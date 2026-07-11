@@ -78,7 +78,10 @@ def test_chat_js_announces_at_footer_target_seam():
     assert "const footerTarget" in js[max(0, idx - 1200):idx], (
         "the announce call must sit right after footerTarget is resolved (the settled render point)"
     )
-    assert "_isBgFinal" in js[max(0, idx - 14000):idx], (
+    # Window widened 14000 → 20000 for #829 (turn coalescing grew the final-render block with the
+    # committed-block finalize branches); the invariant is unchanged — the announce call still
+    # lives inside the `if (!_isBgFinal)` foreground final-render block.
+    assert "_isBgFinal" in js[max(0, idx - 20000):idx], (
         "the announce call must live in the foreground final-render block, not the background stream path"
     )
 

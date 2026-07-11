@@ -1753,6 +1753,92 @@ import { isNarrow } from './platform.js';
         uiModule.scrollHistory();
       };
 
+      // ── TURN COALESCING (#829 redo — one growing bubble per turn) ─────────────────────────
+      // A player turn fans out into N agent ROUNDS. The old render gave EACH round its own
+      // msg-continuation bubble (mount → hide-when-empty → jump); the redo renders every round
+      // into the ONE turn bubble (`roundHolder` stays `holder` for the whole turn — only a
+      // teacher_takeover deliberately starts a fresh bubble).
+      //
+      // Mechanism (deliberately different from the reverted #822): at each round boundary this
+      // helper FREEZES the finished round IN PLACE — it renames the round's live containers
+      // (`.stream-content` → `.committed-round`, `.live-reply-content` → `.committed-reply`) and
+      // clears the renderer/accordion bookkeeping — so the body becomes [inert committed blocks…]
+      // and the NEXT round starts from a body that is STRUCTURALLY IDENTICAL to a fresh bubble's
+      // (no `.stream-content` yet; the spinner a direct `.body` child, exactly like the initial
+      // holder — NEVER inside the renderer-owned `.stream-content`, which is where #822 mounted
+      // it and corrupted the incremental renderer's container). Every downstream consumer
+      // (`_renderStream`, the thinking accordion, the tool_start finalize, the end-of-stream
+      // finalize) keeps operating on `.stream-content`/`.live-reply-content`, which after a
+      // freeze exist ONLY for the current round — so their inputs keep the exact shape they had
+      // in the per-round-bubble world. A single-round turn never has committed blocks and renders
+      // byte-identically to the pre-coalesce code.
+      //
+      // F8 contract: the caller (agent_step) resets roundText/roundReplyText/roundReasoningText
+      // in lockstep right after freezing. Merged-buffer consumers (accumulated → doc-fence, TTS,
+      // persistence dataset.raw, background streams, <think time=…>) are untouched.
+      const _freezeRoundIntoTurnBubble = () => {
+        if (!roundHolder) return;
+        const bodyEl = roundHolder.querySelector('.body');
+        if (!bodyEl) return;
+        // Still mid-thinking at the round boundary (rare: an agent_step with no tool_start in
+        // between)? Settle the live accordion's visuals so the frozen block reads as finished.
+        if (isThinking) {
+          isThinking = false;
+          try { cancelAnimationFrame(_thinkTimerRAF); } catch (_) {}
+          if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+          if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+          const _thinkIdFr = 'think-' + Date.now();
+          const _frHdr = _liveThinkSection && _liveThinkSection.querySelector('.thinking-header');
+          if (_frHdr) _frHdr.dataset.thinkingId = _thinkIdFr;
+          if (_liveThinkContent) _liveThinkContent.id = _thinkIdFr;
+          if (_liveThinkToggle) _liveThinkToggle.id = _thinkIdFr + '-toggle';
+        }
+        const dt = stripToolBlocks(roundReplyText);
+        if (dt.trim() && !roundFinalized) {
+          // The round produced visible narration and no tool_start finalized it yet — run the
+          // SAME final clean render the tool_start finalize seam runs (one render contract).
+          const contentEl = _ensureStreamLayout(bodyEl);
+          contentEl.style.minHeight = '';
+          const dtOoc = chatRenderer.applyOocClass(roundHolder, dt.trim(), 'assistant').text;
+          const _frLive = contentEl.querySelector('.live-reply-content');
+          const _frHtml = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dtOoc));
+          if (_frLive) _frLive.innerHTML = _frHtml; else contentEl.innerHTML = _frHtml;
+          if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+        }
+        // Retire the round's live containers so the next round starts clean in the SAME body.
+        // An empty container (no accordion, no text) is dropped — a pure tool-call round leaves
+        // NOTHING behind (no flashed block, no spinner remount/jump).
+        bodyEl.querySelectorAll('.live-reply-content').forEach((el) => {
+          el._streamRenderer = null;
+          if (!el.textContent.trim()) { el.remove(); return; }
+          el.classList.remove('live-reply-content');
+          el.classList.add('committed-reply');
+        });
+        bodyEl.querySelectorAll('.stream-content').forEach((el) => {
+          el.style.minHeight = '';
+          el._streamRenderer = null;
+          if (!el.textContent.trim() && !el.querySelector('.thinking-section')) { el.remove(); return; }
+          el.classList.remove('stream-content');
+          el.classList.add('committed-round');
+        });
+        // The next round's accordion machinery rebuilds its own refs — a frozen block must never
+        // receive cross-round writes.
+        _liveThinkSection = null;
+        _liveThinkContent = null;
+        _liveThinkInner = null;
+        _liveThinkHeader = null;
+        _liveThinkSpinnerSlot = null;
+        _liveThinkTimerEl = null;
+        _liveThinkToggle = null;
+        _liveThinkDomId = null;
+      };
+      // Does the turn bubble already hold a committed (frozen) prior round? DOM-derived so every
+      // seam reads the same truth (no shadow flag to desync).
+      const _turnHasCommitted = () => {
+        const b = roundHolder && roundHolder.querySelector('.body');
+        return !!(b && b.querySelector('.committed-round, .committed-reply'));
+      };
+
       let _nextIsError = false;
       let _streamSawDone = false;
       // BUG 2 (#985 P2-B): did the server persist ANY message this turn? A clean empty turn (the final
@@ -2647,8 +2733,24 @@ import { isNarrow } from './platform.js';
                     dt = chatRenderer.applyOocClass(roundHolder, dt.trim(), 'assistant').text;
                     _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
                     if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
-                  } else {
+                  } else if (!_turnHasCommitted()) {
+                    // Empty round and NOTHING committed yet this turn: the whole (still-empty)
+                    // bubble hides while the tool runs, exactly as before. Coalescing re-shows it
+                    // when the next round streams into the same bubble (agent_step below).
                     roundHolder.style.display = 'none';
+                    // #834: the turn's visible header just hid — if a teacher takeover starts a
+                    // fresh bubble now, that bubble must be promoted to the header (timestamp).
+                    turnHeaderShown = false;
+                  } else {
+                    // TURN COALESCING (#829): an empty tool-only round in a turn that ALREADY
+                    // carries committed narration must NOT hide the turn bubble (that was the
+                    // "messages disappear" flicker). Just retire the empty live container so the
+                    // next round starts clean below the frozen blocks.
+                    var _emptyBody3 = roundHolder.querySelector('.body');
+                    var _emptySc3 = _emptyBody3 && _emptyBody3.querySelector('.stream-content');
+                    if (_emptySc3 && !_emptySc3.querySelector('.thinking-section') && !_emptySc3.textContent.trim()) {
+                      _emptySc3.remove();
+                    }
                   }
                 }
 
@@ -3203,35 +3305,69 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
-                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
-                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
-                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
-                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
-                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
-                  roundHolder.style.display = 'none';
-                  // #834: this round's bubble is being hidden. If it was the turn's only visible
-                  // header (no later visible bubble has taken over yet), the turn currently has NO
-                  // visible header — flag it so the NEXT bubble is promoted to header + timestamp.
-                  if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;
+                currentToolBubble = null;
+                _docFenceOpened = false;
+                _docFenceContentStart = -1;
+                if (roundHolder) {
+                  // ── TURN COALESCING (#829 redo): a NEW agent round is starting — do NOT spawn a
+                  // fresh msg-continuation bubble (the per-round mount → hide-when-empty → jump this
+                  // feature removes). FREEZE the finished round into the ONE turn bubble
+                  // (_freezeRoundIntoTurnBubble renames its live containers to inert committed
+                  // blocks; a pure tool-call round leaves nothing) and stream the next round below
+                  // it, inside the SAME bubble. L6c's CONTENT discriminator survives: a narration
+                  // round persists (as a committed block), an empty round contributes nothing —
+                  // applied WITHIN the one bubble instead of by mounting/hiding per-round nodes.
+                  _freezeRoundIntoTurnBubble();
+                  roundFinalized = false;
+                  isThinking = false;
+                  roundText = '';
+                  roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
+                  roundReasoningText = '';
+                  // A prior empty tool-only round hid the (then still-empty) bubble at the
+                  // tool_start finalize — re-show it now that the next round is about to stream
+                  // into it (the visual equivalent of the old "fresh bubble with spinner").
+                  if (roundHolder.style.display === 'none') {
+                    roundHolder.style.display = '';
+                    // #834: the header (role + timestamp) is visible again.
+                    turnHeaderShown = true;
+                    // The rail below (if any) regains its visible bubble above.
+                    const _railBelow = roundHolder.nextElementSibling;
+                    if (_railBelow && _railBelow.classList.contains('agent-thread')) {
+                      _railBelow.classList.add('has-top');
+                    }
+                  }
+                  // NOTE: no `.agent-thread` has-bottom here — with coalescing the next round's
+                  // text grows the bubble ABOVE the rail, so no bubble ever appears below it.
+                  //
+                  // Re-arm the ONE per-turn spinner in the SAME body, as a DIRECT `.body` child —
+                  // exactly the initial holder's shape, and never inside the renderer-owned
+                  // `.stream-content` (#822's mistake class). Skip for research (own progress UI).
+                  if (spinner && spinner.element) spinner.destroy();
+                  if (!_researchingStreamIds.has(streamSessionId)) {
+                    spinner = spinnerModule.create(_inProgressLabel('Generating response'), 'right', 'wave');
+                    roundHolder.querySelector('.body').appendChild(spinner.createElement());
+                    spinner.start();
+                  }
+                  if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
+                  uiModule.scrollHistory();
+                  continue;
                 }
-                // Mark thread as connected to bubble below
+                // ── Teacher-takeover reset (roundHolder === null): deliberately a FRESH bubble —
+                // the student attempt and the teacher attempt are different "speakers". This is the
+                // ONLY path that still creates a per-round bubble.
+                roundFinalized = false;
+                isThinking = false;
+                // Mark thread as connected to the (new) bubble below
                 const _activeThread = document.querySelector('.agent-thread.streaming');
                 if (_activeThread) {
                   _activeThread.classList.add('has-bottom');
                 }
-                // --- New round: create fresh AI bubble with spinner ---
-                currentToolBubble = null;
-                roundFinalized = false;
-                isThinking = false;
-                _docFenceOpened = false;
-                _docFenceContentStart = -1;
                 const box = document.getElementById('chat-history');
                 const newWrap = document.createElement('div');
-                // #834: when no visible turn-header exists yet (round 0 was a hidden tool-call), this
-                // bubble is the FIRST VISIBLE one — promote it to the header (role + timestamp, NOT a
-                // continuation) so the received message carries a timestamp. Otherwise it's a normal
-                // continuation. Mirrors the reload path's first-visible logic in chatRenderer.js.
+                // #834: when no visible turn-header exists yet (the original holder hid on a pure
+                // tool-call round), this bubble is the FIRST VISIBLE one — promote it to the header
+                // (role + timestamp, NOT a continuation) so the received message carries a
+                // timestamp. Otherwise it's a normal continuation.
                 const _isTurnHeader = !turnHeaderShown;
                 newWrap.className = 'msg msg-ai streaming' + (_isTurnHeader ? '' : ' msg-continuation');
                 // Add model name label
@@ -3257,16 +3393,10 @@ import { isNarrow } from './platform.js';
                 newWrap.appendChild(newBody);
                 box.appendChild(newWrap);
                 roundHolder = newWrap;
-                // F5/mirror-toolturn dedup fix: `currentHolder` MUST track the round holder in lockstep
-                // (like roundText/roundReplyText/roundReasoningText above). It was left pinned at the
-                // FIRST round's bubble (set once at stream start, chat.js ~1169), so on a multi-round
-                // tool-rich turn the `message_saved` handler (~2375) stamped `data-db-id` onto round 1's
-                // bubble instead of the LAST round's — the round that actually corresponds to what the
-                // server persisted. softReloadHistory's adopt pass (~4256) then matched the WRONG bubble
-                // by id, and every earlier-round bubble (never stamped) survived as a permanent
-                // dup/orphan the reconcile's id-order check couldn't see (only its separate
-                // `_visibleMsgCount` orphan guard could, and only on a later trigger) — the
-                // "duplicating messages" symptom on a tool-rich turn (mirror_toolturn_parity.mjs).
+                // F5/mirror-toolturn dedup fix: `currentHolder` MUST track the round holder in
+                // lockstep so the `message_saved` handler stamps `data-db-id` onto the bubble that
+                // corresponds to what the server persisted. (With coalescing the turn bubble IS
+                // `holder` for the whole turn, so this only matters on this teacher path.)
                 currentHolder = newWrap;
                 roundText = '';
                 roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
@@ -3428,6 +3558,13 @@ import { isNarrow } from './platform.js';
           }
         } catch (_) {}
 
+        // TURN COALESCING (#829): the stream is over — the per-turn round spinner must never
+        // survive into the settled bubble. In the per-round world an empty final round's spinner
+        // was hidden along with its bubble; with one growing bubble that bubble may stay visible
+        // (it carries committed narration), so destroy the spinner explicitly. Idempotent — a
+        // round that streamed text already destroyed it at the first delta.
+        if (spinner && spinner.element) { try { spinner.destroy(); } catch (_) {} }
+
         // Clear streaming minHeight lock
         const _streamContent = roundHolder.querySelector('.stream-content');
         if (_streamContent) _streamContent.style.minHeight = '';
@@ -3443,12 +3580,21 @@ import { isNarrow } from './platform.js';
         // wrap-level `.msg-ooc-producer` styling, a double treatment reload never produces.
         const _finalOoc = chatRenderer.applyOocClass(roundHolder, finalDisplay.trim(), 'assistant');
         const finalDisplayText = _finalOoc.text;
-        if (finalDisplay.trim()) {
-          var _body4 = roundHolder.querySelector('.body');
+        // TURN COALESCING (#829): frozen prior-round blocks (`.committed-round`/`.committed-reply`)
+        // may sit ABOVE the live area in the one turn bubble. When they exist the final render must
+        // NEVER whole-body innerHTML — that wipes the earlier narration + the role label (the
+        // reverted #822's "messages disappear" failure class) — it goes ONLY into the current
+        // round's live container. With no committed blocks (every single-round turn) each branch
+        // below is byte-identical to the pre-coalesce code.
+        var _body4 = roundHolder ? roundHolder.querySelector('.body') : null;
+        var _hasCommitted4 = !!(_body4 && _body4.querySelector('.committed-round, .committed-reply'));
+        if (finalDisplay.trim() && _body4) {
           // Preserve sources expanded state before final render
           var _wasExpanded = _sourcesExpanded || !!(_body4 && _body4.querySelector('.sources-content.expanded'));
 
           // If thinking was collapsed in-place during streaming, a reply container exists.
+          // (A frozen prior round's reply was renamed `.committed-reply`, so this can only match
+          // the CURRENT round's container.)
           var _liveReplyEl = _body4 && _body4.querySelector('.live-reply-content');
           var _finalReply = _liveReplyEl ? finalDisplayText.trim() : '';
           if (_liveReplyEl && _finalReply) {
@@ -3477,17 +3623,48 @@ import { isNarrow } from './platform.js';
               _body4.insertBefore(_srcEl.firstChild || _srcEl, _body4.firstChild);
             }
             if (_findingsData) _body4.insertAdjacentHTML('beforeend', chatRenderer.buildFindingsBox(_findingsData));
+            if (_hasCommitted4) {
+              // TURN COALESCING: flatten the last round's live container into one more committed
+              // block (its accordion + reply ride along), so the settled bubble reads as a
+              // uniform stack of round blocks — the same shape the reload render produces.
+              var _scFlat4 = _liveReplyEl.closest('.stream-content');
+              if (_scFlat4) {
+                _scFlat4.style.minHeight = '';
+                _scFlat4._streamRenderer = null;
+                _scFlat4.classList.remove('stream-content');
+                _scFlat4.classList.add('committed-round');
+              }
+            }
+          } else if (_hasCommitted4) {
+            // TURN COALESCING: frozen prior-round blocks sit above — render the last round ONLY
+            // into the live stream-content (re-created if the empty-round retire dropped it),
+            // leaving the committed narration intact. Then flatten it to one more committed
+            // block so the settled bubble reads as a uniform stack of round blocks.
+            var _liveSc4 = _ensureStreamLayout(_body4);
+            _liveSc4.style.minHeight = '';
+            _liveSc4._streamRenderer = null;
+            _liveSc4.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplayText))
+              + (_findingsData ? chatRenderer.buildFindingsBox(_findingsData) : '');
+            _liveSc4.classList.remove('stream-content');
+            _liveSc4.classList.add('committed-round');
+            if (_sourcesData) {
+              var _srcEl4 = document.createElement('div');
+              _srcEl4.innerHTML = _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded);
+              _body4.insertBefore(_srcEl4.firstChild || _srcEl4, _body4.firstChild);
+            }
           } else {
-            // Full re-render (reply empty or no live-reply container)
+            // Full re-render (reply empty or no live-reply container) — a single-round turn;
+            // byte-identical to the pre-coalesce render.
             _body4.innerHTML = (_sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded) : '')
               + markdownModule.processWithThinking(markdownModule.squashOutsideCode(finalDisplayText))
               + (_findingsData ? chatRenderer.buildFindingsBox(_findingsData) : '');
           }
-        } else if (_sourcesHtml) {
+        } else if (_sourcesHtml && !_hasCommitted4) {
           var _body4b = roundHolder.querySelector('.body');
           var _wasExpanded2 = _sourcesExpanded || !!(_body4b && _body4b.querySelector('.sources-content.expanded'));
           _body4b.innerHTML = _sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded2) : _sourcesHtml;
         } else if (roundHolder !== holder) {
+          // Teacher-takeover bubble (the one surviving per-round bubble): unchanged semantics.
           // Check if there's thinking content worth showing
           const _thinkingOnly = markdownModule.extractThinkingBlocks(roundText);
           if (_thinkingOnly.thinkingBlocks?.length && !_thinkingOnly.content) {
@@ -3501,6 +3678,14 @@ import { isNarrow } from './platform.js';
             if (_lastThread && _lastThread.classList.contains('agent-thread')) {
               _lastThread.classList.remove('has-bottom');
             }
+          }
+        } else if (_hasCommitted4) {
+          // TURN COALESCING: the turn's LAST round was empty (a pure tool/planning tail) but
+          // committed narration stands above — retire the empty live container, never the bubble
+          // (hiding it was the reverted #822 era's "messages disappear").
+          var _tailSc4 = _body4 && _body4.querySelector('.stream-content');
+          if (_tailSc4 && !_tailSc4.querySelector('.thinking-section') && !_tailSc4.textContent.trim()) {
+            _tailSc4.remove();
           }
         }
 
@@ -3530,7 +3715,16 @@ import { isNarrow } from './platform.js';
           holder.querySelector('.body').appendChild(details);
         }
 
-        // Hide first bubble if it has no visible text content (e.g. agent went straight to tools)
+        // Hide the turn bubble when the WHOLE turn produced no visible text (e.g. the agent went
+        // straight to tools and never narrated). TURN COALESCING (#829): `holder` IS the turn
+        // bubble now, so judge the settled body text directly. Guarded on `accumulated` so the
+        // clean-empty-turn case (#985 P2-B) keeps its visible bubble for the Retry render below.
+        if (holder === roundHolder && holder.style.display !== 'none' && accumulated) {
+          const _hBody0 = holder.querySelector('.body');
+          if (_hBody0 && !_hBody0.textContent.trim()) holder.style.display = 'none';
+        }
+        // Hide first bubble if it has no visible text content (teacher-takeover turns still carry
+        // a separate first bubble — the pre-coalesce rule, unchanged).
         if (holder !== roundHolder && holder.style.display !== 'none') {
           const _hBody = holder.querySelector('.body');
           const _hText = _hBody ? _hBody.textContent.trim() : '';
@@ -4870,19 +5064,16 @@ import { isNarrow } from './platform.js';
   }
 
   /**
-   * mirror-toolturn fix: ONE persisted agent message can legitimately render as MULTIPLE `.msg`
-   * bubbles — chatRenderer.addMessage's "Agent multi-bubble reconstruction" (chatRenderer.js
-   * ~1929) re-splits a message carrying `metadata.tool_events`/`round_texts` back into one bubble
-   * PER non-empty narration round, so a re-opened multi-round tool-rich turn reads exactly as it
-   * streamed live instead of collapsing into one blob (L6c). `_visibleMsgCount(box) ===
-   * visible.length` (the OLD orphan check) never accounted for this: a 2-narration-round turn is
-   * ALWAYS 2 bubbles for 1 server message, so the check NEVER converged for a tool-rich turn —
-   * softReloadHistory retried a full destructive rebuild on every single reconcile trigger
-   * forever. Each rebuild reproduced the identical correct render (chatRenderer.addMessage is
-   * deterministic from the same metadata), so this never showed as a literal duplicate, but it
-   * silently burned a `/api/history` fetch + full DOM wipe+rebuild on every peer ping — pure churn
-   * that widens the window for an unrelated concurrent mutation to interleave. Count bubbles the
-   * SAME way addMessage does so a fully-reconciled multi-round turn actually reads "converged".
+   * The server-message → visible-bubble oracle softReloadHistory's orphan check compares against.
+   * TURN COALESCING (#829): ONE persisted agent message renders as ONE `.msg` bubble everywhere —
+   * the live stream grows a single turn bubble (chat.js agent_step freeze) and
+   * chatRenderer.addMessage's agent reconstruction renders the same single bubble (all non-empty
+   * rounds' narration as committed blocks) with the production rail below it. So a tool-rich
+   * message counts 1 when it carries ANY narration (round text, or the persisted content for
+   * legacy rows without round_texts) and 0 when it is beats-only (the reconstruction emits a rail
+   * — an `.agent-thread`, not a `.msg` — and no bubble). Plain messages count 1, as ever. Keep
+   * this in lockstep with BOTH renders or the reconcile never converges and burns a full
+   * `/api/history` fetch + DOM rebuild on every trigger (the pre-#873 churn class).
    */
   export function _expectedVisibleBubbleCount(visible) {
     let n = 0;
@@ -4890,8 +5081,9 @@ import { isNarrow } from './platform.js';
       const meta = msg && msg.metadata;
       if (meta && Array.isArray(meta.tool_events) && meta.tool_events.length) {
         const roundTexts = Array.isArray(meta.round_texts) ? meta.round_texts : [];
-        const textRounds = roundTexts.filter((t) => (t || '').trim()).length;
-        n += Math.max(1, textRounds);
+        const hasText = roundTexts.some((t) => (t || '').trim()) ||
+          !!(_historyMsgText(msg) || '').trim();
+        n += hasText ? 1 : 0;
       } else {
         n += 1;
       }

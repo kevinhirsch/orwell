@@ -45,36 +45,47 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_reload_path_uses_first_visible_not_round_zero():
+    """#829 TURN COALESCING supersedes the per-round first-visible bookkeeping: the agent
+    reconstruction renders ONE turn bubble, and that bubble structurally OWNS the role +
+    timestamp header (it can never be a continuation). #834's guarantee — the received
+    message shows a timestamp — is now satisfied by construction; the runtime gate below
+    still proves it end-to-end against the REAL render."""
     js = _read("static/js/chatRenderer.js")
-    # The header/timestamp gate must no longer be the strict `r === 0`.
-    assert "renderedFirstVisible" in js, (
-        "#834: chatRenderer must track the FIRST VISIBLE bubble (renderedFirstVisible), "
-        "not gate role+timestamp on r === 0."
+    # The single turn bubble always carries the header + timestamp.
+    assert "roleEl.appendChild(roleTimestamp(metadata?.timestamp));" in js, (
+        "#834: the turn bubble must attach the role timestamp."
     )
-    # The continuation class + the timestamp append both key off the first-visible flag.
-    assert "const isFirstVisible = !renderedFirstVisible;" in js
-    assert "(isFirstVisible ? '' : ' msg-continuation')" in js, (
-        "#834: the first visible bubble must NOT be a continuation; later bubbles are."
+    # No reconstruction bubble is ever a continuation any more (one bubble per turn).
+    assert "(isFirstVisible ? '' : ' msg-continuation')" not in js, (
+        "#829: the per-round continuation re-split must not return to the reload path."
     )
-    assert "if (isFirstVisible) roleEl.appendChild(roleTimestamp(" in js, (
-        "#834: the timestamp must attach to the first VISIBLE bubble."
-    )
-    # The old strict-round-zero gate is gone.
+    # The old strict-round-zero gate stays gone.
     assert "if (r === 0) roleEl.appendChild(roleTimestamp(" not in js, (
-        "#834: the old `r === 0` timestamp gate must be replaced."
+        "#834: the old `r === 0` timestamp gate must not return."
     )
 
 
 def test_live_path_promotes_first_visible_continuation():
+    """#829 TURN COALESCING: the live turn bubble (`holder`) carries the header for the whole
+    turn. It hides only while a first tool-only round runs (nothing committed yet) — that hide
+    clears `turnHeaderShown` — and the next round's re-show restores it. The ONE surviving
+    fresh-bubble path (teacher takeover) still promotes to a header when the turn has no
+    visible one (#834)."""
     js = _read("static/js/chat.js")
     assert "turnHeaderShown" in js, (
         "#834: the live path must track whether a visible turn-header was shown."
     )
-    # When the header round is hidden (pure tool-only round), flag it.
-    assert "if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;" in js, (
+    # Hiding the (still-empty) turn bubble at the tool_start finalize clears the flag...
+    assert "turnHeaderShown = false;" in js, (
         "#834: hiding the header bubble must clear turnHeaderShown."
     )
-    # A promoted continuation becomes the header (role + timestamp, not a continuation).
+    # ...and the coalescing re-show at agent_step restores it.
+    step = js[js.index("} else if (json.type === 'agent_step') {"):]
+    step = step[:step.index("} else if (json.type === 'budget_exceeded') {")]
+    assert "roundHolder.style.display = '';" in step
+    assert "turnHeaderShown = true;" in step
+    # The teacher-takeover fresh bubble still promotes to header (role + timestamp, not a
+    # continuation) when the turn has no visible header.
     assert "const _isTurnHeader = !turnHeaderShown;" in js
     assert "(_isTurnHeader ? '' : ' msg-continuation')" in js, (
         "#834: a promoted first-visible bubble must NOT carry msg-continuation."

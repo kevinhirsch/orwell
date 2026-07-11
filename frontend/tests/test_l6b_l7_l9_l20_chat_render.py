@@ -66,7 +66,10 @@ def test_markdown_scrubs_plain_content_reasoning_preamble():
 def test_l6c_narration_round_with_following_tool_is_kept_live():
     """A round that produced visible narration renders even when a tool follows it; only an EMPTY
     tool-only round is hidden. The old unconditional game-build hide at the tool_start finalize is
-    gone — game + non-game share one content-driven rule."""
+    gone — game + non-game share one content-driven rule. #829 TURN COALESCING: an empty round may
+    hide the (still-empty) turn bubble ONLY while nothing is committed yet; once the turn carries
+    committed narration an empty round retires its live container and never hides the bubble
+    (hiding it was the reverted #822 era's "messages disappear")."""
     chat = _read("static", "js", "chat.js")
     fin = chat[chat.index("Finalize current text bubble (only once per round)"):]
     fin = fin[:fin.index("Track tool name for contextual spinner labels")]
@@ -75,34 +78,77 @@ def test_l6c_narration_round_with_following_tool_is_kept_live():
     # a round with visible narration renders the reply (one shared rule, no game gate)
     assert "if (dt.trim())" in fin
     assert "markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt))" in fin
-    # only an empty round is hidden (the else branch survives)
+    # the whole-bubble hide survives ONLY for the nothing-committed-yet case...
+    assert "} else if (!_turnHasCommitted()) {" in fin
     assert "roundHolder.style.display = 'none';" in fin
+    # ...and a committed turn's empty round just retires the empty live container.
+    assert "_emptySc3.remove();" in fin
 
 
-def test_l6c_agent_step_hides_previous_round_only_when_empty():
-    """Starting a new agent round hides the previous bubble ONLY when it rendered no narration
-    (stripToolBlocks empty); a narration round persists. The old unconditional isGameBuild()-gated
-    hide is gone."""
+def test_l6c_agent_step_coalesces_rounds_into_one_turn_bubble():
+    """#829 TURN COALESCING (supersedes the per-round L6c mount/hide): starting a new agent round
+    FREEZES the finished round into the SAME turn bubble (_freezeRoundIntoTurnBubble renames its
+    live containers to inert committed blocks) instead of spawning a fresh msg-continuation
+    bubble. The L6c CONTENT discriminator survives INSIDE the one bubble: a narration round
+    persists as a committed block, a pure tool-call round contributes nothing. The per-round
+    split buffers reset in lockstep with roundText (F8), the spinner re-arms as a DIRECT `.body`
+    child (never inside the renderer-owned .stream-content — the #822 failure class), and the
+    teacher takeover remains the only fresh-bubble path."""
     chat = _read("static", "js", "chat.js")
     step = chat[chat.index("} else if (json.type === 'agent_step') {"):]
-    step = step[:step.index("New round: create fresh AI bubble")]
-    assert "!stripToolBlocks(roundReplyText).trim()" in step
-    assert "roundHolder.style.display = 'none';" in step
-    # the old unconditional game-build hide string is gone
-    assert "if (isGameBuild() && roundHolder) {" not in step
+    step = step[:step.index("} else if (json.type === 'budget_exceeded') {")]
+    # the round is frozen into the one bubble, not spawned as a new bubble
+    assert "_freezeRoundIntoTurnBubble();" in step
+    # F8: the merged buffer + the split buffers reset in lockstep at the round boundary
+    assert step.count("roundText = '';") >= 2          # coalesce branch + teacher branch
+    assert step.count("roundReplyText = '';") >= 2
+    assert step.count("roundReasoningText = '';") >= 2
+    # the spinner re-arms in the SAME body, as a direct child (one stable position per turn)
+    assert "roundHolder.querySelector('.body').appendChild(spinner.createElement());" in step
+    # the teacher_takeover exception (roundHolder === null) still creates a fresh bubble
+    assert "if (roundHolder) {" in step
+    assert "roundHolder = newWrap;" in step
+    # the old per-round hide-at-agent_step is GONE (an empty round is handled by the freeze)
+    assert "!stripToolBlocks(roundReplyText).trim()" not in step
+
+
+def test_829_freeze_helper_contract():
+    """The freeze helper is the coalescing mechanism: it retires the finished round's live
+    containers (stream-content → committed-round, live-reply-content → committed-reply), clears
+    the incremental-renderer bookkeeping, and resets the per-round accordion refs so a frozen
+    block can never receive cross-round writes. The end-of-stream finalize must never whole-body
+    innerHTML once committed blocks exist."""
+    chat = _read("static", "js", "chat.js")
+    helper = chat[chat.index("const _freezeRoundIntoTurnBubble = () => {"):]
+    helper = helper[:helper.index("const _turnHasCommitted = () => {")]
+    assert "el.classList.remove('stream-content');" in helper
+    assert "el.classList.add('committed-round');" in helper
+    assert "el.classList.remove('live-reply-content');" in helper
+    assert "el.classList.add('committed-reply');" in helper
+    assert "el._streamRenderer = null;" in helper
+    assert "_liveThinkSection = null;" in helper
+    # the finalize renders ONLY into the live container when committed blocks exist
+    fin = chat[chat.index("var _hasCommitted4 ="):]
+    fin = fin[:fin.index("if (window.hljs) {")]
+    assert "} else if (_hasCommitted4) {" in fin
+    assert "_liveSc4.innerHTML =" in fin
+    # ...and the single-round whole-body render survives byte-identically for the no-committed case
+    assert "_body4.innerHTML = (_sourcesData ? _buildSourcesBox(_sourcesData, _sourcesType, _wasExpanded) : '')" in fin
 
 
 def test_l6c_reload_renders_every_narration_round_not_just_last():
-    """Reload parity: chatRenderer no longer skips intermediate text rounds in the game build;
-    every round with text renders (empty tool-only rounds carry no txt and are skipped)."""
+    """Reload parity: every narration round still renders on reload — nothing is lost. #829 TURN
+    COALESCING: the rounds accumulate INSIDE the one turn bubble (one `.committed-round` block
+    per non-empty round, matching the live freeze) instead of across per-round continuation
+    bubbles; the intermediate-round skip stays gone."""
     renderer = _read("static", "js", "chatRenderer.js")
-    # the intermediate-skip is disabled (no longer gated on !isLastTextRound)
+    # the L6b intermediate-skip must never return
     assert "_gbSkipIntermediateText = isGameBuild() && !isLastTextRound" not in renderer
-    assert "const _gbSkipIntermediateText = false" in renderer
-    # every non-empty round still gates on txt (empty rounds skipped)
-    assert "if (txt && !_gbSkipIntermediateText)" in renderer
-    # isLastTextRound is retained for source/findings placement (not deleted)
-    assert "isLastTextRound" in renderer
+    # every non-empty round renders as its own committed block inside the ONE bubble
+    assert "let roundSegs = roundTexts.map((t) => (t || '').trim()).filter(Boolean);" in renderer
+    assert "roundSegs.map((t) => '<div class=\"committed-round\">'" in renderer
+    # legacy rows without round_texts still render their persisted content (never lose narration)
+    assert "if (!roundSegs.length && (textRaw || '').trim()) roundSegs = [(textRaw || '').trim()];" in renderer
 
 
 # ── L7 ───────────────────────────────────────────────────────────────────────── #

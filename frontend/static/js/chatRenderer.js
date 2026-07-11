@@ -1950,119 +1950,90 @@ export function addMessage(role, content, modelName, metadata) {
     var esc = uiModule.esc;
     const textRaw = Array.isArray(content) ? markdownModule.renderContent(content) : content;
 
-    // --- Agent multi-bubble reconstruction from saved metadata ---
+    // --- Agent turn reconstruction from saved metadata (TURN COALESCING, #829) ---
+    // ONE persisted agent message renders as ONE turn bubble: every non-empty round's narration,
+    // in order, one `.committed-round` block per round — the exact settled shape the live stream
+    // leaves (chat.js freezes each round into the one growing bubble) — followed by ONE production
+    // rail carrying every visible beat. The old per-round msg-continuation re-split is gone with
+    // the live per-round bubbles it mirrored. L6c's guarantee stands: every narration round still
+    // renders (a multi-line interview accumulates — nothing is lost); it accumulates INSIDE the
+    // one bubble instead of across bubbles. #834's guarantee is now structural: the received
+    // message's single bubble always carries the role + timestamp header (never a continuation).
     if (role === 'assistant' && metadata && metadata.tool_events && metadata.tool_events.length > 0) {
       const roundTexts = metadata.round_texts || [];
       const toolEvents = metadata.tool_events;
-      let lastWrap = null;
-      let firstMsgAi = null;
-      let lastMsgAi = null;
-      // #834: role + timestamp attach to the FIRST VISIBLE bubble of the turn, NOT strictly
-      // round 0. When round 0 is a hidden tool-call (e.g. getGameState — empty txt, no bubble),
-      // the first rendered bubble is a later round; it must still carry the role+timestamp header
-      // (and NOT read as a continuation), or the received message shows no timestamp.
-      let renderedFirstVisible = false;
 
-      const toolsByRound = {};
-      for (const ev of toolEvents) {
-        const r = ev.round || 1;
-        if (!toolsByRound[r]) toolsByRound[r] = [];
-        toolsByRound[r].push(ev);
+      // 1) The single turn bubble — all non-empty round texts as committed blocks. Per-round
+      // processWithThinking (not one merged render) so each round's <think> content folds into
+      // its own accordion exactly as it streamed. Legacy rows with tool_events but no
+      // round_texts fall back to the persisted content so narration is never lost on reload.
+      let roundSegs = roundTexts.map((t) => (t || '').trim()).filter(Boolean);
+      if (!roundSegs.length && (textRaw || '').trim()) roundSegs = [(textRaw || '').trim()];
+      let wrap = null;
+      if (roundSegs.length) {
+        wrap = document.createElement('div');
+        wrap.className = 'msg msg-ai';
+        const roleEl = document.createElement('div');
+        roleEl.className = 'role';
+        const pair = replyModelPair(modelName, metadata);
+        const contModel = pair.actualModel || pair.requestedModel;
+        // C14/immersion: never render the raw LLM model name as the sender in the game
+        // build — the narrator is the show (matches the live path's _setRoleModelLabel).
+        roleEl.textContent = isGameBuild() ? GAME_NARRATOR : modelRouteLabel(pair.requestedModel, contModel);
+        // C14/immersion: the "alias -> dated-version" tooltip is a model-name leak too —
+        // suppressed in the game build (mirrors the live path's _setRoleModelLabel).
+        if (!isGameBuild() && pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
+          roleEl.title = pair.requestedModel + ' -> ' + contModel;
+        }
+        applyModelColor(roleEl, contModel);
+        // #834: the turn bubble IS the header — role + timestamp, structurally.
+        roleEl.appendChild(roleTimestamp(metadata?.timestamp));
+        wrap.appendChild(roleEl);
+        const body = document.createElement('div');
+        body.className = 'body';
+        // Sources go on top of the turn bubble; findings/RAG at its foot (one bubble now — the
+        // old per-round isLastTextRound placement collapses to top/bottom of the same body).
+        var agentSourcesPrefix = '';
+        var agentFindingsSuffix = '';
+        if (metadata?.web_sources?.length) {
+          agentSourcesPrefix = buildSourcesBox(metadata.web_sources, 'web');
+        } else if (metadata?.research_sources?.length) {
+          agentSourcesPrefix = buildSourcesBox(metadata.research_sources, 'research');
+        }
+        if (metadata?.research_findings?.length) {
+          agentFindingsSuffix = buildFindingsBox(metadata.research_findings);
+        }
+        if (metadata?.rag_sources?.length) {
+          agentFindingsSuffix += buildRagSourcesBox(metadata.rag_sources);
+        }
+        body.innerHTML = agentSourcesPrefix
+          + roundSegs.map((t) => '<div class="committed-round">'
+              + markdownModule.processWithThinking(markdownModule.squashOutsideCode(t))
+              + '</div>').join('')
+          + agentFindingsSuffix;
+        wrap.appendChild(body);
+        wrap.dataset.raw = roundSegs.join('\n\n');
+        if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
+        if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
+        if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
+        if (metadata?._fromHistory) wrap.dataset.fromHistory = '1';                     // F5: STATIC reconcile render (resumeStream's dup-check distinguishes this from an own-echo live bubble)
+        box.appendChild(wrap);
       }
 
-      const maxRound = Math.max(...Object.keys(toolsByRound).map(Number), roundTexts.length);
-
-      for (let r = 0; r < maxRound; r++) {
-        const roundNum = r + 1;
-        const txt = (roundTexts[r] || '').trim();
-
-        // Check if this is the last text round — sources go on top of final response.
-        // (Hoisted: L6b also gates the whole bubble on it in the game build.)
-        var isLastTextRound = true;
-        for (let rr = r + 1; rr < maxRound; rr++) {
-          if ((roundTexts[rr] || '').trim()) { isLastTextRound = false; break; }
-        }
-
-        // L6c (supersedes L6b): every NON-EMPTY text round renders on reload — a multi-line
-        // interview / scene accumulates, matching the live path. The old rule kept only the
-        // FINAL narration round, which lost a multi-line casting interview on reload ("4 answers
-        // go away"). Empty tool-only rounds carry no `txt` and are skipped by the guard below;
-        // their tools still render as production beats. `isLastTextRound` is retained for
-        // source/findings placement (web_sources/research/rag) further down. Non-game UNCHANGED.
-        const _gbSkipIntermediateText = false;
-
-        if (txt && !_gbSkipIntermediateText) {
-          // #834: the FIRST visible bubble of the turn owns the role+timestamp header and is
-          // NOT a continuation, even when earlier rounds were hidden tool-calls.
-          const isFirstVisible = !renderedFirstVisible;
-          const wrap = document.createElement('div');
-          wrap.className = 'msg msg-ai' + (isFirstVisible ? '' : ' msg-continuation');
-          const roleEl = document.createElement('div');
-          roleEl.className = 'role';
-          const pair = replyModelPair(modelName, metadata);
-          const contModel = pair.actualModel || pair.requestedModel;
-          // C14/immersion: never render the raw LLM model name as the sender in the game
-          // build — the narrator is the show (matches the live path's _setRoleModelLabel).
-          roleEl.textContent = isGameBuild() ? GAME_NARRATOR : modelRouteLabel(pair.requestedModel, contModel);
-          // C14/immersion: the "alias -> dated-version" tooltip is a model-name leak too —
-          // suppressed in the game build (mirrors the live path's _setRoleModelLabel).
-          if (!isGameBuild() && pair.requestedModel && contModel && !sameModelName(pair.requestedModel, contModel)) {
-            roleEl.title = pair.requestedModel + ' -> ' + contModel;
-          }
-          applyModelColor(roleEl, contModel);
-          if (isFirstVisible) roleEl.appendChild(roleTimestamp(metadata?.timestamp));
-          wrap.appendChild(roleEl);
-          const body = document.createElement('div');
-          body.className = 'body';
-          // Sources go on top of the final response.
-          var agentSourcesPrefix = '';
-          var agentFindingsSuffix = '';
-          if (isLastTextRound && metadata?.web_sources?.length) {
-            agentSourcesPrefix = buildSourcesBox(metadata.web_sources, 'web');
-          } else if (isLastTextRound && metadata?.research_sources?.length) {
-            agentSourcesPrefix = buildSourcesBox(metadata.research_sources, 'research');
-          }
-          if (isLastTextRound && metadata?.research_findings?.length) {
-            agentFindingsSuffix = buildFindingsBox(metadata.research_findings);
-          }
-          // RAG document sources — restored on the final text round.
-          if (isLastTextRound && metadata?.rag_sources?.length) {
-            agentFindingsSuffix += buildRagSourcesBox(metadata.rag_sources);
-          }
-          body.innerHTML = agentSourcesPrefix + markdownModule.processWithThinking(markdownModule.squashOutsideCode(txt)) + agentFindingsSuffix;
-          wrap.appendChild(body);
-          wrap.dataset.raw = txt;
-          if (metadata?._db_id) wrap.dataset.dbId = metadata._db_id;
-          if (metadata?._seq != null) wrap.dataset.seq = String(metadata._seq);          // ADR 0008
-          if (metadata?.client_msg_id) wrap.dataset.clientMsgId = metadata.client_msg_id; // ADR 0008
-          if (metadata?._fromHistory) wrap.dataset.fromHistory = '1';                     // F5: STATIC reconcile render (resumeStream's dup-check distinguishes this from an own-echo live bubble)
-          box.appendChild(wrap);
-          lastWrap = wrap;
-          if (!firstMsgAi) firstMsgAi = wrap;
-          lastMsgAi = wrap;
-          renderedFirstVisible = true;  // #834: subsequent bubbles are continuations
-        }
-
-        // Whether a TEXT bubble was actually rendered above this round's tools.
-        // In the game build an intermediate text round is skipped, so the thread
-        // must merge/connect as if there were no text bubble (no dangling has-top).
-        const _renderedTxt = txt && !_gbSkipIntermediateText;
-        const roundTools = toolsByRound[roundNum] || [];
-        // ADR 0011 — pure context-read beats render no chip in the game build (mirror of the live
-        // path): a re-opened transcript must not re-paint a wall of identical "Production notes" rows.
-        const _visibleTools = isGameBuild() ? roundTools.filter(ev => !orwellBeatIsSilent(ev.tool)) : roundTools;
+      // 2) ONE production rail below the bubble with every VISIBLE beat, in event order — the
+      // live coalesced stream reuses a single `.agent-thread` the same way (no bubble ever
+      // separates two tool rounds any more). ADR 0011: pure context-read beats render no chip in
+      // the game build (a re-opened transcript must not re-paint identical "Production notes").
+      const _visibleTools = isGameBuild() ? toolEvents.filter(ev => !orwellBeatIsSilent(ev.tool)) : toolEvents;
+      let threadWrap = null;
+      {
         if (_visibleTools.length > 0) {
-          // Reuse previous thread if no text separated us (merge consecutive tool rounds)
-          let threadWrap = null;
-          if (!_renderedTxt && lastWrap && lastWrap.classList.contains('agent-thread')) {
-            threadWrap = lastWrap;
-          } else {
-            threadWrap = document.createElement('div');
-            threadWrap.className = 'agent-thread';
-            // Extend line up if there's a chat bubble above
-            if (_renderedTxt) threadWrap.classList.add('has-top');
-            box.appendChild(threadWrap);
-          }
+          threadWrap = document.createElement('div');
+          threadWrap.className = 'agent-thread';
+          // Extend line up if there's a chat bubble above (never has-bottom — the narration
+          // grows ABOVE the rail in the coalesced form, matching the live render).
+          if (wrap) threadWrap.classList.add('has-top');
+          box.appendChild(threadWrap);
           const _gbBeat = isGameBuild();
           // M4-6: ceremony slates queued while walking this round's tools, inserted as full-width
           // cards right after the thread once it's fully built (mirrors the live path's per-event
@@ -2162,41 +2133,27 @@ export function addMessage(role, content, modelName, metadata) {
           // ORWELL_MAX_VISIBLE_BEATS chips, drop older overflow (no live timers on reload nodes).
           { const _rn = threadWrap.querySelectorAll('.agent-thread-node');
             for (let _ri = 0; _ri < _rn.length - ORWELL_MAX_VISIBLE_BEATS; _ri++) _rn[_ri].remove(); }
-          // Check if next round has text — extend line down to connect. In the
-          // game build, an intermediate next-round text bubble is skipped (L6b),
-          // so only connect down when that next text bubble will actually render
-          // (i.e. it is the final text round).
-          let nextTxt = (roundTexts[r + 1] || '').trim();
-          if (nextTxt && isGameBuild()) {
-            let nextIsLastText = true;
-            for (let rr = r + 2; rr < maxRound; rr++) {
-              if ((roundTexts[rr] || '').trim()) { nextIsLastText = false; break; }
-            }
-            if (!nextIsLastText) nextTxt = '';
-          }
-          if (nextTxt) threadWrap.classList.add('has-bottom');
-          lastWrap = threadWrap;
-
-          for (const ev of roundTools) {
-            if (ev.image_url) {
-              box.appendChild(buildImageBubble(ev.image_url, ev.image_prompt, ev.image_model, ev.image_size, ev.image_quality, ev.image_id));
-            }
-          }
         }
       }
 
-      const firstWrap = lastMsgAi || lastWrap;
-      if (firstWrap && firstWrap.classList.contains('msg-ai')) {
-        if (metadata?.memories_used?.length) firstWrap._memoriesUsed = metadata.memories_used;
-        firstWrap.appendChild(createMsgFooter(firstWrap));
-        if (metadata) displayMetrics(firstWrap, metadata);
+      // In-character images generated during the turn (0051) — after the rail, in event order.
+      for (const ev of toolEvents) {
+        if (ev.image_url) {
+          box.appendChild(buildImageBubble(ev.image_url, ev.image_prompt, ev.image_model, ev.image_size, ev.image_quality, ev.image_id));
+        }
+      }
+
+      if (wrap) {
+        if (metadata?.memories_used?.length) wrap._memoriesUsed = metadata.memories_used;
+        wrap.appendChild(createMsgFooter(wrap));
+        if (metadata) displayMetrics(wrap, metadata);
       }
 
       if (window.hljs) {
         box.querySelectorAll('pre code:not(.hljs)').forEach(b => window.hljs.highlightElement(b));
       }
       if (markdownModule.renderMermaid) markdownModule.renderMermaid(box);
-      return lastWrap;
+      return wrap || threadWrap;
     }
 
     // --- Standard single-bubble message ---
