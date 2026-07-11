@@ -104,10 +104,11 @@ def test_record_never_stores_a_message_body_or_secret():
     e = ledger.get_recent("player")[0]
 
     # the stored shape contains ONLY the allowed fields — nothing extra leaked in
+    # (beltsFired is the gap-#3 belt-fire counter map: names + small ints only)
     assert set(e.keys()) == {
         "ts", "turnId", "session", "beatSeqBefore", "beatSeqAfter",
         "toolsCalled", "nudgesFired", "autoBackfills", "desyncDetected",
-        "staleRejections", "idempotencyHits",
+        "staleRejections", "idempotencyHits", "beltsFired",
     }
     # the count fields rejected the smuggled string entirely (coerced to 0)
     for f in ("beatSeqBefore", "beatSeqAfter", "nudgesFired", "autoBackfills",
