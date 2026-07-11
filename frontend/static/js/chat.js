@@ -4149,8 +4149,11 @@ import { isNarrow } from './platform.js';
       needsDedupe: false,
       // #830: an item queued WHILE A TURN STREAMS is the rapid-succession case — it aggregates
       // with its same-lane siblings into ONE combined turn at drain time (_foldOutboxBatch). An
-      // OFFLINE-queued item (isStreaming false here) keeps #891's per-item at-most-once drain.
-      coalesce: isStreaming === true,
+      // OFFLINE-queued item keeps #891's per-item at-most-once drain — the offline branch (~L801)
+      // also routes here, and a device that dropped its link mid-stream must NOT fold (each offline
+      // item is its own idempotency unit whose eventual POST may land independently), so coalesce
+      // additionally requires a live link.
+      coalesce: isStreaming === true && _outboxOnline(),
       bubbleEl: null,
     };
     // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).

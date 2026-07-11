@@ -67,8 +67,10 @@ def test_coalesce_lane_is_streaming_enqueue_only():
     js = _read("static/js/chat.js")
     fn = js[js.index("function _enqueueSend(text)"):]
     fn = fn[:fn.index("function _paintOutboxBubble")]
-    assert "coalesce: isStreaming === true" in fn, (
-        "an item queued while a turn streams (and ONLY then) must join the aggregation lane"
+    assert "coalesce: isStreaming === true && _outboxOnline()" in fn, (
+        "an item queued while a turn streams (and ONLY then, AND on a live link) may join the "
+        "aggregation lane — the offline branch routes through this helper too, and an offline "
+        "item that dropped its link mid-stream must stay a per-item idempotency unit, never fold"
     )
 
 
