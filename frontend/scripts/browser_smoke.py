@@ -19,6 +19,7 @@ Run:  python3 scripts/browser_smoke.py   (needs `playwright install chromium`)
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -38,6 +39,33 @@ def check(cond: bool, label: str) -> None:
     print(("  ok  — " if cond else "  FAIL — ") + label)
     if not cond:
         _fails.append(label)
+
+
+# #737 — THE PLAYER-TIER SURFACE REGISTRY (part of the #660 'all UI into kits' epic).
+# `tests/surface_registry.json` is the single manifest that enumerates every player-tier
+# surface FAMILY and the kit / shared component it MUST compose. The SOURCE-side drift guard
+# (tests/test_737_surface_registry.py) proves the manifest matches the JS *source*; this
+# smoke consumes the SAME manifest at RUNTIME to generalize the F-3 window ratchet past
+# windows (see the #737-runtime census below).
+def _load_surface_registry() -> dict:
+    with open(os.path.join(ROOT, "tests", "surface_registry.json"), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _surface_registry_arg() -> list[dict]:
+    """The manifest, projected to the minimal fields the in-browser census needs:
+    each family's id, its root CSS-family class (sans leading dot), its composition
+    seam global (sans `window.`), and its kind (kit / component / css)."""
+    reg = _load_surface_registry()
+    return [
+        {
+            "id": f["id"],
+            "cls": f["css_family"].lstrip("."),
+            "seam": (f.get("seam") or "").replace("window.", ""),
+            "kind": f["kind"],
+        }
+        for f in reg.get("families", [])
+    ]
 
 
 # L33/L34: `frosted` is now ON by default for every theme, which paints
@@ -2091,6 +2119,107 @@ def main() -> int:
             check(ratchet.get("unkitted") == [] and ratchet.get("bespoke") == 0,
                   f"F-3: every window-like surface is kit-managed ({ratchet})")
             check(ratchet.get("kitStack") is True, "F-3: the kit seam answers (stackIds)")
+
+            # #737 (runtime half): GENERALIZE the F-3 window ratchet past windows, driven by
+            # the surface_registry.json manifest. The SOURCE-side drift guard
+            # (tests/test_737_surface_registry.py) proves the manifest matches the JS source;
+            # this is its RUNTIME mirror. It censuses every player-tier surface family actually
+            # MOUNTED in the live DOM — windows, rail-gadgets, above-composer notices, bottom
+            # sheets, … — family-AGNOSTICALLY (it does not know the families in advance), then
+            # proves each mounted surface resolves to a REGISTERED family / its kit seam. A
+            # mounted surface whose family is not in the manifest FAILS, exactly the way the
+            # source drift guard refuses an unregistered kit — but observed live. This is NOT
+            # #113's visual/screenshot matrix (that is pixels); it is a structural DOM/kit-
+            # membership census. Robust by design: a surface family simply NOT present in this
+            # smoke run is not a failure — only a PRESENT-but-unregistered family fails.
+            _reg_arg = _surface_registry_arg()
+            registry_census = page.evaluate(
+                """(reg) => {
+                  const registeredClasses = new Set(reg.map(f => f.cls));
+                  const registeredKitSeams = new Set(
+                    reg.filter(f => f.kind === 'kit' && f.seam).map(f => f.seam));
+                  const familyByClass = {};
+                  reg.forEach(f => { familyByClass[f.cls] = f; });
+
+                  // (A) Runtime seam census — the family-AGNOSTIC mirror of the source drift
+                  //     guard's `_defined_kit_seams()`: every `window.Orwell*Kit` composition
+                  //     object actually LOADED on this page (regex mirrors _KIT_DEF_RX).
+                  const loadedKits = Object.keys(window).filter(
+                    k => /^Orwell[A-Za-z0-9]+Kit$/.test(k)
+                         && window[k] && typeof window[k] === 'object');
+
+                  // (B) DOM-mounted surface-root census (family-AGNOSTIC). Every kit stamps a
+                  //     BOOLEAN `data-<ns>-<name>` marker on each surface ROOT, and the root
+                  //     also carries a `<ns>-*` primary class + the kit anatomy (a
+                  //     `.<ns>-body`/`.<ns>-head` region, or a card/window/sheet-shaped class).
+                  //     We find every such root WITHOUT knowing the family in advance, then
+                  //     resolve its primary class against the manifest. (Kit-INTERNAL markers
+                  //     carry a value — e.g. data-ow-scrim="<id>", data-on-kind="info" — so the
+                  //     empty-value test skips them.)
+                  const MARK_RX = /^data-([a-z][a-z0-9]{1,4})-[a-z][a-z0-9-]*$/;
+                  const roots = [];
+                  document.querySelectorAll('*').forEach(el => {
+                    for (let i = 0; i < el.attributes.length; i++) {
+                      const at = el.attributes[i];
+                      if (at.value !== '') continue;         // root markers are boolean
+                      const m = at.name.match(MARK_RX);
+                      if (!m) continue;
+                      const ns = m[1];
+                      const primary = Array.prototype.find.call(
+                        el.classList, c => c.startsWith(ns + '-'));
+                      if (!primary) continue;
+                      // A genuine surface ROOT carries the kit anatomy (a `.<ns>-body`/
+                      // `.<ns>-head` region) OR a surface-shaped primary class. This filters
+                      // decorative/animation elements that merely happen to carry a boolean
+                      // `data-<ns>-*` marker + an `<ns>-*` state class (e.g. the blinking-eye
+                      // lid: data-eye-lid + .eye-blinking) — position alone is too loose.
+                      const structural =
+                        el.querySelector('.' + ns + '-body, .' + ns + '-head')
+                        || registeredClasses.has(primary)
+                        || /-(card|window|sheet|panel|dialog|gadget|popover|modal|drawer)$/
+                             .test(primary);
+                      if (!structural) continue;
+                      roots.push({ id: el.id || null, cls: primary, marker: at.name });
+                      break;                                  // one root per element
+                    }
+                  });
+
+                  const unregistered = roots
+                    .filter(r => !registeredClasses.has(r.cls))
+                    .map(r => ({ id: r.id, cls: r.cls, marker: r.marker }));
+                  const present = [...new Set(roots.map(r => r.cls))]
+                    .filter(c => registeredClasses.has(c));
+
+                  // (C) Resolve-to-seam: every MOUNTED registered KIT family must have its
+                  //     declared `window.Orwell*Kit` seam actually loaded — proves the
+                  //     "resolves to its kit seam" linkage is real, not vacuous.
+                  const seamGaps = present
+                    .map(c => familyByClass[c])
+                    .filter(f => f && f.kind === 'kit' && f.seam
+                                 && !(window[f.seam] && typeof window[f.seam] === 'object'))
+                    .map(f => f.id);
+
+                  // A LOADED kit seam the manifest does not register (a new kit shipped
+                  // without registering) — the runtime mirror of the source drift guard.
+                  const unregisteredLoadedKits = loadedKits.filter(
+                    k => !registeredKitSeams.has(k));
+
+                  return { rootsFound: roots.length, present, unregistered, seamGaps,
+                           loadedKits, unregisteredLoadedKits };
+                }""",
+                _reg_arg,
+            )
+            check(registry_census.get("unregistered") == [],
+                  "#737 runtime: every MOUNTED surface family resolves to a registered kit "
+                  f"family (present={registry_census.get('present')}, "
+                  f"unregistered={registry_census.get('unregistered')})")
+            check(registry_census.get("seamGaps") == [],
+                  "#737 runtime: every mounted kit family resolves to its loaded kit seam "
+                  f"(seamGaps={registry_census.get('seamGaps')}, "
+                  f"loadedKits={registry_census.get('loadedKits')})")
+            check(registry_census.get("unregisteredLoadedKits") == [],
+                  "#737 runtime: every LOADED window.Orwell*Kit seam is registered "
+                  f"(unregisteredLoadedKits={registry_census.get('unregisteredLoadedKits')})")
 
             # L12: the cast roster can be PINNED into the control-room gadget rail as a
             # compact gadget — it mounts INTO #gadget-rail-body, the pinned state
