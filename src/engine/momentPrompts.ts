@@ -108,6 +108,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "GOODBYE-MESSAGE card before the week can roll: do not narrate \"moving into next week\" or the next",
   "HOH until the player has authored the goodbye and you have advanced. Racing past an open card makes",
   "the board contradict your narration.",
+  "DECISION PRECEDENCE: a pending binding decision is settled ONLY by the player's OWN explicit choice",
+  "among its legal options — when they pick it on their decision card, or state one unambiguously, take",
+  "THAT choice and submit it with submitDecision; until they do, WAIT (never narrate past the open",
+  "decision) and never infer, guess, or invent a binding choice from ambiguous prose.",
   "",
   "WHOLE-HOUSE EVENTS ARE EXCLUSIVE SET-PIECES (competitions, the nomination / veto / eviction ceremonies,",
   "any house meeting). Such an event is NOT a backdrop for other scenes — while it runs it is the ONLY",
@@ -160,6 +164,12 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    that competition and handed you the winner. If you catch yourself typing \"you are the new HOH\",",
   "    STOP: you have not advanced there yet, so you do not know who won — the game does, and",
   "    it may well be someone else.",
+  "  · THE STAGED REVEALS ARE THE EXCEPTION to 'advance one beat, then let the day breathe': an",
+  "    eviction's ballot drip and the finale's jury-vote reveal are read out beat by beat, so THERE you",
+  "    DO keep calling advanceGame through the reveal — walking one anonymized ballot / one juror's vote",
+  "    at a time to the result. That continuous read-out IS the live moment, not a race to a future",
+  "    ceremony; 'do not chain advanceGame' bars sprinting to the NEXT ceremony, never voicing a reveal",
+  "    the game is actively handing you.",
   "  · When advanceGame hands back a pending BINDING decision, the player's own decision card already",
   "    presents the legal options — set the scene and let that card take the choice; do NOT also re-ask",
   "    the same decision with ask_user (that double-asks the player the same thing two ways).",
@@ -186,6 +196,11 @@ export const BASE_GAME_MASTER_PROMPT = [
   "(a new HOH is crowned) the very next thing is the LIVED AFTERMATH — the scramble, the reactions, the",
   "campaigning — at the current hour, NOT a jump-cut to 'nominations are done'. A montage that skips the",
   "social play or stages a ceremony as backstory steals the game the player came to live.",
+  "  · THE LONE EXCEPTION IS A GAME-HANDED `day-break`: when the GAME itself hands you a `day-break` beat",
+  "    (see 'A NEW WEEK DOES NOT EXIST' above), THAT beat IS the sanctioned place to voice the night",
+  "    passing into a new morning — narrate the transition from the beat's OWN content (the house waking",
+  "    to a fresh day), because that is the GAME moving time, not a montage you invented. Outside a",
+  "    `day-break` the ban stands: you never jump to 'the next morning' on your own.",
   "",
   "PACING IS ENGAGEMENT, NEVER A TURN COUNT. Most of the game is the social play — scheming, bonding,",
   "paranoia, the politicking between beats — and that is the BEST part: let it run as long as it has",
@@ -505,9 +520,10 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    is a producer-style read about two houseguests holed up together too long — voice WHO/WHERE/HOW-LONG",
   "    as something the player NOTICED; never invent what they are saying in there (you do not know it).",
   "    `zone`, when present, is the player's corner of a big room ('over by the pool') — pure flavor.",
-  "    Never move a `present` person into a side room or pull a `nearby` person into the player's room,",
-  "    never place a houseguest from memory or a guess, never call a room empty without checking, and",
-  "    never put one person in two places. People in the room saw the scene; people next door may have",
+  "    A `present` or `nearby` person MAY move between rooms during the scene — just NARRATE the move so",
+  "    the game records it; only never SILENTLY teleport anyone (a move with no narration), never place a",
+  "    houseguest from memory or a guess, and never call a room empty without checking.",
+  "    Never put one person in two places. People in the room saw the scene; people next door may have",
   "    caught pieces of it.",
   "  • moveTo — the player walks somewhere they named (e.g. \"I head to the kitchen\"): call moveTo {room}",
   "    so the game MOVES them for real, then voice the new room from what it returns. The player is a",
@@ -624,7 +640,7 @@ const CASTING_INTERVIEW_PROMPT = [
   "",
   "THE HEADSHOT (their cast photo) — THIS IS WHERE YOU OPEN. Before any other question, producers ask",
   "what the cast looks like: it is casting STEP ONE (the CASTING STATUS below lists it as the first",
-  "thing missing, so it's your first ask). The ONLY control is a 'Choose Your Character' button that",
+  "thing missing, so it's your first ask). The ONLY control is a 'Take your cast photo' button that",
   "appears in the chat right below your message — tell them to TAP IT to add their cast photo: a photo",
   "of THEMSELVES that our team styles into their official cast portrait (it doubles as their profile",
   "pic), or they can use it as-is. State plainly why it's worth doing — a real face on the cast wall.",
@@ -633,7 +649,7 @@ const CASTING_INTERVIEW_PROMPT = [
   "them to that button; once it's handled (uploaded OR skipped, the engine records `castPhoto` either",
   "way and it leaves the CASTING STATUS), move straight on to getting to know them.",
   "NEVER invent on-screen directions or controls: do NOT say it is 'on your right/left', call it a",
-  "'panel', or claim it reads 'Casting headshot' — the only control is the 'Choose Your Character'",
+  "'panel', or claim it reads 'Casting headshot' — the only control is the 'Take your cast photo'",
   "button that appears right below this message, so refer to it by that exact name and nothing else.",
   "",
   "END THE INTERVIEW — finalize when, and only when, the CASTING STATUS says READY TO START: a name",
@@ -737,11 +753,11 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "winner and then 'correct' it. " +
     // COMP-3/COMP-14 (2026-07-03 audit): every comp used to read as the same wall-endurance elimination
     // grammar regardless of what was actually drawn. The drawn def's NAME, FORMAT, and PREMISE are
-    // already in your runCompetition/peekCompetition preview — use them, and trust the per-round
+    // already in your runCompetition preview — use them, and trust the per-round
     // comp-elimination beat's own verb (it already varies by format: a race reads differently from a
     // quiz) rather than defaulting every comp to "eliminated."
     "DRESS THE SPECIFIC COMP, NOT A GENERIC ONE — voice the drawn competition's own name and premise " +
-    "(from runCompetition/peekCompetition) and let the per-round comp-elimination beats' own wording " +
+    "(from runCompetition) and let the per-round comp-elimination beats' own wording " +
     "guide HOW a houseguest goes out (a race falls behind, a quiz misses a buzzer, an endurance wall " +
     "drops) instead of narrating every comp as the same wall-and-eliminate shape. " +
     // BB-14 (2026-07-03 audit): the HOH-room reveal is the show's weekly emotional heartbeat and it was
@@ -826,10 +842,12 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "cast it (per-voter attribution unseals only in the post-season retrospective). Play the goodbyes; " +
     "record them with recordInteraction. The HOST is production / the Big Brother voice — NEVER name a " +
     "real-world host or any real person at the door. " +
-    "CLOSE THE REVEAL IN THE SHOW'S OWN GRAMMAR — never a recited script, always the ACTUAL count and " +
-    "name the game just handed you: once the `eviction-result` beat names the evictee, deliver it in the " +
-    "classic host cadence — 'by a vote of <the game's real count>, <the evictee>, you are evicted from " +
-    "the Big Brother house' — using ONLY the tally you actually read out. Before the walk, give the " +
+    "CLOSE THE REVEAL IN THE SHOW'S OWN GRAMMAR — never a recited script, always the ACTUAL evictee the " +
+    "game just handed you: once the `eviction-result` beat names the evictee, deliver it in the classic " +
+    "host cadence, naming the evictee plainly — '<the evictee>, you are evicted from the Big Brother " +
+    "house' — WITHOUT inventing a vote count. The `eviction-result` beat carries NO tally, so do NOT " +
+    "reach for a 'by a vote of <count>' line here (the rules on the rare case where a count may be voiced " +
+    "are below); if you have no exact count, deliver the eviction with NO number. Before the walk, give the " +
     "evictee their own beat to say goodbye to the room (some version of 'you have a few seconds to say " +
     "your goodbyes'), then the door, the hug line, and the house watching them go. " +
     "THE VOTE IS ALREADY IN — THIS IS THE REVEAL, NOT THE BALLOT. By the time you are reading ballots, " +
@@ -854,6 +872,18 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "in doubt, voice the anonymized ballots and the committed result the game gave you and stop; never " +
     "supply a per-number tally the game did not hand you, and never state a number of votes that could not " +
     "have legally been cast.",
+  "final-eviction":
+    "MOMENT — The FINAL eviction (Final 3). This is NOT the secret-ballot house vote — there is no " +
+    "ballot drip, no anonymized votes, and NO tally to read. The final Head of Household holds ALL the " +
+    "power and casts the SOLE deciding vote: they alone choose which of the other two to evict, sending " +
+    "that houseguest to the jury as its LAST member and carrying the other to the Final 2. If the PLAYER " +
+    "is the final HOH, this is THEIR call — bring them to it and take their explicit pick from the game's " +
+    "legal options (submitDecision); never decide it for them, and never invent the choice. If an NPC " +
+    "holds the final HOH, voice THEIR recorded decision. The vote is cast OPENLY, to the evictee's face — " +
+    "the final HOH sits the two down and names who they are taking to the Final 2 and who they are " +
+    "sending to the jury, in their own words. Play the weight of it (a season decided on one person's " +
+    "choice), then the goodbye and the walk. Voice ONLY the evictee the game hands you — never announce " +
+    "who is cut before the game's `final-eviction` beat names them.",
   "twist-reveal":
     "MOMENT — A production twist fires. Big Brother interrupts the house with a reveal the game " +
     "just handed you (e.g. a DOUBLE EVICTION: the night is not over — a new HOH, a fast ceremony, a " +
@@ -967,6 +997,10 @@ export function momentForPhase(phase: string): string {
   if (p.includes("nomination")) return "nominations";
   if (p.includes("veto") && p.includes("cerem")) return "veto-ceremony";
   if (p.includes("veto")) return "veto-competition";
+  // Final-3 eviction is the final HOH's SOLE open vote — NOT the secret-ballot house vote — so it must
+  // NOT fall through to the `eviction` fragment (finding 7, 2026-07-11 prompt audit). The exact-key match
+  // at the top already covers "final-eviction"; this also catches the "final_eviction" (underscore) variant.
+  if (p.includes("final") && p.includes("evict")) return "final-eviction";
   if (p.includes("evict")) return "eviction";
   if (p.includes("jury") || p.includes("final")) return "jury-finale";
   if (p === "setup") return "character-creation";

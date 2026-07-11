@@ -3972,15 +3972,18 @@ _REAPPROACH_NUDGES = [
     "drifted off into free chat. In character as the show's producer — OUT of fiction, in the "
     "real world, NOT as a houseguest — naturally reach back out and let them know the next season "
     "is theirs whenever they want it. Warm and low-pressure; mention they can hit the 'New season' "
-    "button to bring this houseguest back or recast. Do NOT improvise a new season in chat — the "
-    "only way forward is that sanctioned button.)",
+    "button to bring this houseguest back or recast. Do NOT improvise a new season into being in the "
+    "fiction — but if they ASK you to run it back, you may finalize a REAL restart right here "
+    "(createCharacter, confirmRestart=true) just as well as the button; only a narrated ghost season is "
+    "off-limits.)",
     # 2 — a touch more direct.
-    "(Production note: the player keeps wandering and hasn't started the next season. As the "
+    "(Production note, not for the player to see verbatim: the player keeps wandering and hasn't started the next season. As the "
     "producer, out of fiction, check in again — a little more directly this time — and remind "
-    "them the casting door is open: the 'New season' button starts the next one (keep their "
-    "houseguest or recast). Never start a season yourself; point them at the button.)",
+    "them the casting door is open: the 'New season' button starts the next one, or you can finalize the "
+    "restart right here if they ask you to run it back (keep their houseguest or recast). Never narrate a "
+    "ghost season you have not actually started.)",
     # 3 — the standing offer, plainly.
-    "(Production note: make the standing offer plain. Out of fiction, as the producer: the show "
+    "(Production note, not for the player to see verbatim: make the standing offer plain. Out of fiction, as the producer: the show "
     "would love to have them back, the next season is one click away on the 'New season' button, "
     "and you'll be here whenever they're ready. Then let them be — do not nag further this turn.)",
 ]

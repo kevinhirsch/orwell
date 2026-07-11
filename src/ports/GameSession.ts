@@ -663,9 +663,9 @@ export interface CreateCharacterReq {
   seed?: number;
   /**
    * Explicit opt-in to REPLACE an already-started game (non-degradation guard, B36/audit A2). Without
-   * it, calling `createCharacter` on a started season is a no-op that returns the current state — so a
-   * stray/hallucinated/network call can never wipe an active game. A real restart sets this (the admin
-   * reset path) — it is NOT part of the player tool's documented schema.
+   * it, calling `createCharacter` on a started season is REFUSED with a reason (`createRefused`) and
+   * returns the current state UNCHANGED — so a stray/hallucinated/network call can never wipe an active
+   * game. A real restart sets this (the admin reset path) — it is NOT part of the player tool's documented schema.
    */
   confirmRestart?: boolean;
   /**
@@ -1041,8 +1041,10 @@ export interface FirstImpressionView {
  * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
  * answer to "who has the player met, and who is still to introduce, before the first HOH?". The
  * narrator is HANDED this so it never has to REMEMBER who's been introduced (the real bug: the
- * model under-tracked and skipped people). `complete` is the structural gate — true once the player
- * has met all 15 NPCs (the player counts themselves); the first HOH should not begin until then.
+ * model under-tracked and skipped people). `complete` is the ALL-MET tally — true once the player has
+ * met all 15 NPCs (the player counts themselves). It is NOT the power gate: the first HOH is REACHABLE
+ * earlier, via `powerReachable` below (0111 — a couple of hot reads + nobody left invisible), WITHOUT
+ * every formal introduction first.
  *
  * Public by construction: it carries only names + the same observable persona facets the roster
  * already exposes. No Vault data, no numbers, no hidden state.

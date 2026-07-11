@@ -97,11 +97,27 @@ def test_premiere_directive_none_when_complete():
     assert chat_helpers._premiere_progress_directive(prem) is None
 
 
+def test_premiere_directive_none_when_power_reachable():
+    # #1387 / 0111: once first power is REACHABLE (a couple of hot reads + nobody invisible), the
+    # directive must STOP stonewalling a ready player — even though not all 15 are formally met.
+    prem = {
+        "complete": False,
+        "powerReachable": True,
+        "metCount": 6,           # player + 5 NPCs met so far
+        "total": 16,
+        "hotReads": 3,
+        "remaining": [{"houseguest": {"id": "npc:9", "name": "Rowan"}}],
+    }
+    assert chat_helpers._premiere_progress_directive(prem) is None
+
+
 def test_premiere_directive_names_count_and_remaining():
     prem = {
         "complete": False,
+        "powerReachable": False,  # power not reachable yet ⇒ the warm redirect fires
         "metCount": 12,          # player + 11 NPCs met
         "total": 16,             # player + 15 NPCs
+        "hotReads": 1,
         "remaining": [
             {"houseguest": {"id": "npc:1", "name": "Avery"}},
             {"houseguest": {"id": "npc:2", "name": "Elliot"}},
@@ -109,15 +125,16 @@ def test_premiere_directive_names_count_and_remaining():
     }
     out = chat_helpers._premiere_progress_directive(prem)
     assert out and isinstance(out, str)
-    # NPC-only figures: 11 of 15, 4 still to go.
+    # NPC-only figures: met 11 of 15, 4 still to meet in motion.
     assert "11 of 15" in out
-    assert "4 still to go" in out
+    assert "4 still to meet" in out
     # It names WHO is left (the audit's missing consistency).
     assert "Avery" in out and "Elliot" in out
-    # It pins the HOH gate + the consistency requirement (always name the count).
     low = out.lower()
     assert "hoh" in low
-    assert "always name" in low
+    # #1387: the redirect is now the ASYMMETRIC gate — never an all-15 stonewall.
+    assert "do not need every one of the 15" in low
+    assert "hard-gate" in low
 
 
 def test_premiere_directive_handles_missing_names():
