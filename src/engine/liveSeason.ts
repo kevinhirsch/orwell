@@ -409,6 +409,16 @@ export interface LiveSeasonState {
    * Persisted with the season like the rest of the clock state (0030).
    */
   preNomsNightPassed?: boolean;
+  /**
+   * Phase 3a — the same one-shot day-break gate, extended to the REST of the weekly cadence so every
+   * major beat lands on its OWN in-fiction day (WEEKLY_CADENCE: Day 1 HOH → 2 noms → 3 veto → 4 veto
+   * ceremony → 5 eviction), never two ceremonies in one day. Each is set the first time its beat resolves
+   * for the current reign and cleared per reign by `rollWeek`. Written ONLY under the clock-pacing
+   * night-gate (`SeasonCtx.nightGate`) ⇒ a clock-off / calibration game never sets them ⇒ byte-identical.
+   */
+  preVetoNightPassed?: boolean;
+  preVetoCeremonyNightPassed?: boolean;
+  preEvictionNightPassed?: boolean;
   /** 0066 Phase-2: the COMPOUNDING multi-night fatigue meter (0..1) — an EMA of nightly deficits, so a
    *  STRING of late nights wears a houseguest down beyond the single-night cost. Persisted (0007/0030 —
    *  non-degradation); absent ⇒ 0 ⇒ byte-identical when the clock is off. `npcFatigue` is keyed by id. */
@@ -1258,6 +1268,10 @@ function rollWeek(s: LiveSeasonState): void {
   s.vetoHolder = undefined; s.vetoUsed = false; s.saved = undefined;
   s.replacement = undefined; s.finalNominees = undefined; s.vetoComp = undefined;
   s.preNomsNightPassed = undefined; // #1320: re-arm the night-gate for the new reign (undefined ⇒ serialization-neutral)
+  // Phase 3a — re-arm the rest of the cadence's day-breaks for the new reign (undefined ⇒ serialization-neutral).
+  s.preVetoNightPassed = undefined;
+  s.preVetoCeremonyNightPassed = undefined;
+  s.preEvictionNightPassed = undefined;
   if (s.active.length <= 2) {
     s.beat = "finale";
     return;
@@ -1768,7 +1782,11 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       // the following advance — Day 1 HOH → Day 2 noms (WEEKLY_CADENCE), never a fast-forward. GATED, so a
       // clock-off / calibration game skips this entirely ⇒ byte-identical. (ADR 0006: a diegetic day
       // boundary, not a curfew — it never interrupts an engaged scene, it just seats the ceremony a day on.)
-      if (ctx.nightGate && !s.preNomsNightPassed) {
+      // TWIST GUARD (all four cadence gates): a RUNNING double eviction is a single COMPRESSED night by
+      // design (`rollWeek` re-arms these flags before flipping the twist to "running"), so the re-armed
+      // gates must NOT fire during it — that would stretch the same-night second cycle across days. Skip
+      // every day-break while `s.twist?.phase === "running"`; the ordinary (non-twist) week is untouched.
+      if (ctx.nightGate && !s.preNomsNightPassed && s.twist?.phase !== "running") {
         s.preNomsNightPassed = true;
         crossToNextDay(s);
         return {
@@ -1793,6 +1811,18 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return { beat: "nominations", content: `${s.hoh} nominates ${nominees[0]} and ${nominees[1]}`, participants: [s.hoh!, ...nominees] };
     }
     case "veto-competition": {
+      // Phase 3a NIGHT-GATE: the veto comp is its own day (Day 3, after nominations on Day 2). The first
+      // advance into it crosses the night as a one-shot diegetic day-break, before the chip draw. GATED on
+      // the clock ⇒ a clock-off calibration game skips it ⇒ byte-identical.
+      if (ctx.nightGate && !s.preVetoNightPassed && !s.vetoField && s.twist?.phase !== "running") {
+        s.preVetoNightPassed = true;
+        crossToNextDay(s);
+        return {
+          beat: "day-break",
+          content: "The house turns in, and morning breaks on the day of the Power of Veto competition.",
+          participants: [],
+        };
+      }
       // E35 stage A: the chip draw is a witnessed ceremony of its own — it precedes any winner.
       if (!s.vetoField) return resolveVetoDraw(s, ctx, rng);
       // STAGED (0006 staged-rounds evolution): the veto comp plays out in elimination rounds exactly
@@ -1801,6 +1831,16 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return resolveVetoComp(s, ctx, rng);
     }
     case "veto-ceremony": {
+      // Phase 3a NIGHT-GATE: the veto ceremony is its own day (Day 4). One-shot day-break before it resolves.
+      if (ctx.nightGate && !s.preVetoCeremonyNightPassed && s.twist?.phase !== "running") {
+        s.preVetoCeremonyNightPassed = true;
+        crossToNextDay(s);
+        return {
+          beat: "day-break",
+          content: "The house sleeps, and a new day arrives — the morning of the Veto Ceremony.",
+          participants: [],
+        };
+      }
       const nominees = s.nominees!;
       if (s.vetoHolder === ctx.player) {
         // The holder may save either nominee (incl. self if nominated) — the whole pair is saveable…
@@ -1824,6 +1864,17 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return resolveReplacement(s, ctx); // either pends on the player-HOH or NPC-picks, then → eviction
     }
     case "eviction": {
+      // Phase 3a NIGHT-GATE: eviction is its own day (Day 5). One-shot day-break before the reveal begins —
+      // guarded on `!s.eviction` so a mid-reveal re-entry never re-fires it. GATED on the clock (byte-identical off).
+      if (ctx.nightGate && !s.preEvictionNightPassed && !s.eviction && s.twist?.phase !== "running") {
+        s.preEvictionNightPassed = true;
+        crossToNextDay(s);
+        return {
+          beat: "day-break",
+          content: "Night falls one last time this week, and eviction day dawns over the house.",
+          participants: [],
+        };
+      }
       if (s.eviction) return advanceEviction(s, ctx, rng); // a reveal is already staging — step it
       // 0025 secret veto: a final nominee secretly holds the unplayed safety — they may pull off the
       // block before the vote (player: their choice; NPC: a rational self-save). One eviction still lands.
