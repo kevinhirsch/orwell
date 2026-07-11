@@ -655,7 +655,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40  # four gate legs (live SSE/WS + toolturn SSE/WS), each with bounded retries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -717,6 +717,40 @@ jobs:
             sleep 3
           done
           echo "::error::mirror-parity WS-transport leg failed all attempts (two windows diverged during streaming under WS, or the socket silently fell back)."
+          exit 1
+      # ── tool-rich multi-round parity (H1/H2), BOTH transports (#1087) ─────────────────────────────
+      # The single-round live gate above never exercises the agent-loop MULTI-ROUND path — which is
+      # where the WS rebind→ring-replay churn regression lived (issue #1087: toolturn red on main
+      # while both live legs stayed green, because the gate wasn't in CI). The toolturn gate also
+      # asserts the WS frame-log collapse (one chat subscribe per attached run, no stale run-started
+      # edge churn), so a reintroduced replay loop fails loudly here, not in production.
+      - name: mirror-toolturn gate — SSE/poll transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2; do
+            echo "──── mirror-toolturn (SSE) attempt $attempt ────"
+            if MIRROR_TOOLTURN=1 MIRROR_WS_TRANSPORT=0 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-toolturn (SSE): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-toolturn (SSE): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-toolturn SSE leg failed all attempts (dup/orphan bubbles across a tool-rich turn under the fallback transport)."
+          exit 1
+      - name: mirror-toolturn gate — WebSocket transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2; do
+            echo "──── mirror-toolturn (WS) attempt $attempt ────"
+            if MIRROR_TOOLTURN=1 MIRROR_WS_TRANSPORT=1 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-toolturn (WS): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-toolturn (WS): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-toolturn WS leg failed all attempts (the #1087 rebind→ring-replay churn class: dup bubbles / subscribe churn on a tool-rich turn under WS)."
           exit 1
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────

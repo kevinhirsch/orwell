@@ -111,6 +111,29 @@
   var _highestChatSeq = -1;      // highest `chat` event.seq rendered (reconnect cursor)
   var _chatSubscribed = false;
   var _chatTailActive = false;   // are we tailing a LIVE chat run right now? (§4.1 re-attach guard)
+  // #1087 reconcile-by-id: the id of the run this socket is attached to (or last fully rendered).
+  // `session_events` is at-least-once — its replay ring re-delivers a FINISHED run's `run-started`
+  // edge (≤8 events, 180s retention) to any fresh state-channel subscribe. The `_chatTailActive`
+  // boolean alone can't tell a STALE replayed edge from a genuinely new run (the finished run's
+  // `done` already cleared it), so each `run-started` carries the run's id and we skip edges for a
+  // run we already attached/rendered. Learned from the chat subscribe `ack` (authoritative) and
+  // provisionally at `_onRunStarted` attach-time (so a same-id replay BURST is inert even before
+  // the ack lands). Never cleared by `done` — remembering the finished run is the whole point.
+  var _lastRunId = null;
+  // #1087 queued-run attach: the id of a run that QUEUED behind the run we're currently tailing.
+  // ws_routes publishes a queued turn's `run-started` edge IMMEDIATELY (right after
+  // `agent_runs.start(queue=True)`), stamped with the queued run's id (the registry's current run) —
+  // but that run does NOT stream until the active run drains, and NO second edge follows. We can't
+  // attach mid-tail (that would tear down the active run's tail), so we REMEMBER the queued run's id
+  // here and attach after the active run's `done`. Without this the only invitation is dropped and a
+  // peer window silently misses the queued turn entirely. Cleared once drained and on any transport
+  // reset (the replay ring re-delivers the edge, so nothing durable is lost).
+  var _pendingRunId = null;
+  // #1087 same-id rebind guard: are the state/hud edge channels armed on THIS socket? A rebind
+  // re-arms them only on a genuine canonical change (mirrors the chat-subscribe guard) — a same-id
+  // re-arm would respawn the server's session_events bridge and replay its event ring back into
+  // `orwell:gamechanged` (the rebind→ring-replay churn loop).
+  var _edgesSubscribed = false;
   var _fallbackReason = null;    // WHY we fell back — only "pregame-not-live" is recoverable (see _goFallback)
   var _helloTimer = null;
   var _reconnectFails = 0;
@@ -174,8 +197,14 @@
           if (typeof frame.seq === "number" && frame.seq > _highestChatSeq) _highestChatSeq = frame.seq;
           // A terminal `done` ends this run's tail — a LATER `run-started` edge must re-attach for the
           // NEXT run (a standing subscribe does NOT span runs; each run is a fresh per-run buffer).
-          if (frame.d && frame.d.done) _chatTailActive = false;
+          // `_lastRunId` is deliberately KEPT: it is what lets a stale replayed `run-started` for
+          // this now-finished run be ignored (#1087).
+          var _chatDone = !!(frame.d && frame.d.done);
+          if (_chatDone) _chatTailActive = false;
           _emit("chat", frame);
+          // #1087 — a run that QUEUED behind this one already sent its ONLY `run-started` edge while
+          // we were still tailing (so it was remembered, not attached). The tail is free now: attach it.
+          if (_chatDone) _drainPendingRun();
         } else if (_handlers[frame.ch]) {
           _emit(frame.ch, frame);
         }
@@ -186,8 +215,10 @@
         // subscription does NOT tail across runs (agent_runs' `subscribe()` returns when its run ends,
         // and each run is a fresh per-run buffer), so we must RE-ATTACH the chat channel to mirror the
         // new run — the sender's own reply AND a peer's turn both ride this. Skipped while we're already
-        // tailing a live run (§4.1 "a run it is not already tailing").
-        if (frame.d && frame.d.reason === "run-started") _onRunStarted();
+        // tailing a live run (§4.1 "a run it is not already tailing"). The frame's `runId` (when the
+        // server knows it) lets the handler ignore a STALE replayed edge for a run already rendered
+        // — session_events' ring re-delivers finished runs' edges at-least-once (#1087).
+        if (frame.d && frame.d.reason === "run-started") _onRunStarted(frame.d.runId);
         _emit("state", frame);
         return;
       case "hud":
@@ -236,6 +267,10 @@
         // instead of being skipped as "already tailing". A live/terminal-buffered run keeps the flag —
         // its `done` event (or a drop) clears it.
         if (frame.d && frame.d.hasRun === false) _chatTailActive = false;
+        // #1087 reconcile-by-id: the ack names the run this subscribe attached to (the run whose
+        // buffer replays/tails). Record it so a later ring-replayed `run-started` for the SAME run
+        // is recognized as stale and ignored.
+        if (frame.d && frame.d.runId != null) _lastRunId = frame.d.runId;
       }
       try { q.resolve(frame); } catch (_) {}
       return;
@@ -295,10 +330,19 @@
   }
 
   // Re-resolve the canonical id (§2.3 `bind`) — dropped + re-issued on every
-  // `orwell:gamechanged` (the ONE g15 dispatcher). A rebind ALWAYS re-arms the
-  // lightweight state/hud push edges (fire-and-forget, idempotent — the server dedups per
-  // channel key), but it re-points the `chat` channel ONLY when the canonical id actually
-  // CHANGED (a genuine re-resolve: adoption, or a season-reset unbind).
+  // `orwell:gamechanged` (the ONE g15 dispatcher). A rebind re-arms the lightweight state/hud
+  // push edges ONLY when the canonical id actually CHANGED (or they were never armed on this
+  // socket), and re-points the `chat` channel under the same guard (a genuine re-resolve:
+  // adoption, or a season-reset unbind).
+  //
+  // Why the EDGE guard is load-bearing too (#1087 — the rebind→ring-replay churn loop): a
+  // same-id `_subscribeEdges()` re-arm makes the server REPLACE its state/hud channel task, and
+  // the fresh `session_events.subscribe()` REPLAYS the per-session event ring (≤8 events, 180s
+  // retention — the ADR 0012 §3.4b durable invitation). Those replayed `state` frames re-enter
+  // `orwell:gamechanged` via platform.js's bridge → another rebind → another replay: a
+  // self-sustaining ~2s churn whose stale `run-started` edges also repeatedly re-subscribed chat
+  // from 0 (duplicate bubbles; the toolturn-parity failure). The server dedups the same-canonical
+  // re-arm too (belt-and-braces), but the client simply not re-arming is what starves the loop.
   //
   // Why the guard is load-bearing: `orwell:gamechanged` fires on EVERY game mutation —
   // including MID-TURN (each game-mutating tool result dispatches it). A blind
@@ -324,8 +368,12 @@
       // The socket dropped during the bind (onclose flipped us to negotiating) — the reconnect
       // path re-arms every channel from its own onopen; don't subscribe a dead sock.
       if (_mode !== "ws") return ack;
-      // Always re-arm the state/hud edges (the HUD push keystone — test_ws_statehud_subscribe).
-      _subscribeEdges();
+      // Re-arm the state/hud edges ONLY on a genuine canonical change (the running server bridge
+      // serves its spawn-time canonical, so a re-point needs a fresh subscribe) or if they were
+      // never armed on this socket. A same-id re-arm is the ring-replay churn trigger (#1087);
+      // the HUD push keystone (test_ws_statehud_subscribe) stays live — the existing bridge is
+      // still attached and pushing.
+      if (_canonicalId !== prevCanonical || !_edgesSubscribed) _subscribeEdges();
       if (!_live) return ack;
       // Re-point chat ONLY on a genuine canonical change (or if it was never subscribed).
       // `_onAck` has already updated `_canonicalId` from the bind ack by the time this runs.
@@ -333,6 +381,7 @@
       // (which sets `_chatSubscribed=true`), so a re-entrant gamechanged can't double-subscribe.
       if (_canonicalId !== prevCanonical || !prevChatSubscribed) {
         _chatSubscribed = false;
+        _pendingRunId = null;       // #1087 — a queued run belonged to the OLD tail/canonical; drop it
         return _subscribeChat(0); // full history on the newly-resolved id (a real re-point)
       }
       return ack;                 // same id → the in-flight chat tail stays intact
@@ -360,14 +409,44 @@
   // §4.1 — re-attach the chat channel when a NEW run starts on our canonical. The previous run's
   // `subscribe()` returned at its own end (per-run buffers don't span runs), so `_chatSubscribed` being
   // "true" is stale — the server-side tail is gone. Re-subscribe from 0 (the new run's buffer restarts
-  // at seq 0). Guarded on `_chatTailActive` so we never interrupt an in-flight run we're already
-  // mirroring (the queued back-to-back case) and never double-attach a run.
-  function _onRunStarted() {
+  // at seq 0). Two guards (#1087 — at-least-once edges, exactly-once attach):
+  //   • `_chatTailActive` (fast path) — never interrupt an in-flight run we're already mirroring, and
+  //     never double-attach a run. A genuinely-new run that QUEUES behind the active one is REMEMBERED
+  //     (`_pendingRunId`) not dropped, then attached when the active run's `done` frees the tail
+  //     (#1087 queued-run drop — its single `run-started` edge is published up-front and never repeats);
+  //   • reconcile-by-id — a replayed STALE edge for a run we already fully rendered (its `done`
+  //     cleared the boolean, so the boolean can't catch it) carries the SAME `runId` we recorded;
+  //     skip it instead of resetting the cursor and full-replaying the finished run (the repeating
+  //     duplicate-bubble churn). An id-less edge (older server / evicted run) falls back to the
+  //     boolean-only behavior.
+  function _onRunStarted(runId) {
     if (_mode !== "ws") return;
-    if (_chatTailActive) return;   // already tailing a live run — nothing to do (§4.1)
+    if (_chatTailActive) {
+      // Already tailing a live run — do NOT tear it down (§4.1). But a GENUINELY-NEW run queued
+      // behind it (a distinct id from the one we're tailing) published its ONLY `run-started` edge
+      // NOW and will never send another (#1087 queued-run drop). Remember it so this run's `done`
+      // can attach it. A same-id replay of the run we're already tailing (`id === _lastRunId`) is NOT
+      // a queued run — skip it (an id-less edge stays inert here too: `runId != null` fails).
+      if (runId != null && runId !== _lastRunId) _pendingRunId = runId;
+      return;
+    }
+    if (runId != null && runId === _lastRunId) return; // stale replayed edge — already rendered (#1087)
+    if (runId != null) _lastRunId = runId; // provisional; the subscribe ack confirms/overwrites it
     _highestChatSeq = -1;          // a NEW run's buffer restarts at seq 0 — replay it from the top
     _chatSubscribed = false;
     _subscribeChat(0).catch(function () { _chatTailActive = false; });
+  }
+
+  // #1087 — attach to a run that QUEUED behind the run that just finished. Its `run-started` edge
+  // arrived mid-tail (remembered in `_pendingRunId`, not attached); the tail is free now. Route
+  // through `_onRunStarted` so the full reconcile-by-id + subscribe path runs (a redundant same-id
+  // pending is then a no-op via the `=== _lastRunId` skip). Clear the slot FIRST so a failed attach
+  // or a re-entrant `done` can never double-drain the same id.
+  function _drainPendingRun() {
+    if (_pendingRunId == null) return;
+    var next = _pendingRunId;
+    _pendingRunId = null;
+    _onRunStarted(next);
   }
 
   // ── the state/hud EDGE channels (§4) — the HUD push keystone ─────────────
@@ -386,11 +465,15 @@
   // through `_onError`'s forbidden/not-bound → fallback leg (the socket is broken).
   var EDGE_CHANNELS = ["state", "hud"];
   function _subscribeEdges() {
+    var sent = true;
     for (var i = 0; i < EDGE_CHANNELS.length; i++) {
       // A cid for the protocol shape (§3.1 `{t,ch,cid,...}`; echoed on a refusal
       // error) but NO pending promise — success never acks.
-      _send({ t: "subscribe", ch: EDGE_CHANNELS[i], cid: _nextCid(), d: {} });
+      if (!_send({ t: "subscribe", ch: EDGE_CHANNELS[i], cid: _nextCid(), d: {} })) sent = false;
     }
+    // Armed on THIS socket (the #1087 same-id rebind guard reads this). A failed send means the
+    // socket is dying — onclose/_goFallback resets the flag, and the reconnect onopen re-arms.
+    _edgesSubscribed = sent;
   }
 
   // ── public up-frames (§3.5) ─────────────────────────────────────────────
@@ -450,6 +533,8 @@
     _fallbackReason = reason || _fallbackReason || "handshake";
     _chatSubscribed = false;
     _chatTailActive = false;
+    _pendingRunId = null;          // #1087 — the WS-only queued-run marker is moot on the SSE fallback
+    _edgesSubscribed = false;
     _rebinding = null;
     _clearHelloTimer();
     _clearPertabTimer();
@@ -598,6 +683,8 @@
       _sock = null;
       _chatSubscribed = false;
       _chatTailActive = false;
+      _pendingRunId = null;          // #1087 — the reconnect's ring replay re-delivers a still-queued edge
+      _edgesSubscribed = false;
       _rebinding = null;
       _clearHelloTimer();
       if (_closingForGood) return;
@@ -666,6 +753,8 @@
     canonicalId: function () { return _canonicalId; },
     lastBeatSeq: function () { return _beatSeq; },
     highestChatSeq: function () { return _highestChatSeq; },
+    lastRunId: function () { return _lastRunId; },   // #1087 reconcile-by-id (diagnostics/tests)
+    pendingRunId: function () { return _pendingRunId; }, // #1087 queued-run attach (diagnostics/tests)
     // test seam: feed a frame straight through the router (no live socket).
     _handleFrame: _handleFrame,
     // test seam: force negotiation start (start() is auto-called on ready).
