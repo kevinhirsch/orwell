@@ -65,9 +65,55 @@ import { isNarrow } from './platform.js';
   // windows (sends target the canonical session per #990, render by seq per #992, mirror per #991).
   // Items: { clientMsgId, text, bubbleEl }. STOP is reserved for the explicit Stop button / an EMPTY
   // composer — "stop the current reply" and "send a new message" are no longer collapsed onto one
-  // silent action. In-memory only (reload-durable IndexedDB outbox is a #891 follow-up, see the PR note).
+  // silent action.
   const _sendOutbox = [];
   let _flushingOutbox = false;     // re-entrancy guard so only one flush send is dispatched at a time
+
+  // ── #891 P0 (messaging resilience): the RELOAD-DURABLE half of the outbox + honest offline status ──
+  // The #985 outbox above was in-memory only — a hard reload while a send sat QUEUED lost it (the
+  // explicitly-deferred half; audit row INT-3). Now every queued item is persisted the instant it
+  // enters the queue and stays persisted until a SERVER row carrying its clientMsgId is observed:
+  //
+  //     enqueue → persist { clientMsgId, text, sessionId, ts } (sessionStorage, per-tab)
+  //     dispatch → item moves to _outboxAwaitingConfirm (STILL persisted — a reload mid-flight restores it)
+  //     server row with the clientMsgId observed (adopt pass / pre-send dedupe) → confirmed, released
+  //
+  // STORAGE CHOICE — sessionStorage, deliberately (vs IndexedDB/localStorage): the payload contract is
+  // tiny (a handful of {id, text} strings — no blobs, no attachments), so IndexedDB's async machinery
+  // buys nothing; and the outbox is PER-TAB by design (ADR 0008/0012 — a drained send flows through
+  // THIS tab's normal canonical-session send path; localStorage is shared across tabs, so two tabs
+  // restoring one queue would double-send the same message). sessionStorage is the tab-scoped store
+  // that survives a reload — the exact durability owed — and follows the composer-draft precedent
+  // (orwellComposerDraft.js, G17). Known boundary: closing the TAB discards its queue (a per-tab queue
+  // has no other tab allowed to drain it); that residual is #891's cross-tab/service-worker tier.
+  //
+  // AT-MOST-ONCE across a reload: restored (and network-requeued) items carry `needsDedupe` — before
+  // re-dispatch, ONE /api/history fetch drops any item whose client_msg_id the server already has
+  // (the server stamps it on the persisted user row, chat_helpers.add_user_message). Fail-closed: if
+  // the check cannot run, the item stays queued and the backoff retries — never an unverified re-send.
+  //
+  // HONEST STATUS (#891 P0-2): a queued bubble carries a real-text-node `.queued-tag` ('queued' /
+  // 'queued — offline' — same a11y reasoning as `.unsent-tag`), the drain gates on navigator.onLine,
+  // and the 'online' event + a capped exponential backoff auto-drain the queue. A send attempted
+  // while OFFLINE goes straight to the outbox (no doomed POST), and a send that dies at the network
+  // layer before any byte arrived is classified (`_isNetworkSendFailure`) and re-queued instead of
+  // surfacing as a raw error.
+  const _outboxAwaitingConfirm = [];  // dispatched, not yet server-confirmed (persisted alongside the queue)
+  let _outboxRestoreDone = false;     // boot restore runs once per page
+  let _outboxRetryTimer = null;
+  let _outboxRetryDelayMs = 0;        // 0 → next arm starts at the base delay
+  const _OUTBOX_RETRY_BASE_MS = 2000;
+  const _OUTBOX_RETRY_MAX_MS = 60000;
+  const _OUTBOX_MAX_RETRIES = 4;      // per-item network-requeue cap — beyond it the normal error surface speaks
+  const _OUTBOX_BOOT_RETRY_MS = [600, 1400, 2600, 4200]; // restore attempts (idempotent) past the boot renders
+  function _outboxKey() {
+    // E71 pattern (same as the composer draft): scoped per user so one account's queue never
+    // bleeds into another's. Read lazily — body/data-user exist by the time any send runs.
+    return 'orwell-send-outbox:' + ((document.body && document.body.dataset.user) || '');
+  }
+  function _outboxOnline() {
+    return typeof navigator === 'undefined' || navigator.onLine !== false;
+  }
 
   // shortModel and modelColor are now in chatRenderer.js
   var _shortModel = chatRenderer.shortModel;
@@ -724,6 +770,23 @@ import { isNarrow } from './platform.js';
       }
     }
 
+    // ── #891 P0-2: an OFFLINE send goes STRAIGHT to the durable outbox — no doomed POST. ──
+    // navigator.onLine says the device has no link: the fetch below is guaranteed to die at the
+    // network layer and surface as a raw error/spinner. Instead: paint the optimistic bubble NOW
+    // with an honest 'queued — offline' tag, capture the text in the reload-durable outbox, clear
+    // the composer, and let the 'online' event / backoff retry drain it through the NORMAL send
+    // path when the link returns (never a second send path — the drained send is a plain
+    // handleChatSubmit). Attachment-carrying sends keep the normal path (their upload needs its own
+    // network round-trip + error surface), as do headless machinery sends (their text is not the
+    // player's words — the auto-continue/recovery family owns those semantics).
+    if (!_headless && !_outboxOnline() && msg.trim() && !isCommand(msg.trim()) &&
+        !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) {
+      _enqueueSend(msg);
+      _armOutboxRetry();
+      _releaseSendFlag();
+      return;
+    }
+
     // --- BUG 1 (never eat a message): render the optimistic user bubble SYNCHRONOUSLY here,
     // BEFORE anything that might clear the composer or early-return. The first send of a session
     // has to await session/model materialization below (`materializePendingSession`,
@@ -995,6 +1058,9 @@ import { isNarrow } from './platform.js';
         _userMsgEl = addMessage('user', userDisplay, null, _pendingAttachInfo ? { attachments: _pendingAttachInfo } : null);
         if (_userMsgEl) _userMsgEl.dataset.clientMsgId = _clientMsgId;
       }
+      // #891: the turn is genuinely sending now — a leftover 'queued'/'queued — offline' tag from the
+      // outbox phase would be a stale status lie. (The flush also clears it; this is the belt.)
+      if (_userMsgEl) _setQueuedTag(_userMsgEl, null);
       // A headless send never touches the user's composer (no clear, no draft wipe, no keyboard
       // dismiss) — the message came from a caller, not the textarea, so the user's draft is preserved.
       if (!_headless) {
@@ -3797,12 +3863,30 @@ import { isNarrow } from './platform.js';
             if (node._elapsedTicker) { clearInterval(node._elapsedTicker); node._elapsedTicker = null; }
             node.classList.remove('running');
           });
+          // #891 P0-2 (fetch-failure classification): the turn died at the NETWORK layer before ANY
+          // byte arrived (`!accumulated`) on a real player turn (`_userMsgEl` — a visible user bubble;
+          // headless machinery sends re-queue nothing). Classify honestly and RE-QUEUE the message
+          // into the reload-durable outbox — 'queued — offline' status, backoff + online-drain —
+          // instead of burning auto-recover nudges on a dead link. `needsDedupe` re-verifies against
+          // /api/history before the re-send, so a POST that DID reach the server (reader died in the
+          // preamble) can never double-deliver; the detached server run's reply arrives through the
+          // normal resume/reconcile machinery. Capped per item (_OUTBOX_MAX_RETRIES) — past the cap,
+          // _requeueOutboxItem returns false and the existing error surface speaks.
+          let _requeuedOffline = false;
+          if (!accumulated && _userMsgEl && _isNetworkSendFailure(err)) {
+            _requeuedOffline = _requeueOutboxItem(_clientMsgId, msg, _userMsgEl);
+            if (_requeuedOffline) {
+              // The empty reply shell (spinner holder) is noise for a turn that never left the device.
+              try { if (holder && holder.parentNode) holder.remove(); } catch (_) {}
+            }
+          }
           // Stream died unexpectedly — the "silently died" case. Re-engage the
           // model immediately (no wait) with a completion handshake, up to the
           // cap. Only auto-recover from connection-class failures; deterministic
           // errors (unsupported tools, 4xx/5xx, parse failures) surface right away
           // instead of burning the nudge budget on a guaranteed-to-fail retry.
-          if (!(_isRecoverableStreamErr(err) && _tryAutoRecover(holder, accumulated, streamSessionId))) {
+          if (!_requeuedOffline &&
+              !(_isRecoverableStreamErr(err) && _tryAutoRecover(holder, accumulated, streamSessionId))) {
             const errorHolder = document.querySelector('.msg-ai:last-of-type .body');
             if (errorHolder) {
               let errMsg = `Error: ${err.message}`;
@@ -4033,18 +4117,20 @@ import { isNarrow } from './platform.js';
     const clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
       ? crypto.randomUUID()
       : (Date.now() + '-' + Math.random().toString(36).slice(2)));
+    const item = {
+      clientMsgId,
+      text,
+      sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
+      ts: Date.now(),
+      retries: 0,
+      needsDedupe: false,
+      bubbleEl: null,
+    };
     // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
-    let bubbleEl = null;
-    try {
-      bubbleEl = chatRenderer.addMessage('user', text, null, null);
-      if (bubbleEl) {
-        bubbleEl.dataset.clientMsgId = clientMsgId;
-        bubbleEl.classList.add('msg-pending');
-      }
-      if (uiModule.setAutoScroll) uiModule.setAutoScroll(true);
-      if (uiModule.scrollHistory) uiModule.scrollHistory();
-    } catch (_) { /* a paint failure must not strand the text — it's still captured in the queue below */ }
-    _sendOutbox.push({ clientMsgId, text, bubbleEl });
+    _paintOutboxBubble(item);
+    _sendOutbox.push(item);
+    _refreshOutboxStatusTags(); // honest status the moment it queues: 'queued' / 'queued — offline'
+    _persistOutbox();           // #891 P0-1: reload-durable from the instant it enters the queue
     // Clear the composer — the text is now held in the outbox (+ bubble), so it is safe (and expected:
     // the player is free to compose the next message). Mirror the normal-send composer reset.
     try {
@@ -4056,6 +4142,225 @@ import { isNarrow } from './platform.js';
       }
       if (window._orwellComposerDraftClear) window._orwellComposerDraftClear();
     } catch (_) {}
+  }
+
+  /** #891: paint (or re-paint after a reload) a queued item's optimistic pending bubble. */
+  function _paintOutboxBubble(item) {
+    try {
+      const bubbleEl = chatRenderer.addMessage('user', item.text, null, null);
+      if (bubbleEl) {
+        bubbleEl.dataset.clientMsgId = item.clientMsgId;
+        bubbleEl.classList.add('msg-pending');
+      }
+      item.bubbleEl = bubbleEl || null;
+      if (uiModule.setAutoScroll) uiModule.setAutoScroll(true);
+      if (uiModule.scrollHistory) uiModule.scrollHistory();
+    } catch (_) {
+      // A paint failure must not strand the text — it's still captured in the queue.
+      item.bubbleEl = null;
+    }
+  }
+
+  // ── #891 P0-1: outbox persistence (sessionStorage — per-tab; see the design note at the top) ──
+  /** Serialize queue + awaiting-confirm. An item leaves storage ONLY on server-confirmed delivery
+   *  (or the dedupe pass proving its row already exists) — never merely because it was dispatched. */
+  function _persistOutbox() {
+    try {
+      const items = _outboxAwaitingConfirm
+        .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
+        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })));
+      if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
+      sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
+    } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
+  }
+
+  /** #891: restore the persisted queue after a reload — repaint pending bubbles, mark every restored
+   *  item `needsDedupe` (at-most-once: the pre-send history check drops already-delivered rows), and
+   *  kick the drain. Idempotent (runs once per page); scheduled past the boot renders so the bubbles
+   *  land after the history paint. Returns the number of items restored (test seam). */
+  function _restoreOutboxFromStorage() {
+    if (_outboxRestoreDone) return 0;
+    if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
+    let rec = null;
+    try { rec = JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) {}
+    _outboxRestoreDone = true;
+    const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
+    let restored = 0;
+    for (const it of items) {
+      if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
+      if (typeof it.text !== 'string' || !it.text) continue;
+      if (_sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
+          _outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId)) continue;
+      const item = {
+        clientMsgId: it.clientMsgId,
+        text: it.text,
+        sessionId: it.sessionId || null,
+        ts: it.ts || Date.now(),
+        retries: it.retries || 0,
+        needsDedupe: true, // EVERY restored item verifies against the server log before re-sending
+        bubbleEl: null,
+      };
+      _paintOutboxBubble(item);
+      _sendOutbox.push(item);
+      restored++;
+    }
+    _persistOutbox(); // normalize (drops a corrupt/empty record)
+    if (restored) {
+      _refreshOutboxStatusTags();
+      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 250);
+    }
+    return restored;
+  }
+
+  /** #891: a server row carrying this clientMsgId was OBSERVED (adopt pass / dedupe) — delivery is
+   *  proven, so release the durable copy. Cheap no-op when nothing is queued (the common case). */
+  function _outboxConfirmDelivery(clientMsgId) {
+    if (!clientMsgId) return;
+    if (!_outboxAwaitingConfirm.length && !_sendOutbox.length) return;
+    let hit = false;
+    for (const arr of [_outboxAwaitingConfirm, _sendOutbox]) {
+      const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
+      if (i >= 0) {
+        const removed = arr.splice(i, 1)[0];
+        if (removed && removed.bubbleEl) _setQueuedTag(removed.bubbleEl, null);
+        hit = true;
+      }
+    }
+    if (hit) {
+      _outboxRetryDelayMs = 0; // a confirmed delivery proves the link — reset the backoff
+      _persistOutbox();
+    }
+  }
+
+  /** #891 P0-2: re-queue a send that died at the network layer (or dead-ended) back into the durable
+   *  outbox — front of the queue (it is the OLDEST turn), `needsDedupe` armed (the POST may still have
+   *  reached the server), bubble kept with an honest queued tag. Idempotent per clientMsgId; capped at
+   *  _OUTBOX_MAX_RETRIES so a non-network failure misclassified once can't retry silently forever. */
+  function _requeueOutboxItem(clientMsgId, text, bubbleEl) {
+    if (!clientMsgId || typeof text !== 'string' || !text) return false;
+    const ai = _outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
+    let item = ai >= 0 ? _outboxAwaitingConfirm.splice(ai, 1)[0] : null;
+    if (_sendOutbox.some((it) => it && it.clientMsgId === clientMsgId)) {
+      _persistOutbox(); // already queued — idempotent (the awaiting copy, if any, was just folded out)
+      return true;
+    }
+    if (!item) {
+      item = {
+        clientMsgId, text,
+        sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
+        ts: Date.now(), retries: 0, bubbleEl: null,
+      };
+    }
+    item.retries = (item.retries || 0) + 1;
+    if (item.retries > _OUTBOX_MAX_RETRIES) {
+      _persistOutbox(); // out of retries — hand the turn back to the normal error surface
+      return false;
+    }
+    item.needsDedupe = true;
+    if (bubbleEl) item.bubbleEl = bubbleEl;
+    if (item.bubbleEl) {
+      item.bubbleEl.classList.add('msg-pending');
+      item.bubbleEl.classList.remove('msg-unsent');
+      delete item.bubbleEl.dataset.unsent;
+    }
+    _sendOutbox.unshift(item);
+    _refreshOutboxStatusTags();
+    _persistOutbox();
+    _armOutboxRetry();
+    return true;
+  }
+
+  /** #891: classify a send failure as NETWORK-layer (device offline / fetch never reached the server).
+   *  Deliberately NARROWER than _isRecoverableStreamErr — only the browser's fetch-network messages
+   *  qualify, so a client-side TypeError from a coding bug can't masquerade as "offline" and loop. */
+  function _isNetworkSendFailure(err) {
+    if (!_outboxOnline()) return true;
+    const m = ((err && err.message) || '').toLowerCase();
+    return /failed to fetch|networkerror|network request failed|load failed|err_internet|err_network|err_connection/.test(m);
+  }
+
+  /** #891: at-most-once across a reload — before dispatching any `needsDedupe` item, ONE history fetch
+   *  drops every queued item whose client_msg_id the server already persisted. FAIL-CLOSED: returns
+   *  false (drain deferred, backoff armed) when verification is needed but unavailable — never an
+   *  unverified re-send. A 404 session (never materialized / since deleted) verifies trivially clean. */
+  async function _dedupeOutboxAgainstServer() {
+    const flagged = _sendOutbox.filter((it) => it && it.needsDedupe);
+    if (!flagged.length) return true;
+    const sid = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) ||
+      flagged[0].sessionId || null;
+    if (!sid) { flagged.forEach((it) => { it.needsDedupe = false; }); return true; }
+    let seen = null;
+    try {
+      // Bounded: a hung verification fetch must not wedge the drain (the flush holds _flushingOutbox
+      // across this await). On timeout it rejects → fail-closed below → backoff re-attempts.
+      const _dedupeOpts = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+        ? { signal: AbortSignal.timeout(15000) } : {};
+      const res = await fetch(`${API_BASE}/api/history/${sid}`, _dedupeOpts);
+      if (res.status === 404) { flagged.forEach((it) => { it.needsDedupe = false; }); return true; }
+      if (res.ok) {
+        const data = await res.json();
+        seen = new Set((data.history || [])
+          .map((m) => m && m.metadata && m.metadata.client_msg_id)
+          .filter(Boolean));
+      }
+    } catch (_) { /* network hiccup — fail closed below */ }
+    if (!seen) return false;
+    for (let i = _sendOutbox.length - 1; i >= 0; i--) {
+      const it = _sendOutbox[i];
+      if (!it || !it.needsDedupe) continue;
+      it.needsDedupe = false;
+      if (seen.has(it.clientMsgId)) {
+        // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
+        // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
+        _sendOutbox.splice(i, 1);
+        if (it.bubbleEl) _setQueuedTag(it.bubbleEl, null);
+      }
+    }
+    _persistOutbox();
+    return true;
+  }
+
+  // ── #891 P0-2: honest queued/offline status on the message bubble ──
+  /** Set/clear the `.queued-tag` status on a queued bubble. mode: 'queued' | 'offline' | null. The tag
+   *  is a REAL text node (the .unsent-tag a11y precedent — WCAG 4.1.3), never CSS generated content. */
+  function _setQueuedTag(bubbleEl, mode) {
+    if (!bubbleEl) return;
+    try {
+      const role = bubbleEl.querySelector('.role');
+      let tag = role && role.querySelector('.queued-tag');
+      if (!mode) {
+        if (tag) tag.remove();
+        bubbleEl.classList.remove('msg-queued-offline');
+        return;
+      }
+      if (!tag && role) {
+        tag = document.createElement('span');
+        tag.className = 'queued-tag';
+        role.appendChild(tag);
+      }
+      if (tag) tag.textContent = mode === 'offline' ? 'queued — offline' : 'queued';
+      bubbleEl.classList.toggle('msg-queued-offline', mode === 'offline');
+    } catch (_) {}
+  }
+
+  /** #891: sweep every queued bubble's status to the live connectivity truth. */
+  function _refreshOutboxStatusTags() {
+    const mode = _outboxOnline() ? 'queued' : 'offline';
+    for (const it of _sendOutbox) { if (it) _setQueuedTag(it.bubbleEl, mode); }
+  }
+
+  /** #891: capped exponential backoff retry (2s → 60s) for a queue held by offline/network failure.
+   *  Reset to the base by a confirmed delivery or the 'online' event. One timer at a time. */
+  function _armOutboxRetry() {
+    if (_outboxRetryTimer) return;
+    if (_sendOutbox.length === 0) return;
+    _outboxRetryDelayMs = _outboxRetryDelayMs
+      ? Math.min(_outboxRetryDelayMs * 2, _OUTBOX_RETRY_MAX_MS)
+      : _OUTBOX_RETRY_BASE_MS;
+    _outboxRetryTimer = setTimeout(() => {
+      _outboxRetryTimer = null;
+      try { _flushSendOutbox(); } catch (_) {}
+    }, _outboxRetryDelayMs);
   }
 
   /**
@@ -4074,22 +4379,80 @@ import { isNarrow } from './platform.js';
     if (_flushingOutbox) return;
     if (isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
     if (_sendOutbox.length === 0) return;
-    const item = _sendOutbox.shift();
-    if (!item) return;
-    // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
-    // back to letting the send paint a fresh one — the text is never lost.
-    const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
+    // TEST SEAM (#891 browser gate): lets the reload-durability harness install its dispatch spy
+    // before the boot-restore auto-drain can fire. Never set by app code.
+    if (typeof window !== 'undefined' && window.__orwellOutboxHoldDrain) return;
+    // #891 P0-2: OFFLINE — hold the queue (durable + honestly tagged), arm the backoff, and let the
+    // 'online' listener drain the moment the link returns. Never a doomed dispatch.
+    if (!_outboxOnline()) { _refreshOutboxStatusTags(); _armOutboxRetry(); return; }
     _flushingOutbox = true;
-    try {
-      Promise.resolve(
-        _outboxDispatch(item.text, {
-          queuedClientMsgId: item.clientMsgId,
-          queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
-        })
-      ).catch(() => {}).finally(() => { _flushingOutbox = false; });
-    } catch (_) {
-      _flushingOutbox = false;
-    }
+    // #891: restored / network-requeued items verify against the server log FIRST (at-most-once
+    // across a reload — a send whose POST landed but whose confirmation was lost must never
+    // re-send). Fail-closed: an unverifiable check keeps the item queued and re-arms the backoff.
+    // Runs BEFORE the session gate below: a proven-delivered item must be releasable even while the
+    // boot is still re-selecting its session.
+    const _preflight = _sendOutbox.some((it) => it && it.needsDedupe)
+      ? _dedupeOutboxAgainstServer()
+      : Promise.resolve(true);
+    _preflight.then((ok) => {
+      if (ok === false) { _flushingOutbox = false; _armOutboxRetry(); return; }
+      if (isStreaming || _sendOutbox.length === 0) { _flushingOutbox = false; return; }
+      // #891: a RESTORED item waits for the boot to re-select a session — dispatching into a null
+      // session would auto-create a FRESH one and strand the turn outside the game.
+      const _head = _sendOutbox[0];
+      if (_head && _head.sessionId &&
+          !(sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId())) {
+        _flushingOutbox = false;
+        _armOutboxRetry();
+        return;
+      }
+      const item = _sendOutbox.shift();
+      if (!item) { _flushingOutbox = false; return; }
+      // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
+      // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
+      // keeps the re-send at-most-once.
+      _outboxAwaitingConfirm.push(item);
+      _persistOutbox();
+      _setQueuedTag(item.bubbleEl, null); // actually sending now — the queued status would be a lie
+      // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
+      // back to letting the send paint a fresh one — the text is never lost.
+      const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
+      try {
+        Promise.resolve(
+          _outboxDispatch(item.text, {
+            queuedClientMsgId: item.clientMsgId,
+            queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
+          })
+        ).catch(() => {}).finally(() => { _flushingOutbox = false; });
+      } catch (_) {
+        _flushingOutbox = false;
+      }
+    }).catch(() => { _flushingOutbox = false; _armOutboxRetry(); });
+  }
+
+  // ── #891 P0: durability wiring — boot restore + online/offline honesty. Module-level (the
+  // orwellComposerDraft.js / ws-ready precedent): chat.js is evaluated once per page. ──
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    window.addEventListener('online', () => {
+      // The link is back: reset the backoff, cancel any pending long-delay retry, retag, and drain
+      // through the normal flush (which re-checks every guard). Small defer so the browser's own
+      // connectivity settle (and any 'online'-triggered reconcile) lands first.
+      _outboxRetryDelayMs = 0;
+      if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
+      _refreshOutboxStatusTags();
+      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 200);
+    });
+    window.addEventListener('offline', () => { _refreshOutboxStatusTags(); });
+    // Boot restore: attempted on pageshow + a short retry schedule (idempotent — first attempt that
+    // finds the chat box wins), so the restored bubbles land after the boot history render instead
+    // of being wiped by it. Mirrors the composer-draft boot pattern.
+    const _kickOutboxRestore = () => {
+      for (const ms of _OUTBOX_BOOT_RETRY_MS) {
+        setTimeout(() => { try { _restoreOutboxFromStorage(); } catch (_) {} }, ms);
+      }
+    };
+    window.addEventListener('pageshow', _kickOutboxRestore, { once: true });
+    if (document.readyState === 'complete') _kickOutboxRestore();
   }
 
   /**
@@ -4539,6 +4902,9 @@ import { isNarrow } from './platform.js';
     for (const msg of visible) {
       const sid = _serverMsgId(msg);
       const cid = msg.metadata && msg.metadata.client_msg_id;
+      // #891: a server row carrying this clientMsgId PROVES delivery — release the reload-durable
+      // outbox copy (awaiting-confirm) so it can never re-send. Cheap no-op when nothing is queued.
+      if (cid) _outboxConfirmDelivery(cid);
       const el = (sid && byId.get(sid)) || (cid && byClient.get(cid)) || null;
       if (el) {
         if (sid) { el.dataset.dbId = sid; byId.set(sid, el); }
@@ -6656,6 +7022,16 @@ import { isNarrow } from './platform.js';
     _sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
     _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
     _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
+    _outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
+    _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
+    _outboxConfirmDelivery,      // #891: server-row-observed delivery confirm (browser gate)
+    _requeueOutboxItem,          // #891: network-failure requeue into the durable queue (browser gate)
+    _persistOutbox,              // #891: persistence write point (browser gate)
+    _dedupeOutboxAgainstServer,  // #891: pre-send at-most-once check (browser gate)
+    _isNetworkSendFailure,       // #891: fetch-failure classifier (browser gate)
+    _outboxPeekStorage: () => {  // #891: read the persisted record (browser gate)
+      try { return JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) { return null; }
+    },
     _syncSubmitButtonState,  // #971: reconcile the composer button to the true streaming state (browser gate)
     _foregroundStreamLive,   // #971: "is a turn genuinely streaming in the foreground" predicate (browser gate)
     _inProgressLabel,        // #986: the unified in-progress spinner label helper (browser gate)
