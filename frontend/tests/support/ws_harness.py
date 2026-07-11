@@ -29,6 +29,7 @@ from typing import Any, Callable, Optional
 from starlette.websockets import WebSocketDisconnect
 
 agent_runs = importlib.import_module("src.agent_runs")
+session_events = importlib.import_module("src.session_events")
 
 _DISCONNECT = object()
 
@@ -157,6 +158,13 @@ async def stop(ws: FakeWebSocket, task: asyncio.Task) -> None:
     # Drain the (possibly just-cancelled) handler to completion so nothing is left pending at close.
     with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, Exception):
         await task
+    # The handler's teardown just ran subscribe()'s ``finally`` for any state/layout channel, which —
+    # when this socket was the session's LAST subscriber — armed a 180s ring-evict timer
+    # (``session_events._schedule_ring_evict``) ON THIS per-test loop. Drain it in-loop NOW, or it
+    # survives to the ``_run`` loop close as "Task was destroyed but it is pending!" (the #1339
+    # session_events residual). Cancel-without-pop keeps the ring itself intact (same as a
+    # re-subscribe), so this never changes what a later peer in the same test can replay.
+    await aclose_session_events()
 
 
 async def hello(ws: FakeWebSocket, per_tab_id: str, cid: str = "c_hello", **extra) -> dict:
@@ -218,6 +226,11 @@ def reset_runs() -> None:
         for attr in ("task", "evict_task"):
             agent_runs._safe_cancel(getattr(run, attr, None))
     agent_runs._RUNS.clear()
+    # Same for the session_events ring-evict timers: `_cancel_ring_evict` pops the registry entry and
+    # best-effort-cancels (guarded — the task may belong to a prior, now-closed loop). This keeps a
+    # dead-loop task from lingering in the process-global `_RING_EVICT_TASKS` across tests.
+    for sid in list(session_events._RING_EVICT_TASKS):
+        session_events._cancel_ring_evict(sid)
 
 
 async def aclose_runs() -> None:
@@ -250,3 +263,35 @@ async def aclose_runs() -> None:
         # ``aclose_runs`` teardown flake). ``gather`` collects it as a result instead of raising.
         await asyncio.gather(*pending, return_exceptions=True)
     agent_runs._RUNS.clear()
+    await aclose_session_events()
+
+
+async def aclose_session_events() -> None:
+    """Cancel AND await (in-loop) every armed ``session_events`` ring-evict timer, popping the
+    process-global ``_RING_EVICT_TASKS`` registry — the #1339 residual. A last-subscriber-leaves
+    teardown (``ws_session``'s ``finally`` → ``subscribe()``'s ``finally``) arms a 180s
+    ``_schedule_ring_evict`` task on the CURRENT per-test ``_run`` loop; left undrained it survives to
+    the loop close as "Task was destroyed but it is pending!" and lingers cross-loop in the registry.
+    Cancelling does NOT pop the ring itself (mirrors a re-subscribe's ``_cancel_ring_evict``), so replay
+    semantics inside a still-running test are untouched. A task from a PRIOR (closed) loop cannot be
+    awaited here — it is popped and best-effort-cancelled only (the guarded production path)."""
+    loop = asyncio.get_running_loop()
+    pending = []
+    for sid in list(session_events._RING_EVICT_TASKS):
+        task = session_events._RING_EVICT_TASKS.pop(sid, None)
+        if task is None or task.done():
+            continue
+        try:
+            same_loop = task.get_loop() is loop
+        except RuntimeError:
+            same_loop = False
+        try:
+            task.cancel()
+        except RuntimeError:
+            continue  # armed on a dead loop — popping the reference is all that can be done
+        if same_loop:
+            pending.append(task)
+    if pending:
+        # Same rationale as ``aclose_runs``: a task cancelled before its first step raises
+        # ``CancelledError`` at coroutine entry; ``gather(return_exceptions=True)`` absorbs it.
+        await asyncio.gather(*pending, return_exceptions=True)

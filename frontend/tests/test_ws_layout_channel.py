@@ -208,3 +208,37 @@ def test_cancelled_channel_task_cleanup_runs_before_ws_session_returns(run):
             "cancelled channel task's subscribe() cleanup did not run before ws_session returned"
 
     run(main())
+
+
+def test_ring_evict_timer_is_drained_in_loop_by_stop(run):
+    """#1339 residual — the ``session_events`` ring-evict timer. When ``ws_session``'s teardown runs
+    the state channel's ``subscribe()`` ``finally`` as the session's LAST subscriber, it arms a 180s
+    ``_schedule_ring_evict`` task on the CURRENT (per-test) loop. The harness ``stop()`` must cancel
+    AND await that timer in-loop; otherwise it survives to the ``_run`` loop close as
+    "Task was destroyed but it is pending!" and lingers cross-loop in the process-global
+    ``_RING_EVICT_TASKS`` (the CI teardown noise this issue tracked). Proof: right after ``stop()``
+    returns — no further ``await`` — the registry is empty, and the ring itself is KEPT (cancel
+    mirrors a re-subscribe; it never pops the replay ring)."""
+    async def main():
+        import asyncio as _a
+        canon = H.seed_live_game(None, "live-canon")
+        ws = H.new_ws()
+        t = H.spawn(ws)
+        await H.hello(ws, canon)
+        ws.client_send({"t": "subscribe", "ch": "state", "cid": "c_state"})
+        for _ in range(100):
+            if session_events.subscriber_count(canon) >= 1:
+                break
+            await _a.sleep(0.005)
+        assert session_events.subscriber_count(canon) == 1, "state channel never subscribed"
+        # Seed a replayable invitation so the ring exists when the evict timer is armed.
+        session_events.publish(canon, "game-updated")
+        await H.stop(ws, t)
+        assert t.done()
+        # The last subscriber left during stop(), so the evict timer WAS armed — and stop() drained it.
+        assert session_events._RING_EVICT_TASKS == {}, \
+            "stop() left an armed ring-evict timer to be destroyed pending at loop close"
+        # Draining cancels the timer without popping the ring (re-subscribe semantics).
+        assert session_events._ring_snapshot(canon), "the drain must keep the replay ring intact"
+
+    run(main())
