@@ -115,6 +115,55 @@ export function orwellGameChanged(reason, beatSeq) {
 
 if (typeof window !== 'undefined') window.orwellGameChanged = orwellGameChanged;
 
+// ============================================
+// The mutating-tool manifest (issue #1412 — this half). The set of tools whose
+// SUCCESSFUL result should fire `orwell:gamechanged` (a HUD refresh). The chat.js
+// tool-result seam consumes this via `window.orwellIsMutatingTool(json.tool)`
+// instead of carrying its own hand-coded array — that inline list silently went
+// stale whenever a new game-mutating tool got wired (the HUD then lagged a full
+// poll period after that tool ran).
+//
+// DERIVED FROM the engine tool registry `src/surfaces/tools/registry.ts` (the
+// mutating subset of PLAYER_TOOLS — the pure reads and the non-HUD FE write-backs
+// are excluded — plus the one mutating admin tool `manageSandbox`), and PINNED to
+// it by the drift-guard `frontend/tests/test_1412_mutating_manifest.py`: that test
+// reads the registry, classifies every tool, and asserts THIS array equals the
+// registry's mutating set EXACTLY (no missing, no extra). So a newly-wired mutating
+// tool fails that test until it is added here — the HUD stays fresh by construction,
+// not by hope. (Membership in `INFRA_LEVERS` does NOT decide this: `recordImageBeat`
+// is an infra lever that IS mutating; `recordCastProfile` is an infra lever that is
+// NOT — hence the classification is explicit, see the drift-guard.)
+//
+// This adds NO second dispatcher: `orwellGameChanged` above stays the ONE
+// `orwell:gamechanged` emitter (test_g15_gamechanged.py). This manifest only feeds
+// that dispatcher's "does this tool warrant a refresh?" decision.
+export const ORWELL_MUTATING_TOOLS = Object.freeze([
+  // Weekly-loop progression + the player's binding decisions.
+  'advanceGame', 'submitDecision',
+  // Casting / character lifecycle.
+  'updateCasting', 'createCharacter',
+  // Consequence loop + the single competition authority (all move the board the HUD reads).
+  'recordInteraction', 'runCompetition', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat',
+  // Presence & movement (0049 / ADR 0009), premiere meet-everyone (#380), the bedtime lever (ADR 0006).
+  'moveTo', 'moveHouseguest', 'markHouseguestMet', 'turnIn',
+  // Deals & alliances (0039 / 0107).
+  'makeDeal', 'formAlliance', 'joinAlliance',
+  // Secrets-as-power + gossip / pre-show-tie levers (0093 / 0094 / 0095 / 0099).
+  'exposeSecret', 'tradeSecret', 'confront', 'accuseTie',
+  // The one mutating ADMIN tool in the HUD set — sandbox lifecycle (create | reset | save | load).
+  'manageSandbox',
+]);
+
+const _ORWELL_MUTATING_SET = new Set(ORWELL_MUTATING_TOOLS);
+
+// The lookup chat.js's tool-result seam calls in place of its old inline array.
+export function orwellIsMutatingTool(name) { return _ORWELL_MUTATING_SET.has(name); }
+
+if (typeof window !== 'undefined') {
+  window.ORWELL_MUTATING_TOOLS = ORWELL_MUTATING_TOOLS;
+  window.orwellIsMutatingTool = orwellIsMutatingTool;
+}
+
 // #570: a backgrounded tab misses cross-device game-updated server pushes (the panels' polls are
 // gated on `!document.hidden`, and the server-push reconcile may be dropped while hidden), so it
 // can sit stale for a whole poll cycle after the user returns. When the tab REGAINS visibility,

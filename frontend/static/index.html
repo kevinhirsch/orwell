@@ -414,19 +414,38 @@
     // single-user posture). That fallback lives INSIDE the helper — this boot deliberately leaves
     // data-user EMPTY in no-auth mode, so surfaces that read data-user DIRECTLY (e.g. the per-tab
     // send-outbox in chat.js) keep their existing empty-user value and behavior.
+    //
+    // R5/#1416b: the "local" fallback is now gated on an EXPLICIT no-auth signal — a SEPARATE
+    // global (window.__ORWELL_NO_AUTH__), never stamped onto data-user. The helper keys under
+    // ":local" ONLY when this is set; a MULTI-user deploy that (buggily) omits data-user leaves it
+    // UNSET, so the helper fail-closed SKIPS instead of two real users sharing the ":local" bucket.
     try {
       var seed = '';
       try { seed = sessionStorage.getItem('orwell-current-user') || ''; } catch(_){}
       if (seed && document.body) document.body.dataset.user = seed;
+      // Seed the no-auth signal SYNCHRONOUSLY from the last-known posture so a reload's per-user
+      // reads resolve ":local" without waiting on the async /api/auth/status confirm (the very
+      // first cold load fails closed until the confirm lands — that pre-auth window is meant to
+      // skip). Nothing else reads window.__ORWELL_NO_AUTH__ / 'orwell-no-auth'.
+      try { if (sessionStorage.getItem('orwell-no-auth') === '1') window.__ORWELL_NO_AUTH__ = true; } catch(_){}
       fetch('/api/auth/status', { credentials: 'same-origin' })
         .then(function(r){ return r.json(); })
         .then(function(d){
           var u = (d && d.username) ? String(d.username) : '';
+          // auth_enabled === false ⇒ the single-user / no-auth posture ⇒ the helper's ":local".
+          var noAuth = !!(d && d.auth_enabled === false);
+          try { window.__ORWELL_NO_AUTH__ = noAuth; } catch(_){}
+          try { sessionStorage.setItem('orwell-no-auth', noAuth ? '1' : '0'); } catch(_){}
           if (!document.body) return;
-          if (document.body.dataset.user !== u) {
+          var rekeyed = document.body.dataset.user !== u;
+          if (rekeyed) {
             document.body.dataset.user = u;
             try { sessionStorage.setItem('orwell-current-user', u); } catch(_){}
-            // namespace changed mid-boot — let the per-user panels re-read their keyed state.
+          }
+          // namespace resolved mid-boot — let the per-user panels re-read their keyed state. Fires
+          // on a real re-key AND when the no-auth ":local" namespace just became available (in
+          // no-auth mode data-user stays empty, so the re-key branch alone wouldn't nudge them).
+          if (rekeyed || noAuth) {
             try { if (window.orwellGameChanged) window.orwellGameChanged('user-identified'); } catch(_){}
           }
         })
