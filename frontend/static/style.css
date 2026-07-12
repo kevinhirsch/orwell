@@ -2797,12 +2797,13 @@ body.bg-pattern-perlin-flow {
     }
     .ooc-producer-aside > :first-child:not(::before) { margin-top: 0; }
 
-    /* #829 turn-coalescing — per-SEGMENT producer aside. A coalesced turn stacks each round as
-       its own segment (the live `.stream-content`, frozen to `.round-seg`) inside ONE bubble, so
-       an OOC/producer round is classified on ITS segment (not the shared bubble — a later
+    /* issue 829 turn-coalescing — per-SEGMENT producer aside. A coalesced turn stacks each round
+       as its own segment (the live `.stream-content`, frozen to `.round-seg`) inside ONE bubble,
+       so an OOC/producer round is classified on ITS segment (not the shared bubble — a later
        non-OOC round would otherwise strip the treatment off the whole bubble). The wrap-scoped
        `.msg-ooc-producer .body` / `.role::after` rules can't reach a segment, so mirror the same
-       quiet, dashed, badged "to production" look at the segment level. Theme-token driven. */
+       quiet, dashed, badged "to production" look at the segment level. Theme-token driven.
+       (No hex here — the L36 aside/hint block forbids any literal, colors derive from --fg.) */
     .msg .body .stream-content.msg-ooc-producer,
     .msg .body .round-seg.msg-ooc-producer {
       border: 1px dashed color-mix(in srgb, var(--fg) 28%, transparent);
