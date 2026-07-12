@@ -300,6 +300,12 @@ write_config() {
       # houseguests are more sensitive + settle slower). Hidden layer only, CHARACTER byte-stable. DEFAULT
       # OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
       echo "ORWELL_SOUL_DEPTH=1"
+      # Expanded competition mechanics (0126): the mechanic pool grows 12 => 30 (15 HOH + 15 veto) drawn as
+      # a rolling shuffle, so a full season runs with NO repeated competition mechanic (real gameplay
+      # variety, layered under the 0125 themes). The new mechanics preserve the base stat mix so balance
+      # holds (juryReach re-run green flag-on). DEFAULT OFF in code (it changes seeded winners, so off keeps
+      # the seeded gates + golden byte-identical); the deploy opts in here.
+      echo "ORWELL_COMP_MECHANICS_PLUS=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded

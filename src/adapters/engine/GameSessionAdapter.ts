@@ -522,6 +522,17 @@ const SOUL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_SOUL_DEPTH === "1";
 const COMP_THEMES_ENABLED_DEFAULT = process.env.ORWELL_COMP_THEMES !== "0";
 
 /**
+ * 0126 — whether the EXPANDED competition-mechanic pool (9 HOH + 9 veto extra, 30 total) runs by DEFAULT.
+ * OFF unless `ORWELL_COMP_MECHANICS_PLUS=1`. Unlike the 0125 THEME layer (a pure projection, default-on),
+ * this changes WHICH mechanic a fixed seed draws — and the def's `type` selects the resolution stat — so it
+ * changes seeded winners (the COMP-4 cost). A DEDICATED default-off flag so calibration neutrality is
+ * provable in isolation: unset ⇒ `ctx().expandedComps` is false, the draw pool is the bare base 12, and
+ * every seeded gate (juryReach / gradient / UAT / golden / the fixed-seed 0043 BDD) is byte-identical. The
+ * deploy turns it on for real play; the new mechanics preserve the base stat mix so the band still holds.
+ */
+const COMP_MECHANICS_PLUS_ENABLED_DEFAULT = process.env.ORWELL_COMP_MECHANICS_PLUS === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -921,6 +932,8 @@ export class GameSessionAdapter implements GameSession {
   private reliabilityReader?: (holder: EntityId) => ReadonlySet<EntityId>;
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
   private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
+
+  private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
@@ -6240,11 +6253,20 @@ export class GameSessionAdapter implements GameSession {
       // 0110: fold the eviction jury grudge on the evictee's DEDUCED belief (process of elimination) —
       // present ONLY when enabled (off in the calibration harness ⇒ absent ⇒ true ballot folded ⇒ byte-identical).
       ...(this.voteDeductionEnabled ? { voteDeduction: true as const } : {}),
+      // 0126: fold the expanded mechanic pool into the competition draw — present ONLY when enabled (off in
+      // the calibration/golden harness ⇒ absent ⇒ the base 12-mechanic draw ⇒ byte-identical).
+      ...(this.compMechanicsPlusEnabled ? { expandedComps: true as const } : {}),
     };
   }
 
   /** Turn 0110 vote deduction on/off. Off by default — the calibration harness leaves it off. */
   setVoteDeductionEnabled(on: boolean): void { this.voteDeductionEnabled = on; }
+
+  /** 0126 — turn the expanded competition-mechanic pool (30 total) on/off. Off by default (the calibration
+   *  harness leaves it off ⇒ base 12-mechanic draw ⇒ byte-identical). The deploy turns it on for real play. */
+  setCompMechanicsPlusEnabled(on: boolean): void { this.compMechanicsPlusEnabled = on; }
+  /** 0126 — the resolved on/off state of the expanded-mechanic pool (for an admin/status read). */
+  compMechanicsPlusEnabledNow(): boolean { return this.compMechanicsPlusEnabled; }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }

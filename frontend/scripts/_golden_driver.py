@@ -326,7 +326,10 @@ class GoldenDriver:
                    ORWELL_ENGINE_PORT=str(self.engine_port),
                    ORWELL_LOGICAL_CLOCK="1",
                    ORWELL_TIME_PER_CONVERSATION="0",
-                   ORWELL_COMP_THEMES="0")
+                   ORWELL_COMP_THEMES="0",
+                   # 0126: the expanded mechanic pool changes WHICH comp a fixed seed draws (and thus the
+                   # winner); the fixture was recorded on the base 12. Pin off so the replay is byte-stable.
+                   ORWELL_COMP_MECHANICS_PLUS="0")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))

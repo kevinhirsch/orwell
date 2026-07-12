@@ -152,6 +152,186 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
 ];
 
 /**
+ * Feature 0126 — the EXPANDED mechanic pool. 0125's theme layer reskins the SAME ~12 mechanics, so a
+ * season still repeats each mechanic ~2×; this adds 9 HOH + 9 veto NEW mechanics so a full season (~14
+ * HOH + ~13 veto comps) can run with essentially no repeated MECHANIC (not just no repeated skin). The
+ * new defs preserve the base pool's governing-stat MIX per phase (physical ~33% / mental ~53% / social
+ * ~13%) so the competition balance — and thus the seeded calibration distribution — stays stable.
+ *
+ * OPT-IN, default-off (`ORWELL_COMP_MECHANICS_PLUS`, threaded via `SeasonCtx.expandedComps`): adding
+ * mechanics changes WHICH def a fixed seed draws each week, and the def's `type` selects the resolution
+ * stat, so it changes seeded winners (the documented COMP-4 cost). With the flag off the draw pool is the
+ * bare base 12 ⇒ every seeded gate (juryReach / gradient / UAT / golden / the fixed-seed 0043 BDD) is
+ * byte-identical. The deploy turns it on for real play; a flag-on calibration sanity proves the band holds.
+ */
+export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
+  // --- HOH (9 new: 3 physical, 5 mental, 1 social — mirrors the base mix) ----------------
+  {
+    id: "hoh-slip", name: "Slip 'N Slide Shuffle", phase: "hoh", type: "physical", governing: "physical",
+    format: "skill",
+    narrative: {
+      premise: "A foam-slick runway: belly-slide down, grab a puzzle piece, wade back, and build.",
+      beats: ["the first sliders overshoot into the pit", "someone finds a slow, sure crawl", "the last piece is set with the buzzer looming"],
+      winReads: "power that kept its footing on nothing",
+    },
+  },
+  {
+    id: "hoh-cling", name: "Cling On", phase: "hoh", type: "endurance", governing: "physical",
+    format: "endurance",
+    narrative: {
+      premise: "Press flat against a spinning wall and hang on as it tilts past vertical.",
+      beats: ["the spin starts gentle and lulls the field", "a jolt to full tilt sheds the first names", "two hang on past every warning"],
+      winReads: "sheer refusal to let the wall win",
+    },
+  },
+  {
+    id: "hoh-boulder", name: "Boulder Push", phase: "hoh", type: "physical", governing: "physical",
+    format: "skill",
+    narrative: {
+      premise: "Roll a giant weighted ball up a switchback ramp and park it on a narrow mark.",
+      beats: ["early pushes roll back over the pushers", "a measured pace finds the groove", "the leader's ball teeters on the mark"],
+      winReads: "brute strength married to control",
+    },
+  },
+  {
+    id: "hoh-grid", name: "Gridlock", phase: "hoh", type: "puzzle", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "A giant sliding-tile board: shuffle the squares to rebuild the house logo, one move at a time.",
+      beats: ["everyone slides fast and scrambles it worse", "one player stops to plan the sequence", "the final tile clicks home"],
+      winReads: "patience out-thinking panic",
+    },
+  },
+  {
+    id: "hoh-timeline", name: "Before & After", phase: "hoh", type: "quiz", governing: "mental", secondary: "social",
+    format: "quiz",
+    narrative: {
+      premise: "Put the season's events in order: which happened before which, buzzers only.",
+      beats: ["the obvious order goes fast", "two tangled events split the leaders", "a sudden-death ordering decides it"],
+      winReads: "the sharpest memory for how the season unspooled",
+    },
+  },
+  {
+    id: "hoh-montage", name: "Photo Finish", phase: "hoh", type: "memory", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "A montage of house moments flashes by; then answer how many, who, and in what order.",
+      beats: ["easy counts land quickly", "a near-identical pair of frames stalls everyone", "the tiebreak comes down to one detail"],
+      winReads: "a mind that filed every frame",
+    },
+  },
+  {
+    id: "hoh-numbers", name: "By the Numbers", phase: "hoh", type: "mental", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "Reach the target number from a scramble of digits and operators, fastest math wins.",
+      beats: ["wild stabs miss high and low", "the careful arithmetic clusters near the mark", "the closest exact answer takes it"],
+      winReads: "a calculating head under the clock",
+    },
+  },
+  {
+    id: "hoh-truefalse", name: "Fact or Fiction", phase: "hoh", type: "quiz", governing: "mental",
+    format: "quiz",
+    narrative: {
+      premise: "True or false, rapid fire: statements about what really happened in the house.",
+      beats: ["a run of gimmes lulls the field", "a cleverly-worded trap catches a leader", "the final statement is a coin-flip of nerve"],
+      winReads: "who read the house closest, and second-guessed least",
+    },
+  },
+  {
+    id: "hoh-poll", name: "Popularity Contest", phase: "hoh", type: "social", governing: "social",
+    format: "social",
+    narrative: {
+      premise: "Guess how the house ranked each other in an anonymous poll — most likely to flip, to win, to bore.",
+      beats: ["a safe first guess lands", "a shock ranking exposes who really sees the house", "the last prediction crowns it"],
+      winReads: "the houseguest who actually knows where they all stand",
+    },
+  },
+  // --- Veto (9 new: 3 physical, 5 mental, 1 social) --------------------------------------
+  {
+    id: "veto-beam", name: "Balance Beam", phase: "veto", type: "physical", governing: "physical", secondary: "mental",
+    format: "skill",
+    narrative: {
+      premise: "Ferry stacked tokens across a wobbling beam over water; a drop sends you back to start.",
+      beats: ["first crossers wobble into the drink", "a slow, planted stride emerges", "the winning stack lands at full stretch"],
+      winReads: "nerve and fine balance beating haste",
+    },
+  },
+  {
+    id: "veto-deadhang", name: "Dead Hang", phase: "veto", type: "endurance", governing: "physical",
+    format: "endurance",
+    narrative: {
+      premise: "Hang from a bar over a foam pit while the grips grow slicker every minute.",
+      beats: ["the first hands slip early", "a slick coat thins the field", "two dangle past the last warning"],
+      winReads: "who wanted it enough to burn for it",
+    },
+  },
+  {
+    id: "veto-crawl", name: "Mud Crawl", phase: "veto", type: "physical", governing: "physical",
+    format: "crapshoot",
+    narrative: {
+      premise: "Belly-crawl a muddy obstacle course collecting veto tokens under a low net.",
+      beats: ["everyone bogs down in the first pit", "a churning rhythm breaks someone free", "the last token surfaces caked in mud"],
+      winReads: "grit that kept moving through the muck",
+    },
+  },
+  {
+    id: "veto-tangram", name: "Tangram Trial", phase: "veto", type: "puzzle", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "Fit a heap of odd shapes into one silhouette board — only one arrangement solves it.",
+      beats: ["forced pieces jam the frame", "one builder clears the board and restarts clean", "the final shape snaps flush"],
+      winReads: "spatial sense out-lasting frustration",
+    },
+  },
+  {
+    id: "veto-rewind", name: "Season Rewind", phase: "veto", type: "quiz", governing: "mental",
+    format: "quiz",
+    narrative: {
+      premise: "Buzz in with what happened each week: who won, who went, who wore the veto.",
+      beats: ["the recent weeks come easy", "an early-season detail splits the leaders", "sudden death on a forgotten vote"],
+      winReads: "who kept the whole season in their head",
+    },
+  },
+  {
+    id: "veto-spot", name: "Spot the Difference", phase: "veto", type: "memory", governing: "mental",
+    format: "quiz",
+    narrative: {
+      premise: "Two near-identical shots of a room flash up; name what changed between them.",
+      beats: ["the glaring changes fall fast", "a one-pixel difference stalls the room", "a lightning round settles it"],
+      winReads: "an eye that misses nothing",
+    },
+  },
+  {
+    id: "veto-countdown", name: "Countdown", phase: "veto", type: "mental", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "Hit the target with the digits drawn — closest exact answer under the timer takes the veto.",
+      beats: ["rushed sums overshoot", "the steady solvers cluster near the number", "the nearest exact answer wins"],
+      winReads: "arithmetic nerve under a ticking clock",
+    },
+  },
+  {
+    id: "veto-ballmaze", name: "Ball Maze", phase: "veto", type: "puzzle", governing: "mental",
+    format: "crapshoot",
+    narrative: {
+      premise: "Tilt a giant hand-held maze to roll a ball past every trap-hole to the veto slot.",
+      beats: ["early balls drop through the first hole", "a delicate touch finds the line", "the ball rolls home on the last tilt"],
+      winReads: "a light, thinking touch over force",
+    },
+  },
+  {
+    id: "veto-tells", name: "Tells", phase: "veto", type: "social", governing: "social",
+    format: "social",
+    narrative: {
+      premise: "Watch silent clips of houseguests answering yes/no — call who was lying.",
+      beats: ["the obvious tells go fast", "a practiced poker face fools a leader", "the sharpest reader pulls ahead"],
+      winReads: "proof of who really reads this house",
+    },
+  },
+];
+
+/**
  * How many most-recent draws (per phase) the next draw must avoid — no immediate repeats.
  *
  * NOTE (COMP-4/BB-8, audit 2026-07-03): widening this (e.g. to 3) would meaningfully cut short-
@@ -166,9 +346,10 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
  */
 export const NO_REPEAT_WINDOW = 1;
 
-/** Library lookup by id (e.g. a deferred veto resuming the comp it already drew). */
+/** Library lookup by id (searches BOTH the base 12 and the 0126 expanded pool, so a deferred veto
+ *  drawn from the expanded pool still resolves the comp it already drew). */
 export function competitionById(id: string): CompetitionDef | undefined {
-  return COMPETITION_LIBRARY.find((d) => d.id === id);
+  return COMPETITION_LIBRARY.find((d) => d.id === id) ?? COMPETITION_LIBRARY_PLUS.find((d) => d.id === id);
 }
 
 /**
@@ -176,13 +357,22 @@ export function competitionById(id: string): CompetitionDef | undefined {
  * pool, avoiding the last `NO_REPEAT_WINDOW` used (variety, reproducibly by seed). PURE — the
  * caller owns `recent` (persisted with the season, 0030) and records the draw when the comp
  * actually resolves.
+ *
+ * `expanded` (0126) folds the extra mechanic pool into the draw. Default false ⇒ the bare base 12,
+ * byte-identical to pre-0126 (the seeded spine is untouched unless a caller opts in via the flag).
  */
 export function drawCompetition(
   phase: CompetitionPhase, week: number, rng: RandomnessSource, recent: readonly string[] = [],
+  expanded = false,
 ): CompetitionDef {
-  const pool = COMPETITION_LIBRARY.filter((d) => d.phase === phase);
-  const avoid = new Set(recent.slice(-NO_REPEAT_WINDOW));
+  const library = expanded ? [...COMPETITION_LIBRARY, ...COMPETITION_LIBRARY_PLUS] : COMPETITION_LIBRARY;
+  const pool = library.filter((d) => d.phase === phase);
+  // 0126: with the expanded pool the window widens to the whole pool minus one — a rolling shuffle, so no
+  // mechanic repeats until every one has been used (a season of ~14 comps from 15 is repeat-free). The base
+  // pool keeps the NO_REPEAT_WINDOW=1 behavior byte-identically (the seeded spine is unmoved when off).
+  const window = expanded ? pool.length - 1 : NO_REPEAT_WINDOW;
+  const avoid = new Set(recent.slice(-window));
   const candidates = pool.filter((d) => !avoid.has(d.id));
-  const from = candidates.length > 0 ? candidates : pool; // a one-def pool can only repeat
+  const from = candidates.length > 0 ? candidates : pool; // a fully-exhausted pool can only repeat
   return from[rng.int(from.length)]!;
 }
