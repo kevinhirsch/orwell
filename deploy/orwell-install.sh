@@ -285,6 +285,11 @@ write_config() {
       # DEFAULT OFF in code (+ additionally gated on the live in-game clock, pinned off in the golden
       # driver) so the seeded gates + golden fixture stay byte-identical; the deploy opts in here.
       echo "ORWELL_CONFESSIONAL_DEPTH=1"
+      # Deal depth (0121): the two ACTIVE-obligation deal kinds (comp-throw / veto-save) + the reliability
+      # rewards (loyalty streak, reliable-ally protection, and the diffusing "keeps their word" reputation).
+      # DEFAULT OFF in code (+ pinned off in the golden driver so the fixture stays byte-identical); the FE
+      # flag-gates the two new makeDeal kinds off /health's `flags.dealDepth`. The deploy opts in here.
+      echo "ORWELL_DEAL_DEPTH=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded
