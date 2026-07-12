@@ -24,6 +24,12 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 const searchModule = null, documentModule = null, emailInbox = null, createResearchSynapse = null;
 import { createStreamRenderer } from './streamingRenderer.js';
 import { isNarrow } from './platform.js';
+// #1414 (R3 PR0): chat.js's cross-cluster module-level mutable state (streaming flags, the send
+// outbox, the reconcile sets, background-stream maps, single-flight guards) lives on ONE shared
+// singleton so the modules chat.js will be decomposed into can mutate the SAME instance (an ES
+// imported binding is read-only; a shared object's fields are not). Behavior-preserving: chat.js
+// still owns all the logic and just references `chatState.X` where it used to reference `X`.
+import { chatState } from './chatState.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -56,17 +62,14 @@ import { isNarrow } from './platform.js';
     "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back.";
 
   let API_BASE = '';
-  let currentAbort = null;
-  let isStreaming = false;
-  let _sendInFlight = false;   // covers the window from click → streaming start
-  let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
-  let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
-  let _pendingContinue = null; // Stores the stopped AI element to merge with new response
+  // #1414 (R3 PR0): streaming/send/display/continue mutable state moved to the shared `chatState`
+  // singleton — chatState.currentAbort, .isStreaming, ._sendInFlight, ._displayOverride,
+  // ._hideUserBubble, ._pendingContinue. See chatState.js for the per-field docs.
   // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
   // goes quiet while the connection is alive, re-engage the model with a
   // completion handshake instead of leaving it hung. Capped so it can't loop.
-  let _autoNudges = 0;             // handshakes fired for the CURRENT user turn
-  let _autoContinuePending = false; // marks the next submit as an auto-continue (don't reset the counter)
+  // chatState._autoNudges (handshakes fired for the CURRENT user turn) + chatState._autoContinuePending
+  // (next submit is an auto-continue — don't reset the counter). Moved to chatState.js, #1414 R3 PR0.
   const _AUTO_NUDGE_CAP = 3;
 
   // ── #985 P2-A: the SEND OUTBOX ──────────────────────────────────────────────
@@ -83,8 +86,8 @@ import { isNarrow } from './platform.js';
   // Items: { clientMsgId, text, bubbleEl }. STOP is reserved for the explicit Stop button / an EMPTY
   // composer — "stop the current reply" and "send a new message" are no longer collapsed onto one
   // silent action.
-  const _sendOutbox = [];
-  let _flushingOutbox = false;     // re-entrancy guard so only one flush send is dispatched at a time
+  // chatState._sendOutbox is this in-memory FIFO; chatState._flushingOutbox is the single-flight
+  // re-entrancy guard (only one flush send dispatched at a time). Moved to chatState.js, #1414 R3 PR0.
 
   // ── #891 P0 (messaging resilience): the RELOAD-DURABLE half of the outbox + honest offline status ──
   // The #985 outbox above was in-memory only — a hard reload while a send sat QUEUED lost it (the
@@ -115,7 +118,7 @@ import { isNarrow } from './platform.js';
   // while OFFLINE goes straight to the outbox (no doomed POST), and a send that dies at the network
   // layer before any byte arrived is classified (`_isNetworkSendFailure`) and re-queued instead of
   // surfacing as a raw error.
-  const _outboxAwaitingConfirm = [];  // dispatched, not yet server-confirmed (persisted alongside the queue)
+  // chatState._outboxAwaitingConfirm: dispatched, not yet server-confirmed (persisted alongside the queue). #1414 R3 PR0.
   //
   // ── #891 F-A7 (per-bubble delivery state): the DURABLE-FAILED bucket ──
   // A message's lifecycle is queued → sending → delivered | failed, projected onto its user bubble
@@ -129,7 +132,7 @@ import { isNarrow } from './platform.js';
   // (which re-enters the ONE normal flush, `needsDedupe`-armed) or by a server row proving the POST
   // did land after all (`_outboxConfirmDelivery`). Kept separate from `_sendOutbox` so the drain,
   // backoff, and aggregation never touch a terminally-failed turn.
-  const _outboxFailed = [];
+  // chatState._outboxFailed holds these durable terminally-failed items. Moved to chatState.js, #1414 R3 PR0.
   //
   // ── #830 (optimistic-always + aggregated unsent queue): the AGGREGATION lane ──
   // The owner's ruling: "aggregate what you send quickly … when it's time to send the payload it
@@ -147,7 +150,7 @@ import { isNarrow } from './platform.js';
   // within a conversation is preserved). When ≥2 items sit queued, an aggregated status strip
   // (`#send-queue-strip`, role="status" — real text, WCAG 4.1.3) shows the count + a manual
   // "Send now" retry that resets the backoff and drains through the ONE normal flush.
-  let _outboxRestoreDone = false;     // boot restore runs once per page
+  // chatState._outboxRestoreDone gates the once-per-page boot restore. Moved to chatState.js, #1414 R3 PR0.
   let _outboxRetryTimer = null;
   let _outboxRetryDelayMs = 0;        // 0 → next arm starts at the base delay
   const _OUTBOX_RETRY_BASE_MS = 2000;
@@ -223,8 +226,8 @@ import { isNarrow } from './platform.js';
     }
     if (tsSpan) roleEl.appendChild(tsSpan);
   }
-  // Per-session research tracking (supports concurrent research across sessions)
-  const _researchingStreamIds = new Set();
+  // Per-session research tracking (supports concurrent research across sessions).
+  // The id set is chatState._researchingStreamIds (moved to chatState.js, #1414 R3 PR0).
   let _researchTimerEl = null, _researchTimerInterval = null;
   let _researchStartTime = 0, _researchAvgDuration = null;
   let _researchSynapse = null;
@@ -252,10 +255,10 @@ import { isNarrow } from './platform.js';
   let currentHolder = null; // Track current message holder
   let currentSpinner = null; // Track current spinner for stop cleanup
 
-  // Background streaming support
-  const _backgroundStreams = new Map(); // sessionId -> { status, accumulated, sourcesHtml, abortCtrl, query, metrics }
-  const _resumingStreams = new Set();   // sessionId -> a resumeStream() reader is live (re-attach lock)
-  let _streamSessionId = null; // Session ID for the currently active reader loop
+  // Background streaming support. Moved to chatState.js (#1414 R3 PR0):
+  //   chatState._backgroundStreams  Map sessionId -> { status, accumulated, sourcesHtml, abortCtrl, query, metrics }
+  //   chatState._resumingStreams    Set sessionId -> a resumeStream() reader is live (re-attach lock)
+  //   chatState._streamSessionId    session id for the currently active reader loop
   let _lastReaderActivity = 0; // Timestamp of last reader.read() success — used to detect frozen streams
   let _webLockRelease = null;  // Function to release the Web Lock held during streaming
   let _forcePlanOff = false;   // One-shot: suppress plan_mode for the next send (Approve & Run)
@@ -290,8 +293,8 @@ import { isNarrow } from './platform.js';
 
   /** Check if an SSE reader is still actively connected for a session. */
   function hasActiveStream(sessionId) {
-    return _streamSessionId === sessionId || _backgroundStreams.has(sessionId) ||
-           _resumingStreams.has(sessionId);
+    return chatState._streamSessionId === sessionId || chatState._backgroundStreams.has(sessionId) ||
+           chatState._resumingStreams.has(sessionId);
   }
 
   /** ADR 0012 §2.2: stamp a live bubble's role-timestamp from the SERVER-minted ISO time (carried on
@@ -415,7 +418,7 @@ import { isNarrow } from './platform.js';
     API_BASE = apiBase;
     // #738 item #9: transcript scroll-edge mask + recede-on-scroll banner (glass polish).
     try { _initChatScrollEdges(); } catch (_) {}
-    initSlashCommands({ apiBase, isStreaming: () => isStreaming });
+    initSlashCommands({ apiBase, isStreaming: () => chatState.isStreaming });
     if (emailInbox) emailInbox.init(documentModule);
     // L9 (composer): the Agent|Chat mode toggle is meaningless in the game build —
     // play is always hybrid (OOC chat + in-character role-play + the engine tools
@@ -475,12 +478,12 @@ import { isNarrow } from './platform.js';
       submitBtn.title = 'Stop generation';
       submitBtn.dataset.mode = 'streaming';
       submitBtn.dataset.phase = 'processing';
-      isStreaming = true;
+      chatState.isStreaming = true;
     } else if (state === 'idle') {
       submitBtn.dataset.mode = '';
       delete submitBtn.dataset.phase;
       submitBtn.classList.remove('recording');
-      isStreaming = false;
+      chatState.isStreaming = false;
       // Defer to global updater which handles mic/newchat/send modes
       if (window._updateSendBtnIcon) {
         setTimeout(window._updateSendBtnIcon, 50);
@@ -510,11 +513,11 @@ import { isNarrow } from './platform.js';
   // the button only shows Stop for a live foreground stream with an EMPTY composer; otherwise the
   // global updater paints send/upload/mic from the composer/attachment state.
   function _foregroundStreamLive() {
-    if (!isStreaming || !currentAbort) return false;
+    if (!chatState.isStreaming || !chatState.currentAbort) return false;
     try {
       const cur = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
-      if (cur != null && _streamSessionId != null && cur !== _streamSessionId) return false;
-      if (_streamSessionId != null && _backgroundStreams.has(_streamSessionId)) return false;
+      if (cur != null && chatState._streamSessionId != null && cur !== chatState._streamSessionId) return false;
+      if (chatState._streamSessionId != null && chatState._backgroundStreams.has(chatState._streamSessionId)) return false;
     } catch (_) {}
     return true;
   }
@@ -540,7 +543,7 @@ import { isNarrow } from './platform.js';
     // Not streaming in the foreground. If the button is stuck on the Stop face (a backgrounded/settled
     // stream left it there), clear the stale flag+mode and let the global updater repaint send/upload/
     // mic from the live composer/attachment state.
-    if (isStreaming) isStreaming = false;
+    if (chatState.isStreaming) chatState.isStreaming = false;
     if (submitBtn.dataset.mode === 'streaming') {
       submitBtn.dataset.mode = '';
       delete submitBtn.dataset.phase;
@@ -578,9 +581,9 @@ import { isNarrow } from './platform.js';
     let _queuedClientMsgId = null;
     let _queuedBubbleEl = null;
     if (_headless && overrideOpts) {
-      if (overrideOpts.hideUserBubble) _hideUserBubble = true;
-      if ('pendingContinue' in overrideOpts) _pendingContinue = overrideOpts.pendingContinue;
-      if (overrideOpts.autoContinue) _autoContinuePending = true;
+      if (overrideOpts.hideUserBubble) chatState._hideUserBubble = true;
+      if ('pendingContinue' in overrideOpts) chatState._pendingContinue = overrideOpts.pendingContinue;
+      if (overrideOpts.autoContinue) chatState._autoContinuePending = true;
       if (overrideOpts.queuedClientMsgId) _queuedClientMsgId = overrideOpts.queuedClientMsgId;
       if (overrideOpts.queuedBubbleEl) _queuedBubbleEl = overrideOpts.queuedBubbleEl;
     }
@@ -614,7 +617,7 @@ import { isNarrow } from './platform.js';
     // queues; an EMPTY composer (or the explicit Stop button) still falls through to the Stop branch,
     // and a slash command runs through its own dispatcher below (never queued as chat). The compare/
     // group routing above has already returned, so this is the plain-chat send path only.
-    if (isStreaming && !_headless) {
+    if (chatState.isStreaming && !_headless) {
       const _qInput = uiModule.el('message');
       const _qText = _qInput ? (_qInput.value || '') : '';
       const _qTrim = _qText.trim();
@@ -626,12 +629,12 @@ import { isNarrow } from './platform.js';
     }
 
     // If currently streaming, stop it (a headless/programmatic send never toggles Stop — it sends).
-    if (isStreaming && !_headless) {
+    if (chatState.isStreaming && !_headless) {
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
-      if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
+      if (_cancelSid && chatState._researchingStreamIds.has(_cancelSid)) {
         fetch(`${API_BASE}/api/research/cancel/${_cancelSid}`, { method: 'POST' }).catch(e => console.warn('Research cancel failed:', e));
-        _researchingStreamIds.delete(_cancelSid);
+        chatState._researchingStreamIds.delete(_cancelSid);
         _clearResearchTimer();
       }
       abortCurrentRequest(true);  // explicit user Stop → also cancel the detached server run
@@ -712,8 +715,8 @@ import { isNarrow } from './platform.js';
         const _stoppedHolder = currentHolder; // capture before it gets cleared
         continueBtn.addEventListener('click', () => {
           stoppedIndicator.remove();
-          _hideUserBubble = true;
-          _pendingContinue = _stoppedHolder;
+          chatState._hideUserBubble = true;
+          chatState._pendingContinue = _stoppedHolder;
           const cutoff = stoppedContent;
           // Headless send (no composer puppeteering) — the _hideUserBubble/_pendingContinue flags set
           // above flow through; the continuation merges into the existing bubble.
@@ -763,15 +766,15 @@ import { isNarrow } from './platform.js';
     } catch (_) { /* gate unavailable → never block the chat */ }
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
-    if (_sendInFlight) return;
-    _sendInFlight = true;
+    if (chatState._sendInFlight) return;
+    chatState._sendInFlight = true;
     // Instant visual feedback so the user sees their click was accepted
     // even before the streaming button state kicks in below.
     const _earlyMessageInput = uiModule.el('message');
     if (_earlyMessageInput) _earlyMessageInput.disabled = true;
     if (submitBtn) submitBtn.classList.add('send-pending');
     const _releaseSendFlag = () => {
-      _sendInFlight = false;
+      chatState._sendInFlight = false;
       if (_earlyMessageInput) _earlyMessageInput.disabled = false;
       if (submitBtn) submitBtn.classList.remove('send-pending');
     };
@@ -844,7 +847,7 @@ import { isNarrow } from './platform.js';
     // is always visible; if materialization fails the bubble is marked unsent and the composer text
     // is RESTORED (never wiped into nothing). The later render block (post-attachment-upload) adopts
     // this element instead of painting a second bubble. Headless / skip-bubble sends never get one.
-    const _wantOptimisticBubble = !_headless && !_hideUserBubble;
+    const _wantOptimisticBubble = !_headless && !chatState._hideUserBubble;
     // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
     // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
     // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
@@ -866,7 +869,7 @@ import { isNarrow } from './platform.js';
       _userMsgEl = _queuedBubbleEl;
       _userMsgEl.dataset.clientMsgId = _clientMsgId;
     } else if (_wantOptimisticBubble) {
-      _userMsgEl = addMessage('user', _displayOverride || msg, null,
+      _userMsgEl = addMessage('user', chatState._displayOverride || msg, null,
         _earlyAttachInfo ? { attachments: _earlyAttachInfo } : null);
       if (_userMsgEl) {
         _userMsgEl.dataset.clientMsgId = _clientMsgId;
@@ -987,11 +990,11 @@ import { isNarrow } from './platform.js';
     if (messageInput) messageInput.disabled = false;
     updateSubmitButton('streaming', submitBtn);
     if (submitBtn) submitBtn.classList.remove('send-pending');
-    _sendInFlight = false;
+    chatState._sendInFlight = false;
 
     // Capture session ID for background stream detection
     const streamSessionId = sessionModule.getCurrentSessionId();
-    _streamSessionId = streamSessionId;
+    chatState._streamSessionId = streamSessionId;
     const streamQuery = msg;
     _lastReaderActivity = Date.now();
 
@@ -1064,20 +1067,20 @@ import { isNarrow } from './platform.js';
         const lineRefs = sels.map(s =>
           s.startLine === s.endLine ? `L${s.startLine}` : `L${s.startLine}-${s.endLine}`
         );
-        _displayOverride = `[Doc edit: ${lineRefs.join(', ')}] ${msg}`;
+        chatState._displayOverride = `[Doc edit: ${lineRefs.join(', ')}] ${msg}`;
       }
 
-      const userDisplay = _displayOverride || msg;
-      _displayOverride = null;
-      const skipBubble = _hideUserBubble;
-      _hideUserBubble = false;
+      const userDisplay = chatState._displayOverride || msg;
+      chatState._displayOverride = null;
+      const skipBubble = chatState._hideUserBubble;
+      chatState._hideUserBubble = false;
       // Auto-recovery counter: carries across a turn's auto-continues, but resets
       // when the user genuinely sends a new message (so each task gets a fresh cap).
       // A real user turn (visible bubble) ALWAYS resets the budget — even if a
       // prior auto-continue's deferred click never cleared the pending flag — so a
       // stuck flag can't silently eat the next turn's recovery budget.
-      if (!skipBubble) { _autoNudges = 0; _autoContinuePending = false; }
-      else if (_autoContinuePending) { _autoContinuePending = false; }
+      if (!skipBubble) { chatState._autoNudges = 0; chatState._autoContinuePending = false; }
+      else if (chatState._autoContinuePending) { chatState._autoContinuePending = false; }
       const _pendingAttachInfo = fileHandlerModule.getPendingCount() ? fileHandlerModule.getPendingInfo() : null;
       // Pre-read importable file contents before upload clears pending files
       const IMPORTABLE_EXT = /\.(txt|py|js|ts|html|htm|css|md|json|csv|yml|yaml|sh|sql|rs|go|java|c|cpp|h|rb|php|xml|jsx|tsx|log|toml|ini|conf|env|vue|svelte|scss|sass|less)$/i;
@@ -1334,7 +1337,7 @@ import { isNarrow } from './platform.js';
 
       const abortCtrl = new AbortController();
       abortCtrl._reason = '';
-      currentAbort = abortCtrl;
+      chatState.currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
       const _isAgent = (_tState.mode || 'chat') === 'agent';
@@ -1416,12 +1419,12 @@ import { isNarrow } from './platform.js';
         if (endpointUrlForProbe && modelName) {
           processingProbeTimer = setTimeout(async () => {
             processingProbeTimer = null;
-            if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
+            if (accumulated || !spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted)) return;
             processingProbeAbort = new AbortController();
             try {
               spinner.updateMessage('Checking model endpoint');
               const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
-              if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
+              if (accumulated || !spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted)) return;
               if (!status) {
                 spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               } else if (status.alive) {
@@ -1438,7 +1441,7 @@ import { isNarrow } from './platform.js';
                 spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
                 const _tick = setInterval(() => {
                   _countdown--;
-                  if (!spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted) || accumulated) {
+                  if (!spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted) || accumulated) {
                     clearInterval(_tick);
                     return;
                   }
@@ -1446,9 +1449,9 @@ import { isNarrow } from './platform.js';
                     spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
                   } else {
                     clearInterval(_tick);
-                    if (currentAbort && !currentAbort.signal.aborted) {
-                      currentAbort._reason = 'offline';
-                      currentAbort.abort();
+                    if (chatState.currentAbort && !chatState.currentAbort.signal.aborted) {
+                      chatState.currentAbort._reason = 'offline';
+                      chatState.currentAbort.abort();
                     }
                   }
                 }, 1000);
@@ -1526,7 +1529,7 @@ import { isNarrow } from './platform.js';
           _wsResetRound();
           if (clearResponseTimeout) clearResponseTimeout();
           try { if (spinner) spinner.destroy(); } catch (_) {}
-          if (_streamSessionId === streamSessionId) _streamSessionId = null;
+          if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;
           try { if (holder) holder.remove(); } catch (_) {}
           try { await softReloadHistory(streamSessionId); } catch (_) {}
           return;
@@ -1724,7 +1727,7 @@ import { isNarrow } from './platform.js';
       function _scheduleThinkingSpinner() {
         if (_textPauseTimer) clearTimeout(_textPauseTimer);
         _textPauseTimer = setTimeout(() => {
-          if (!document.querySelector('.agent-thinking-dots') && isStreaming) {
+          if (!document.querySelector('.agent-thinking-dots') && chatState.isStreaming) {
             _showThinkingSpinner(_thinkingLabel());
           }
         }, 400);
@@ -1917,13 +1920,13 @@ import { isNarrow } from './platform.js';
             const _isBg = (sessionModule.getCurrentSessionId() !== streamSessionId);
 
             // On first transition to background, store state in map
-            if (_isBg && !_backgroundStreams.has(streamSessionId)) {
-              _backgroundStreams.set(streamSessionId, {
+            if (_isBg && !chatState._backgroundStreams.has(streamSessionId)) {
+              chatState._backgroundStreams.set(streamSessionId, {
                 status: 'running',
                 accumulated: accumulated,
                 sourcesHtml: _sourcesHtml,
                 findingsData: null,
-                abortCtrl: currentAbort,
+                abortCtrl: chatState.currentAbort,
                 query: streamQuery,
                 metrics: null,
               });
@@ -1935,7 +1938,7 @@ import { isNarrow } from './platform.js';
             if (data === '[DONE]') {
               _streamSawDone = true;
               // Always update background map if entry exists (even if user switched back)
-              var bgDone = _backgroundStreams.get(streamSessionId);
+              var bgDone = chatState._backgroundStreams.get(streamSessionId);
               if (bgDone) {
                 bgDone.status = 'completed';
                 bgDone.accumulated = accumulated;
@@ -2072,7 +2075,7 @@ import { isNarrow } from './platform.js';
 
                 // Update background map if running in background
                 if (_isBg) {
-                  var bgEntry = _backgroundStreams.get(streamSessionId);
+                  var bgEntry = chatState._backgroundStreams.get(streamSessionId);
                   if (bgEntry) bgEntry.accumulated = accumulated;
                   continue; // Skip all DOM writes
                 }
@@ -2336,7 +2339,7 @@ import { isNarrow } from './platform.js';
                 }
               } else if (json.type === 'research_progress') {
                 if (_isBg) continue; // Skip DOM updates in background
-                _researchingStreamIds.add(streamSessionId);
+                chatState._researchingStreamIds.add(streamSessionId);
                 // Highlight research button while running
                 var _rToggle = document.getElementById('research-toggle-btn');
                 if (_rToggle) _rToggle.classList.add('research-running');
@@ -2412,7 +2415,7 @@ import { isNarrow } from './platform.js';
                   // Store sources HTML in background map
                   if (json.data && json.data.length > 0) {
                     _sourcesHtml = _buildSourcesBox(json.data, 'research');
-                    var bgE = _backgroundStreams.get(streamSessionId);
+                    var bgE = chatState._backgroundStreams.get(streamSessionId);
                     if (bgE) bgE.sourcesHtml = _sourcesHtml;
                   }
                   // Clear researching indicator for this background session
@@ -2433,7 +2436,7 @@ import { isNarrow } from './platform.js';
                 }
               } else if (json.type === 'research_findings') {
                 if (_isBg) {
-                  var bgEf = _backgroundStreams.get(streamSessionId);
+                  var bgEf = chatState._backgroundStreams.get(streamSessionId);
                   if (bgEf) bgEf.findingsData = json.data;
                   continue;
                 }
@@ -2446,7 +2449,7 @@ import { isNarrow } from './platform.js';
                 if (sessionModule && sessionModule.clearResearching) {
                   sessionModule.clearResearching(streamSessionId);
                 }
-                _researchingStreamIds.delete(streamSessionId);
+                chatState._researchingStreamIds.delete(streamSessionId);
                 // Small delay then reload session history which includes the full report
                 setTimeout(async () => {
                   // Don't yank the user back to this chat if they've navigated
@@ -2463,7 +2466,7 @@ import { isNarrow } from './platform.js';
                 if (_isBg) {
                   if (json.data && json.data.length > 0) {
                     _sourcesHtml = _buildSourcesBox(json.data, 'web');
-                    var bgE2 = _backgroundStreams.get(streamSessionId);
+                    var bgE2 = chatState._backgroundStreams.get(streamSessionId);
                     if (bgE2) bgE2.sourcesHtml = _sourcesHtml;
                   }
                   continue;
@@ -2569,8 +2572,8 @@ import { isNarrow } from './platform.js';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();
-                    _hideUserBubble = true;
-                    _pendingContinue = _holder;
+                    chatState._hideUserBubble = true;
+                    chatState._pendingContinue = _holder;
                     handleChatSubmit(null, 'You hit the step limit before finishing — the task is not complete. Continue from exactly where you left off and keep going until it is done. Do NOT repeat work already done.');
                   });
                   note.appendChild(contBtn);
@@ -2600,8 +2603,8 @@ import { isNarrow } from './platform.js';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();
-                    _hideUserBubble = true;
-                    _pendingContinue = _holder;
+                    chatState._hideUserBubble = true;
+                    chatState._pendingContinue = _holder;
                     handleChatSubmit(null, 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.');
                   });
                   note.appendChild(contBtn);
@@ -2699,7 +2702,7 @@ import { isNarrow } from './platform.js';
                   holder._actualModel = metrics.model || holder._actualModel || holder._requestedModel;
                 }
                 if (_isBg) {
-                  var bgM = _backgroundStreams.get(streamSessionId);
+                  var bgM = chatState._backgroundStreams.get(streamSessionId);
                   if (bgM) bgM.metrics = json.data;
                   continue;
                 }
@@ -3124,7 +3127,7 @@ import { isNarrow } from './platform.js';
               } else if (json.type === 'doc_stream_open') {
                 if (_isBg) {
                   // Store for replay when user returns to this session
-                  var bgDocOpen = _backgroundStreams.get(streamSessionId);
+                  var bgDocOpen = chatState._backgroundStreams.get(streamSessionId);
                   if (bgDocOpen) {
                     bgDocOpen._docTitle = json.title || '';
                     bgDocOpen._docLang = json.language || '';
@@ -3138,7 +3141,7 @@ import { isNarrow } from './platform.js';
 
               } else if (json.type === 'doc_stream_delta') {
                 if (_isBg) {
-                  var bgDocDelta = _backgroundStreams.get(streamSessionId);
+                  var bgDocDelta = chatState._backgroundStreams.get(streamSessionId);
                   if (bgDocDelta) bgDocDelta._docContent = json.content || '';
                   continue;
                 }
@@ -3372,7 +3375,7 @@ import { isNarrow } from './platform.js';
                 // first delta, below the frozen segment).
                 if (spinner && spinner.element) spinner.destroy();
                 const _coalBody = roundHolder.querySelector('.body');
-                if (_coalBody && !_researchingStreamIds.has(streamSessionId)) {
+                if (_coalBody && !chatState._researchingStreamIds.has(streamSessionId)) {
                   spinner = spinnerModule.create(_inProgressLabel('Generating response'), 'right', 'wave');
                   _coalBody.appendChild(spinner.createElement());
                   spinner.start();
@@ -3478,7 +3481,7 @@ import { isNarrow } from './platform.js';
       holder.classList.remove('streaming');
       if (roundHolder && roundHolder !== holder) roundHolder.classList.remove('streaming');
 
-      const _isBgFinal = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgFinal = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
       if (!_isBgFinal) {
         finalMeta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
         const _finalActualModel = metrics?.model || holder._actualModel || finalMeta?.model;
@@ -3700,7 +3703,7 @@ import { isNarrow } from './platform.js';
             try { if (window._setPlanMode) window._setPlanMode(false); } catch (_) {}
             // Show a clean bubble ("Approved the plan."); the full instruction goes to the model via the
             // headless override (no composer puppeteering).
-            _displayOverride = 'Approved the plan.';
+            chatState._displayOverride = 'Approved the plan.';
             handleChatSubmit(null, 'Approved — execute the plan. The full approved checklist is pinned '
               + 'for you under "## ACTIVE PLAN"; do NOT go looking for it in tasks, notes, or '
               + 'memory. Work through it in order, and after each step call the update_plan tool '
@@ -3728,7 +3731,7 @@ import { isNarrow } from './platform.js';
           footerTarget.appendChild(_approveWrap);
         }
         // Add "View Report" link for completed research
-        if (_researchingStreamIds.has(streamSessionId)) {
+        if (chatState._researchingStreamIds.has(streamSessionId)) {
           _appendViewReportLink(footerTarget, streamSessionId);
         }
         // FEDEEP-2: the copy-cache and every TTS read-aloud path below consume the MERGED stream
@@ -3777,9 +3780,9 @@ import { isNarrow } from './platform.js';
         _attachVariantNav(footerTarget);
 
         // Merge with previous stopped message if this was a continue
-        if (_pendingContinue) {
-          const prevEl = _pendingContinue;
-          _pendingContinue = null;
+        if (chatState._pendingContinue) {
+          const prevEl = chatState._pendingContinue;
+          chatState._pendingContinue = null;
           const prevBody = prevEl.querySelector('.body');
           const newBody = footerTarget.querySelector('.body');
           if (prevBody && newBody && prevEl.parentNode) {
@@ -3822,7 +3825,7 @@ import { isNarrow } from './platform.js';
         // message sat unanswered with no way forward. Render the SAME user-controlled Retry the
         // network-drop path builds (distinct copy: "no response" rather than "connection dropped"). Guard
         // against the user-cancel path (handled by the abort branch) and the continue/auto-recover path.
-        const _turnWasCancelled = !!(currentAbort && currentAbort.signal && currentAbort.signal.aborted);
+        const _turnWasCancelled = !!(chatState.currentAbort && chatState.currentAbort.signal && chatState.currentAbort.signal.aborted);
         // Guard: only when the holder is still IN the DOM. A continue-merge above can remove `holder`
         // (folding it into the prior bubble); rendering Retry into a detached node would be invisible.
         if (holder && holder.parentNode &&
@@ -3847,12 +3850,12 @@ import { isNarrow } from './platform.js';
       _removeThinkingSpinner();
       document.querySelectorAll('.agent-thread.streaming').forEach(t => t.classList.remove('streaming'));
       // Check if this stream was running in background
-      const _isBgCatch = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgCatch = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
 
       if (_isBgCatch) {
         // Error happened while backgrounded — update map, don't touch DOM
         console.error('Background stream error:', err);
-        var bgErr = _backgroundStreams.get(streamSessionId);
+        var bgErr = chatState._backgroundStreams.get(streamSessionId);
         if (bgErr && bgErr.status === 'completed') {
           // [DONE] was already processed — this error is benign (e.g. reader.read() after close)
           // Don't override the completed status; just ensure the completed dot stays
@@ -3869,8 +3872,8 @@ import { isNarrow } from './platform.js';
         // Stop streaming TTS on any error/abort
         if (streamingTTS && window.aiTTSManager) window.aiTTSManager.stop();
 
-        if (currentAbort && currentAbort.signal.aborted) {
-          const abortReason = currentAbort._reason || '';
+        if (chatState.currentAbort && chatState.currentAbort.signal.aborted) {
+          const abortReason = chatState.currentAbort._reason || '';
           // Timeout-triggered aborts should remain visible instead of disappearing.
           if (timedOut || abortReason === 'timeout') {
             const timeoutMsg = _isAgent
@@ -3887,7 +3890,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${timeoutMsg}]</span>`;
               holder.querySelector('.body').appendChild(timeoutNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3903,7 +3906,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${offlineMsg}]</span>`;
               holder.querySelector('.body').appendChild(offlineNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3919,7 +3922,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${recoveryMsg}]</span>`;
               holder.querySelector('.body').appendChild(recoveryNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3955,8 +3958,8 @@ import { isNarrow } from './platform.js';
             continueBtn.textContent = '\u25B8';
             continueBtn.addEventListener('click', () => {
               stoppedIndicator.remove();
-              _hideUserBubble = true;
-              _pendingContinue = holder;
+              chatState._hideUserBubble = true;
+              chatState._pendingContinue = holder;
               const cutoff = accumulated;
               handleChatSubmit(null, 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.');
             });
@@ -3975,7 +3978,7 @@ import { isNarrow } from './platform.js';
           }
 
           // Now clear the abort controller
-          currentAbort = null;
+          chatState.currentAbort = null;
         } else {
           console.error(err);
           // Stream died with a tool node still spinning. Its per-node tickers
@@ -4079,7 +4082,7 @@ import { isNarrow } from './platform.js';
       // (the two-tabs-streaming-concurrently residual the ADR-0008 live verification found). Guarded to
       // `=== streamSessionId` so a newer stream's session isn't cleared by a late-settling old finally;
       // a backgrounded stream stays covered by _backgroundStreams in hasActiveStream.
-      if (_streamSessionId === streamSessionId) _streamSessionId = null;
+      if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;
       // ADR 0008: read-your-writes. The turn has persisted, so reconcile the sender's optimistic
       // bubbles to the authoritative {id, seq} log (the adopt pass is cheap + flicker-free; it only
       // rebuilds if a PEER also wrote during this turn). Was: the sender never re-fetched, so its DOM
@@ -4094,7 +4097,7 @@ import { isNarrow } from './platform.js';
       // assistant message to converge to) so a hard fail that persisted NOTHING keeps its live error
       // feedback — we don't need the client to have observed the message_saved event (which a same-chunk
       // error→[DONE] can skip past the break).
-      if (_streamHadError) _forceRebuild.add(streamSessionId);
+      if (_streamHadError) chatState._forceRebuild.add(streamSessionId);
       // ADR 0012 (GAP 1): a PEER's run-started arrived for this session while THIS stream was in
       // flight, so the observer's `!hasActiveStream` guard deferred the live attach. Our stream has
       // now settled (_streamSessionId cleared above ⇒ hasActiveStream is false), so RE-ATTEMPT the
@@ -4123,14 +4126,14 @@ import { isNarrow } from './platform.js';
         try { setTimeout(() => { try { sessionModule.selectSession(_adoptCanonicalAfterStream, { keepSidebar: true }); } catch (_) {} }, 0); } catch (_) {}
       }
       // Always clean up research tracking regardless of background state
-      _researchingStreamIds.delete(streamSessionId);
-      if (_researchingStreamIds.size === 0) {
+      chatState._researchingStreamIds.delete(streamSessionId);
+      if (chatState._researchingStreamIds.size === 0) {
         var _rToggleCleanup = document.getElementById('research-toggle-btn');
         if (_rToggleCleanup) _rToggleCleanup.classList.remove('research-running');
       }
 
       // Only reset UI state if still on the stream's session and was never backgrounded
-      const _isBgFinally = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgFinally = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
 
       if (!_isBgFinally) {
         // Reset button to idle state
@@ -4159,9 +4162,9 @@ import { isNarrow } from './platform.js';
         currentAccumulated = '';
         currentHolder = null;
         currentSpinner = null;
-        _researchingStreamIds.delete(streamSessionId);
+        chatState._researchingStreamIds.delete(streamSessionId);
         // Clear research-running highlight if no more active research
-        if (_researchingStreamIds.size === 0) {
+        if (chatState._researchingStreamIds.size === 0) {
           var _rToggle2 = document.getElementById('research-toggle-btn');
           if (_rToggle2) _rToggle2.classList.remove('research-running');
         }
@@ -4201,7 +4204,7 @@ import { isNarrow } from './platform.js';
       }
 
       // Research clarification timeout — if user doesn't reply within 5 min, show timeout
-      if (holder && holder._roleSuffix === 'Research' && !_researchingStreamIds.has(streamSessionId)) {
+      if (holder && holder._roleSuffix === 'Research' && !chatState._researchingStreamIds.has(streamSessionId)) {
         var _timeoutSessionId = streamSessionId;
         var _timeoutTimer = setTimeout(async function() {
           // Check if research_pending is still active (user hasn't replied)
@@ -4263,12 +4266,12 @@ import { isNarrow } from './platform.js';
       // also routes here, and a device that dropped its link mid-stream must NOT fold (each offline
       // item is its own idempotency unit whose eventual POST may land independently), so coalesce
       // additionally requires a live link.
-      coalesce: isStreaming === true && _outboxOnline(),
+      coalesce: chatState.isStreaming === true && _outboxOnline(),
       bubbleEl: null,
     };
     // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
     _paintOutboxBubble(item);
-    _sendOutbox.push(item);
+    chatState._sendOutbox.push(item);
     _refreshOutboxStatusTags(); // honest status the moment it queues: 'queued' / 'queued — offline'
     _persistOutbox();           // #891 P0-1: reload-durable from the instant it enters the queue
     // Clear the composer — the text is now held in the outbox (+ bubble), so it is safe (and expected:
@@ -4309,13 +4312,13 @@ import { isNarrow } from './platform.js';
       // #830: `coalesce` is deliberately NOT persisted — a restored item is its own at-most-once
       // unit and re-enters the queue outside the aggregation lane (the restore forces it false),
       // so a persisted copy of the flag would be dead weight the restore ignores.
-      const items = _outboxAwaitingConfirm
+      const items = chatState._outboxAwaitingConfirm
         .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
-        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })))
+        .concat(chatState._sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })))
         // #891 F-A7: terminally-failed sends persist too — a reload must show 'failed' (with its
         // Retry), never a stranded pending bubble or a vanished turn. `state:'failed'` routes the
         // restore to the failed bucket instead of the auto-drain.
-        .concat(_outboxFailed.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'failed' })));
+        .concat(chatState._outboxFailed.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'failed' })));
       if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
       sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
     } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
@@ -4326,7 +4329,7 @@ import { isNarrow } from './platform.js';
    *  kick the drain. Idempotent (runs once per page); scheduled past the boot renders so the bubbles
    *  land after the history paint. Returns the number of items restored (test seam). */
   function _restoreOutboxFromStorage() {
-    if (_outboxRestoreDone) return 0;
+    if (chatState._outboxRestoreDone) return 0;
     if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
     // #830 hardening, retained as DEFENSE-IN-DEPTH. chat.js USED to be evaluated TWICE on this
     // page (app.js imports './chat.js' bare while index.html ALSO script-tagged 'chat.js?v=…' —
@@ -4340,22 +4343,22 @@ import { isNarrow } from './platform.js';
     try {
       if (window.chatModule && window.chatModule._restoreOutboxFromStorage &&
           window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage) {
-        _outboxRestoreDone = true; // this shadow instance never restores (nor re-attempts)
+        chatState._outboxRestoreDone = true; // this shadow instance never restores (nor re-attempts)
         return 0;
       }
     } catch (_) { /* fail-open */ }
     let rec = null;
     try { rec = JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) {}
-    _outboxRestoreDone = true;
+    chatState._outboxRestoreDone = true;
     const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
     let restored = 0;
     let restoredFailed = 0; // #891 F-A7: durable-failed items repaint but never auto-drain
     for (const it of items) {
       if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
       if (typeof it.text !== 'string' || !it.text) continue;
-      if (_sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
-          _outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId) ||
-          _outboxFailed.some((x) => x.clientMsgId === it.clientMsgId)) continue;
+      if (chatState._sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
+          chatState._outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId) ||
+          chatState._outboxFailed.some((x) => x.clientMsgId === it.clientMsgId)) continue;
       // #891 F-A7: a persisted `state:'failed'` item restores into the DURABLE-FAILED bucket — its
       // bubble repaints as 'failed' + Retry, and it is NOT re-queued for the auto-drain (retries were
       // exhausted; only an explicit Retry, or a proven-delivered server row, moves it).
@@ -4373,7 +4376,7 @@ import { isNarrow } from './platform.js';
         };
         _paintOutboxBubble(failedItem);
         _setDeliveryState(failedItem.bubbleEl, 'failed');
-        _outboxFailed.push(failedItem);
+        chatState._outboxFailed.push(failedItem);
         restoredFailed++;
         continue;
       }
@@ -4391,7 +4394,7 @@ import { isNarrow } from './platform.js';
         bubbleEl: null,
       };
       _paintOutboxBubble(item);
-      _sendOutbox.push(item);
+      chatState._sendOutbox.push(item);
       restored++;
     }
     _persistOutbox(); // normalize (drops a corrupt/empty record)
@@ -4406,12 +4409,12 @@ import { isNarrow } from './platform.js';
    *  proven, so release the durable copy. Cheap no-op when nothing is queued (the common case). */
   function _outboxConfirmDelivery(clientMsgId) {
     if (!clientMsgId) return;
-    if (!_outboxAwaitingConfirm.length && !_sendOutbox.length && !_outboxFailed.length) return;
+    if (!chatState._outboxAwaitingConfirm.length && !chatState._sendOutbox.length && !chatState._outboxFailed.length) return;
     let hit = false;
     // #891 F-A7: a proven-delivered server row can rescue even a bubble we'd marked 'failed' (its
     // POST DID land — the reader just died before the confirm). Scan the failed bucket too and settle
     // the bubble to 'delivered' (clears the Retry).
-    for (const arr of [_outboxAwaitingConfirm, _sendOutbox, _outboxFailed]) {
+    for (const arr of [chatState._outboxAwaitingConfirm, chatState._sendOutbox, chatState._outboxFailed]) {
       const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
       if (i >= 0) {
         const removed = arr.splice(i, 1)[0];
@@ -4432,9 +4435,9 @@ import { isNarrow } from './platform.js';
    *  _OUTBOX_MAX_RETRIES so a non-network failure misclassified once can't retry silently forever. */
   function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId) {
     if (!clientMsgId || typeof text !== 'string' || !text) return false;
-    const ai = _outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
-    let item = ai >= 0 ? _outboxAwaitingConfirm.splice(ai, 1)[0] : null;
-    if (_sendOutbox.some((it) => it && it.clientMsgId === clientMsgId)) {
+    const ai = chatState._outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
+    let item = ai >= 0 ? chatState._outboxAwaitingConfirm.splice(ai, 1)[0] : null;
+    if (chatState._sendOutbox.some((it) => it && it.clientMsgId === clientMsgId)) {
       _persistOutbox(); // already queued — idempotent (the awaiting copy, if any, was just folded out)
       return true;
     }
@@ -4465,7 +4468,7 @@ import { isNarrow } from './platform.js';
       item.bubbleEl.classList.remove('msg-unsent');
       delete item.bubbleEl.dataset.unsent;
     }
-    _sendOutbox.unshift(item);
+    chatState._sendOutbox.unshift(item);
     _refreshOutboxStatusTags();
     _persistOutbox();
     _armOutboxRetry();
@@ -4495,7 +4498,7 @@ import { isNarrow } from './platform.js';
    *  could have written into, so it verifies trivially clean (current-session-at-queue-time semantics,
    *  documented at the drain's eligibility check). */
   async function _dedupeOutboxAgainstServer() {
-    const flagged = _sendOutbox.filter((it) => it && it.needsDedupe);
+    const flagged = chatState._sendOutbox.filter((it) => it && it.needsDedupe);
     if (!flagged.length) return true;
     const bySid = new Map();
     for (const it of flagged) {
@@ -4526,8 +4529,8 @@ import { isNarrow } from './platform.js';
         if (seen.has(it.clientMsgId)) {
           // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
           // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
-          const i = _sendOutbox.indexOf(it);
-          if (i >= 0) _sendOutbox.splice(i, 1);
+          const i = chatState._sendOutbox.indexOf(it);
+          if (i >= 0) chatState._sendOutbox.splice(i, 1);
           if (it.bubbleEl) _setDeliveryState(it.bubbleEl, 'delivered');
         }
       }
@@ -4566,7 +4569,7 @@ import { isNarrow } from './platform.js';
    *  un-fail them; only an explicit Retry does. */
   function _refreshOutboxStatusTags() {
     const mode = _outboxOnline() ? 'queued' : 'offline';
-    for (const it of _sendOutbox) { if (it) _setDeliveryState(it.bubbleEl, mode); }
+    for (const it of chatState._sendOutbox) { if (it) _setDeliveryState(it.bubbleEl, mode); }
     _updateOutboxStrip(); // #830: keep the aggregate affordance in lockstep with the per-bubble tags
   }
 
@@ -4666,14 +4669,14 @@ import { isNarrow } from './platform.js';
    *  hand (the stream catch-hook, after the network-requeue cap is hit). */
   function _markSendFailed(item) {
     if (!item || !item.clientMsgId) return false;
-    for (const arr of [_sendOutbox, _outboxAwaitingConfirm]) {
+    for (const arr of [chatState._sendOutbox, chatState._outboxAwaitingConfirm]) {
       const i = arr.indexOf(item);
       if (i >= 0) arr.splice(i, 1);
     }
-    if (!_outboxFailed.some((it) => it && it.clientMsgId === item.clientMsgId)) {
+    if (!chatState._outboxFailed.some((it) => it && it.clientMsgId === item.clientMsgId)) {
       item.failed = true;
       item.coalesce = false;
-      _outboxFailed.push(item);
+      chatState._outboxFailed.push(item);
     }
     if (item.bubbleEl) _setDeliveryState(item.bubbleEl, 'failed');
     _persistOutbox();
@@ -4686,7 +4689,7 @@ import { isNarrow } from './platform.js';
     // Reclaim any live copy so it can't also drain; otherwise build the record fresh (the capped
     // requeue already spliced it out of every bucket).
     let item = null;
-    for (const arr of [_sendOutbox, _outboxAwaitingConfirm, _outboxFailed]) {
+    for (const arr of [chatState._sendOutbox, chatState._outboxAwaitingConfirm, chatState._outboxFailed]) {
       const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
       if (i >= 0) { item = arr.splice(i, 1)[0]; break; }
     }
@@ -4708,15 +4711,15 @@ import { isNarrow } from './platform.js';
    *  is the oldest turn), exactly like a network requeue. Fresh retry budget (the user chose this). */
   function _retryFailedSend(clientMsgId) {
     if (!clientMsgId) return false;
-    const i = _outboxFailed.findIndex((it) => it && it.clientMsgId === clientMsgId);
+    const i = chatState._outboxFailed.findIndex((it) => it && it.clientMsgId === clientMsgId);
     if (i < 0) return false;
-    const item = _outboxFailed.splice(i, 1)[0];
+    const item = chatState._outboxFailed.splice(i, 1)[0];
     item.failed = false;
     item.retries = 0;              // user-initiated — a fresh attempt, not a continuation of the cap
     item.needsDedupe = true;       // its earlier POST may have reached the server — verify first
     item.coalesce = false;         // its own at-most-once unit, never folded
     if (item.bubbleEl) _setDeliveryState(item.bubbleEl, _outboxOnline() ? 'queued' : 'offline');
-    _sendOutbox.unshift(item);
+    chatState._sendOutbox.unshift(item);
     _persistOutbox();
     _armOutboxRetry();
     try { _flushSendOutbox(); } catch (_) {}
@@ -4739,7 +4742,7 @@ import { isNarrow } from './platform.js';
    *  item's per-bubble tag already tells the whole story); closed the moment the queue drains. */
   function _updateOutboxStrip() {
     try {
-      const n = _sendOutbox.length;
+      const n = chatState._sendOutbox.length;
       if (n < 2) {
         if (_outboxNotice) {
           try { _outboxNotice.hide(); } catch (_) {}
@@ -4791,7 +4794,7 @@ import { isNarrow } from './platform.js';
         _outboxStripRow = row;
       }
       const offline = !_outboxOnline();
-      const oneTurn = _sendOutbox.every((it) => it && it.coalesce && !it.needsDedupe);
+      const oneTurn = chatState._sendOutbox.every((it) => it && it.coalesce && !it.needsDedupe);
       const label = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-label');
       if (label) {
         label.textContent = offline
@@ -4808,7 +4811,7 @@ import { isNarrow } from './platform.js';
    *  Reset to the base by a confirmed delivery or the 'online' event. One timer at a time. */
   function _armOutboxRetry() {
     if (_outboxRetryTimer) return;
-    if (_sendOutbox.length === 0) return;
+    if (chatState._sendOutbox.length === 0) return;
     _outboxRetryDelayMs = _outboxRetryDelayMs
       ? Math.min(_outboxRetryDelayMs * 2, _OUTBOX_RETRY_MAX_MS)
       : _OUTBOX_RETRY_BASE_MS;
@@ -4862,27 +4865,27 @@ import { isNarrow } from './platform.js';
   // production it IS `handleChatSubmit`, so behaviour is byte-identical.
   let _outboxDispatch = (text, opts) => handleChatSubmit(null, text, opts);
   function _flushSendOutbox() {
-    if (_flushingOutbox) return;
-    if (isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
-    if (_sendOutbox.length === 0) return;
+    if (chatState._flushingOutbox) return;
+    if (chatState.isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
+    if (chatState._sendOutbox.length === 0) return;
     // TEST SEAM (#891 browser gate): lets the reload-durability harness install its dispatch spy
     // before the boot-restore auto-drain can fire. Never set by app code.
     if (typeof window !== 'undefined' && window.__orwellOutboxHoldDrain) return;
     // #891 P0-2: OFFLINE — hold the queue (durable + honestly tagged), arm the backoff, and let the
     // 'online' listener drain the moment the link returns. Never a doomed dispatch.
     if (!_outboxOnline()) { _refreshOutboxStatusTags(); _armOutboxRetry(); return; }
-    _flushingOutbox = true;
+    chatState._flushingOutbox = true;
     // #891: restored / network-requeued items verify against the server log FIRST (at-most-once
     // across a reload — a send whose POST landed but whose confirmation was lost must never
     // re-send). Fail-closed: an unverifiable check keeps the item queued and re-arms the backoff.
     // Runs BEFORE the session gate below: a proven-delivered item must be releasable even while the
     // boot is still re-selecting its session.
-    const _preflight = _sendOutbox.some((it) => it && it.needsDedupe)
+    const _preflight = chatState._sendOutbox.some((it) => it && it.needsDedupe)
       ? _dedupeOutboxAgainstServer()
       : Promise.resolve(true);
     _preflight.then((ok) => {
-      if (ok === false) { _flushingOutbox = false; _armOutboxRetry(); return; }
-      if (isStreaming || _sendOutbox.length === 0) { _flushingOutbox = false; return; }
+      if (ok === false) { chatState._flushingOutbox = false; _armOutboxRetry(); return; }
+      if (chatState.isStreaming || chatState._sendOutbox.length === 0) { chatState._flushingOutbox = false; return; }
       // #891 P1 fix (cross-session bleed — PR #1379 review, Greptile-executed repro): an item's
       // recorded `sessionId` is BINDING — it may only dispatch while ITS session is the currently-
       // selected one, because `_outboxDispatch` submits against current sessionModule state. The
@@ -4896,11 +4899,11 @@ import { isNarrow } from './platform.js';
       // exactly as the inline pre-session send it stands in for would have. A still-`needsDedupe`
       // item (its verification fetch failed above) is never eligible.
       const _cur = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
-      const _idx = _sendOutbox.findIndex((it) =>
+      const _idx = chatState._sendOutbox.findIndex((it) =>
         it && !it.needsDedupe && (!it.sessionId || it.sessionId === _cur));
-      if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }
-      let item = _idx === 0 ? _sendOutbox.shift() : _sendOutbox.splice(_idx, 1)[0];
-      if (!item) { _flushingOutbox = false; return; }
+      if (_idx === -1) { chatState._flushingOutbox = false; _armOutboxRetry(); return; }
+      let item = _idx === 0 ? chatState._sendOutbox.shift() : chatState._sendOutbox.splice(_idx, 1)[0];
+      if (!item) { chatState._flushingOutbox = false; return; }
       // #830: AGGREGATED drain — a rapid-succession run queued while a turn streamed sends as ONE
       // combined turn ("aggregate what you send quickly … it sends all messages in one turn").
       // Collect every later item that (a) opted into the coalesce lane at enqueue time, (b) has no
@@ -4911,12 +4914,12 @@ import { isNarrow } from './platform.js';
       // fold — byte-identical to the pre-#830 dispatch.
       if (item.coalesce && !item.needsDedupe) {
         const _batch = [item];
-        for (let i = 0; i < _sendOutbox.length; ) {
-          const it = _sendOutbox[i];
+        for (let i = 0; i < chatState._sendOutbox.length; ) {
+          const it = chatState._sendOutbox[i];
           if (!it) { i++; continue; }
           const _sameLane = !it.sessionId || it.sessionId === _cur;
           if (!_sameLane) { i++; continue; }
-          if (it.coalesce && !it.needsDedupe) { _batch.push(_sendOutbox.splice(i, 1)[0]); continue; }
+          if (it.coalesce && !it.needsDedupe) { _batch.push(chatState._sendOutbox.splice(i, 1)[0]); continue; }
           break;
         }
         if (_batch.length > 1) item = _foldOutboxBatch(_batch);
@@ -4924,7 +4927,7 @@ import { isNarrow } from './platform.js';
       // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
       // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
       // keeps the re-send at-most-once.
-      _outboxAwaitingConfirm.push(item);
+      chatState._outboxAwaitingConfirm.push(item);
       _persistOutbox();
       _updateOutboxStrip(); // #830: the queue just shrank (dispatch and/or fold)
       _setDeliveryState(item.bubbleEl, 'sending'); // #891 F-A7: actually sending now (dim, no queued tag)
@@ -4943,8 +4946,8 @@ import { isNarrow } from './platform.js';
       // session binding) and either dispatches the next eligible item or parks on the backoff —
       // one hop per settle, so it can never spin.
       const _continueDrain = () => {
-        _flushingOutbox = false;
-        if (_sendOutbox.length > 0) {
+        chatState._flushingOutbox = false;
+        if (chatState._sendOutbox.length > 0) {
           setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0);
         }
       };
@@ -4958,7 +4961,7 @@ import { isNarrow } from './platform.js';
       } catch (_) {
         _continueDrain();
       }
-    }).catch(() => { _flushingOutbox = false; _armOutboxRetry(); });
+    }).catch(() => { chatState._flushingOutbox = false; _armOutboxRetry(); });
   }
 
   // ── #891 P0: durability wiring — boot restore + online/offline honesty. Module-level (the
@@ -4995,13 +4998,13 @@ import { isNarrow } from './platform.js';
   // the server run — otherwise closing the tab would kill the background task,
   // defeating the whole point. Only the Stop button cancels the server run.
   export function abortCurrentRequest(stopServer = false) {
-    if (currentAbort) {
-      currentAbort.abort();
+    if (chatState.currentAbort) {
+      chatState.currentAbort.abort();
       // Don't set to null here - let catch block handle it
     }
     if (stopServer) {
       try {
-        const _sid = _streamSessionId
+        const _sid = chatState._streamSessionId
           || (window.sessionModule && window.sessionModule.getCurrentSessionId && window.sessionModule.getCurrentSessionId());
         if (_sid) {
           fetch(`/api/chat/stop/${encodeURIComponent(_sid)}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
@@ -5039,8 +5042,8 @@ import { isNarrow } from './platform.js';
     }
     // PARTIAL TEXT: a mid-stream cut. Continuing is genuinely useful, so auto-continue ONCE — but via a
     // HEADLESS send (no composer write, no synthetic click, no stop/send race). Gated by the cap.
-    if (_autoNudges >= _AUTO_NUDGE_CAP) return false;
-    _autoNudges++;
+    if (chatState._autoNudges >= _AUTO_NUDGE_CAP) return false;
+    chatState._autoNudges++;
     if (holder) {
       // FEDEEP-2: same raw-copy scrub as the natural-completion/user-stop paths.
       holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
@@ -5150,18 +5153,18 @@ import { isNarrow } from './platform.js';
    * Called when user switches sessions mid-stream.
    */
   export function detachCurrentStream(sessionId) {
-    if (!isStreaming || !currentAbort) {
+    if (!chatState.isStreaming || !chatState.currentAbort) {
       // Not streaming — fall through to abort
       abortCurrentRequest();
       return;
     }
     // Store background stream state
-    _backgroundStreams.set(sessionId, {
+    chatState._backgroundStreams.set(sessionId, {
       status: 'running',
       accumulated: currentAccumulated,
       sourcesHtml: '',
       findingsData: null,
-      abortCtrl: currentAbort,
+      abortCtrl: chatState.currentAbort,
       query: currentHolder ? (currentHolder._researchQuery || '') : '',
       metrics: null,
     });
@@ -5170,8 +5173,8 @@ import { isNarrow } from './platform.js';
       sessionModule.markStreaming(sessionId);
     }
     // Clear local state WITHOUT aborting the fetch
-    currentAbort = null;
-    isStreaming = false;
+    chatState.currentAbort = null;
+    chatState.isStreaming = false;
     currentHolder = null;
     currentAccumulated = '';
     // Reset submit button so the new chat is ready to send
@@ -5192,7 +5195,7 @@ import { isNarrow } from './platform.js';
    * touches #chat-history, and only auto-scrolls if already near the bottom.
    */
   // ADR 0008: sessions that DIVERGED while a stream was in flight — reconciled when it ends.
-  const _pendingReconcile = new Set();
+  // → chatState._pendingReconcile (moved to chatState.js, #1414 R3 PR0).
   // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): a PEER's run-started arrived for the
   // canonical session while THIS window's OWN POST stream for that same session was still in flight,
   // so the observer's `!hasActiveStream(id)` guard suppressed the live `resumeStream` attach. The peer
@@ -5201,14 +5204,14 @@ import { isNarrow } from './platform.js';
   // stream settles (the finally below). subscribe() replays the peer run's buffer (or its tail) then
   // live-tails, so the deferred attach mirrors the peer turn in lockstep instead of waiting on a later
   // poll/reconcile (the transient one-window-behind offset the 50× smoke caught).
-  const _pendingPeerResume = new Set();
+  // → chatState._pendingPeerResume (moved to chatState.js, #1414 R3 PR0).
   // ADR 0012 (GAP 2): sessions whose NEXT softReloadHistory must FORCE the seq-ordered rebuild even if
   // the rendered id-order looks "converged". The error path adopts the live error bubble to the
   // persisted message's {id, seq} (so the divergence check passes) but its CONTENT is still the raw
   // "Error 503", not the persisted friendly fallback — only a content rebuild makes the sender match
   // the peer. The convergence short-circuit is about avoiding flicker on a NORMAL turn; on an error we
   // accept the one rebuild to guarantee identical settled text.
-  const _forceRebuild = new Set();
+  // → chatState._forceRebuild (moved to chatState.js, #1414 R3 PR0).
   function _historyMsgText(msg) {
     if (typeof msg.content === 'string') return msg.content;
     if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
@@ -5460,7 +5463,7 @@ import { isNarrow } from './platform.js';
     // SELF-GUARD: only honor the force when the server actually has at least as many messages as are
     // rendered — i.e. there IS a persisted message to converge to. A hard fail that persisted NOTHING
     // (server has fewer messages) keeps its live error bubble rather than the rebuild erasing it.
-    let _forced = _forceRebuild.delete(sessionId);
+    let _forced = chatState._forceRebuild.delete(sessionId);
     const renderedCount = box.querySelectorAll('.msg').length;
     if (_forced && visible.length < renderedCount) _forced = false;
     // A multi-round tool-rich message legitimately renders as SEVERAL contiguous bubbles sharing
@@ -5485,15 +5488,15 @@ import { isNarrow } from './platform.js';
     const converged = orphanFree &&
       renderedIds.length === serverIds.length &&
       renderedIds.every((v, i) => v === serverIds[i]);
-    if (converged && !_forced) { _pendingReconcile.delete(sessionId); return; }
+    if (converged && !_forced) { chatState._pendingReconcile.delete(sessionId); return; }
 
     // 3) DIVERGED (or forced) — defer past a live stream, else rebuild to the authoritative order.
     if (hasActiveStream(sessionId)) {
-      _pendingReconcile.add(sessionId);
-      if (_forced) _forceRebuild.add(sessionId);   // re-arm the one-shot force for the deferred flush
+      chatState._pendingReconcile.add(sessionId);
+      if (_forced) chatState._forceRebuild.add(sessionId);   // re-arm the one-shot force for the deferred flush
       return;
     }
-    _pendingReconcile.delete(sessionId);
+    chatState._pendingReconcile.delete(sessionId);
 
     // #836 / "never eat a message": before we blow away the DOM, RESCUE any still-pending optimistic
     // user bubble (clientMsgId, no dbId) whose persisted row is ABSENT from this server snapshot — so the
@@ -5536,7 +5539,7 @@ import { isNarrow } from './platform.js';
     if (!id) return Promise.resolve();
     // Always run once at stream end: the adopt pass alone (cheap, no churn) gives the sender
     // read-your-writes even when nothing diverged; if it DID diverge, this does the rebuild.
-    _pendingReconcile.delete(id);
+    chatState._pendingReconcile.delete(id);
     try { return Promise.resolve(softReloadHistory(id)).catch(function () {}); } catch (_) { return Promise.resolve(); }
   }
 
@@ -5547,7 +5550,7 @@ import { isNarrow } from './platform.js';
    */
   export function deferPeerResume(sessionId) {
     if (!sessionId) return;
-    _pendingPeerResume.add(sessionId);
+    chatState._pendingPeerResume.add(sessionId);
   }
 
   /**
@@ -5560,8 +5563,8 @@ import { isNarrow } from './platform.js';
   export function flushPendingPeerResume(sessionId) {
     const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
     if (!id) return;
-    if (!_pendingPeerResume.has(id)) return;
-    _pendingPeerResume.delete(id);
+    if (!chatState._pendingPeerResume.has(id)) return;
+    chatState._pendingPeerResume.delete(id);
     // Only attach if we're still viewing this session and nothing else is already rendering it live.
     const onIt = !sessionModule || !sessionModule.getCurrentSessionId ||
                  sessionModule.getCurrentSessionId() === id;
@@ -5678,7 +5681,7 @@ import { isNarrow } from './platform.js';
     // for a same-tab POST stream and spawn its own spinner+poll on re-entry. Set BEFORE the first
     // paint below, so a `softReloadHistory` reconcile that races this attach sees `hasActiveStream`
     // and DEFERS past it (never rebuilds the DOM out from under the live holder mid-paint).
-    _resumingStreams.add(sessionId);
+    chatState._resumingStreams.add(sessionId);
 
     const holder = document.createElement('div');
     holder.className = 'msg msg-ai';
@@ -5730,7 +5733,7 @@ import { isNarrow } from './platform.js';
 
     const cleanup = () => {
       try { spinner.destroy(); } catch (_) {}
-      _resumingStreams.delete(sessionId);
+      chatState._resumingStreams.delete(sessionId);
     };
 
     // Canonical combined source: reasoning wrapped in a CLOSED <think> block (so it renders
@@ -5909,17 +5912,17 @@ import { isNarrow } from './platform.js';
    * Called after history loads on session switch.
    */
   export function checkBackgroundStream(sessionId) {
-    if (!sessionId || !_backgroundStreams.has(sessionId)) return;
-    var entry = _backgroundStreams.get(sessionId);
+    if (!sessionId || !chatState._backgroundStreams.has(sessionId)) return;
+    var entry = chatState._backgroundStreams.get(sessionId);
 
     if (entry.status === 'completed') {
       // Response is already saved to DB and will appear in history — just clean up
-      _backgroundStreams.delete(sessionId);
+      chatState._backgroundStreams.delete(sessionId);
       return;
     }
 
     if (entry.status === 'error') {
-      _backgroundStreams.delete(sessionId);
+      chatState._backgroundStreams.delete(sessionId);
       var box = document.getElementById('chat-history');
       if (box) {
         var errHolder = document.createElement('div');
@@ -5969,7 +5972,7 @@ import { isNarrow } from './platform.js';
           return;
         }
         // Update doc content while polling
-        var curPoll = _backgroundStreams.get(sessionId);
+        var curPoll = chatState._backgroundStreams.get(sessionId);
         if (curPoll && curPoll._docContent && documentModule) {
           documentModule.streamDocDelta(curPoll._docContent);
         }
@@ -5977,7 +5980,7 @@ import { isNarrow } from './platform.js';
           clearInterval(pollId);
           spinner.destroy();
           if (holder.parentNode) holder.remove(); // Remove entire holder, not just spinner
-          _backgroundStreams.delete(sessionId);
+          chatState._backgroundStreams.delete(sessionId);
           // Reload session to show the completed response — but only if the user
           // is still on it; don't yank them back from a new chat they opened.
           if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === sessionId) {
@@ -6160,7 +6163,7 @@ import { isNarrow } from './platform.js';
       // the tab was hidden/backgrounded (the `_isBgFinally` path never reset it). Cheap + idempotent;
       // runs even when not streaming, so the stuck-Stop case recovers the moment the user looks back.
       try { _syncSubmitButtonState(); } catch (_) {}
-      if (!isStreaming) return;
+      if (!chatState.isStreaming) return;
 
       // Stream claims to be running — check if reader is actually alive
       const staleSince = Date.now() - _lastReaderActivity;
@@ -6172,18 +6175,18 @@ import { isNarrow } from './platform.js';
 
       setTimeout(() => {
         // Re-check — maybe the reader woke up during the grace period
-        if (!isStreaming) return;
+        if (!chatState.isStreaming) return;
         const stillStale = Date.now() - _lastReaderActivity;
         if (stillStale < 5000) return; // Came back to life
 
         console.warn('[tab-recovery] Stream confirmed dead. Aborting and reloading session.');
 
         // Abort the frozen stream, but preserve the visible bubble.
-        if (currentAbort) {
-          currentAbort._reason = 'recovery';
-          currentAbort.abort();
+        if (chatState.currentAbort) {
+          chatState.currentAbort._reason = 'recovery';
+          chatState.currentAbort.abort();
         }
-        isStreaming = false;
+        chatState.isStreaming = false;
 
         // Release Web Lock
         if (_webLockRelease) {
@@ -6392,7 +6395,7 @@ import { isNarrow } from './platform.js';
         sibling.remove();
         sibling = next;
       }
-      _hideUserBubble = true;
+      chatState._hideUserBubble = true;
       _pendingRegenAttachments = _ids;
 
       // Resubmit (headless — no composer puppeteering)
@@ -6505,7 +6508,7 @@ import { isNarrow } from './platform.js';
       _pendingVariantLabel = 'regen';
       aiMsgElement.remove();
 
-      _hideUserBubble = true;
+      chatState._hideUserBubble = true;
       handleChatSubmit(null, userText); // headless regen — no composer puppeteering
 
     } catch (err) {
@@ -6791,7 +6794,7 @@ import { isNarrow } from './platform.js';
       }
 
       updateSpinnerFromProgress(data.progress);
-      _researchingStreamIds.add(sessionId);
+      chatState._researchingStreamIds.add(sessionId);
       if (sessionModule && sessionModule.markResearching) sessionModule.markResearching(sessionId);
 
       // Restore research timer from started_at
@@ -6840,8 +6843,8 @@ import { isNarrow } from './platform.js';
           spinner.destroy();
           _clearResearchTimer();
           if (holder.parentNode) holder.remove();
-          _researchingStreamIds.delete(sessionId);
-          if (_researchingStreamIds.size === 0) {
+          chatState._researchingStreamIds.delete(sessionId);
+          if (chatState._researchingStreamIds.size === 0) {
             var _rToggleP = document.getElementById('research-toggle-btn');
             if (_rToggleP) _rToggleP.classList.remove('research-running');
           }
@@ -6853,7 +6856,7 @@ import { isNarrow } from './platform.js';
             clearInterval(pollInterval);
             spinner.destroy();
             _clearResearchTimer();
-            _researchingStreamIds.delete(sessionId);
+            chatState._researchingStreamIds.delete(sessionId);
             if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
             return;
           }
@@ -6869,7 +6872,7 @@ import { isNarrow } from './platform.js';
             clearInterval(pollInterval);
             spinner.destroy();
             _clearResearchTimer();
-            _researchingStreamIds.delete(sessionId);
+            chatState._researchingStreamIds.delete(sessionId);
             if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
 
             if (pollData.status === 'done') {
@@ -6908,12 +6911,12 @@ import { isNarrow } from './platform.js';
 
   /** Set a display override for the next user message bubble */
   export function setDisplayOverride(text) {
-    _displayOverride = text;
+    chatState._displayOverride = text;
   }
 
   /** Hide the user bubble for the next submit (e.g. continue after stop) */
   export function setHideUserBubble() {
-    _hideUserBubble = true;
+    chatState._hideUserBubble = true;
   }
 
   /**
@@ -6941,7 +6944,7 @@ import { isNarrow } from './platform.js';
       return true;
     } catch (_) {
       // Never leave the hide-bubble flag armed for a real next turn if the cue blew up.
-      _hideUserBubble = false;
+      chatState._hideUserBubble = false;
       try { box.value = ''; } catch (__) {}
       return false;
     }
@@ -6949,7 +6952,7 @@ import { isNarrow } from './platform.js';
 
   /** Set the AI element to merge with the next streamed response (continue after stop) */
   export function setPendingContinue(el) {
-    _pendingContinue = el;
+    chatState._pendingContinue = el;
   }
 
   /**
@@ -7506,7 +7509,7 @@ import { isNarrow } from './platform.js';
       // Mirrors the SSE observer's rich resume contract (mirror-toolturn parity, #1087).
       if (rich && round && round.holder) { try { round.holder.remove(); } catch (_) {} }
       _wsResetRound();
-      if (sid && _streamSessionId === sid) _streamSessionId = null; // release the active-stream lock
+      if (sid && chatState._streamSessionId === sid) chatState._streamSessionId = null; // release the active-stream lock
       if (sid) { try { softReloadHistory(sid); } catch (_) {} }
       return;
     }
@@ -7569,11 +7572,11 @@ import { isNarrow } from './platform.js';
     _renderStreamDropRetry, // BUG 2: the user-controlled Retry control (browser gate)
     _enqueueSend,       // #985 P2-A: enqueue a send-while-streaming into the outbox (browser gate)
     _flushSendOutbox,   // #985 P2-A: drain the outbox FIFO at turn settle (browser gate)
-    _sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
-    _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
+    _sendOutbox: chatState._sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
+    _isStreaming: () => chatState.isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
     _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
-    _outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
-    _outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
+    _outboxAwaitingConfirm: chatState._outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
+    _outboxFailed: chatState._outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
     _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
     _outboxConfirmDelivery,      // #891: server-row-observed delivery confirm (browser gate)
     _setDeliveryState,           // #891 F-A7: per-bubble delivery-state projection (browser gate)
@@ -7595,9 +7598,9 @@ import { isNarrow } from './platform.js';
     // never called by app code. `sid` (the streaming session id) lets a test simulate a foreground vs.
     // backgrounded/settled run.
     _setStreamStateForTest: ({ streaming, hasAbort, sid } = {}) => {
-      isStreaming = !!streaming;
-      currentAbort = hasAbort ? (currentAbort || new AbortController()) : null;
-      if (sid !== undefined) _streamSessionId = sid;
+      chatState.isStreaming = !!streaming;
+      chatState.currentAbort = hasAbort ? (chatState.currentAbort || new AbortController()) : null;
+      if (sid !== undefined) chatState._streamSessionId = sid;
     },
   };
 

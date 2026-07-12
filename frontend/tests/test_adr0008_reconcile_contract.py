@@ -83,7 +83,7 @@ def test_stream_end_resets_stream_session_id_so_deferred_reconcile_can_flush():
     # concurrently residual, reproduced + fixed live). The foreground reader's finally must clear it —
     # guarded to `=== streamSessionId` so a newer stream's session isn't clobbered by a late finally.
     src = _read("static", "js", "chat.js")
-    assert "if (_streamSessionId === streamSessionId) _streamSessionId = null;" in src, \
+    assert "if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;" in src, \
         "the foreground stream's finally must reset _streamSessionId so hasActiveStream clears at stream end"
 
 
@@ -93,7 +93,7 @@ def test_stream_end_reset_ordering_lets_deferred_peer_resume_attach():
     # BEFORE it schedules flushPendingPeerResume — otherwise the deferred attach short-circuits on its
     # own hasActiveStream guard and the peer turn never renders live (the ±1 the 50× smoke caught).
     src = _read("static", "js", "chat.js")
-    reset_at = src.index("if (_streamSessionId === streamSessionId) _streamSessionId = null;")
+    reset_at = src.index("if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;")
     flush_at = src.index("flushPendingPeerResume(streamSessionId)")
     assert reset_at < flush_at, \
         "the finally must reset _streamSessionId BEFORE re-attempting the deferred peer-resume"

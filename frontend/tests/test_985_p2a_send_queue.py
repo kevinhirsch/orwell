@@ -47,8 +47,8 @@ def _read(rel):
 
 def test_outbox_state_and_helpers_exist():
     js = _read("static/js/chat.js")
-    assert "const _sendOutbox = []" in js, "the in-memory FIFO outbox must exist"
-    assert "let _flushingOutbox = false" in js, "the re-entrancy guard must exist"
+    assert "chatState._sendOutbox" in js, "the in-memory FIFO outbox must exist (moved to the chatState singleton — #1414)"
+    assert "chatState._flushingOutbox" in js, "the re-entrancy guard must exist (moved to the chatState singleton — #1414)"
     assert "function _enqueueSend(text)" in js, "the enqueue helper must exist"
     assert "function _flushSendOutbox()" in js, "the flush helper must exist"
 
@@ -86,8 +86,8 @@ def test_flush_is_idempotent_and_serial():
     js = _read("static/js/chat.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("\n  /**", 1) if "\n  /**" in fn else len(fn)]
-    assert "if (_flushingOutbox) return;" in fn, "re-entrancy guard: one flush at a time"
-    assert "if (isStreaming) return;" in fn, "never flush while a turn is in flight"
+    assert "if (chatState._flushingOutbox) return;" in fn, "re-entrancy guard: one flush at a time"
+    assert "if (chatState.isStreaming) return;" in fn, "never flush while a turn is in flight"
     assert "_sendOutbox.shift()" in fn, "FIFO drain: shift the head (removed once → at-most-once)"
 
 
