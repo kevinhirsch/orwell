@@ -596,34 +596,20 @@ def _uses_max_completion_tokens(model: str) -> bool:
     return any(m.startswith(p) or f"/{p}" in m for p in _MAX_COMPLETION_TOKENS_MODELS)
 
 
-# ADR 0010 follow-on #2: model-aware default OUTPUT ceiling for the Anthropic builder, which (unlike
-# the OpenAI-compatible path) REQUIRES an explicit max_tokens and 400s if it's too high for the model.
-# This replaces the single hardcoded `8192` stopgap: a reasoning model burns budget thinking before it
-# answers, so the floor must be generous — but it must stay under each family's hard cap. We size by
-# model family from published Anthropic output limits, defaulting to the safe 8192 floor for anything
-# unrecognized (so an unknown model is never sent a value that 400s). Order matters: match the LARGEST
-# qualifier first (Haiku-3.5 caps at 8192 even though "claude-…-4-…" patterns are 64K+).
-_DEFAULT_OUTPUT_TOKENS = 8192  # the conservative floor — supported by every modern Claude model
-# (substring, cap) — checked in order; first hit wins. Generous-but-safe per-family defaults.
-_ANTHROPIC_OUTPUT_CAPS = (
-    ("haiku-3", 8192),       # Haiku 3 / 3.5 — 8192 hard cap
-    ("claude-3-5", 8192),    # other Claude-3.5 snapshots — 8192
-    ("opus-4", 32768),       # Opus 4.x — supports up to 128K; 32K is a safe, generous reasoning floor
-    ("sonnet-4", 32768),     # Sonnet 4.x — up to 64K; 32K floor
-    ("haiku-4", 16384),      # Haiku 4.x — up to 64K; 16K floor (Haiku answers are shorter)
-)
-
-
+# ADR 0010 follow-on #2: the model-aware default OUTPUT ceiling — previously a family table + a
+# hardcoded 8192 stopgap RIGHT HERE — now lives in the token-policy RESOLVER
+# (`src/token_policy.resolve_output_cap`), so the number is a computed policy owned in one place, not
+# a literal at the call site. This thin wrapper is kept ONLY because agent_loop.py and the Anthropic
+# builder call `_model_max_output_tokens(model)` by name (and tests pin that exact call site); it
+# delegates to the resolver. The Anthropic builder REQUIRES an explicit max_tokens (400s if too high),
+# and the OpenAI/OpenRouter path applies it only when > 0 — both consume this via the wrapper.
 def _model_max_output_tokens(model: str) -> int:
     """The model-aware DEFAULT output cap used when the caller set no explicit ``max_tokens`` —
-    sized per Anthropic model family so a reasoning model has room to think AND answer, while never
-    exceeding the family's hard limit. Unknown models fall back to the conservative ``8192`` floor
-    (previously the single hardcoded constant)."""
-    m = (model or "").lower()
-    for needle, cap in _ANTHROPIC_OUTPUT_CAPS:
-        if needle in m:
-            return cap
-    return _DEFAULT_OUTPUT_TOKENS
+    delegated to ``token_policy.resolve_output_cap`` (which owns the per-family table + the
+    conservative 8192 floor for unrecognized models). Kept as a named wrapper so the existing
+    call sites/imports (agent_loop, the Anthropic builder) stay stable."""
+    from src.token_policy import resolve_output_cap
+    return resolve_output_cap(model)
 
 # OpenAI reasoning models (o1, o3, o4, gpt-5 families) only accept the default
 # temperature. Sending any explicit value — even 0.0 — returns HTTP 400
@@ -652,16 +638,37 @@ def _supports_thinking(model: str) -> bool:
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
 
 
-def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Optional[Dict]) -> None:
+# OpenRouter documents a 1024-token MINIMUM for Anthropic `reasoning.max_tokens`; a request that
+# sends a smaller value for an Anthropic model is REJECTED rather than clamped. Our reply-reserving
+# sub-budget (`token_policy.resolve_reasoning_max_tokens`) can dip below this when an admin sets a
+# tight per-class output cap (e.g. cap 256 → 153), so the emission site must not send a sub-floor
+# value to an Anthropic model. (Non-Anthropic reasoners have no documented floor and keep the exact
+# value, which is what protects their reply from the reasoning chain — #835.)
+_OPENROUTER_ANTHROPIC_REASONING_MIN = 1024
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """True for an Anthropic (Claude) model — direct (``claude-…``) or via an OpenRouter
+    ``anthropic/…`` slug. Used only to honor OpenRouter's Anthropic `reasoning.max_tokens` floor."""
+    if not model:
+        return False
+    m = model.lower()
+    return "claude" in m or m.startswith("anthropic/")
+
+
+def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Optional[Dict],
+                            requested_max_tokens: Optional[int] = None) -> None:
     """ADR 0010 slice B: inject the per-call-class reasoning budget into an OpenAI-compatible payload,
     PROVIDER-AWARE so it fires for the live model and never breaks a non-reasoning one (NOT gated on
     `_supports_thinking`, whose pattern list predates DeepSeek-V4 and would silently no-op the live
     narration model):
-      • OpenAI o-series  → `reasoning_effort`;
+      • OpenAI o-series  → `reasoning_effort` (effort-only; o-series reasoning is intrinsic);
       • OpenRouter       → the unified `reasoning` map (applied to reasoners like DeepSeek-V*/o-series,
-                           ignored for the rest — safe to always send);
+                           ignored for the rest — safe to always send), carrying BOTH the ratified
+                           `effort` AND a model-aware `max_tokens` sub-budget (see below);
       • other direct providers → only when the model is a known thinking model (else omit, so a plain
-                           chat model is byte-identical and never 400s on an unknown field).
+                           chat model is byte-identical and never 400s on an unknown field);
+                           effort-only there (the `max_tokens` sub-budget is an OpenRouter unified param).
     EXPLICIT OFF is a genuine disable, not an omission: when a call class resolves to effort
     "off" the policy carries ``reasoning is None``. OMITTING the field would let a reasoning model
     (DeepSeek-V*/o-series) fall back to its provider DEFAULT (often ON) — so "off" would silently
@@ -669,6 +676,15 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
     (the unified form documented as "whether reasoning is enabled"; verified upstream via
     ``debug.echo_upstream_body`` — ADR 0010). OpenAI o-series reasoning is intrinsic and cannot be
     disabled, so we leave it untouched there.
+
+    ADR 0010 follow-on #2 (the F-S4-D mechanism): on OpenRouter the `reasoning` map also carries a
+    MODEL-AWARE `max_tokens` sub-budget so thinking can NEVER starve the visible reply. A reasoning
+    model bills its hidden chain-of-thought against the SAME output budget as the answer, so we cap
+    the think at a fraction of the *effective* output ceiling — the explicit per-request/admin cap
+    when set (``requested_max_tokens``), else the model-aware default (``_model_max_output_tokens``),
+    whichever is TIGHTER — with ``token_policy.resolve_reasoning_max_tokens`` reserving reply headroom.
+    `effort` stays the primary control (for providers that only honor effort); `max_tokens` is the
+    hard reply-protecting bound. The player never sees any of these numbers (mandate #3).
 
     No-op without a policy (no call class ⇒ byte-identical). Shared by the streaming and
     non-streaming builders."""
@@ -689,7 +705,28 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
     if provider == "openai" and _uses_max_completion_tokens(model):
         payload["reasoning_effort"] = eff
     elif provider == "openrouter" or _supports_thinking(model):
-        payload["reasoning"] = {"effort": eff}
+        reasoning_map = {"effort": eff}
+        if provider == "openrouter":
+            # Bound reasoning below the reply's reserved headroom, sized off the tighter of the
+            # explicit per-request cap and the model-aware default (the resolver owns the formula).
+            from src.token_policy import resolve_reasoning_max_tokens
+            model_cap = _model_max_output_tokens(model)
+            if (isinstance(requested_max_tokens, int) and not isinstance(requested_max_tokens, bool)
+                    and requested_max_tokens > 0):
+                basis = min(requested_max_tokens, model_cap)
+            else:
+                basis = model_cap
+            reasoning_max = resolve_reasoning_max_tokens(basis)
+            # Only attach the explicit sub-budget when it is provider-VALID. A tight admin cap can
+            # drive it below OpenRouter's 1024-token Anthropic floor (cap 256 → 153), which Anthropic
+            # REJECTS — so for a Claude model below the floor we omit `max_tokens` and let `effort`
+            # (plus the tight cap itself) bound the think. A non-Anthropic reasoner has no such floor
+            # and keeps the exact value, which is what protects its reply from the reasoning chain
+            # (#835). At the usual (untightened) caps the sub-budget is far above the floor, so this
+            # guard is a no-op on the common path.
+            if reasoning_max >= _OPENROUTER_ANTHROPIC_REASONING_MIN or not _is_anthropic_model(model):
+                reasoning_map["max_tokens"] = reasoning_max
+        payload["reasoning"] = reasoning_map
 
 def _convert_openai_content_to_anthropic(content):
     """Convert OpenAI multimodal content blocks to Anthropic format.
@@ -1556,7 +1593,7 @@ async def _llm_call_async_impl(
         # ADR 0010: per-class reasoning budget on the non-streaming path too (utility-extraction /
         # background-authoring), + OpenRouter usage accounting so `cost` is returned — but ONLY when a
         # usage_sink is present (we're metering), so a non-metered call stays byte-identical.
-        _apply_reasoning_budget(payload, provider, model, policy)
+        _apply_reasoning_budget(payload, provider, model, policy, requested_max_tokens=max_tokens)
         if provider == "openrouter" and usage_sink is not None:
             payload["usage"] = {"include": True}
         # 0112: attach the Vault-free correlation metadata (only when observability is enabled;
@@ -1739,7 +1776,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         if _restricts_temperature(model):
             payload.pop("temperature", None)
         # ADR 0010 slice B: send the per-call-class reasoning budget (provider-aware; see helper).
-        _apply_reasoning_budget(payload, provider, model, policy)
+        _apply_reasoning_budget(payload, provider, model, policy, requested_max_tokens=max_tokens)
         if provider not in {"openrouter", "groq"}:
             payload["stream_options"] = {"include_usage": True}
         elif provider == "openrouter":
