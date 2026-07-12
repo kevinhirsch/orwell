@@ -54,6 +54,15 @@ strike the item.
    (full spec at E38). The 0004 "no hard-coded name list" do-not is amended to "**no fixed
    cast**: name corpora are raw material; no full-name+persona pairing may be hard-coded; the
    legacy Bible's names stay banned."
+   **Amended again — ruling #1 (amended), owner-ratified 2026-07-12 (feature 0116 §5):** names (and
+   the whole cast skeleton) are now **model-generated + engine-validated** rather than corpus-sampled.
+   The validators keep every guarantee ruling #1 protects — per-house + cross-season uniqueness, the
+   **legacy-Bible deny-list**, plausible shape, **no player-name collision** — and **per-season
+   generation makes a fixed cast structurally impossible** (a strictly stronger guarantee than
+   sampling from a fixed pool: there is no static pairing *to* hard-code). The vendored corpora survive
+   as the **deterministic floor** (stubbed / keyless-CI / golden lanes), so 0004's `isCorpusName`
+   inverse-realism gate becomes **floor-scoped** rather than universal; the deny-list is enforced on
+   **both** paths; the **roles-only test rule is unchanged**. See `docs/features/0116-model-authored-cast-genesis.md` §5.
 2. **A game-only reset script must exist and run from the Proxmox host** like the other
    scripts. **Shipped with this audit**: `deploy/orwell-game-reset.sh` — clears every per-user
    engine sandbox (saves, souls, Vault, casting intake), preserves `data/.env` **and** the
