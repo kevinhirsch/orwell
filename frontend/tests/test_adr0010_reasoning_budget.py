@@ -47,7 +47,7 @@ class _FakeClient:
         return _FakeStreamCM(self._captured, json)
 
 
-def _capture_payload(monkeypatch, url, model, *, policy):
+def _capture_payload(monkeypatch, url, model, *, policy, max_tokens=0):
     from src import llm_core as lc
     captured: dict = {}
     monkeypatch.setattr(lc, "_get_http_client", lambda: _FakeClient(captured))
@@ -56,7 +56,8 @@ def _capture_payload(monkeypatch, url, model, *, policy):
     monkeypatch.setattr(lc, "_clear_host_dead", lambda *a, **k: None)
 
     async def drive():
-        async for _ in lc.stream_llm(url, model, [{"role": "user", "content": "x"}], policy=policy):
+        async for _ in lc.stream_llm(url, model, [{"role": "user", "content": "x"}],
+                                     max_tokens=max_tokens, policy=policy):
             pass
 
     asyncio.get_event_loop().run_until_complete(drive())
@@ -66,8 +67,56 @@ def _capture_payload(monkeypatch, url, model, *, policy):
 def test_reasoning_fires_for_the_live_model_via_openrouter(monkeypatch):
     # The whole point: DeepSeek-V4 is a reasoning model but `_supports_thinking` doesn't match it,
     # so the budget MUST still reach the wire through the OpenRouter unified-param path.
+    from src.token_policy import resolve_output_cap, resolve_reasoning_max_tokens
     p = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro",
                          policy={"reasoning": {"effort": "medium"}, "max_tokens": 4096})
+    r = p.get("reasoning")
+    assert isinstance(r, dict) and r.get("effort") == "medium", r
+    # ADR 0010 follow-on #2 (F-S4-D): a MODEL-AWARE reasoning `max_tokens` sub-budget rides ALONGSIDE
+    # the effort so thinking can never starve the visible reply. No explicit request cap here ⇒ it's
+    # sized off the model-aware default output cap, and reserves reply headroom by construction.
+    cap = resolve_output_cap("deepseek/deepseek-v4-pro")
+    assert r.get("max_tokens") == resolve_reasoning_max_tokens(cap), r
+    assert 0 < r["max_tokens"] < cap, "reasoning must leave the reply room within the output cap"
+
+
+def test_reasoning_max_tokens_reserves_reply_headroom(monkeypatch):
+    # The reasoning sub-budget must always leave a majority-share of the output cap for the reply —
+    # bounding reasoning below the reply's reserve is the whole F-S4-D cure.
+    from src.token_policy import resolve_output_cap
+    p = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro",
+                         policy={"reasoning": {"effort": "medium"}})
+    cap = resolve_output_cap("deepseek/deepseek-v4-pro")
+    reasoning_budget = p["reasoning"]["max_tokens"]
+    assert cap - reasoning_budget >= reasoning_budget, "the reply must keep at least as much as thinking"
+
+
+def test_explicit_tight_request_cap_shrinks_the_reasoning_budget(monkeypatch):
+    # When the caller/admin sends a TIGHT explicit output cap, the reasoning sub-budget must shrink
+    # with it (sized off the tighter of the request cap and the model default) — the reply is sacred
+    # even under a small cap. A big model-aware default must never over-budget reasoning past a small
+    # request cap.
+    from src.token_policy import resolve_reasoning_max_tokens
+    p_tight = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro",
+                               policy={"reasoning": {"effort": "medium"}}, max_tokens=2000)
+    tight = p_tight["reasoning"]["max_tokens"]
+    assert tight == resolve_reasoning_max_tokens(2000), tight
+    assert 2000 - tight >= int(0.4 * 2000), "even a tight cap must reserve reply headroom"
+
+
+def test_o_series_reasoning_effort_carries_no_token_subbudget(monkeypatch):
+    # OpenAI o-series reasoning is intrinsic/effort-only — it rides `reasoning_effort`, NOT a
+    # `reasoning` map, so there is no token sub-budget to attach (and none must appear).
+    p = _capture_payload(monkeypatch, OAI_URL, "o3-mini", policy={"reasoning": {"effort": "medium"}})
+    assert p.get("reasoning_effort") == "medium"
+    assert "reasoning" not in p
+
+
+def test_direct_thinking_provider_stays_effort_only_no_subbudget(monkeypatch):
+    # A thinking model served by a NON-OpenRouter provider keeps the effort-only `reasoning` map
+    # (byte-identical to before) — the `max_tokens` sub-budget is an OpenRouter unified param, so we
+    # do not send it to a direct provider that may not understand it.
+    p = _capture_payload(monkeypatch, OAI_URL, "qwen3-max", policy={"reasoning": {"effort": "medium"}})
     assert p.get("reasoning") == {"effort": "medium"}
 
 

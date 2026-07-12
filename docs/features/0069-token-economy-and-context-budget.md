@@ -86,11 +86,17 @@ The **deeper** items it surfaced are tracked here so they land **with** the slic
    policy as a constant). Same resolver, same `settings.json` read-per-request pattern (no restart), same
    clamp + admin-gate as the reasoning budget. *(A gap on top of Slice B — B currently makes only
    reasoning runtime-editable.)*
-2. **Model-aware reasoning budget.** Slice B sends a `reasoning` map per class; **size it relative to the
-   resolved model's output cap/window** so reasoning can't starve the visible reply — the exact F-S4-D
-   mechanism (thinking billed against the same budget as the answer). The resolver reads the model's
-   max-output and reserves visible-reply headroom; and the Anthropic `max_tokens` fallback (the #481
-   4096→8192 stopgap) **folds into the resolver, model-aware**, rather than staying a hardcoded literal.
+2. **Model-aware reasoning budget.** ✅ **DONE** (2026-07-12, issue #1420 item #2). Slice B sends a
+   `reasoning` map per class; it is now **sized relative to the resolved model's output cap** so reasoning
+   can't starve the visible reply — the exact F-S4-D mechanism (thinking billed against the same budget as
+   the answer). `token_policy.resolve_reasoning_max_tokens(output_cap)` computes it —
+   `reasoning = min( clamp(0.5 × cap, 1024, 32000), cap − ceil(0.4 × cap) )` — reserving **≥40% of the cap
+   for the reply always** (≥ half when the fraction binds), sized off the *tighter* of the explicit
+   per-request/admin cap and the model default. `llm_core._apply_reasoning_budget` attaches it as the
+   OpenRouter unified `reasoning.max_tokens` beside the ratified `effort`. The Anthropic `max_tokens`
+   fallback (the #481 4096→8192 stopgap) is folded into `token_policy.resolve_output_cap(model)` (a
+   per-family table + 8192 floor); `llm_core._model_max_output_tokens` is a thin delegate. No number
+   reaches the player. Gate: `tests/test_adr0010_{token_policy,reasoning_budget}.py`.
    *(Extends Slice B; supersedes the #481 constant.)*
 3. **In-season "which cap is biting" capture.** Slice A records the full envelope; add the **applied
    `max_tokens`** (the cap actually sent) next to `outputTokens` and the `finish_reason` #481 emits, so a
