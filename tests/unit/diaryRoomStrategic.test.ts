@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { renderGameContext } from "../../src/engine/momentPrompts";
+import type { GameStateView } from "../../src/ports/GameSession";
 import { producerPrompt, deriveNpcKnowledge, NO_NPC_PATHWAY } from "../../src/engine/diaryRoom";
 import { resolvePending } from "../support/adr0003";
 import { PLAYER } from "../../src/domain/ids";
@@ -128,6 +129,91 @@ describe("0115 — the confessional through-line resurfaces post-season (0048)",
     const retro = sb.session.seasonRetrospective();
     expect(retro).not.toBeNull();
     expect(retro!.playerConfessionals).toEqual(expect.arrayContaining(["My whole game is quietly running the house"]));
+  });
+});
+
+// Feature 0115 / #1392 — DIARY-ROOM EXPOSURE SHRINK. The DR block is the ONE prompt-guided (not
+// structural) DR surface, so it is NARROWED to the turns where its irony is safely narratable: an entry
+// is surfaced only when the houseguest it CONCERNS is ABSENT from the scene. Roles only — the houseguest
+// names below are SYNTHETIC phonetic placeholders (Alfa/Bravo/Charlie), matching the neighbouring "A"/"B"
+// convention; they exist only to exercise the name-in-scene match, never as cast data.
+describe("0115 (#1392) — the DR block is gated to moments where the concerned houseguest is absent", () => {
+  const viewWith = (
+    diary: string[],
+    scene?: { present?: string[]; nearby?: string[] },
+  ): GameStateView =>
+    ({
+      started: true,
+      week: 3,
+      phase: "social",
+      moment: "social",
+      player: { id: "player", name: "The Player", archetype: "a", strategyStyle: "s", status: "active" },
+      house: [],
+      playerDiaryRoom: diary,
+      whereabouts: scene
+        ? {
+            room: "kitchen",
+            turnsHere: 1,
+            present: (scene.present ?? []).map((name, i) => ({ id: `npc:p${i}`, name })),
+            companions: [],
+            nearby: (scene.nearby ?? []).length
+              ? [{ room: "living-room", present: (scene.nearby ?? []).map((name, i) => ({ id: `npc:n${i}`, name })) }]
+              : [],
+          }
+        : undefined,
+    }) as unknown as GameStateView;
+
+  it("withholds an entry that names an in-ROOM houseguest, but surfaces entries about absent ones / no one", () => {
+    const ctx = renderGameContext(
+      viewWith(
+        [
+          "scheming to backstab Alfa the moment the veto is off",       // Alfa present   → withheld
+          "I plan to blindside Bravo when the numbers finally line up", // Bravo absent    → surfaced
+          "everyone here thinks I'm loyal but I'm quietly running this whole house", // no name → surfaced
+        ],
+        { present: ["Alfa"] },
+      ),
+    );
+    // The block header is present (some entries survive the gate)…
+    expect(ctx).toContain("THE PLAYER'S DIARY ROOM");
+    // …the present-target entry is WITHHELD (the concerned houseguest is in the scene)…
+    expect(ctx).not.toContain("backstab Alfa");
+    // …and the absent-target + name-free entries are SURFACED (safely narratable irony).
+    expect(ctx).toContain("blindside Bravo");
+    expect(ctx).toContain("running this whole house");
+  });
+
+  it("treats an EYESHOT (nearby) houseguest as in-scene too — an entry naming them is withheld", () => {
+    const ctx = renderGameContext(
+      viewWith(
+        ["Charlie is my real target — I just keep smiling at them", "no one suspects a thing"],
+        { present: ["Alfa"], nearby: ["Charlie"] },
+      ),
+    );
+    expect(ctx).not.toContain("Charlie is my real target"); // Charlie is in view (eyeshot) → withheld
+    expect(ctx).toContain("no one suspects a thing");         // name-free → surfaced
+  });
+
+  it("omits the whole DR block when EVERY entry concerns an in-scene houseguest (max exposure shrink)", () => {
+    const ctx = renderGameContext(
+      viewWith(["I'm cutting Alfa this week", "Alfa still has no idea it's coming"], { present: ["Alfa"] }),
+    );
+    expect(ctx.toLowerCase()).not.toContain("the player's diary room");
+    expect(ctx).not.toContain("cutting Alfa");
+  });
+
+  it("with NO scene presence known (no whereabouts), all entries surface — fail-open to prior behaviour", () => {
+    const ctx = renderGameContext(viewWith(["I'm cutting Alfa this week", "Alfa still has no idea"]));
+    expect(ctx).toContain("THE PLAYER'S DIARY ROOM");
+    expect(ctx).toContain("cutting Alfa");
+  });
+
+  it("word-boundary match: an absent houseguest is never suppressed by a coincidental substring", () => {
+    // "Ridley" present must not suppress an entry that merely contains "ride" — the gate is whole-word.
+    const ctx = renderGameContext(
+      viewWith(["I keep telling them we're ride-or-die but I'm gunning for them"], { present: ["Ridley"] }),
+    );
+    expect(ctx).toContain("ride-or-die but I'm gunning for them"); // surfaced: "ride" != "Ridley"
   });
 });
 

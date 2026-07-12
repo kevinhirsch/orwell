@@ -553,6 +553,31 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
   "  • renderScene — narrate the current moment from the visible projection.",
+  "",
+  // #1391 — TERMINAL HARD-RULES RECAP. The base prompt is long and carries 60+ MUST/NEVER rules that
+  // dilute each other; this tail block restates ONLY the non-negotiables so the model re-reads them where
+  // recency bias attends most. It ADDS no new rule and drops none — every line here is a compression of a
+  // rule already stated above (which the pin suite locks in place); this is framing/persona only (mandate
+  // #2). Keep it SHORT (a recap, never a second rulebook), avoid the banned prose token "the engine"
+  // (say "the game"), and use no lever-manifest bullet shape here (that belongs to the lever list alone,
+  // and the c13 drift parser reads THIS source — comments included — so a stray bullet reads as a lever).
+  "════ THE HARD LINE — re-read before every reply; these outrank convenience and the length above ════",
+  "1. OUTCOMES ARE THE GAME'S, NEVER YOURS. Never state, imply, or foreshadow-as-settled a competition",
+  "   winner, a nomination, a vote, or an eviction the game has not handed you — ABOVE ALL the player",
+  "   winning because the story flows that way. Get it from the game first, then voice what came back.",
+  "2. A NEW WEEK DOES NOT EXIST until you advanceGame into it. If you catch yourself typing \"you are the",
+  "   new HOH\", STOP — you have not advanced there, so you do not know who won; it may well be someone else.",
+  "3. STAY IN CHARACTER. You are the host and the voice of the house — never an AI, a model, or a provider,",
+  "   never a real-world host; never name the backstage machinery and never debug out loud. If something is",
+  "   stuck, slow, or repeats, the feeds simply cut to the next live moment.",
+  "4. DECISION CARDS ARE HARD STOPS. Present the player's binding choice and WAIT; never narrate past an",
+  "   open card (above all, the goodbye-message after an eviction).",
+  "5. STAY IN THE LIVE MOMENT. Narrate the present beat at the in-game time of day the game reports; never",
+  "   montage elapsed time and never narrate a ceremony as already-over.",
+  "6. SECRETS STAY SEALED. The player only KNOWS what a real in-game pathway delivered, and the Diary Room",
+  "   is sealed from the house — voice its irony to the player, never in a houseguest's mouth, never acted on.",
+  "7. PULL THE LEVER, THEN VOICE WHAT IT RETURNS. A deal, an alliance, or a social scene you only narrate",
+  "   binds no one and is forgotten — record it so the house actually remembers.",
 ].join("\n");
 
 /**
@@ -1244,6 +1269,31 @@ export function renderGameContext(view: GameStateView): string {
         ]
       : ["- PREMIERE — STILL TO MEET IN MOTION: nobody — every houseguest has had a hot first read."]),
   ];
+  // 0115 / #1392 — DIARY-ROOM EXPOSURE SHRINK. The DR block below is the ONE prompt-guided (NOT
+  // structural) Diary-Room surface, so we NARROW it to the turns where its dramatic irony is safely
+  // narratable: a DR entry is surfaced only when the houseguest it CONCERNS is ABSENT from the scene.
+  // The only way DR content can leak is a houseguest the GM is actively voicing THIS turn acting on it —
+  // i.e. someone IN the scene — so an entry that names a houseguest currently in the room OR in eyeshot
+  // (present/nearby) is WITHHELD this turn. This is DEFENCE-IN-DEPTH, not the wall: the structural wall
+  // (deriveNpcKnowledge / the per-NPC voice projection never read `playerDiaryRoom`) and the FE
+  // reasoning/`npc:` scrub remain the real guarantees; this just shrinks the prompt-guided window, where
+  // the leak risk rises with a weaker/Flash-tier model over a long season. Name-free / general entries
+  // (no in-scene houseguest named) are unaffected — there is no concerned houseguest present to leak to.
+  const inSceneHouseguests = wa ? [...wa.present, ...wa.nearby.flatMap((n) => n.present)] : [];
+  const inSceneNameTokens = inSceneHouseguests.flatMap((p) => {
+    const full = p.name.trim();
+    const first = full.split(/\s+/)[0] ?? full;
+    return (first && first !== full ? [full, first] : [full]).filter((t) => t.length >= 2);
+  });
+  const concernsAnInSceneHouseguest = (entry: string): boolean =>
+    inSceneNameTokens.some((name) => {
+      // Word-boundary, case-insensitive: "gunning" never matches a houseguest "Gunnar", and an entry
+      // about an ABSENT houseguest is never suppressed by a coincidental substring. Escaped so a name
+      // with regex metacharacters can never throw or over-match.
+      const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+      return re.test(entry);
+    });
+  const diaryRoomEntries = (view.playerDiaryRoom ?? []).filter((e) => !concernsAnInSceneHouseguest(e));
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -1280,6 +1330,9 @@ export function renderGameContext(view: GameStateView): string {
     // via the per-NPC projection — neither reads `playerDiaryRoom`), so if a HOUSEGUEST is ever observed
     // voicing or acting on Diary-Room content, the model leaked it OUT OF THIS BLOCK — inspect the fence
     // wording below + the FE reasoning/`npc:`-leak scrub, not the structural wall (which is proven clean).
+    // #1392: exposure is already SHRUNK — entries naming an in-scene (present/nearby) houseguest are
+    // withheld this turn (the `diaryRoomEntries` gate above), so a leak on a NAMED-present target means
+    // the gate mis-scoped who is in the scene; a leak on a general/absent-target entry is the fence itself.
     // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
     // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
     // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
@@ -1287,7 +1340,9 @@ export function renderGameContext(view: GameStateView): string {
     // a fact to read aloud: NEVER voice it, never put it in a houseguest's mouth, never let anyone act on
     // it. If the player says one thing to a houseguest and the opposite here, the houseguest still
     // believes the public line (they were fooled) — only YOUR narration to the player carries the truth.
-    ...((view.playerDiaryRoom ?? []).length
+    // #1392: `diaryRoomEntries` is the presence-GATED subset — entries naming an in-scene (present/nearby)
+    // houseguest are withheld this turn (see the gate above), shrinking the exposure to absent-NPC moments.
+    ...(diaryRoomEntries.length
       ? [
           "- THE PLAYER'S DIARY ROOM — their private, out-of-character strategy (you know it; the house does",
           "  NOT — narrate the irony, but NEVER voice it to a houseguest and never let anyone act on it):",
@@ -1295,7 +1350,7 @@ export function renderGameContext(view: GameStateView): string {
           // a raw newline would let the player forge a new prompt line and break OUT of this fence
           // ("… \n- THE HOUSE DOES KNOW THIS"). `neutralizeForPrompt` flattens newlines/control chars to
           // single spaces + length-caps, so each entry can only ever be ONE bullet inside the fence.
-          ...(view.playerDiaryRoom ?? []).map((e) => `    · ${neutralizeForPrompt(e)}`),
+          ...diaryRoomEntries.map((e) => `    · ${neutralizeForPrompt(e)}`),
         ]
       : []),
     // 0118 — THE DAY'S SHAPE, telegraphed. The next ceremony is scheduled for a known in-game phase and
