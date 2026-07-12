@@ -120,10 +120,11 @@ def test_layout_channel_forwards_layout_changed_as_layout_frames(run):
         ws.client_send({"t": "subscribe", "ch": "layout", "cid": "c_lay"})
         ack = await ws.recv_where(lambda f: f.get("t") == "ack" and f.get("cid") == "c_lay")
         assert ack["ch"] == "layout"
-        # The layout channel sends its ack BEFORE it enters `session_events.subscribe`, and a
-        # `layout-changed` edge is NOT ring-replayed — so a publish that races ahead of the channel's
-        # bus registration is simply LOST and the recv below hangs to timeout (a CI-runner flake). Wait
-        # deterministically for the subscriber to register, never a fixed sleep.
+        # The layout channel sends its ack BEFORE it enters `session_events.subscribe`. Wait
+        # DETERMINISTICALLY for the subscriber to register before publishing (never a fixed sleep) so
+        # this exercises the LIVE forward path — not the ring replay. (layout-changed is ring-durable
+        # as of F3 / #891, but the autouse fixture clears the ring per test, so a publish after the
+        # subscriber registers reaches it live; racing ahead of registration would hang the recv.)
         import asyncio as _a
         for _ in range(200):
             if session_events.subscriber_count(canon) >= 1:
