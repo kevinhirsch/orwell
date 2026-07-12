@@ -1,6 +1,6 @@
 import type { Beat, LiveSeasonState } from "./liveSeason";
 import type { TimeOfDay } from "./timeOfDay";
-import { WAKE_HOUR } from "./timeOfDay";
+import { WAKE_HOUR, eventSpanHours } from "./timeOfDay";
 import { CLOCK } from "./sleepConstants";
 
 /**
@@ -98,4 +98,34 @@ export function milestoneDue(live: LiveSeasonState | null | undefined): boolean 
   if (!m || live?.timeOfDay === undefined) return false;
   const hour = live.nightDepth ?? WAKE_HOUR;
   return hour >= m.targetHour;
+}
+
+/**
+ * 0119 (in-game-time pivot, Phase 3) — which duration CATEGORY a resolved beat belongs to. Comps run
+ * long, ceremonies are quick, evictions are in between; the finale is a long endgame event. Beats with no
+ * distinct duration (staged presentation drops, twists, the terminal) are absent ⇒ the caller keeps the
+ * flat per-beat default.
+ */
+const DURATION_CATEGORY: Partial<Record<Beat, "competition" | "ceremony" | "eviction">> = {
+  "hoh-competition": "competition",
+  "veto-competition": "competition",
+  "nominations": "ceremony",
+  "veto-ceremony": "ceremony",
+  "eviction": "eviction",
+  "final-eviction": "eviction",
+  "finale": "eviction",
+};
+
+/**
+ * 0119 — the in-game HOURS a resolved beat COSTS the day: a quick nomination/veto ceremony ~1h, a
+ * competition ~3h, an eviction/finale ~2h (from the shared `EVENT_DURATION` library, via `eventSpanHours`).
+ * `null` for a beat with no distinct felt duration ⇒ the caller keeps the flat per-beat default. Pure; no
+ * rng. The caller applies this ONLY when the per-conversation clock is live, so golden replay (that clock
+ * off) keeps the flat default and stays byte-identical — the different-events-cost-different-time layer is
+ * dormant exactly where the seeded/recorded streams must not move.
+ */
+export function beatFeltHours(beat: Beat | undefined): number | null {
+  if (!beat) return null;
+  const cat = DURATION_CATEGORY[beat];
+  return cat ? eventSpanHours(cat) : null;
 }

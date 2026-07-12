@@ -237,6 +237,10 @@ export class BbWorld extends World {
   dscSandbox?: import("../../src/composition/registry").UserSandbox;
   dscContext?: string;
 
+  // Feature 0119 — per-event felt durations scratch state.
+  pfdFlat?: { winner?: string; order: string[] };
+  pfdVariable?: { winner?: string; order: string[] };
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;

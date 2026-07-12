@@ -24,7 +24,7 @@ import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
-import { nextMilestone, milestoneDue as milestoneDueOf } from "../../engine/daySchedule";
+import { nextMilestone, milestoneDue as milestoneDueOf, beatFeltHours } from "../../engine/daySchedule";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
@@ -7031,7 +7031,14 @@ export class GameSessionAdapter implements GameSession {
         // deficit is 0 (no night ran) and the conflict tally is still empty.
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
           const wasRetired = this.live!.playerRetired ?? false;
-          advanceClock(this.live!);
+          // 0119 — different events cost different amounts of the in-game day: a quick ceremony ~1h, a
+          // comp ~3h, an eviction ~2h (beatFeltHours), instead of a flat +3h. Applied ONLY when the
+          // per-conversation clock is live, so golden replay (that clock off, master on) keeps the flat
+          // default and the recorded time-of-day stream is byte-identical (no re-record); calibration
+          // (master off) skips this whole block. A beat with no distinct felt duration ⇒ the flat default.
+          const feltHours = this.perConversationClockLive() ? beatFeltHours(ev?.beat) : null;
+          if (feltHours !== null) advanceClock(this.live!, feltHours);
+          else advanceClock(this.live!);
           // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
           // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
           // did NOT reach via retirement.
