@@ -30,6 +30,11 @@ import { isNarrow } from './platform.js';
 // imported binding is read-only; a shared object's fields are not). Behavior-preserving: chat.js
 // still owns all the logic and just references `chatState.X` where it used to reference `X`.
 import { chatState } from './chatState.js';
+// #1414 (R3 PR1): the #738 scroll-edge mask + recede-on-scroll banner — the first leaf
+// extraction from this god-object. Behavior-preserving: chat.js still calls
+// _initChatScrollEdges() from init() exactly as before, the logic just lives in its own
+// module now. Imported here only (never app.js / an html shell) so #1399 single-eval holds.
+import { _initChatScrollEdges } from './chatScrollEdges.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -369,46 +374,6 @@ import { chatState } from './chatState.js';
     if (!probesRes.ok) return null;
     const probes = await probesRes.json().catch(() => ({}));
     return probes[item.endpoint_id] || null;
-  }
-
-  // ── #738 item #9 · Chat transcript scroll-edge mask + recede-on-scroll banner ──
-  // Toggle the CSS state classes that drive the transcript's top/bottom fade mask
-  // (.edge-top / .edge-bottom on #chat-history) and the receding title banner
-  // (.chat-scrolled on #chat-container). The handler is passive + rAF-coalesced; it
-  // reads only the scroller's already-computed scroll metrics (no getBoundingClientRect,
-  // no forced layout) and writes classes at most once per frame. A childList-ONLY
-  // observer keeps the BOTTOM edge honest when new messages arrive while the reader is
-  // scrolled up (no scroll event fires then) — childList only, so streaming token
-  // appends (characterData inside an existing bubble) never storm it. Reduced-motion is
-  // handled entirely in CSS. Additive: this does NOT touch the streaming buffers
-  // (roundReplyText / roundReasoningText) or the live-stream render path.
-  var _scrollEdgeRaf = 0;
-  function _applyChatScrollEdges() {
-    _scrollEdgeRaf = 0;
-    var box = document.getElementById('chat-history');
-    if (!box) return;
-    var container = document.getElementById('chat-container');
-    var top = box.scrollTop;
-    var maxScroll = box.scrollHeight - box.clientHeight;
-    var scrollable = maxScroll > 4;
-    box.classList.toggle('edge-top', scrollable && top > 2);
-    box.classList.toggle('edge-bottom', scrollable && (maxScroll - top) > 2);
-    if (container) container.classList.toggle('chat-scrolled', top > 24);
-  }
-  function _scheduleChatScrollEdges() {
-    if (_scrollEdgeRaf) return;
-    _scrollEdgeRaf = (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(_applyChatScrollEdges);
-  }
-  function _initChatScrollEdges() {
-    var box = document.getElementById('chat-history');
-    if (!box || box._scrollEdgesWired) return;
-    box._scrollEdgesWired = true;
-    box.addEventListener('scroll', _scheduleChatScrollEdges, { passive: true });
-    try {
-      var mo = new MutationObserver(_scheduleChatScrollEdges);
-      mo.observe(box, { childList: true });
-    } catch (_) {}
-    _scheduleChatScrollEdges();
   }
 
   /**
