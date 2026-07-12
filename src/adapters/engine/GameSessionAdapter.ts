@@ -157,9 +157,10 @@ function isUsableTagline(s: string): boolean {
 }
 import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearance } from "../../engine/portraitPrompts";
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
-import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
+import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace, VOL_OF } from "../../engine/characterFactory";
+import type { Disposition } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
-import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
+import { evolveEmotion, arcNote, offscreenEmotion, composedEmotion, effectiveDisposition, settleScaleOf } from "../../engine/emotionalArc";
 import { strategicDriveWeight } from "../../engine/offscreen";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
@@ -478,6 +479,16 @@ const CONFESSIONAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_CONFESSIONAL_DEPTH
  * provable in isolation: unset ⇒ no offer is generated, no pending is raised, nothing folds ⇒ byte-identical.
  */
 const NPC_DEAL_OFFERS_ENABLED_DEFAULT = process.env.ORWELL_NPC_DEAL_OFFERS === "1";
+
+/**
+ * 0124 — whether the DEEPER character-evolution layer runs by DEFAULT (independent distress/confidence
+ * axes + strategic-temperament drift + disposition-tuned reactivity). OFF unless `ORWELL_SOUL_DEPTH=1`.
+ * A DEDICATED flag (sibling to `ORWELL_CONFESSIONAL_DEPTH`/`ORWELL_DEAL_DEPTH`) so calibration neutrality
+ * is provable in isolation: unset ⇒ `evolveEmotion` moves only the single 0041 scalar, the behavior reads
+ * use the plain `emotionalState`/static disposition, and NPC volatility is the legacy random draw ⇒
+ * byte-identical (the seeded `juryReach`/golden spine untouched).
+ */
+const SOUL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_SOUL_DEPTH === "1";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -881,6 +892,8 @@ export class GameSessionAdapter implements GameSession {
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
   private npcDealOffersEnabled = NPC_DEAL_OFFERS_ENABLED_DEFAULT;
+  /** 0124 — deeper character evolution (multi-axis affect + temperament drift + tuned reactivity); off ⇒ 0041 exactly. */
+  private soulDepthEnabled = SOUL_DEPTH_ENABLED_DEFAULT;
   /** 0122 — the last in-game day the daily confessional sweep ran, so it fires at most once per day. */
   private lastConfessionalSweepDay = 0;
   /**
@@ -4549,6 +4562,9 @@ export class GameSessionAdapter implements GameSession {
     // first impressions so the bias rides the scattered baseline; persisted so a showmance never resets.
     this.seedSeededRelationships(seed);
     this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
+    // 0124 (part C): tune each houseguest's starting reactivity to their disposition (temperamental ⇒ more
+    // volatile + slower to settle) instead of the flat random draw. Off ⇒ skipped ⇒ the draw stands (byte-identical).
+    if (this.soulDepthEnabled) this.applyDispositionReactivity();
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere). L21/L24:
     // seed BOTH views from the SAME premiere stream — the player-facing WEIGHTED positions (`presence`)
     // and the calibration-neutral BASE the off-screen society pairs on (`presenceBase`). The player's
@@ -6139,7 +6155,9 @@ export class GameSessionAdapter implements GameSession {
       statsOf: (id) => this.statsOf(id),
       rel: this.rel,
       // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
-      emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
+      // 0124 (part A): with soul-depth on, the COMPOSED read (confidence lifts, distress drags harder)
+      // stands in for the single scalar — so "confident AND rattled" competes worse. Off ⇒ the plain state.
+      emotionalOf: (id) => this.emotionalReadOf(id),
       // The hidden REST deficit (ADR 0006): the player's from how late THEY stayed up last night, an
       // NPC's from the latest phase they were ACTUALLY awake last night (ENG-NEW-1 — the earlier of
       // their character bedtime and how far the night ran, not a static aptitude tax). Feeds the comp
@@ -6156,18 +6174,15 @@ export class GameSessionAdapter implements GameSession {
           ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
           : undefined;
         if (!hg) return 0.55;
-        return derivedLoyalty(dispositionOf(hg.character.archetype), hg.soul.emotionalState);
+        return derivedLoyalty(this.dispositionReadOf(id), this.emotionalReadOf(id));
       },
       // 0107: the named-alliance cement into bloc detection — bounded, saturation-diluted; 0 for every
       // pair when no alliance is named ⇒ the seeded bloc/vote read is byte-identical (the calibration spine).
       allianceTie: (a, b) => allianceTieBoost(this.alliances.all(), a, b),
       // Static disposition (0044): gates which nomination tactic an HOH plays (pawn/backdoor/direct).
-      dispositionOf: (id) => {
-        const hg = this.house
-          ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
-          : undefined;
-        return hg ? dispositionOf(hg.character.archetype) : "neutral";
-      },
+      // 0124 (part B): with soul-depth on, the EFFECTIVE disposition (baseline bent by temperament drift)
+      // gates it instead — a repeatedly-burned houseguest plays more defensively. Off ⇒ the static baseline.
+      dispositionOf: (id) => this.dispositionReadOf(id),
       // #1320 night-gate: the HOH→nominations day boundary is live ONLY when the clock pacing is running
       // (the per-conversation clock AND the master clock) — it is the "deeper half" of the fast-forward
       // fix and rides the same pair, so the golden replay (which pins `ORWELL_TIME_PER_CONVERSATION=0`)
@@ -6299,6 +6314,16 @@ export class GameSessionAdapter implements GameSession {
   setNpcDealOffersEnabled(on: boolean): void { this.npcDealOffersEnabled = on; }
   /** Whether the NPC-initiated deal-offer layer is live (0123). */
   npcDealOffersEnabledNow(): boolean { return this.npcDealOffersEnabled; }
+
+  /** Turn the 0124 deeper character-evolution layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ evolveEmotion moves only the 0041 scalar, reads use the plain state ⇒ byte-identical).
+   *  Applies the disposition-tuned reactivity post-pass (part C) to the live cast when switched on. */
+  setSoulDepthEnabled(on: boolean): void {
+    this.soulDepthEnabled = on;
+    if (on) this.applyDispositionReactivity();
+  }
+  /** Whether the deeper character-evolution layer is live (0124). */
+  soulDepthEnabledNow(): boolean { return this.soulDepthEnabled; }
 
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
@@ -7231,13 +7256,50 @@ export class GameSessionAdapter implements GameSession {
    * (keyed off the game seed + the soul's own arc position — deterministic, restart-stable, and
    * the main beat stream is untouched).
    */
+  /** 0124 — the STATIC baseline disposition (from the archetype, the CHARACTER value); never drifts (0007). */
+  private baselineDispositionOf(id: EntityId): Disposition {
+    const hg = this.house
+      ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
+      : undefined;
+    return hg ? dispositionOf(hg.character.archetype) : "neutral";
+  }
+
+  /** 0124 (part B) — the EFFECTIVE disposition: the static baseline bent by the soul's temperament drift when
+   *  the layer is on; the plain static baseline otherwise (byte-identical). Never mutates the CHARACTER. */
+  private dispositionReadOf(id: EntityId): Disposition {
+    const baseline = this.baselineDispositionOf(id);
+    const soul = this.soulObj(id);
+    return this.soulDepthEnabled && soul ? effectiveDisposition(baseline, soul) : baseline;
+  }
+
+  /** 0124 (part A) — the emotional read the behavior layer uses: the COMPOSED axes (confidence lifts,
+   *  distress drags) when the layer is on; the plain 0041 `emotionalState` scalar otherwise (byte-identical). */
+  private emotionalReadOf(id: EntityId): number {
+    const soul = this.soulObj(id);
+    if (!soul) return 0.5;
+    return this.soulDepthEnabled ? composedEmotion(soul) : soul.emotionalState;
+  }
+
+  /** 0124 (part C) — stamp each houseguest's reactivity from their DISPOSITION rather than a flat random draw:
+   *  `volatility = VOL_OF[disposition]` (the temperamental swing harder; the same table the player uses) and a
+   *  `settleScale` (clash lingers, bond shrugs off). Touches only the SOUL (CHARACTER byte-stable, 0007) and no
+   *  rng (draw-preserving). Idempotent; applied only when the layer is on (at cast genesis / when toggled on). */
+  private applyDispositionReactivity(): void {
+    if (!this.house) return;
+    for (const hg of [this.house.player, ...this.house.npcs]) {
+      const disp = this.baselineDispositionOf(hg.id);
+      hg.soul.volatility = VOL_OF[disp];
+      hg.soul.settleScale = settleScaleOf(disp);
+    }
+  }
+
   private inflect(id: EntityId, event: EmotionalEvent): void {
     const soul = this.soulObj(id);
     if (!soul) return;
     const rng = new SeededRandom(hashSeed(
       `${this.gameSeed ?? this.house?.player.name ?? "season"}:arc:${id}:${event}:${soul.emotionalHistory.length}`,
     ));
-    evolveEmotion(soul, event, undefined, rng);
+    evolveEmotion(soul, event, undefined, rng, { soulDepth: this.soulDepthEnabled });
     const note = arcNote(event, this.week);
     soul.memory.push(note);                 // persisted arc (house snapshot, monotonic — 0007/0030)
     this.soul?.recordToSoul(id, note);       // vector recall index (0024), when wired into the sandbox

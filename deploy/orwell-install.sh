@@ -295,6 +295,11 @@ write_config() {
       # bounded. DEFAULT OFF in code (+ only ever acts at a lull) so the seeded gates stay byte-identical;
       # the deploy opts in here.
       echo "ORWELL_NPC_DEAL_OFFERS=1"
+      # Deeper character evolution (0124): independent distress/confidence axes, strategic-temperament
+      # drift (a burned houseguest hardens, mean-reverting), and disposition-tuned reactivity (temperamental
+      # houseguests are more sensitive + settle slower). Hidden layer only, CHARACTER byte-stable. DEFAULT
+      # OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
+      echo "ORWELL_SOUL_DEPTH=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded
