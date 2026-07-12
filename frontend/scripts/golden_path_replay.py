@@ -115,7 +115,10 @@ def main() -> int:
     for n in range(max(1, args.runs)):
         print(f"\n── replay run {n + 1}/{args.runs} ─────────────────────────────", flush=True)
         d = _replay_run(n, fixture=args.fixture, model=model, utility_model=utility_model,
-                        turn_timeout=120, turn_budget=args.turn_budget)
+                        turn_timeout=240, turn_budget=args.turn_budget)
+        # turn_timeout=240 (was 120): the driver's per-read socket budget must exceed the heavy
+        # advanceGame turn's now-permitted engine time (ORWELL_ENGINE_TIMEOUT=180 in the golden boot)
+        # so a slow-runner turn that streams silently through a long engine call is not cut short.
         rep = d.report((args.report + f".run{n + 1}.json") if args.report else None)
         digests.append(rep["digest"])
         failed.extend(d.inv.failed)

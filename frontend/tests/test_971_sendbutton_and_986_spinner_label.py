@@ -65,9 +65,9 @@ def test_predicate_requires_streaming_abort_session_and_not_backgrounded():
     js = _read("static/js/chat.js")
     fn = js[js.index("function _foregroundStreamLive()"):]
     fn = fn[:fn.index("function _syncSubmitButtonState()")]
-    assert "if (!isStreaming || !currentAbort) return false;" in fn, "must require a live reader"
-    assert "cur !== _streamSessionId" in fn, "must require we are on the streaming session"
-    assert "_backgroundStreams.has(_streamSessionId)" in fn, "a backgrounded run is NOT a foreground stream"
+    assert "if (!chatState.isStreaming || !chatState.currentAbort) return false;" in fn, "must require a live reader"
+    assert "cur !== chatState._streamSessionId" in fn, "must require we are on the streaming session"
+    assert "chatState._backgroundStreams.has(chatState._streamSessionId)" in fn, "a backgrounded run is NOT a foreground stream"
 
 
 def test_reconciler_composes_with_993_queue_text_while_streaming_is_send_not_stop():
@@ -83,7 +83,7 @@ def test_reconciler_composes_with_993_queue_text_while_streaming_is_send_not_sto
     # Text during a live stream → drop the Stop face but DON'T touch the live flag (the queue handles it).
     assert "submitBtn.dataset.mode = ''" in fn, "text during streaming must clear the Stop face"
     # Not streaming → clear a stuck 'streaming' mode + repaint via the global updater.
-    assert "if (isStreaming) isStreaming = false;" in fn, "a settled-but-stuck flag must be cleared"
+    assert "if (chatState.isStreaming) chatState.isStreaming = false;" in fn, "a settled-but-stuck flag must be cleared"
     assert "window._updateSendBtnIcon()" in fn, "must repaint send/upload/mic via the global updater"
 
 
@@ -95,7 +95,7 @@ def test_reconciler_wired_to_gamechanged_visibility_and_bg_settle():
     assert "_syncSubmitButtonState()" in gc[:200], "gamechanged must reconcile the button"
     # tab-return must reconcile BEFORE the frozen-stream early-return (so a stuck Stop recovers).
     vis = js[js.index("document.addEventListener('visibilitychange'"):]
-    vis_head = vis[:vis.index("if (!isStreaming) return;")]
+    vis_head = vis[:vis.index("if (!chatState.isStreaming) return;")]
     assert "_syncSubmitButtonState()" in vis_head, "tab-return must reconcile before the !isStreaming guard"
     # The backgrounded-settle path (the `else` of `!_isBgFinally`) must reconcile the button.
     assert "} else {" in js[js.index("if (!_isBgFinally) {"):]

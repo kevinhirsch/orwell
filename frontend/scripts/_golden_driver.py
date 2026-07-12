@@ -339,7 +339,20 @@ class GoldenDriver:
                       # refusals + strict-only retries). The golden record/replay must stay
                       # byte-deterministic with the legacy fail-soft call shapes, so the driver pins
                       # the LEGACY `soft` policy (exactly like the floor-start hatch above).
-                      ORWELL_ENRICHMENT_POLICY="soft")
+                      ORWELL_ENRICHMENT_POLICY="soft",
+                      # CI-load resilience (slow/contended gh-runner): the heavy advanceGame turn
+                      # (premiere→week1 — staged HOH setup + off-screen tick + folds) can blow the 30s
+                      # default FE→engine timeout, so the FE's engine call ReadTimeouts, chat_stream
+                      # closes mid-turn, and NO assistant row persists ("no new assistant message
+                      # persisted" — the golden-path CI flake #1512/#1514 only partly closed). Give the
+                      # golden boot GENEROUS engine timeouts: HARNESS-ONLY (production keeps its own
+                      # defaults) and DIGEST-NEUTRAL — a bigger timeout only lets a slow runner FINISH
+                      # the same deterministic work, never changing WHAT happens. Lifting the tight 3s
+                      # framing bound also stops a slow-runner framing read from timing out into the
+                      # fallback prompt and perturbing the recorded request stream (a would-be miss).
+                      ORWELL_ENGINE_TIMEOUT="180",
+                      ORWELL_ENGINE_FRAMING_TIMEOUT="30",
+                      ORWELL_ENGINE_POLL_TIMEOUT="60")
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture
