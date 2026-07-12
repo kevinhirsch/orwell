@@ -75,6 +75,21 @@ PUSH_PROMPT = ("I'm ready — production, run the next competition or ceremony r
 # burning the rest of a paid budget re-proving it turn after turn.
 PHASE_STALL_ABORT = 25
 
+# I4 — the async cast-authoring pre-warm wait (see `_await_cast_authoring`). Deep-authoring (0058) is
+# kicked FIRE-AND-FORGET during casting (createCharacter, floor-start hatch on), so it is NOT guaranteed
+# done when the walk reaches the I4 check. #1409 re-routes deep-authoring to the NARRATION model @ temp
+# 1.1 (slower + hotter than the legacy utility path) and golden forces authoring concurrency=1 (serial)
+# for determinism, so the 15-profile run becomes a long serial chain of large-model calls (+ temp-1.1
+# malformed-JSON retries) that can outlast a short check — the source of the flaky 5–15/15. Record needs
+# the FULL cast (a committable fixture is never partial), so its budget is generous headroom for that
+# slow serial run; replay's fixture-fed authoring is synchronous, so a short budget returns on the first
+# poll (the wait is a NO-OP on replay). The poll returns the instant the count reaches the full cast, so
+# the generous record budget costs nothing on a healthy run — it only buys time for a slow one, and a
+# genuine authoring failure still elapses it and fails I4 loudly with the real count (never masked).
+CAST_AUTHORING_WAIT_RECORD_S = 900
+CAST_AUTHORING_WAIT_REPLAY_S = 90
+CAST_AUTHORING_POLL_S = 3.0
+
 # Invariant 7 — the same leak definitions the game-build scrub enforces
 # (frontend/static/js/markdown.js) + the golden fixture gate (src/golden_path.py).
 RAW_NPC_ID_RE = re.compile(r"\bnpc:\d+\b", re.I)
@@ -381,6 +396,49 @@ class GoldenDriver:
             time.sleep(poll_s)
         print(f"  quiesce[{label}]: budget elapsed (beatSeq {last}) — proceeding", flush=True)
 
+    def _await_cast_authoring(self) -> tuple[int, int]:
+        """Bounded wait for the background cast-authoring pre-warm (0058) to land the FULL cast before
+        the I4 assertion. Polls the SAME count I4 asserts on — ``/api/admin/health``
+        ``castAuthoring.{authored,total}`` — until ``authored >= total`` (the whole cast) or the budget
+        elapses. Returns ``(authored, total)``.
+
+        WHY this is a wait, not a single read: deep-authoring is kicked fire-and-forget during casting,
+        so it is not guaranteed complete when the walk reaches I4. #1409 routes it to the narration model
+        @ temp 1.1 and golden forces authoring concurrency=1 (serial), so the 15-profile run is slow — a
+        variable 5–15/15 depending on whether it finished before the check (the flake this removes).
+
+        Progress is logged whenever the count moves, so a slow-but-progressing run is visibly distinct
+        from a genuine stall (0/15 that never climbs). On timeout it returns the LAST observed count and
+        lets I4 assert honestly — the wait removes the RACE, it never masks a real authoring miss. Replay
+        is a no-op: the fixture feeds authoring synchronously, so the first poll already reads the full
+        cast and this returns immediately (it mutates no engine state and contributes nothing to the
+        digest, so run-to-run determinism is untouched)."""
+        budget = (CAST_AUTHORING_WAIT_RECORD_S if self.mode == "record"
+                  else CAST_AUTHORING_WAIT_REPLAY_S)
+        started_at = time.time()
+        deadline = started_at + budget
+        authored, total = 0, 15
+        last_logged = -1
+        while time.time() < deadline:
+            try:
+                health = self._get(self.fe, "/api/admin/health")
+                comp = (health.get("orwell") or {}).get("castAuthoring") \
+                    or health.get("castAuthoring") or {}
+                authored = int(comp.get("authored") or 0)
+                total = int(comp.get("total") or 15)
+            except Exception:
+                pass
+            if authored != last_logged:
+                print(f"  authoring: {authored}/{total} deep-authored "
+                      f"({int(time.time() - started_at)}s elapsed)", flush=True)
+                last_logged = authored
+            if total and authored >= total:
+                return authored, total
+            time.sleep(CAST_AUTHORING_POLL_S)
+        print(f"  authoring: budget elapsed at {authored}/{total} after {int(budget)}s — proceeding "
+              "to the I4 assertion (a genuine miss now fails I4 with the true count)", flush=True)
+        return authored, total
+
     # ── the walk ──────────────────────────────────────────────────────────────────
 
     def _turn(self, text: str) -> str:
@@ -531,20 +589,7 @@ class GoldenDriver:
         # divergence and a key miss. Record mode additionally requires the FULL 15/15 for a
         # committable fixture (a partial cast is a wall-clock artifact, not golden state);
         # replay keeps the spec's >=13 tolerance since it inherits the recorded outcome.
-        authored, total = 0, 15
-        authoring_budget = 600 if self.mode == "record" else 90
-        deadline = time.time() + authoring_budget
-        while time.time() < deadline:
-            try:
-                health = self._get(self.fe, "/api/admin/health")
-                comp = (health.get("orwell") or {}).get("castAuthoring") or health.get("castAuthoring") or {}
-                authored = int(comp.get("authored") or 0)
-                total = int(comp.get("total") or 15)
-                if total and authored >= total:
-                    break
-            except Exception:
-                pass
-            time.sleep(5)
+        authored, total = self._await_cast_authoring()
         need = total if self.mode == "record" else 13
         self.inv.record("I4", "cast authoring lands >=13/15 deep profiles",
                         authored >= need, f"{authored}/{total} deep-authored"
