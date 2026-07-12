@@ -702,12 +702,14 @@ jobs:
           python3 -m venv frontend/.venv
           frontend/.venv/bin/pip install --upgrade pip
           frontend/.venv/bin/pip install -r frontend/requirements.txt
-      - name: mirror-parity gate — SSE/poll transport (blocking, the production default)
+      - name: mirror-parity gate — SSE/poll fallback transport (blocking)
         run: |
           set -uo pipefail
-          # The blocking F5 gate runs in the PRODUCTION-default transport (ORWELL_WS_TRANSPORT off ⇒
-          # SSE/poll fallback). Pinned explicitly so the WS turn-on work below never changes what this
-          # required leg proves. `MIRROR_WS_TRANSPORT=0` is a single-mode run of run_mirror_gate.sh.
+          # The blocking F5 gate runs in the SSE/poll FALLBACK transport (MIRROR_WS_TRANSPORT=0 ⇒
+          # ORWELL_WS_TRANSPORT off for this leg). Since 2026-07-10 (#1357) WS-on is the production
+          # default, so this leg proves the permanent fallback still passes F5. Pinned explicitly so the
+          # WS leg below never changes what this required leg proves. `MIRROR_WS_TRANSPORT=0` is a
+          # single-mode run of run_mirror_gate.sh.
           for attempt in 1 2 3 4; do
             echo "──── mirror-parity (SSE) attempt $attempt ────"
             if MIRROR_WS_TRANSPORT=0 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
