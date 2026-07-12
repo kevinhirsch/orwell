@@ -147,6 +147,30 @@
     return true;
   }
 
+  // #891 (F4): fell-behind detection. Every published event carries a monotonic per-session busSeq (F3)
+  // off the SAME counter — so a HOLE (this event's busSeq jumps past our high-water mark + 1) means the
+  // server had to drop an event we never received (a slow/stuck SSE queue overflowed). Read-only: it does
+  // NOT advance the mark (the board-ping dedupe / `_noteBusSeq` own that), so it can run before them.
+  // Fail-open: an unversioned event (no numeric busSeq) or no prior mark can't reveal a gap → false.
+  function _busGap(id, data) {
+    if (!id) return false;
+    var bs = data && data.busSeq;
+    if (typeof bs !== 'number' || !isFinite(bs)) return false;   // unversioned — can't detect a gap
+    var last = _lastBusSeq[id];
+    return typeof last === 'number' && bs > last + 1;            // a hole: we missed at least one event
+  }
+  // #891 (F4): advance the busSeq high-water mark for events the board-ping dedupe (`_isFreshPing`)
+  // does NOT track — chat events (run-started / message-added) and the `resync` sentinel — so the
+  // client's tracked busSeq stream stays contiguous (they increment the same counter as board pings)
+  // and a real hole is detectable without a false positive on the next event. Fail-open on unversioned.
+  function _noteBusSeq(id, data) {
+    if (!id) return;
+    var bs = data && data.busSeq;
+    if (typeof bs !== 'number' || !isFinite(bs)) return;
+    var last = _lastBusSeq[id];
+    if (typeof last !== 'number' || bs > last) _lastBusSeq[id] = bs;
+  }
+
   // #985 (P2-C): is an incoming event's session one WE should accept? We accept the per-tab session
   // we're viewing (the original rule) AND — in the game build — the bound CANONICAL game session,
   // even when our per-tab `currentSession()` hasn't yet converged to it. The published `run-started`
@@ -192,6 +216,18 @@
 
   function handle(type, data) {
     var id = data && data.session;
+    // #891 (F4): fell-behind RECOVERY. The server enqueues a `resync` sentinel when a subscriber's SSE
+    // queue overflowed (it had to drop events); independently, a HOLE in the busSeq stream means we
+    // missed one. Either way, catch up with a full history reconcile through the EXISTING coalesced seam
+    // (`scheduleReconcile` → softReloadHistory) — the same mechanism message-added uses. Read the mark
+    // BEFORE the board-ping dedupe below advances it (so a board ping that also reveals a gap still fires
+    // its own notify). Advance the mark here only for events `_isFreshPing` doesn't track (chat events +
+    // the sentinel), so the stream stays contiguous and we don't re-detect the same hole. Fail-open: a
+    // missing reload seam / unversioned events behave exactly as today.
+    var _isBoardPing = (type === 'game-updated' || type === 'layout-changed');
+    if (id && (type === 'resync' || _busGap(id, data))) { scheduleReconcile(id); }
+    if (id && !_isBoardPing) { _noteBusSeq(id, data); }
+    if (type === 'resync') return;               // the sentinel carries no board/chat payload of its own
     // Board/layout pings are not chat — handle them before the chat-session gate (they ride the
     // canonical session; the player is on it during the game). Messenger model: NO spectator/lockout.
     // #891 (F3): dedupe by the ping's `busSeq` so a ring-REPLAYED ping (reconnect/backgrounded catch-up)
@@ -261,6 +297,7 @@
     es.addEventListener('message-added', function (e) { handle('message-added', parse(e)); });
     es.addEventListener('game-updated', function (e) { handle('game-updated', parse(e)); });   // 0064 §B/D
     es.addEventListener('layout-changed', function (e) { handle('layout-changed', parse(e)); }); // 0064 F
+    es.addEventListener('resync', function (e) { handle('resync', parse(e)); });   // #891 F4 overflow recovery
     es.onerror = function () {
       // EventSource auto-reconnects on transient drops. Only if it hard-closes
       // (readyState CLOSED) do we re-establish, with capped backoff.

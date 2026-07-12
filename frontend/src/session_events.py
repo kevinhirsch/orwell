@@ -134,9 +134,40 @@ _RING_REPLAY_EVENTS = ("run-started", "message-added", "game-updated", "layout-c
 # front) stay open between real events.
 _HEARTBEAT_S = 20
 
+# F4 (#891) — overflow recovery. A subscriber queue is bounded (`subscribe` mints maxsize=256). When a
+# slow/stuck consumer's queue fills, `put_nowait` raises `asyncio.QueueFull`. Silently dropping the
+# payload (the old bare `except: pass`) leaves that client a PERMANENT HOLE in its monotonic `busSeq`
+# stream with no signal to recover. Instead we drop a bounded batch of the OLDEST (now-superseded)
+# payloads to reclaim room and enqueue ONE `resync` sentinel — a full-reconcile signal. How many stale
+# payloads to reclaim before enqueuing the sentinel (a full history reconcile supersedes them all).
+_OVERFLOW_DRAIN = 32
+
 
 def _fmt(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _recover_overflowed_subscriber(session_id: str, q: "asyncio.Queue") -> None:
+    """F4 (#891): a subscriber's queue is full — recover it instead of leaving a silent permanent gap.
+
+    Best-effort drain a bounded batch of the oldest (now-superseded) payloads to reclaim room, then
+    enqueue a single `resync` sentinel — an ordinary event carrying its own monotonic `busSeq` via the
+    normal `_fmt`/`_next_seq` path, so ordering into this queue stays monotonic. The sentinel tells the
+    client "you fell behind — reload from history," which supersedes every queued ping anyway. If even
+    the sentinel won't fit after the drain, that is acceptable: the client's own busSeq gap-detection
+    (sessionSync.js) is the backstop. Targeted at the ONE stuck queue (not the ring / other subscribers).
+    """
+    # Reclaim room for the sentinel. The queued payloads are stale — a full reconcile supersedes them.
+    for _ in range(_OVERFLOW_DRAIN):
+        try:
+            q.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+    sentinel = _fmt("resync", {"session": session_id, "busSeq": _next_seq(session_id)})
+    try:
+        q.put_nowait(sentinel)
+    except asyncio.QueueFull:
+        pass  # still full after the drain — the client's busSeq gap-detection recovers it.
 
 
 def publish(session_id: str, event: str, data: Optional[dict] = None) -> None:
@@ -165,7 +196,17 @@ def publish(session_id: str, event: str, data: Optional[dict] = None) -> None:
     for q in list(subs):
         try:
             q.put_nowait(payload)
+        except asyncio.QueueFull:
+            # F4 (#891): this subscriber fell behind and its bounded queue is full. Don't silently drop
+            # the payload into a permanent busSeq gap — recover the subscriber with a single `resync`
+            # sentinel so its client reloads from history. Best-effort + isolated to this one queue;
+            # must never break delivery to the other (healthy) subscribers.
+            try:
+                _recover_overflowed_subscriber(session_id, q)
+            except Exception:
+                pass
         except Exception:
+            # Any other unexpected per-subscriber error is swallowed so the fan-out loop survives.
             pass
 
 
