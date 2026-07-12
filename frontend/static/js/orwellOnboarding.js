@@ -855,13 +855,18 @@
       // A feed is connected (the healthy case): clear any stale no-feed notice/disabled composer
       // from a moment ago (e.g. this route() pass landed right after a feed appeared).
       hideNoFeedNotice();
+      // 0065/0116 AUTHOR WARM — kick FIRST, the moment a model is confirmed configured and the season
+      // hasn't started (i.e. immediately on a post-factory-reset app load), BEFORE the interview session
+      // opens or the producers reach out. The (genesis skeleton → identity → deep author) pipeline is the
+      // longest pre-game work — with 0116 it fronts a cast-sketch call plus 15 deep calls — so it needs
+      // maximum lead time to be well underway before the player's first prompt. Fire-and-forget and
+      // idempotent (`_authorWarmKicked`); the server resolves the user from credentials, so it has NO
+      // dependency on the interview session opened below — hoisting it here only buys lead time.
+      _orwellWarm("prewarm-cast");
       // #874 (owner ruling): the healthy case gets NO gate and NO modal — the producers reach out
       // in-chat immediately. Open the fresh interview session (F7) and fire the producers' kickoff
       // directly; there is no intermediate "Start casting" confirm step anymore.
       await openFreshInterviewSession();
-      // 0065 AUTHOR WARM: a model is configured and the season hasn't started — pre-seed + deeply author
-      // the cast in the background NOW, before the interview, so it is fully authored before any portrait.
-      _orwellWarm("prewarm-cast");
       try { if (window._orwellOpenGameAfterCasting) window._orwellOpenGameAfterCasting(); } catch (_) {}
     } catch (_) {
       // Engine unreachable: on the game build that's a dark house, not a silent skip (F5).

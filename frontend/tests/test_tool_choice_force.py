@@ -151,11 +151,11 @@ def test_tool_choice_interop_with_reasoning_low(monkeypatch):
         tools=_TOOLS, tool_choice="required",
         policy={"reasoning": {"effort": "low"}, "max_tokens": 4096},
     )
-    # Both present, each on its own key. (The reasoning map also carries a model-aware `max_tokens`
-    # sub-budget per ADR 0010 #2 — assert the effort, not exact equality, so the two channels stay
-    # independent regardless of the reasoning sizing.)
+    # Both present, each on its own key. (OpenRouter's `reasoning` takes EITHER effort OR max_tokens,
+    # never both — #1543 — so a valid budget rides as the model-aware `max_tokens` sub-budget; the point
+    # here is that the reasoning channel and tool_choice stay independent, whatever the reasoning shape.)
     assert p.get("tool_choice") == "required", p
-    assert (p.get("reasoning") or {}).get("effort") == "low", p
+    assert (p.get("reasoning") or {}).get("max_tokens"), p
     # The directives don't bleed into each other.
     assert "reasoning" not in str(p.get("tool_choice"))
     assert "tool_choice" not in json.dumps(p.get("reasoning"))
@@ -166,8 +166,8 @@ def test_reasoning_low_without_forcing_has_no_tool_choice(monkeypatch):
     p = _capture_payload(
         monkeypatch, OR_URL, "z-ai/glm-4.7",
         tools=_TOOLS, policy={"reasoning": {"effort": "low"}, "max_tokens": 4096})
-    # effort on its own channel (a model-aware `max_tokens` sub-budget rides along per ADR 0010 #2).
-    assert (p.get("reasoning") or {}).get("effort") == "low"
+    # reasoning on its own channel as the model-aware `max_tokens` sub-budget (OpenRouter one-param, #1543).
+    assert (p.get("reasoning") or {}).get("max_tokens")
     assert "tool_choice" not in p
 
 

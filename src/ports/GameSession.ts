@@ -244,8 +244,9 @@ export interface CompetitionStagingView {
   winner: NamedRef;
   /** The FIXED elimination order of the losers, earliest-out first (names) — author one line per entry, IN ORDER. */
   dropOrder: NamedRef[];
-  /** The 0042 library scaffold the model riffs ON (and the deterministic floor when no fiction is authored). */
-  library: { name: string; premise: string; beats: string[]; winReads: string };
+  /** The 0042 library scaffold the model riffs ON (and the deterministic floor when no fiction is authored).
+   *  `theme` is the seeded 0125 skin (Vault-free flavor) the mechanic is already dressed in; absent when off. */
+  library: { name: string; theme?: string; premise: string; beats: string[]; winReads: string };
   /**
    * Whether VALIDATED fiction is ALREADY stored for this competition — the FE's persistent "author exactly
    * once per comp" guard. The staged comp stays surfaced across every reveal round until it crowns, so the
@@ -849,6 +850,8 @@ export interface CompetitionResultView {
   winner: { id: EntityId; name: string } | null;
   /** The drawn competition's name (0042) — set while a comp beat is live. */
   name?: string;
+  /** The seeded THEME/skin over the mechanic (0125) — e.g. "Outer Space". Vault-free flavor; absent when themes are off. */
+  theme?: string;
   /** The drawn competition's narrative format (endurance / puzzle / quiz / skill / crapshoot / social). */
   format?: string;
   /** The Vault-free narrative scaffold (0042/0018): premise + beats + how a win reads — flavor only, never a stat or score. */

@@ -724,8 +724,19 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
             # and keeps the exact value, which is what protects its reply from the reasoning chain
             # (#835). At the usual (untightened) caps the sub-budget is far above the floor, so this
             # guard is a no-op on the common path.
+            #
+            # OpenRouter's unified `reasoning` accepts EITHER `effort` OR `max_tokens`, NEVER BOTH —
+            # sending both returns HTTP 400 "Only one of reasoning.effort and reasoning.max_tokens can
+            # be specified" (observed on z-ai/glm-5.2 via Novita), which empties the whole response and
+            # stalls the game (no reply, no reasoning). So when we have a provider-valid `max_tokens`,
+            # send it ALONE and DROP `effort`: `max_tokens` is the precise reply-protecting bound
+            # (#1420-#2 F-S4-D), sized off the tighter per-call-class cap so it still scales by class
+            # (narration's big cap → big think; utility's small cap → small) AND can never starve the
+            # visible reply. Fall back to `effort` alone only where a valid `max_tokens` can't be sent
+            # (the Anthropic sub-1024-floor case, #1481). NOTE: every automated gate stubs the LLM, so
+            # this provider contract is only exercised on a real key (the 0108 golden RECORD caught it).
             if reasoning_max >= _OPENROUTER_ANTHROPIC_REASONING_MIN or not _is_anthropic_model(model):
-                reasoning_map["max_tokens"] = reasoning_max
+                reasoning_map = {"max_tokens": reasoning_max}
         payload["reasoning"] = reasoning_map
 
 def _convert_openai_content_to_anthropic(content):

@@ -777,6 +777,15 @@ export class BbWorld extends World {
     seasonHashB?: string;
   };
 
+  // Feature 0125 — competition theme variety scratch state (one bag).
+  ctv?: {
+    on?: { views: import("../../src/ports/GameSession").CompetitionResultView[]; evictionOrder: readonly string[] };
+    off?: { views: import("../../src/ports/GameSession").CompetitionResultView[]; evictionOrder: readonly string[] };
+    themes?: { hoh: (string | undefined)[]; veto: (string | undefined)[] };
+    det?: string[];
+    detB?: string[];
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }
