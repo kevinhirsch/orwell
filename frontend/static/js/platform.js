@@ -96,18 +96,32 @@ let _gameChangedTimer = null;
 // up to the claimed commit (and re-fetch briefly if the read raced the write) instead of
 // rendering a stale board beside a fresh ceremony card for a whole poll interval.
 let _gameChangedBeat = 0;
+// F6 (#1538, #891): the debounce coalesces a burst into ONE event whose `detail.reason`
+// is LAST-WINS — so when a routine board refresh (e.g. "tool:recordInteraction",
+// "ws:state", "tab-visible") arrives last in the same window, it MASKS an earlier
+// ceremony/decision beat (a crown, an eviction) from any listener that picks a cue by
+// reason (orwellHaptics.js). We ADDITIONALLY accumulate the SET of reasons seen across
+// the debounce window and carry it as `detail.reasons` — additive only: the last-wins
+// `detail.reason`, the 250ms debounce, and the coalesced-to-highest `beatSeq` are all
+// byte-identical. Listeners that don't care ignore it; haptics reads it to pick the most
+// salient beat even when a routine refresh was last. This is NOT a second dispatcher —
+// still the ONE `orwell:gamechanged` emitter (test_g15_gamechanged.py).
+const _gameChangedReasons = new Set();
 
 export function orwellGameChanged(reason, beatSeq) {
   const b = Number(beatSeq);
   if (Number.isFinite(b) && b > _gameChangedBeat) _gameChangedBeat = b;
+  _gameChangedReasons.add(String(reason || ''));
   if (_gameChangedTimer) clearTimeout(_gameChangedTimer);
   _gameChangedTimer = setTimeout(() => {
     _gameChangedTimer = null;
     const beat = _gameChangedBeat;
     _gameChangedBeat = 0;
+    const reasons = Array.from(_gameChangedReasons);
+    _gameChangedReasons.clear();
     try {
       window.dispatchEvent(new CustomEvent('orwell:gamechanged', {
-        detail: { reason: String(reason || ''), beatSeq: beat > 0 ? beat : undefined },
+        detail: { reason: String(reason || ''), beatSeq: beat > 0 ? beat : undefined, reasons },
       }));
     } catch (_) { /* fail open — every panel keeps its poll fallback */ }
   }, GAMECHANGED_DEBOUNCE_MS);

@@ -159,6 +159,9 @@
 
   // ── Beat classification — PUBLIC reason/kind ONLY ──────────────────────────
   // gamechanged reasons: "tool:runCompetition", "decision:<kind>", "turn-settled"…
+  // The three pure classifiers below are marker-delimited (no window/DOM refs) so
+  // the F6 test can extract + unit-test them under Node (test_1538_haptic_cue_split).
+  // #1538-BEAT-CLASSIFY-START
   function beatForReason(reason) {
     reason = String(reason || "");
     if (reason === "tool:runCompetition") return "crown";
@@ -183,8 +186,36 @@
     // neutral confirm acknowledgement.
     return "decision";
   }
+
+  // ── F6 (#1538): pick ONE cue from a whole DEBOUNCE WAVE of reasons ──────────
+  // The g15 dispatcher coalesces a burst into a single event whose LAST-WINS
+  // `detail.reason` may be a routine board refresh that maps to NO beat — masking
+  // an earlier ceremony/decision beat in the same wave. Given the full SET of
+  // reasons (`detail.reasons`), classify each and return the MOST SALIENT beat, so
+  // distinct mutation CLASSES still drive distinct cues even when coalesced (a
+  // ceremony beat always wins over a routine refresh that produced no beat). This
+  // reads only PUBLIC reason strings — never any secret/Vault state — and fires at
+  // most ONE cue per wave (no back-to-back buzzing). Salience: most consequential
+  // house event first.
+  var BEAT_SALIENCE = ["eviction", "veto", "noms", "crown", "decision"];
+  function beatForWave(reasons) {
+    if (!reasons || !reasons.length) return null;
+    var present = {};
+    for (var i = 0; i < reasons.length; i++) {
+      var b = beatForReason(reasons[i]);
+      if (b) present[b] = true;
+    }
+    for (var j = 0; j < BEAT_SALIENCE.length; j++) {
+      if (present[BEAT_SALIENCE[j]]) return BEAT_SALIENCE[j];
+    }
+    return null;
+  }
+  // #1538-BEAT-CLASSIFY-END
+
   // Exposed for tests so the public-reason → beat map is gate-pinned.
   window.orwellHapticsBeatFor = beatForReason;
+  // Exposed for tests so the per-wave cue split (F6) is gate-pinned.
+  window.orwellHapticsBeatForWave = beatForWave;
 
   // ── Wiring ─────────────────────────────────────────────────────────────────
   // The CONFIRM beat: a bound decision fires `orwell:gamechanged` with
@@ -193,8 +224,14 @@
   // crown is decided.
   window.addEventListener("orwell:gamechanged", function (e) {
     try {
-      var reason = e && e.detail && e.detail.reason;
-      var beat = beatForReason(reason);
+      var detail = e && e.detail;
+      // F6 (#1538): prefer the per-wave reason SET so a trailing routine refresh
+      // can't mask an earlier ceremony/decision beat. Fall back to the single
+      // last-wins reason for any dispatch that didn't carry the set.
+      var reasons = detail && detail.reasons;
+      var beat = (reasons && reasons.length)
+        ? beatForWave(reasons)
+        : beatForReason(detail && detail.reason);
       if (beat) fire(beat);
     } catch (_) { /* fail-soft */ }
   });
