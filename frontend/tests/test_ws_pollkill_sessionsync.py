@@ -8,7 +8,7 @@ concurrently with the WS socket. With WS on, that is a live dual-transport race.
 
 Every leg sessionSync carries has a verified WS carrier fed from the SAME server source (all off
 the canonical session): the peer's turn rides the `chat` replay-then-tail broadcast (agent_runs run
-buffer → chat.js `_onWsChatFrame`), the board reconcile rides the `state`/`hud` edge (session_events
+buffer → chatWsSplice.js `_onWsChatFrame`), the board reconcile rides the `state`/`hud` edge (session_events
 bus → platform.js → the ONE g15 dispatcher), and layout rides the `layout` channel. The socket also
 resolves the canonical id itself (its hello/bind ack), so the game-session poll is redundant too.
 

@@ -367,6 +367,17 @@ export class BbWorld extends World {
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
 
+  // Deeper character evolution (0124) scratch state.
+  dceSoul?: import("../../src/engine/characterFactory").Soul;
+  dceHoh?: EntityId;
+  dceNomsBase?: EntityId[];
+  dceNomsHardened?: EntityId[];
+  dceCompConfident?: number;
+  dceCompDistressed?: number;
+  dceClashSwing?: number;
+  dceBondSwing?: number;
+  dceSandbox?: import("../../src/composition/registry").UserSandbox;
+
   // NPC-initiated deal offers (0123) scratch state.
   dofSandbox?: import("../../src/composition/registry").UserSandbox;
   dofOffer?: import("../../src/ports/GameSession").PendingDecisionView | null;
