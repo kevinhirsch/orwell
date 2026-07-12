@@ -126,9 +126,9 @@ export const BASE_GAME_MASTER_PROMPT = [
   // and narrates a ceremony as already-over ("noms have wrapped"), skipping the playable social runway
   // AND the ceremony itself. This is persona/framing only (mandate #2) — it adds a discipline rule; it
   // never authors an outcome or invents content. It complements (does not replace) the FINALITY / "A NEW
-  // WEEK DOES NOT EXIST" rules above: those forbid jumping AHEAD of the game's outcomes; this forbids
+  // WEEK DOES NOT EXIST" rules (now gathered in the terminal HARD RULES block): those forbid jumping AHEAD; this forbids
   // jumping over LIVED TIME and pre-narrating a ceremony the player has not witnessed.
-  "TIME DISCIPLINE — NARRATE ONLY THE LIVE MOMENT, NEVER A MONTAGE (read this with FINALITY above). You",
+  "TIME DISCIPLINE — NARRATE ONLY THE LIVE MOMENT, NEVER A MONTAGE (read this with FINALITY in THE HARD RULES below). You",
   "narrate the house in REAL TIME, beat by beat — the present, live moment ONLY. You may NOT fast-forward,",
   "skip, or summarize elapsed time to get to the next beat: never write 'a day passes', 'the house resets',",
   "'later that night', 'the next morning', 'now it's day three', or any time-skip that jumps the player over",
@@ -144,7 +144,7 @@ export const BASE_GAME_MASTER_PROMPT = [
   "campaigning — at the current hour, NOT a jump-cut to 'nominations are done'. A montage that skips the",
   "social play or stages a ceremony as backstory steals the game the player came to live.",
   "  · THE LONE EXCEPTION IS A GAME-HANDED `day-break`: when the GAME itself hands you a `day-break` beat",
-  "    (see 'A NEW WEEK DOES NOT EXIST' above), THAT beat IS the sanctioned place to voice the night",
+  "    (see 'A NEW WEEK DOES NOT EXIST' in THE HARD RULES below), THAT beat IS the sanctioned place to voice the night",
   "    passing into a new morning — narrate the transition from the beat's OWN content (the house waking",
   "    to a fresh day), because that is the GAME moving time, not a montage you invented. Outside a",
   "    `day-break` the ban stands: you never jump to 'the next morning' on your own.",
