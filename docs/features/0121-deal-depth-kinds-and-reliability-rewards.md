@@ -108,8 +108,9 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
 - [x] **[Part 2a] Loyalty streak (reward 3):** consecutive kept deals with the same partner compound the
       honored fold (bounded `DEAL_STREAK`); a break resets the streak; off ⇒ the plain honored fold
       (byte-identical). *(`dealDepth.test.ts`.)*
-- [ ] **[Part 2b] comp-throw live wiring:** a resolved comp emits a `compete` action per competitor (needs
-      the transient comp-intent threaded to the crown beat).
+- [x] **[Part 2b] comp-throw live wiring:** the HOH / veto crown emits a `compete` action per competitor,
+      judged by OUTCOME (broken iff the promisor WON the comp they swore to throw — no fragile intent
+      threading); resolves live end-to-end. *(`dealDepthLive.test.ts` drives a real season.)*
 - [ ] **[Part 2b] Reputation that spreads (reward 1) + reliable-ally protection (reward 2):** a kept deal
       seeds a diffusing "keeps their word" reputation (gossip) that raises NPC deal-willingness; a proven
       partner protects the player — all hidden, no number.

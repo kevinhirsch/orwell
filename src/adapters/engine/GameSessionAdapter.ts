@@ -8188,6 +8188,28 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     if (!s) return [];
     switch (ev.beat) {
+      // 0121: a comp CROWN is where a `comp-throw` promise resolves — judged by OUTCOME (did the promisor
+      // WIN the comp they swore to throw?), which is observable here; no fragile comp-intent threading.
+      // A compete action per competitor: the winner "won" (breaks a throw-promise), everyone else "threw"
+      // (kept — they didn't take the power). Gated on the deal-depth layer (off ⇒ no comp-throw deals ⇒
+      // a no-op anyway — byte-identical). The intermediate inert comp-round/comp-elimination beats never
+      // reach here (distinct beat keys); this fires only at the crown, where the winner is set.
+      case "hoh-competition": {
+        if (!this.dealDepthEnabled || !s.hoh) return [];
+        const finalThree = s.active.length === 3; // Final 3 lifts the outgoing-HOH sit-out
+        const field = s.active.filter((id) => finalThree || id !== s.outgoingHoh);
+        return field.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.hoh ? "won" : "threw") as "won" | "threw",
+        }));
+      }
+      case "veto-competition": {
+        if (!this.dealDepthEnabled || !s.vetoHolder || !s.vetoField) return [];
+        return s.vetoField.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.vetoHolder ? "won" : "threw") as "won" | "threw",
+        }));
+      }
       case "nominations":
         return s.hoh && s.nominees
           ? [{
