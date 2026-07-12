@@ -845,6 +845,9 @@ export class GameSessionAdapter implements GameSession {
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
   /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
   private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
+  /** 0121 R1 — seed a diffusing "keeps their word" reputation when a deal is kept (registry-wired; it holds
+   *  the KnowledgeService `reconcileDeals` does not). Unset (standalone) ⇒ no reputation ⇒ byte-identical. */
+  private dealReputationSink?: (honorer: EntityId, other: EntityId) => void;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -6227,6 +6230,10 @@ export class GameSessionAdapter implements GameSession {
   setDealDepthEnabled(on: boolean): void { this.dealDepthEnabled = on; }
   /** Whether the deal-depth layer is live (0121). */
   dealDepthEnabledNow(): boolean { return this.dealDepthEnabled; }
+  /** 0121 R1 — wire the "keeps their word" reputation diffuser (the registry owns the KnowledgeService +
+   *  social graph). Only invoked when the deal-depth layer is on (the ledger gates `reputation` on it), so
+   *  an unwired / flag-off game is byte-identical. */
+  setDealReputationSink(fn: (honorer: EntityId, other: EntityId) => void): void { this.dealReputationSink = fn; }
 
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
@@ -8311,8 +8318,13 @@ export class GameSessionAdapter implements GameSession {
       rng: this.beatRng(),
       // 0121: the deal-depth layer — a kept deal compounds via the LOYALTY STREAK (consecutive kept deals
       // with the same partner scale the honored fold, bounded). OFF ⇒ the plain 0039/0109 honored fold,
-      // byte-identical. (The diffusing "keeps their word" reputation reward is wired in a follow-up.)
+      // byte-identical.
       dealDepth: this.dealDepthEnabled,
+      // 0121 R1: a kept deal also seeds a diffusing "keeps their word" reputation — the honorer's deal
+      // partner spreads it NPC→NPC, and third parties who hear it lean toward the honorer as a safer deal
+      // partner (the positive mirror of the betrayal rumor). The ledger only calls this when `dealDepth`
+      // is on, and the sink is registry-wired (it owns the KnowledgeService), so off ⇒ byte-identical.
+      reputation: (honorer, other) => this.dealReputationSink?.(honorer, other),
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
