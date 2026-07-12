@@ -93,6 +93,54 @@ def test_data_user_identity_is_injected_on_boot():
     assert "document.body.dataset.user = u;" in html, "boot must set the confirmed identity"
     assert "/api/auth/status" in html, "identity is confirmed from the auth status endpoint"
     assert "orwell-current-user" in html, "identity is seeded synchronously from sessionStorage"
+    # Single-user / no-auth posture: the boot resolves a STABLE default ("local"), never empty, so
+    # the fail-closed skip cannot strand localhost persistence (and it never clobbers the server
+    # default back to empty). Auth-ON keeps the empty (fail-closed) branch.
+    assert "authOff ? 'local' : ''" in html, "no-auth boot must resolve a stable default namespace"
+    assert "d.auth_enabled === false" in html
+
+
+# ── SERVER-SIDE INJECTION (single-user / no-auth posture) ────────────────────
+
+class _StubRequest:
+    """Minimal Starlette Request stand-in — the serve helper only reads request.state.csp_nonce."""
+    class state:  # noqa: N801
+        csp_nonce = ""
+
+
+def _render_index(monkeypatch, *, auth_enabled: bool, game_build: bool = True) -> str:
+    monkeypatch.setenv("ORWELL_GAME_BUILD", "1" if game_build else "0")
+    monkeypatch.setenv("AUTH_ENABLED", "true" if auth_enabled else "false")
+    monkeypatch.delenv("ORWELL_WS_TRANSPORT", raising=False)
+    from app import _serve_html_with_nonce, BASE_DIR
+    from src.app_helpers import abs_join
+    resp = _serve_html_with_nonce(_StubRequest(), abs_join(BASE_DIR, "static/index.html"))
+    return resp.body.decode("utf-8")
+
+
+def _body_open_tag(html: str) -> str:
+    bs = html.find("<body")
+    assert bs != -1, "served html has no <body> tag"
+    return html[bs: html.find(">", bs) + 1]
+
+
+def test_no_auth_mode_injects_stable_default_data_user_server_side(monkeypatch):
+    # AUTH_ENABLED=false (the single-user / localhost posture browser_smoke boots) ⇒ the server
+    # injects a stable default namespace synchronously at parse time, so orwellUserKey() produces a
+    # real key and single-user persistence works (gadget order, window layout, dismissed notices).
+    html = _render_index(monkeypatch, auth_enabled=False)
+    # it lands on the <body> open tag itself (alongside data-game-build), not somewhere stray
+    assert 'data-user="local"' in _body_open_tag(html), \
+        "no-auth render must inject a stable default data-user on <body>"
+
+
+def test_auth_enabled_mode_injects_no_server_side_data_user(monkeypatch):
+    # AUTH_ENABLED=true (multi-user) ⇒ NO server default on the body: the per-session identity is
+    # resolved client-side from /api/auth/status, so a genuinely-missing data-user stays absent and
+    # the fail-closed guard skips persistence rather than sharing an empty namespace (#1416 intent).
+    html = _render_index(monkeypatch, auth_enabled=True)
+    assert "data-user=" not in _body_open_tag(html), \
+        "auth-on render must NOT stamp a shared server-side data-user on <body>"
 
 
 # ── BEHAVIORAL (run the real helper in Node) ─────────────────────────────────

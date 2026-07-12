@@ -401,13 +401,19 @@
   </div>
   <script nonce="{{CSP_NONCE}}">
   (function(){
-    // #614: per-user client-storage namespace. Many surfaces key localStorage by
-    // document.body.dataset.user (welcome-seen, composer draft, window geometry, cast-pin), but
-    // nothing ever SET it — so two accounts on ONE browser collapsed into the same empty ("")
-    // namespace and shared each other's transient client state. Set it as EARLY as possible from
-    // the session identity. Seed synchronously from the last-known value (instant, correct for the
-    // common single-account browser) then confirm via /api/auth/status — on a DIFFERENT user we
-    // re-key and refresh the namespace-sensitive panels through the single dispatcher.
+    // #614 / R5 #1416: per-user client-storage namespace. Many surfaces key localStorage by
+    // document.body.dataset.user (welcome-seen, composer draft, window geometry, cast-pin) via the
+    // fail-closed window.orwellUserKey helper (absent data-user ⇒ SKIP persistence, never a shared
+    // "" namespace). Set the identity as EARLY as possible. Seed synchronously from the last-known
+    // value (instant, correct for the common single-account browser) then confirm via
+    // /api/auth/status — on a DIFFERENT user we re-key and refresh the namespace-sensitive panels
+    // through the single dispatcher.
+    //
+    // Single-user / no-auth posture (auth_enabled === false, e.g. localhost): there is exactly ONE
+    // effective user, so resolve to a STABLE default namespace ("local") rather than the empty
+    // string — otherwise the fail-closed skip would strand single-user/localhost persistence. The
+    // server ALSO stamps that same default onto the body dataset in this posture (app.py
+    // _serve_html_with_nonce), so this confirm never clobbers it back to empty. Kept in lock-step.
     try {
       var seed = '';
       try { seed = sessionStorage.getItem('orwell-current-user') || ''; } catch(_){}
@@ -415,7 +421,9 @@
       fetch('/api/auth/status', { credentials: 'same-origin' })
         .then(function(r){ return r.json(); })
         .then(function(d){
-          var u = (d && d.username) ? String(d.username) : '';
+          var authOff = !!(d && d.auth_enabled === false);
+          var u = (d && d.username) ? String(d.username)
+                : (authOff ? 'local' : '');   // no-auth single-user ⇒ stable default, never empty
           if (!document.body) return;
           if (document.body.dataset.user !== u) {
             document.body.dataset.user = u;

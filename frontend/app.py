@@ -907,6 +907,23 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         # (ORWELL_GAME_BUILD=0 debugging) the full workspace must come back, so strip the link.
         import re as _re
         html = _re.sub(r'<link[^>]*game-trim\.css[^>]*>\s*(<!--[^>]*-->)?', "", html, count=1)
+    # R5/#1416 (requirement 0021): per-user client-storage keys namespace by
+    # document.body.dataset.user, and the guard (window.orwellUserKey) is FAIL-CLOSED — absent
+    # data-user ⇒ skip persistence — so a genuinely-missing identity on a MULTI-user authed page
+    # can never collapse into one shared empty ("") namespace. But the single-user / no-auth
+    # posture (AUTH_ENABLED=false, e.g. localhost) has exactly ONE effective user, so inject a
+    # STABLE default namespace server-side (synchronously, at parse time) — the fail-closed skip
+    # must NOT strand single-user/localhost persistence (gadget order, window layout, dismissed
+    # notices…). Auth-ON pages get NO server default: the boot script resolves the real
+    # per-session identity via /api/auth/status, keeping cross-user isolation intact. Kept in
+    # lock-step with the boot script's "local" fallback in static/index.html.
+    if (os.getenv("AUTH_ENABLED", "true") or "").strip().lower() == "false":
+        # Guard is BODY-TAG-scoped (not whole-html): a comment/script string elsewhere may mention
+        # the attribute, so only skip if the <body> open tag itself already carries it.
+        _bs = html.find("<body")
+        _be = html.find(">", _bs) if _bs != -1 else -1
+        if _bs != -1 and "data-user=" not in html[_bs:_be]:
+            html = html.replace("<body", '<body data-user="local"', 1)
     return HTMLResponse(html)
 
 @app.get("/")
