@@ -151,9 +151,11 @@ def test_tool_choice_interop_with_reasoning_low(monkeypatch):
         tools=_TOOLS, tool_choice="required",
         policy={"reasoning": {"effort": "low"}, "max_tokens": 4096},
     )
-    # Both present, each on its own key.
+    # Both present, each on its own key. (The reasoning map also carries a model-aware `max_tokens`
+    # sub-budget per ADR 0010 #2 — assert the effort, not exact equality, so the two channels stay
+    # independent regardless of the reasoning sizing.)
     assert p.get("tool_choice") == "required", p
-    assert p.get("reasoning") == {"effort": "low"}, p
+    assert (p.get("reasoning") or {}).get("effort") == "low", p
     # The directives don't bleed into each other.
     assert "reasoning" not in str(p.get("tool_choice"))
     assert "tool_choice" not in json.dumps(p.get("reasoning"))
@@ -164,7 +166,8 @@ def test_reasoning_low_without_forcing_has_no_tool_choice(monkeypatch):
     p = _capture_payload(
         monkeypatch, OR_URL, "z-ai/glm-4.7",
         tools=_TOOLS, policy={"reasoning": {"effort": "low"}, "max_tokens": 4096})
-    assert p.get("reasoning") == {"effort": "low"}
+    # effort on its own channel (a model-aware `max_tokens` sub-budget rides along per ADR 0010 #2).
+    assert (p.get("reasoning") or {}).get("effort") == "low"
     assert "tool_choice" not in p
 
 
