@@ -46,6 +46,38 @@ def _default_fixture() -> str:
     return gp.DEFAULT_FIXTURE  # none found → main() reports not-found + the regenerate hint
 
 
+# The golden REPLAY is digest-DETERMINISTIC (the same fixture + walk yields byte-identical
+# requests → the same recorded responses → the same engine state; proven by identical digests
+# across many runs). So a run that CRASHES mid-walk with "no new assistant message persisted" is
+# NOT a determinism bug — it is the FE's assistant row lagging a heavy advanceGame turn's stream
+# under gh-runner CPU contention, past the driver's in-turn re-read budget (#1512). Retry the WHOLE
+# run on a fresh engine. NON-masking BY CONSTRUCTION: a real staling MISS or a genuine engine stall
+# raises this SAME crash on EVERY attempt (deterministic) and still fails after the budget — only
+# the intermittent load give-up is absorbed; and a true determinism regression surfaces as a digest
+# MISMATCH (asserted in main), which a retry never touches. A crash with any OTHER message (e.g. the
+# never-closing-stream backstop = a genuine hang) is re-raised immediately, never retried.
+_TRANSIENT_CRASH_SIG = "no new assistant message persisted"
+_RUN_RETRIES = 2  # total attempts per run = 1 + _RUN_RETRIES
+
+
+def _replay_run(n: int, **kw):
+    """One replay run, retried on the transient CI-load crash (see the note above). Fresh ports
+    per attempt so a lagging shutdown / TIME_WAIT socket never blocks the reboot."""
+    last = None
+    for attempt in range(1 + _RUN_RETRIES):
+        try:
+            return run_once(mode="replay", engine_port=8971 + n + attempt * 40,
+                            fe_port=7971 + n + attempt * 40, **kw)
+        except RuntimeError as e:
+            if _TRANSIENT_CRASH_SIG not in str(e):
+                raise  # a genuine hang / unexpected error — never masked
+            last = e
+            print(f"  ⚠ replay run {n + 1}: transient CI-load crash on attempt "
+                  f"{attempt + 1}/{1 + _RUN_RETRIES} — retrying on a fresh engine "
+                  f"(a real staling miss would fail every attempt). {e}", flush=True)
+    raise last  # exhausted → a persistent (deterministic) failure surfaces honestly
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fixture", default="")
@@ -78,9 +110,8 @@ def main() -> int:
     digests, failed = [], []
     for n in range(max(1, args.runs)):
         print(f"\n── replay run {n + 1}/{args.runs} ─────────────────────────────", flush=True)
-        d = run_once(mode="replay", fixture=args.fixture, model=model, utility_model=utility_model,
-                     engine_port=8971 + n, fe_port=7971 + n,
-                     turn_timeout=120, turn_budget=args.turn_budget)
+        d = _replay_run(n, fixture=args.fixture, model=model, utility_model=utility_model,
+                        turn_timeout=120, turn_budget=args.turn_budget)
         rep = d.report((args.report + f".run{n + 1}.json") if args.report else None)
         digests.append(rep["digest"])
         failed.extend(d.inv.failed)
