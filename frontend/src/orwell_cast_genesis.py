@@ -479,6 +479,13 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
 # the do_create_character pre-finalize gate reads. Cleared on the new-season scrub.
 _STRICT_FAILED: set = set()
 
+# Idempotency: the seed for which genesis already COMMITTED per user. Genesis is kicked from TWO seams
+# (the interview-open pre-warm `prewarm_cast` — the async overlap — AND the `do_create_character`
+# pre-finalize belt that guarantees it runs even when the pre-warm route was never hit, e.g. the
+# HTTP/golden flow). Keyed by (user, seed) so the SECOND kick for the same warmed cast is a no-op — no
+# duplicate LLM sketch call, no double fold. Cleared on the new-season scrub.
+_COMMITTED: dict = {}
+
 
 def _key(user: Optional[str]) -> str:
     return str(user) if user else "default"
@@ -498,13 +505,26 @@ def strict_failed(user: Optional[str]) -> bool:
     return _key(user) in _STRICT_FAILED
 
 
+def genesis_committed(user: Optional[str], seed) -> bool:
+    """True iff genesis already committed a skeleton for this user's CURRENT warmed seed — the
+    idempotency guard shared by the pre-warm kick and the pre-finalize belt (no duplicate sketch call)."""
+    return seed is not None and _COMMITTED.get(_key(user)) == seed
+
+
+def _mark_committed(user: Optional[str], seed, committed: int) -> None:
+    if seed is not None:
+        _COMMITTED[_key(user)] = seed
+
+
 def reset_state(user: Optional[str] = None) -> None:
-    """New-season scrub: clear the strict-failed latch so a fresh cast starts clean (``user=None`` clears
-    everyone)."""
+    """New-season scrub: clear the strict-failed latch + the idempotency latch so a fresh cast starts
+    clean (``user=None`` clears everyone)."""
     if user is None:
         _STRICT_FAILED.clear()
+        _COMMITTED.clear()
     else:
         _STRICT_FAILED.discard(_key(user))
+        _COMMITTED.pop(_key(user), None)
 
 
 def refusal_message() -> str:
@@ -542,6 +562,12 @@ async def run_genesis(roster: list, seed: int, owner: Optional[str], *,
 
     PLAYER-BLIND: no player identity is threaded in — the cast is proposed off the seeded brief alone.
     Returns the ``seed_cast_genesis`` result dict (Vault-free counts)."""
+    # Idempotency: genesis is kicked from BOTH the interview-open pre-warm AND the do_create_character
+    # pre-finalize belt — if it already committed for THIS warmed seed, this second kick is a no-op (no
+    # duplicate sketch call, no double fold).
+    if genesis_committed(owner, seed):
+        return {"committed": 0, "accepted": True, "varianceOk": True, "rerolls": 0,
+                "reason": "already-committed"}
     strict = False
     try:
         from src import enrichment_policy
@@ -577,7 +603,9 @@ async def run_genesis(roster: list, seed: int, owner: Optional[str], *,
     result = await seed_cast_genesis(roster, seed, llm_fn, write or _write)
     # STRICT: a run that committed NOTHING (all already logged inside seed_cast_genesis) is ledgered
     # loudly + latches the pre-finalize gate. Soft: byte-identical legacy silent floor.
-    if not (isinstance(result, dict) and result.get("accepted") and int(result.get("committed") or 0) > 0):
+    if isinstance(result, dict) and result.get("accepted") and int(result.get("committed") or 0) > 0:
+        _mark_committed(owner, seed, int(result.get("committed") or 0))  # idempotency: no second sketch call
+    else:
         _fail_loud("cast genesis committed nothing (model or write-back failed)",
                    detail=f"result={result}")
     return result

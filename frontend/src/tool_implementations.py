@@ -4682,12 +4682,27 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 return {"error": _enrichment.creation_refusal_message(_unwired), "exit_code": 1}
     except Exception as e:
         logger.warning("[enrichment] strict creation preflight failed open for %s: %s", owner, e)
+    # 0116 — model-author the whole cast SKELETON BEFORE finalize (skeleton-first). recordCastGenesis is
+    # a PRE-GAME operation (refused once the season runs), so genesis must land on the pre-warm BEFORE
+    # create_character. Kicked HERE so it runs in EVERY finalize path (the browser interview-open pre-warm
+    # `prewarm_cast` also fires it early to overlap the interview — run_genesis is idempotent per (user,
+    # seed), so this is a no-op when the pre-warm already committed it, and the REAL work when the pre-warm
+    # route was never hit, e.g. the HTTP/golden flow). Ensure the cast is warmed first (idempotent). Best-
+    # effort + fail-soft: no model ⇒ the deterministic floor stands byte-identically; under strict a failure
+    # latches the loud gate below. Never blocks start on a hiccup (the outer try/except owns that).
+    try:
+        from src import orwell_cast_genesis as _genesis_kick
+        _warm = await orwell_engine.pre_seed_cast(seed=args.get("seed"), user=owner)
+        if isinstance(_warm, dict) and _warm.get("warmed") and _warm.get("house"):
+            await _genesis_kick.run_genesis(_warm.get("house") or [], _warm.get("seed"), owner)
+    except Exception as e:
+        logger.warning("[cast-genesis] pre-finalize genesis kick failed open for %s: %s", owner, e)
     # 0116 — the model-authored cast-genesis LOUD PRE-FINALIZE GATE (§4 / #1313 precedent). Genesis
-    # model-authors the whole cast SKELETON during the casting interview (on the pre-warm — recordCastGenesis
-    # is refused once a season runs), so its outcome is known BEFORE finalize. Under the strict policy, if
-    # that genesis run FAILED (ended on the deterministic floor after the bounded re-rolls), REFUSE casting
-    # finalize here — never start on a generic floor skeleton, and never discover the failure only AFTER the
-    # player commits their character. Fail-open: a gate hiccup must never strand a legitimate creation.
+    # model-authored the whole cast SKELETON just above (or during the interview on the pre-warm), so its
+    # outcome is known BEFORE finalize. Under the strict policy, if that genesis run FAILED (ended on the
+    # deterministic floor after the bounded re-rolls), REFUSE casting finalize here — never start on a
+    # generic floor skeleton, and never discover the failure only AFTER the player commits their character.
+    # Fail-open: a gate hiccup must never strand a legitimate creation.
     try:
         from src import enrichment_policy as _enrichment_g
         from src import orwell_cast_genesis as _genesis_gate

@@ -309,6 +309,44 @@ def test_reset_state_clears_the_latch():
     assert G.strict_failed("u-3") is False
 
 
+# ── idempotency: genesis is kicked from BOTH the pre-warm AND the pre-finalize belt — run once ───────────
+
+def test_run_genesis_is_idempotent_per_seed(monkeypatch):
+    from src import enrichment_policy as ep
+    G.reset_state("u-idem")
+    monkeypatch.setattr(ep, "is_strict", lambda: False)
+    calls = {"llm": 0}
+
+    async def _model(_owner):
+        async def llm(_messages):
+            calls["llm"] += 1
+            return _valid_proposal_json()
+        return llm
+
+    async def write(proposal):
+        return {"accepted": True, "committed": len(proposal["npcs"]), "violations": [], "varianceOk": True}
+
+    monkeypatch.setattr(G, "_resolve_llm_fn", _model)
+    r1 = _run(G.run_genesis(_ROSTER, 7, "u-idem", write=write))
+    assert r1["accepted"] is True and r1["committed"] == 15
+    assert G.genesis_committed("u-idem", 7) is True
+    # A SECOND kick for the SAME warmed seed (the pre-finalize belt after the pre-warm already committed)
+    # is a no-op — no duplicate sketch call.
+    r2 = _run(G.run_genesis(_ROSTER, 7, "u-idem", write=write))
+    assert r2["reason"] == "already-committed" and calls["llm"] == 1
+    # A DIFFERENT seed (a new season / re-warm) DOES re-run.
+    r3 = _run(G.run_genesis(_ROSTER, 99, "u-idem", write=write))
+    assert r3["committed"] == 15 and calls["llm"] == 2
+    G.reset_state("u-idem")
+
+
+def test_reset_state_clears_the_committed_latch():
+    G._mark_committed("u-4", 5, 15)
+    assert G.genesis_committed("u-4", 5) is True
+    G.reset_state("u-4")
+    assert G.genesis_committed("u-4", 5) is False
+
+
 # ── the prewarm pipeline order: SKELETON (genesis) → identity → author ──────────────────────────────────
 
 def test_prewarm_runs_genesis_before_identity_and_authoring():
