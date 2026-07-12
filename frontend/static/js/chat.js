@@ -1455,7 +1455,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           holder.innerHTML = '<div class="body"></div>';
         } catch (_) {}
         if (!/Chat mode/i.test(errText)) {
-          errText = `⚠ Connection error (${res.status}) — your message didn't go through. Try again.`;
+          errText = `⚠ Connection error — your message didn't go through. Try again.`;
         }
         typewriterInto(holder.querySelector('.body'), errText);
         enableResearchBtn();
