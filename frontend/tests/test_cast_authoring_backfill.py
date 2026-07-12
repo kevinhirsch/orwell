@@ -380,14 +380,22 @@ def test_admin_health_payload_carries_cast_authoring_completeness(admin_client, 
     assert sorted(ca["missingIds"]) == ["npc:2", "npc:4"]
 
 
-def test_admin_health_cast_authoring_is_none_pre_game(admin_client, monkeypatch):
+def test_admin_health_cast_authoring_pre_game_carries_run_state(admin_client, monkeypatch):
+    """2026-07-12 (owner: the debug bundle showed castAuthoring: null while casting was the exact
+    window the pipeline runs in): pre-game is no longer null-blind — the payload carries a small
+    Vault-free run-state block instead (pregame flag + give-ups + the house-entry hold marker)."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
 
     async def pre_game(user=None, **k):
         return {"started": False}
     monkeypatch.setattr(orwell_engine, "get_game_state", pre_game)
     body = admin_client.get("/api/admin/health").json()
-    assert body["castAuthoring"] is None
+    ca = body["castAuthoring"]
+    assert isinstance(ca, dict) and ca.get("pregame") is True
+    assert isinstance(ca.get("givenUp"), list)
+    assert "houseEntryHold" in ca
+    # Vault-free: flags / ids / timestamps only — never cast content keys.
+    assert set(ca) <= {"pregame", "givenUp", "houseEntryHold"}
 
 
 # ── POST /api/admin/ops/reauthor-cast (the admin debug lever) ──────────────────────────────

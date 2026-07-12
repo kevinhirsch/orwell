@@ -239,8 +239,14 @@ async def _cast_authoring_state(user: str | None) -> dict | None:
     cast (the player is human-authored, excluded), so the operator can SEE whether the producer-LLM
     actually enriched this cast or it all fell back to the thin deterministic floor (mandate #1). The
     counts come from the SAME helper the backfill acts on (`orwell_cast_authoring.unauthored_ids`), so
-    the status page can never disagree with what a re-author lever would do. None pre-game / engine
-    down. Best-effort — any failure reads as None, never a 500."""
+    the status page can never disagree with what a re-author lever would do.
+
+    2026-07-12 (owner: the debug bundle showed `castAuthoring: null` while `enrichment.failures`
+    carried the real story): PRE-GAME is no longer null-blind — during casting (a warmed but
+    unstarted season, exactly when genesis/identity/deep-authoring RUN) this returns a small
+    Vault-free run-state block `{pregame, givenUp, houseEntryHold}` (ids/flags only, no cast
+    content). None still means unknown (engine down / state unreadable). Best-effort — any
+    failure reads as None, never a 500."""
     try:
         from src import orwell_engine, orwell_cast_authoring
     except Exception:
@@ -249,8 +255,20 @@ async def _cast_authoring_state(user: str | None) -> dict | None:
         state = await orwell_engine.get_game_state(user=user)
     except Exception:
         return None
-    if not isinstance(state, dict) or state.get("started") is False:
+    if not isinstance(state, dict):
         return None
+    if state.get("started") is False:
+        # Casting / pre-game: surface the authoring RUN STATE instead of null-blindness.
+        out: dict = {"pregame": True}
+        try:
+            out["givenUp"] = orwell_cast_authoring.giveups(user)
+        except Exception:
+            out["givenUp"] = []
+        try:
+            out["houseEntryHold"] = orwell_cast_authoring.house_entry_gate_status(user)
+        except Exception:
+            out["houseEntryHold"] = None
+        return out
     try:
         from routes.orwell_routes import _roster_cards
         cards = _roster_cards(state, user)
@@ -1261,6 +1279,9 @@ _STATUS_PAGE = """<!doctype html>
 <style>@keyframes opsspin { to { transform: rotate(360deg); } }</style>
 <!-- END ops-progress lane -->
 <div id="failwrap"></div>
+<h1 style="margin-top:26px">CAST AUTHORING &middot; ENRICHMENT</h1>
+<div class="sub">The model-driven cast pipeline (genesis → identity → deep authoring → zeitgeist/texture): the runtime policy, the authoring run state, and every recorded per-class failure — a "no model wired" refusal lands here loudly instead of reading as in-fiction stalling.</div>
+<div id="enrichwrap"></div>
 <h1 style="margin-top:26px">LIVE LOG</h1>
 <div class="sub">Every log stream in the program, selectable. Auto-follows the tail while you are at the bottom; scrolling up pauses the follow — scroll back down to resume.</div>
 <div class="actions" style="margin:8px 0">
@@ -1331,6 +1352,30 @@ function render(d) {
     (fails.map(f => "<tr><td>" + esc(fmt(f.ts)) + "</td><td>" + esc(f.tool) + "</td><td>" + esc(f.errorClass) + "</td><td class='num'>" + esc(f.durationMs) + " ms</td></tr>").join("") ||
      "<tr><td colspan=4>No recent failures on record.</td></tr>") + "</tbody></table>" +
     (feLast ? "<div class='sub' style='margin-top:8px'>Front-end tier: " + esc(feLast.tool || "?") + " — " + esc(feLast.kind || "") + " — " + esc(feLast.error || "") + "</div>" : "");
+  // CAST AUTHORING · ENRICHMENT (2026-07-12): the authoring run state + the per-class failure
+  // ledger. Pre-game castAuthoring carries {pregame, givenUp, houseEntryHold}; in-game it carries
+  // the completeness counters (also summarized in the grid row above). Vault-free throughout —
+  // timestamps / call classes / reasons / houseguest IDS only, never cast content.
+  const enr = d.enrichment || null;
+  const eFails = ((enr && enr.failures) || []).slice().reverse().slice(0, 15);
+  const gaveUp = (ca && ca.givenUp) || [];
+  const hold = ca && ca.houseEntryHold;
+  const runState =
+    !ca ? '<span class="sub">unknown (engine unreachable)</span>' :
+    ca.pregame ? ("pre-game (casting): authoring pipeline " +
+                  (hold ? '<span class="warn">HOLDING house entry (' + esc(hold.state || "authoring") + ")</span>" : "runs during the interview") +
+                  (gaveUp.length ? ' · <span class="warn">gave up on ' + esc(gaveUp.length) + " houseguest(s)</span>" : "")) :
+    (ca.total ? esc(ca.authored) + "/" + esc(ca.total) + " deep-authored" +
+                (ca.missing ? ' · <span class="warn">' + esc(ca.missing) + " on floor</span>" : "") +
+                (gaveUp.length ? ' · <span class="warn">gave up on ' + esc(gaveUp.length) + "</span>" : "")
+              : '<span class="sub">—</span>');
+  document.getElementById("enrichwrap").innerHTML =
+    "<div class='sub' style='margin:6px 0'>Policy: <strong>" + esc(enr ? enr.policy : "?") + "</strong>" +
+    " · Run state: " + runState + "</div>" +
+    "<table><thead><tr><th>Time (UTC)</th><th>Call class</th><th>Failure</th></tr></thead><tbody>" +
+    (eFails.map(f => "<tr><td>" + esc(fmt((f.at || 0) * 1000)) + "</td><td>" + esc(f.callClass) + "</td><td>" +
+                     esc(f.reason) + (f.detail ? " — " + esc(f.detail) : "") + "</td></tr>").join("") ||
+     "<tr><td colspan=3>No enrichment failures on record.</td></tr>") + "</tbody></table>";
 }
 // ── update-awareness that SURVIVES the restart (localStorage) ──
 // The Update button restarts BOTH tiers, including this page's own host. An in-memory reconnect

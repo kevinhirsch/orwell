@@ -30,6 +30,20 @@ from src.auth_helpers import _auth_disabled, owner_filter
 
 logger = logging.getLogger(__name__)
 
+
+def _refresh_key(base: str, api_key: Optional[str]) -> str:
+    """The per-provider refresh identity (URL + credential)."""
+    return f"{base.rstrip('/')}\x00{api_key or ''}"
+
+
+# 2026-07-12 — which provider caches were refreshed successfully IN THIS PROCESS
+# (refresh_key → wall time). `/api/default-chat`'s stale-membership (F) re-derive consults this:
+# kicking the CONFIGURED default model out because it is missing from a cached list is only safe
+# when that list was confirmed fresh here — a carried-over/stale cache (post-OOBE-reset, restart)
+# must never silently swap the narrator to an arbitrary first-listed model. Module-level (not the
+# route-closure `_refresh_state`) so tests can drive both branches.
+_MODELS_LIVE_REFRESH: Dict[str, float] = {}
+
 _SPEECH_ENDPOINT_SETTINGS = (
     ("tts_provider", "tts_model", "tts-1", "Text to Speech"),
     ("stt_provider", "stt_model", "base", "Speech to Text"),
@@ -928,9 +942,6 @@ def setup_model_routes(model_discovery):
     _REFRESH_FAILURE_BASE = 300.0
     _REFRESH_FAILURE_MAX = 3600.0
 
-    def _refresh_key(base: str, api_key: Optional[str]) -> str:
-        return f"{base.rstrip('/')}\x00{api_key or ''}"
-
     def _ts(value: Any) -> float:
         try:
             return float(value.timestamp()) if value else 0.0
@@ -1035,6 +1046,7 @@ def setup_model_routes(model_discovery):
                                             ep_obj.cached_models = json.dumps(ids)
                                             changed = True
                                     st["last_success"] = _time.time()
+                                    _MODELS_LIVE_REFRESH[key] = _time.time()
                                     st["fail_count"] = 0
                                     st.pop("last_failure", None)
                                 else:
@@ -1974,13 +1986,38 @@ def setup_model_routes(model_discovery):
             # since renamed/dropped so it is no longer in the endpoint's visible set (it would otherwise
             # be dispatched and 404 mid-turn). `model` and `visible` are both exact provider id strings,
             # so membership is a safe stale check. Self-heals an already-corrupted default on next resolve.
-            if visible and (not model or is_image_model(model) or model not in visible):
+            #
+            # 2026-07-12 (the arbitrary-narrator class, live PROD evidence): the membership-based (F)
+            # re-derive is only trustworthy when the cached model list was refreshed IN THIS PROCESS —
+            # after an OOBE reset / restart the carried `cached_models` can be old/partial, and kicking
+            # the CONFIGURED default out on a stale cache silently swapped the narrator to "first model
+            # in the provider list" (openai/gpt-5.6-luna-pro instead of the stored z-ai/glm-5.2). Gate
+            # the membership re-derive on a confirmed-fresh cache (`_MODELS_LIVE_REFRESH` for this
+            # endpoint's refresh key); the empty/image-model re-derives stay unconditional (an
+            # image model can never be the chat default, fresh cache or not).
+            _cache_fresh = False
+            try:
+                _rk = _refresh_key(_normalize_base(ep.base_url), getattr(ep, "api_key", None))
+                _cache_fresh = bool(_MODELS_LIVE_REFRESH.get(_rk))
+            except Exception:
+                _cache_fresh = False
+            _stale_miss = bool(model) and not is_image_model(model) and model not in visible
+            if visible and (not model or is_image_model(model) or (_stale_miss and _cache_fresh)):
                 try:
                     picked = _first_chat_model(visible)
                     if picked:
+                        if _stale_miss:
+                            logger.warning(
+                                "[default-chat] stored default model %r is not in endpoint %s's "
+                                "FRESH model list — re-deriving to %r", model, ep.id, picked)
                         model = picked
                 except Exception:
                     pass
+            elif _stale_miss and not _cache_fresh:
+                logger.info(
+                    "[default-chat] stored default model %r not in endpoint %s's CACHED list, but "
+                    "the cache has no in-process refresh — keeping the configured default "
+                    "(never swapping the narrator on a possibly-stale cache)", model, ep.id)
             # Final guard: never hand an image model back as the chat default, even when the
             # endpoint has no chat model to offer (better an empty pick than dispatching to it).
             if model and is_image_model(model):
