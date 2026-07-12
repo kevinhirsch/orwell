@@ -140,23 +140,33 @@ def reset_user_season(user: Optional[str]) -> None:
         enrichment_policy.clear_failures(user)
     except Exception as e:
         logger.info("[prewarm] reset_user_season: clear_failures failed: %s", e)
+    try:  # 0116: a new season clears the cast-genesis strict-failed latch (the pre-finalize gate)
+        from src import orwell_cast_genesis
+        orwell_cast_genesis.reset_state(user)
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: genesis reset failed: %s", e)
     try:
         reset(user)
     except Exception as e:
         logger.info("[prewarm] reset_user_season: reset failed: %s", e)
 
 
-async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None, identity=None) -> dict:
-    """AUTHOR WARM (earliest): pre-seed the cast in the engine, AI-seed its descriptive identity (#544),
-    then deeply author it in the background.
+async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=None, identity=None,
+                       genesis=None) -> dict:
+    """AUTHOR WARM (earliest): pre-seed the cast in the engine, model-author its SKELETON (0116 genesis),
+    AI-seed its descriptive identity (#544), then deeply author it in the background.
 
     Idempotent per user (a second call is a no-op that reports the in-flight warm). Releases the
     author-done gate when authoring finishes — success OR failure — so portrait warm never hangs.
     Returns ``{warmed, count, alreadyWarmed?, refused?}``.
 
-    The ``identity`` dep (default: the real ``orwell_cast_identity`` module) seeds the AI-driven cast
-    identity BEFORE authoring, so the authored look + portraits read the engine-validated heritage. Injected
-    for tests; a missing model makes it a silent no-op (the engine's deterministic floor stands).
+    Pipeline order (0116): SKELETON → identity → author → shoot. The ``genesis`` dep (default: the real
+    ``orwell_cast_genesis`` module) model-authors the whole cast skeleton FIRST — a PRE-GAME operation
+    (``recordCastGenesis`` is refused once the season runs), so it rides THIS pre-warm during the casting
+    interview. The ``identity`` dep (default: ``orwell_cast_identity``) then seeds the AI-driven cast
+    identity before authoring, so the authored look + portraits read the engine-validated heritage. Both
+    are injected for tests; a missing model makes each a silent no-op (the engine's deterministic floor
+    stands byte-identically).
     """
     if engine is None:
         from src import orwell_engine as engine
@@ -192,6 +202,27 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
     st.prompts = res.get("portraitPrompts") or []
     cast = res.get("house") or []
     st.author_started = True
+
+    # 0116 — model-authored cast GENESIS runs FIRST (skeleton BEFORE identity + depth). The producer-LLM
+    # proposes the ENTIRE cast skeleton (names, freeform identities, personas, hidden elements, BANDED
+    # stats, the pre-show tie graph), steered ONLY by a seeded season brief (PLAYER-BLIND), and the engine
+    # validates/clamps/commits it onto the warmed floor (recordCastGenesis). A PRE-GAME operation (refused
+    # once the season runs), so it rides THIS pre-warm during the casting interview — game start never
+    # blocks on it. Best-effort + fail-soft: no model ⇒ the deterministic floor stands byte-identically
+    # (under strict policy the failure is loud + latches the do_create_character pre-finalize gate). When
+    # it committed a skeleton, RE-FETCH the warmed roster so identity + authoring read the genesis-committed
+    # ground truth (pipeline order: SKELETON → identity → author → shoot).
+    try:
+        if genesis is None:
+            from src import orwell_cast_genesis as genesis
+        gres = await genesis.run_genesis(cast, seed, user)
+        if isinstance(gres, dict) and gres.get("committed"):
+            again = await engine.pre_seed_cast(user=user)
+            if isinstance(again, dict) and again.get("house"):
+                cast = again.get("house") or cast
+                st.prompts = again.get("portraitPrompts") or st.prompts
+    except Exception as e:  # genesis must never block onboarding
+        logger.info("[prewarm] cast-genesis skipped: %s", e)
 
     # #544 — the AI-driven IDENTITY seed runs FIRST (before deep authoring), so the engine has validated /
     # repaired / folded the cast's descriptive identity (re-grounding skin tone from the final heritage)

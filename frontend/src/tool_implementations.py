@@ -4682,6 +4682,22 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 return {"error": _enrichment.creation_refusal_message(_unwired), "exit_code": 1}
     except Exception as e:
         logger.warning("[enrichment] strict creation preflight failed open for %s: %s", owner, e)
+    # 0116 — the model-authored cast-genesis LOUD PRE-FINALIZE GATE (§4 / #1313 precedent). Genesis
+    # model-authors the whole cast SKELETON during the casting interview (on the pre-warm — recordCastGenesis
+    # is refused once a season runs), so its outcome is known BEFORE finalize. Under the strict policy, if
+    # that genesis run FAILED (ended on the deterministic floor after the bounded re-rolls), REFUSE casting
+    # finalize here — never start on a generic floor skeleton, and never discover the failure only AFTER the
+    # player commits their character. Fail-open: a gate hiccup must never strand a legitimate creation.
+    try:
+        from src import enrichment_policy as _enrichment_g
+        from src import orwell_cast_genesis as _genesis_gate
+        if _enrichment_g.is_strict() and _genesis_gate.strict_failed(owner):
+            _enrichment_g.record_failure(
+                owner, "cast-genesis",
+                "casting finalize refused — the cast skeleton could not be model-authored (genesis failed)")
+            return {"error": _genesis_gate.refusal_message(), "exit_code": 1}
+    except Exception as e:
+        logger.warning("[enrichment] strict genesis pre-finalize gate failed open for %s: %s", owner, e)
     try:
         res = await orwell_engine.create_character(
             player_name,

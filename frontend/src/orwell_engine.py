@@ -494,6 +494,22 @@ async def record_cast_identity(facets: dict, user: str | None = None) -> dict:
     return await _call("recordCastIdentity", {"facets": facets}, user=user)
 
 
+async def record_cast_genesis(proposal: dict, user: str | None = None) -> dict:
+    """Feature 0116 (phase 2): write the LLM-PROPOSED whole-cast SKELETON BACK to the engine, which
+    validates it against the envelope it owns and commits it onto the pre-warmed cast. ``proposal`` is
+    ``{ "npcs": [ { id?, name?, identity?, archetype?, vocation?, hometown?, demeanor?, background?,
+    biography?, presentation?, appearance?, age?, stats?, hiddenElements? } ], "ties"?: [ { a, b, nature?,
+    backstory? } ] }`` — descriptive identity + BANDED stats + the pre-show tie graph, NEVER a hidden game
+    weight. The ENGINE clamps every stat total into its band (no model number escapes), enforces the
+    cast-wide variance floor, validates names (uniqueness / plausibility / the legacy deny-list /
+    player-collision), closes the hidden-element kinds + C9-gates them, sanity-checks the tie graph, strips
+    any hidden weight, folds the committed skeleton onto the byte-stable warmed cast, and seals the hidden
+    half into the Vault. Returns ``{ accepted, committed, violations, varianceOk, reason? }`` — structured
+    Vault-free violations only, never a hidden value. A PRE-GAME operation (``preSeedCast`` must have run;
+    refused once a season is running). Idempotent; with no proposal the deterministic floor stands."""
+    return await _call("recordCastGenesis", proposal, user=user)
+
+
 async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict:
     """Feature 0062: write a REAL captured move-in zeitgeist BACK to the engine, which persists it
     as the single FROZEN artifact and RECALLS it (never re-searches) all season. ``snapshot`` carries
