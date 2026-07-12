@@ -284,9 +284,10 @@ import { onNarrowChange } from './platform.js';
            window-kit titlebar controls in orwellWindow.js and the frosted traffic-lights) — the visible
            30px face is untouched. Two clip fixes make the ::after reachable in BOTH axes: the tile drops
            overflow:hidden (redundant — the .ow-mono-face clips its OWN portrait via its own
-           overflow:hidden) so the ::after can escape the 30px box, and the strip gains ~7px vertical
-           padding so the ::after's ±7px overhang lands inside the strip's clip box instead of being
-           guillotined by its overflow-y:hidden. The gap widens to 14px (2×7px overhang) so adjacent
+           overflow:hidden) so the ::after can escape the 30px box, and the strip gains ~7px padding on
+           ALL sides so the ::after's ±7px overhang lands inside the strip's clip box on BOTH axes — the
+           y-overhang isn't guillotined by overflow-y:hidden, AND the first/last tiles' x-overhang isn't
+           clipped at the overflow-x scroll endpoints (CodeRabbit). The gap widens to 14px (2×7px overhang) so adjacent
            44px hit regions abut without intersecting. Touch only — desktop chrome stays compact. */
         @media (pointer: coarse) {
           #orwell-status .os-tile { overflow: visible; }
@@ -294,7 +295,7 @@ import { onNarrowChange } from './platform.js';
             content: ""; position: absolute; top: 50%; left: 50%;
             width: 44px; height: 44px; transform: translate(-50%, -50%);
           }
-          #orwell-status .os-prem-strip { gap: 14px; padding-top: 7px; padding-bottom: 7px; }
+          #orwell-status .os-prem-strip { gap: 14px; padding: 7px; }
         }
         /* M2-3 (audit B2): the pre-HOH board line — before the first HOH exists (week 1, no HOH yet)
            the three dead "HOH — / Noms — / Veto —" rows read as broken. This single line replaces
