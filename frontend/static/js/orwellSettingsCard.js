@@ -30,6 +30,13 @@
   var TITLE_CLASS = 'osc-title';
   var ICON_CLASS = 'osc-icon';
   var BODY_CLASS = 'osc-body';
+  // The form-row primitive (#1451). `.osc-row` is the kit's own class; `.settings-row` is the
+  // legacy row class the tabs hand-rolled today (styled in style.css). A migrated row carries
+  // BOTH — `.osc-row` mirrors `.settings-row` byte-for-byte, so keeping the legacy class is
+  // pixel-neutral AND preserves every legacy descendant/adjacent selector + modifier that keys off
+  // `.settings-row` (exactly as upgrade() KEEPS `.admin-card` beside `.osc-card`).
+  var ROW_CLASS = 'osc-row';
+  var ROW_LEGACY_CLASS = 'settings-row';
 
   function _isEl(x) { return !!x && x.nodeType === 1; }
 
@@ -156,16 +163,79 @@
     return n;
   }
 
+  // ── The form-row primitive (#1451) ──────────────────────────────────────────────────────────
+  // A settings row is a label/description on one side + a control/toggle on the other. Before this
+  // the tabs hand-rolled `<div class="settings-row">…</div>` per section. `row()` builds one from
+  // the kit; `upgradeRow()`/`scanRows()` compose an EXISTING hand-rolled `.settings-row` in place
+  // (idempotent), mirroring the card's create()/upgrade()/upgradePanel() shape exactly.
+
+  // row({ label?, labelHtml?, controlEl?, html?, align?: 'end'|'between', className?, id? }) -> row
+  //   Builds `<div class="settings-row osc-row"[…modifiers]>` — the legacy class is KEPT so a fresh
+  //   kit row inherits every `.settings-row` descendant style + is pixel-identical to a hand-rolled
+  //   one. `html` (trusted markup for the WHOLE inner row, e.g. `<label…>…</label><input…>`) mirrors
+  //   create()'s `bodyHtml`; otherwise a `.settings-label` is minted from label/labelHtml and an
+  //   optional `controlEl` node is appended. The returned element exposes `.oscRow` (self).
+  function row(opts) {
+    opts = opts || {};
+    var el = document.createElement('div');
+    el.className = ROW_LEGACY_CLASS + ' ' + ROW_CLASS;
+    if (opts.align === 'end') el.classList.add(ROW_CLASS + '--end');
+    else if (opts.align === 'between') el.classList.add(ROW_CLASS + '--between');
+    if (opts.id) el.id = opts.id;
+    if (typeof opts.className === 'string') {
+      var extra = opts.className.split(/\s+/);
+      for (var e = 0; e < extra.length; e++) if (extra[e]) el.classList.add(extra[e]);
+    }
+    if (typeof opts.html === 'string') {
+      el.innerHTML = opts.html;
+    } else {
+      if (typeof opts.labelHtml === 'string' || typeof opts.label === 'string') {
+        var lab = document.createElement('label');
+        lab.className = 'settings-label';
+        if (typeof opts.labelHtml === 'string') lab.innerHTML = opts.labelHtml;
+        else lab.textContent = opts.label || '';
+        el.appendChild(lab);
+      }
+      if (_isEl(opts.controlEl)) el.appendChild(opts.controlEl);
+    }
+    el.oscRow = el;
+    return el;
+  }
+
+  // upgradeRow(el) -> el — compose an existing `.settings-row` (or any row element) onto the
+  // primitive IN PLACE: ADD `.osc-row` (KEEP `.settings-row` + its modifiers), idempotent. Nodes,
+  // ids, listeners, and ARIA are untouched — this only tags a class. Pixel-neutral by construction.
+  function upgradeRow(el) {
+    if (!_isEl(el)) return el;
+    if (!el.classList.contains(ROW_CLASS)) el.classList.add(ROW_CLASS);
+    return el;
+  }
+
+  // scanRows(root) -> number — compose every legacy `.settings-row` under `root` onto the primitive
+  // (skipping ones already composed). Returns how many rows now carry `.osc-row`. The row-level
+  // sibling of upgradePanel(): the settings shell calls this on each shown tab so the whole pane is
+  // composed from the kit without churning each tab's row markup.
+  function scanRows(root) {
+    if (!_isEl(root) || typeof root.querySelectorAll !== 'function') return 0;
+    var rows = root.querySelectorAll('.' + ROW_LEGACY_CLASS);
+    for (var i = 0; i < rows.length; i++) upgradeRow(rows[i]);
+    return rows.length;
+  }
+
   try {
     window.OrwellSettingsCardKit = {
       create: create,
       upgrade: upgrade,
       upgradePanel: upgradePanel,
+      row: row,
+      upgradeRow: upgradeRow,
+      scanRows: scanRows,
       CARD_CLASS: CARD_CLASS,
       HEAD_CLASS: HEAD_CLASS,
       TITLE_CLASS: TITLE_CLASS,
       ICON_CLASS: ICON_CLASS,
       BODY_CLASS: BODY_CLASS,
+      ROW_CLASS: ROW_CLASS,
     };
   } catch (_) {}
 })();
