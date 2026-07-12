@@ -1,16 +1,18 @@
 # 0038 — Live off-screen society (wire the real simulation into the watcher)
 
-> **Status:** **Partially implemented.** ✅ **Varied off-screen society is LIVE** — the watcher tick
-> (`Orchestrator.defaultApply`) now runs `richOffscreenStretch`: **seven real interaction types**
-> (alliance/gossip/conflict/bonding/strategy/showmance/betrayal), each folded into the relationship
-> layer with its **true nature** (not the old 4-verb stub + a single "strategy" nudge). Bounded,
-> seeded, Vault-walled, isolated; unit-gated by `tests/unit/offscreenSociety.test.ts`. **Remaining
-> (B27b):** (a) **live gossip→player diffusion** — `diffuseGossip` is built, but routing it through the
-> 0031 fail-closed checkpoint trips a **false-positive leak** (the generic `"gossip told-by:npc:Y"`
-> provenance string collides between a hidden NPC→NPC retelling and the player's received event); wiring
-> it needs the checkpoint's substring leak-heuristic reconciled with legitimate pathway propagation.
-> (b) **soul deepening** — the live sandbox has **no `SoulStore`** (`engineRoot.ts` exposes only
-> events/knowledge/relationships); wiring `recordToSoul`/`recall` live is **feature 0041**.
+> **Status:** ✅ **Built + BDD-gated** (all six scenarios in `cucumber.cjs`); **PO-approved 2026-07-12**.
+> The whole feature is live: the turn-driven off-screen tick runs `richOffscreenStretch` — **seven real
+> interaction types** (alliance/gossip/conflict/bonding/strategy/showmance/betrayal), each folded into the
+> relationship layer with its **true nature**; **gossip diffuses NPC→NPC** with drift + decaying
+> confidence + provenance and a rumor reaches the player by a terminating pathway (B27b — the 0031 leak
+> heuristic was made pathway-aware, so legitimate propagation no longer false-flags); and off-screen scenes
+> **deepen the souls** (`recordOffscreenScene`, live via 0041) and are recall-able. Bounded (one tick per
+> committed turn — real-time purge 2026-07-10; **no wall-clock watcher**), seed-deterministic, Vault-walled,
+> and per-user isolated. Unit-gated by `tests/unit/offscreenSociety.test.ts` + siblings.
+> **Extended by the in-game-time pivot (2026-07-12):** **0117** un-silences this society into the player's
+> between-ceremony social play (it now lives *as the in-game clock passes*, paced to the player), and
+> **0120** varies the scheming CADENCE by each houseguest's strategic drive (the PO-approved expansion of
+> this review — sharper players scheme a touch more often).
 > **Executable spec:** [`0038-live-offscreen-society.feature`](./0038-live-offscreen-society.feature)
 
 ## 1. Summary
@@ -80,18 +82,18 @@ Orchestrator off-screen apply (per idle tick, bounded):
 
 ## 6. Definition of Done
 
-- [ ] **Varied life:** between turns an idle house produces **multiple interaction types** (not one canned
+- [x] **Varied life:** between turns an idle house produces **multiple interaction types** (not one canned
       verb) — alliances shift, conflicts and bonding happen off-screen (assert variety, not a single kind).
-- [ ] **Information travels:** a hidden fact **diffuses NPC→NPC** with **drift + decaying confidence +
+- [x] **Information travels:** a hidden fact **diffuses NPC→NPC** with **drift + decaying confidence +
       provenance**; a rumor can **reach the player** through a terminating pathway as a belief carrying a
       **source + confidence** (possibly distorted) — and **never a number**.
-- [ ] **Souls deepen:** off-screen scenes **append to souls** (`recordToSoul`, monotonic — 0024/0007) and
-      become **recall-able** live; relationships move (`applyDirected`).
-- [ ] **Bounded + deterministic:** capped per wake (no season fast-forward); same seed + same ticks ⇒
-      identical society.
-- [ ] **Vault-free + isolated:** the player sees no opinion numbers/hidden scenes (extend the 0001 canary to
-      the live off-screen path); one user's society never bleeds into another's (0021).
-- [ ] **BDD-gated:** add **0035** and **0038** to `cucumber.cjs`; name-agnostic (roles only); `npm test` green.
+- [x] **Souls deepen:** off-screen scenes **append to souls** (monotonic — 0024/0007) and become
+      **recall-able** live; relationships move.
+- [x] **Bounded + deterministic:** one tick per committed turn (no season fast-forward); same seed + same
+      ticks ⇒ identical society.
+- [x] **Vault-free + isolated:** the player sees no opinion numbers/hidden scenes (the 0001 canary extends
+      to the live off-screen path); one user's society never bleeds into another's (0021).
+- [x] **BDD-gated:** **0038** is in `cucumber.cjs`; name-agnostic (roles only); `npm test` green.
 
 ## 7. Dependencies & traceability
 

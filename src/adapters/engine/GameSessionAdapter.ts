@@ -115,6 +115,7 @@ import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
+import { strategicDriveWeight } from "../../engine/offscreen";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
@@ -385,6 +386,16 @@ const ALLIANCE_ADVERSE = new Set(["nominate", "replace", "vote-evict"]);
  * per-session via `setTrajectoriesEnabled`.
  */
 const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
+
+/**
+ * 0120 — whether the STRATEGIC-DRIVE INITIATOR CADENCE runs by DEFAULT. OFF unless
+ * `ORWELL_STRATEGIC_CADENCE=1`. A DEDICATED flag (sibling to `ORWELL_TRAJECTORIES`/`ORWELL_CAMPAIGNS`) so
+ * calibration neutrality is provable in isolation: unset ⇒ the off-screen initiator is drawn with the
+ * uniform `rng.pick` exactly (no `initiatorDriveOf` is passed), and every seeded gate is byte-identical.
+ * The calibration/UAT harness never sets it; the live deploy does. A test overrides per-session via
+ * `setStrategicCadenceEnabled`. When on, sharper/more-strategic houseguests scheme a touch more often.
+ */
+const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -734,6 +745,8 @@ export class GameSessionAdapter implements GameSession {
    * instance; a test flips it via `setTrajectoriesEnabled`.
    */
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
+  /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
+  private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -5895,6 +5908,22 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the trajectory layer is live (0087) — the orchestrator reads this so it passes `trajectoryOf`
    *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
   trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
+
+  /** Turn the 0120 STRATEGIC-DRIVE initiator cadence on/off. Off by default — the calibration harness leaves
+   *  it off (with it off the off-screen tick passes no `initiatorDriveOf` ⇒ the seeded spine is byte-identical). */
+  setStrategicCadenceEnabled(on: boolean): void { this.strategicCadenceEnabled = on; }
+
+  /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
+   *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
+  strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
+
+  /** 0120 — how often this houseguest INITIATES off-screen scheming, weighted by strategic intelligence
+   *  (Mental stat) + personality (strategyStyle). Engine-internal (the off-screen society is hidden) —
+   *  never a player-facing number. A bounded, slight variance (see `strategicDriveWeight`). */
+  initiatorDrive(id: EntityId): number {
+    const npc = this.house?.npcs.find((n) => n.id === id);
+    return strategicDriveWeight(this.statsOf(id).mental, npc?.character.strategyStyle);
+  }
 
   // --- 0066 Phase-2 (#1125): the three sleep-economy extension flags (each default OFF) --------------
 

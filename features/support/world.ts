@@ -241,6 +241,16 @@ export class BbWorld extends World {
   pfdFlat?: { winner?: string; order: string[] };
   pfdVariable?: { winner?: string; order: string[] };
 
+  // Feature 0120 — strategic-drive off-screen cadence scratch state.
+  scSandbox?: import("../../src/composition/registry").UserSandbox;
+  scOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  scUser?: string;
+  scSharpDrive?: number;
+  scPassiveDrive?: number;
+  scOffStream?: string[];
+  scOnStream?: string[];
+  scOnStreamB?: string[];
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;

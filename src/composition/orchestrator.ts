@@ -689,6 +689,12 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         ...(sandbox.session.trajectoriesEnabledNow()
           ? { trajectoryOf: (a: EntityId, b: EntityId) => sandbox.session.trajectoryOf(a, b) }
           : {}),
+        // 0120: sharper/more-strategic houseguests initiate off-screen scheming a touch more often.
+        // Passed ONLY when enabled so the off-screen call is byte-identical to the uniform draw when off;
+        // it swaps the single `rng.pick` for a single-draw `weightedPick`, so the seeded spine stays in phase.
+        ...(sandbox.session.strategicCadenceEnabledNow()
+          ? { initiatorDriveOf: (id: EntityId) => sandbox.session.initiatorDrive(id) }
+          : {}),
         ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society

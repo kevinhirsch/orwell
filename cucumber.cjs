@@ -90,6 +90,7 @@ module.exports = {
       "docs/features/0117-house-lives-in-in-game-time.feature",
       "docs/features/0118-ceremonies-as-timed-interrupts.feature",
       "docs/features/0119-per-event-felt-durations.feature",
+      "docs/features/0120-strategic-drive-offscreen-cadence.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
