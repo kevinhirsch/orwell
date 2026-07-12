@@ -58,7 +58,8 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_seq_helpers_exist():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the seq helpers moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "export function _msgSeq(el)" in js, "the seq reader must exist"
     assert "export function _insertBySeq(box, el)" in js, "the insert-by-seq choke point must exist"
     assert "export function _reorderBySeq(box)" in js, "the non-destructive seq reorder must exist"
@@ -67,7 +68,8 @@ def test_seq_helpers_exist():
 def test_reorder_wired_into_reconcile_adopt_pass():
     """The reorder MUST run inside softReloadHistory's adopt pass — i.e. BEFORE the divergence check
     and BEFORE the `hasActiveStream` early-return — so order converges even mid-stream, non-destructively."""
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: softReloadHistory + the reorder moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     fn = js[js.index("export async function softReloadHistory"):]
     fn = fn[:fn.index("export function flushPendingReconcile")] if "export function flushPendingReconcile" in fn else fn
     assert "_reorderBySeq(box)" in fn, "softReloadHistory must call _reorderBySeq"
@@ -80,8 +82,11 @@ def test_reorder_wired_into_reconcile_adopt_pass():
 
 
 def test_empty_turn_predicate_exists_and_wired():
+    # #1414 R3 PR7: the _isEmptyTurnNoSave predicate DEFINITION moved to chatReconcile.js; its finalize
+    # CALL SITE + the per-stream flags stay in chat.js's stream loop.
+    recon = _read("static/js/chatReconcile.js")
+    assert "export function _isEmptyTurnNoSave(" in recon, "the clean-empty-turn predicate must exist"
     js = _read("static/js/chat.js")
-    assert "export function _isEmptyTurnNoSave(" in js, "the clean-empty-turn predicate must exist"
     # the finalize must consult the predicate and render the Retry control for it.
     assert "_isEmptyTurnNoSave({" in js, "the finalize must consult the empty-turn predicate"
     assert "_sawMessageSaved = true" in js, "message_saved must set the save flag"
@@ -103,7 +108,8 @@ def test_render_stream_drop_retry_serves_empty_turn():
 def test_pending_bubble_preservation_intact():
     """#973 / #836 — softReloadHistory must still PRESERVE a pending optimistic bubble across a rebuild;
     the seq fix must not have disturbed it."""
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: softReloadHistory's pending-bubble rescue moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "_isPendingOptimisticBubble(el) && !_serverClientIds.has(el.dataset.clientMsgId)" in js, \
         "the pending-bubble rescue across the rebuild must remain"
 

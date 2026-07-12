@@ -29,6 +29,23 @@ export interface Confessional {
   trigger?: string;
   /** The NPC's coarse mood at the moment of confessing (from their hidden soul, 0041). */
   mood?: "rattled" | "steady" | "confident";
+  /**
+   * Feature 0122 — the DEEP facets, each present ONLY when the confessor's situation triggered it (this is
+   * NOT a fixed multi-slot form; depth is earned by game state, so an HOH / nominee gets several and a
+   * coasting houseguest gets none). Every facet is grounded in the confessor's OWN reads + PUBLIC role/beat
+   * state — no number, no other houseguest's sealed state. Absent unless `ctx.depth` was supplied (⇒ the
+   * whole confessional is BYTE-IDENTICAL to 0040 when depth is off — the calibration/golden guarantee).
+   */
+  /** Their intended next move (triggered by holding power/danger — HOH/veto-holder/nominee). */
+  plan?: string;
+  /** How safe they feel, from PUBLIC role state only (never another's hidden threat-of-me edge). */
+  standing?: "safe" | "exposed" | "reading";
+  /** A peer they hold a real grudge against (lowest trust, below the grudge floor) — distinct from target. */
+  grudge?: EntityId | null;
+  /** The partner of a significant recent conversation this facet reacts to (how that talk sat with them). */
+  aftermath?: EntityId | null;
+  /** A relation of theirs who was just in a public beat, read through the bond ("my ally won HOH"). */
+  adjacent?: { relation: EntityId; bond: "ally" | "target"; beat: "won-power" | "nominated" } | null;
 }
 
 /**
@@ -101,6 +118,31 @@ export interface ConfessionalContext {
    * the role-only unit tests stay green. The resolver yields a PUBLIC display name only (no Vault read).
    */
   nameOf?: (id: EntityId) => string;
+  /**
+   * Feature 0122 — the caller-supplied, Vault-safe inputs that TRIGGER the deep facets. Present ⇒ the
+   * composer computes + renders whichever facets are grounded (plan/standing/grudge/aftermath/adjacent),
+   * appended after the base line; ABSENT ⇒ NONE of the deep logic runs and the confessional is
+   * BYTE-IDENTICAL to 0040 (the calibration/golden guarantee — the daily sweep supplies this only when
+   * the flag + in-game clock are live). The caller (`GameSessionAdapter`) computes these from PUBLIC role
+   * state + the confessor's OWN witnessed events — never another houseguest's hidden read, never a number.
+   */
+  depth?: ConfessionalDepth;
+}
+
+/**
+ * Feature 0122 — the Vault-safe grounding inputs for the deep facets, pre-computed by the caller (which
+ * owns the live board + the confessor's witnessed events). `grudge` is derived INSIDE `confessionalFor`
+ * from `rel` (lowest-trust peer below the grudge floor) — the rest are public-state facts the confessor
+ * legitimately knows. Every field is optional: a facet renders only when its input is present, so depth
+ * tracks the confessor's real situation (an HOH/nominee triggers several; a coasting houseguest none).
+ */
+export interface ConfessionalDepth {
+  /** The confessor's PUBLIC role this week — drives the plan + safe/exposed standing. */
+  role?: "hoh" | "veto-holder" | "nominee" | "none";
+  /** A significant recent conversation partner the confessor witnessed (the "how that talk sat" facet). */
+  recentTalk?: EntityId;
+  /** A relation of the confessor who was just in a public beat, read through the bond (the adjacent move). */
+  adjacent?: { relation: EntityId; bond: "ally" | "target"; beat: "won-power" | "nominated" };
 }
 
 const MOOD_OF = (state: number): "rattled" | "steady" | "confident" =>
@@ -123,6 +165,47 @@ const MOOD_LINES: Record<"rattled" | "steady" | "confident", string> = {
   rattled: "I'm shaken — this house just got very real",
   steady: "I'm keeping my head down and my eyes open",
   confident: "honestly? I feel untouchable right now",
+};
+
+/**
+ * Feature 0122 — the DEEP-facet phrasing pools ({T}=target, {G}=grudge, {P}=talk partner, {R}=relation).
+ * Same seeded `pick` the base uses; every line states the SAME engine-grounded fact (the facet only
+ * changes WHAT is voiced, never invents a stance). Each facet renders only when its trigger fired, so
+ * these are drawn from à la carte — an HOH's confessional strings several, a coasting one none.
+ */
+const PLAN_LINES: Record<"hoh" | "veto-holder" | "nominee" | "none", string> = {
+  hoh: "This power is mine now, so the plan is simple: {T} goes up",
+  "veto-holder": "I've got the veto, and I'm using it to steer this straight at {T}",
+  nominee: "I'm on the block, so I have to win — or {T} sends me home",
+  none: "If I get any power at all, {T} is the name I'm writing down",
+};
+const STANDING_LINES: Record<"safe" | "exposed" | "reading", string> = {
+  safe: "And I'm sitting pretty this week — nobody can touch me",
+  exposed: "And I know exactly how exposed I am right now",
+  reading: "And I'm still reading where I stand in all this",
+};
+const GRUDGE_LINES = [
+  "I also haven't forgotten what {G} did to me",
+  "and don't get me started on {G} — that betrayal still stings",
+  "{G} crossed me once, and I hold onto that",
+];
+const AFTERMATH_WARM_LINES = [
+  "that talk with {P} sat right with me — we're tighter for it",
+  "after getting into it with {P}, I feel better about where we are",
+];
+const AFTERMATH_COOL_LINES = [
+  "that conversation with {P} put me on edge",
+  "I came out of that talk with {P} trusting them a little less",
+];
+const ADJACENT_LINES: Record<"won-power" | "nominated", Record<"ally" | "target", string>> = {
+  "won-power": {
+    ally: "{R} taking power changes everything for me — my person is on top",
+    target: "the one I'm gunning for, {R}, just grabbed power, and that's a problem",
+  },
+  nominated: {
+    ally: "they put {R} on the block, and that's my closest person up there",
+    target: "seeing {R} on the block? That's exactly where I wanted them",
+  },
 };
 
 /**
@@ -255,14 +338,100 @@ export function confessionalFor(
         : "";
   const opening = reaction;
   const moodStr = mood ? ` ${MOOD_LINES[mood]}.` : "";
+  // Feature 0122 — the DEEP FACETS (triggered, not templated). Runs ONLY when the caller supplied
+  // `ctx.depth` (the daily sweep, with the flag + in-game clock live); absent ⇒ none of this executes and
+  // `content` + the structured fields are BYTE-IDENTICAL to 0040 (the calibration/golden guarantee). Every
+  // facet is grounded in PUBLIC role/beat state + the confessor's OWN edges — no number, no other
+  // houseguest's sealed read — and renders ONLY when its trigger fired, so an HOH/nominee strings several
+  // while a coasting houseguest gets none.
+  let planStr: string | undefined;
+  let standing: "safe" | "exposed" | "reading" | undefined;
+  let grudge: EntityId | null = null;
+  let aftermath: EntityId | null = null;
+  let adjacent: NonNullable<Confessional["adjacent"]> | null = null;
+  const deepParts: string[] = [];
+  const dep = ctx.depth;
+  if (dep) {
+    const role = dep.role;
+    // plan — earned by power/danger (HOH / veto-holder / nominee); a coasting houseguest gets no plan.
+    if (target && (role === "hoh" || role === "veto-holder" || role === "nominee")) {
+      planStr = PLAN_LINES[role].replaceAll("{T}", display(target));
+      deepParts.push(planStr);
+    }
+    // standing — safe/exposed from PUBLIC role state ONLY (never another houseguest's hidden threat-of-me).
+    if (role === "nominee") standing = "exposed";
+    else if (role === "hoh" || role === "veto-holder") standing = "safe";
+    if (standing) deepParts.push(STANDING_LINES[standing]);
+    // grudge — the lowest-trust peer below the grudge floor, PREFERRED distinct from the current target.
+    let worstTrust: number = CONFESSIONAL.depth.grudgeTrust;
+    for (const o of candidates) {
+      if (o === npc) continue;
+      const t = rel.edge(npc, o).trust;
+      if (t < worstTrust) { worstTrust = t; grudge = o; }
+    }
+    if (grudge !== null && grudge === target) {
+      let altTrust: number = CONFESSIONAL.depth.grudgeTrust;
+      let alt: EntityId | null = null;
+      for (const o of candidates) {
+        if (o === npc || o === target) continue;
+        const t = rel.edge(npc, o).trust;
+        if (t < altTrust) { altTrust = t; alt = o; }
+      }
+      if (alt !== null) grudge = alt;
+    }
+    if (grudge !== null) deepParts.push(pick(GRUDGE_LINES).replaceAll("{G}", display(grudge)));
+    // aftermath — how a significant recent conversation sat with them (warm vs cool by their OWN read).
+    if (dep.recentTalk && dep.recentTalk !== npc) {
+      aftermath = dep.recentTalk;
+      const e = rel.edge(npc, aftermath);
+      const warm = (e.trust + e.affinity) / 2 >= CONFESSIONAL.depth.clearBond;
+      deepParts.push(pick(warm ? AFTERMATH_WARM_LINES : AFTERMATH_COOL_LINES).replaceAll("{P}", display(aftermath)));
+    }
+    // adjacent — a relation of theirs who just moved on the PUBLIC board, read through the bond.
+    if (dep.adjacent && dep.adjacent.relation !== npc) {
+      adjacent = dep.adjacent;
+      deepParts.push(ADJACENT_LINES[adjacent.beat][adjacent.bond].replaceAll("{R}", display(adjacent.relation)));
+    }
+  }
+  const deepStr = deepParts.length > 0 ? ` ${deepParts.join(". ")}.` : "";
   return {
     npc,
     target,
     ally,
-    content: `[confessional ${display(npc)}] ${opening}${targetStr}. ${allyStr}.${moodStr}`,
+    content: `[confessional ${display(npc)}] ${opening}${targetStr}. ${allyStr}.${moodStr}${deepStr}`,
     ...(ctx.trigger ? { trigger: ctx.trigger } : {}),
     ...(mood ? { mood } : {}),
+    ...(planStr ? { plan: planStr } : {}),
+    ...(standing ? { standing } : {}),
+    ...(grudge !== null ? { grudge } : {}),
+    ...(aftermath !== null ? { aftermath } : {}),
+    ...(adjacent !== null ? { adjacent } : {}),
   };
+}
+
+/**
+ * Feature 0122 — the BARE-GAME gate for the daily sweep. A houseguest with **nothing to say** stays
+ * quiet that day: no clear TARGET (no peer they read as a real threat), no clear ALLY (no genuine bond),
+ * and no salient recent beat they witnessed. Everyone with any real hook confesses; a pure wallflower
+ * waits until the house touches them. Pure + grounded in the confessor's OWN edges (no number crosses).
+ * `hasSalientRecent` is the caller's answer to "did they witness any non-flavor event recently?"
+ * (`selectRecentForConfessional` supplies the recency).
+ */
+export function isBareGame(
+  npc: EntityId,
+  others: readonly EntityId[],
+  rel: RelationshipModel,
+  hasSalientRecent: boolean,
+): boolean {
+  let hasTarget = false;
+  let hasAlly = false;
+  for (const o of others) {
+    if (o === npc) continue;
+    const e = rel.edge(npc, o);
+    if (e.threat >= CONFESSIONAL.depth.clearThreat) hasTarget = true;
+    if ((e.trust + e.affinity) / 2 >= CONFESSIONAL.depth.clearBond) hasAlly = true;
+  }
+  return !hasTarget && !hasAlly && !hasSalientRecent;
 }
 
 /**

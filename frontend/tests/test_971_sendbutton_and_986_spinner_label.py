@@ -53,7 +53,8 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_reconciler_and_predicate_exist():
-    js = _read("static/js/chat.js")
+    # #1414 (R3 PR2): the button state machine now lives in chatSubmitButton.js (imported by chat.js).
+    js = _read("static/js/chatSubmitButton.js")
     assert "function _foregroundStreamLive()" in js, "the live-foreground-stream predicate must exist"
     assert "function _syncSubmitButtonState()" in js, "the button-state reconciler must exist"
 
@@ -62,19 +63,19 @@ def test_predicate_requires_streaming_abort_session_and_not_backgrounded():
     """`_foregroundStreamLive` must require ALL of: isStreaming, a live reader (currentAbort), being on
     the streaming session, and the run NOT detached to the background. Otherwise the button could show
     Stop for a settled/backgrounded run (the exact #971 desync)."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatSubmitButton.js")  # #1414 (R3 PR2): moved out of chat.js
     fn = js[js.index("function _foregroundStreamLive()"):]
     fn = fn[:fn.index("function _syncSubmitButtonState()")]
-    assert "if (!isStreaming || !currentAbort) return false;" in fn, "must require a live reader"
-    assert "cur !== _streamSessionId" in fn, "must require we are on the streaming session"
-    assert "_backgroundStreams.has(_streamSessionId)" in fn, "a backgrounded run is NOT a foreground stream"
+    assert "if (!chatState.isStreaming || !chatState.currentAbort) return false;" in fn, "must require a live reader"
+    assert "cur !== chatState._streamSessionId" in fn, "must require we are on the streaming session"
+    assert "chatState._backgroundStreams.has(chatState._streamSessionId)" in fn, "a backgrounded run is NOT a foreground stream"
 
 
 def test_reconciler_composes_with_993_queue_text_while_streaming_is_send_not_stop():
     """While a turn streams AND the composer has text, the button must read as SEND (the #993 queue
     enqueues) — NOT Stop. So the reconciler shows Stop ONLY for a live foreground stream with an EMPTY
     composer; with text it drops the Stop face WITHOUT flipping the live isStreaming flag."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatSubmitButton.js")  # #1414 (R3 PR2): moved out of chat.js
     fn = js[js.index("function _syncSubmitButtonState()"):]
     fn = fn[:fn.index("\n  function ", 1) if "\n  function " in fn[1:] else len(fn)]
     # Stop only when empty-composer + live.
@@ -83,7 +84,7 @@ def test_reconciler_composes_with_993_queue_text_while_streaming_is_send_not_sto
     # Text during a live stream → drop the Stop face but DON'T touch the live flag (the queue handles it).
     assert "submitBtn.dataset.mode = ''" in fn, "text during streaming must clear the Stop face"
     # Not streaming → clear a stuck 'streaming' mode + repaint via the global updater.
-    assert "if (isStreaming) isStreaming = false;" in fn, "a settled-but-stuck flag must be cleared"
+    assert "if (chatState.isStreaming) chatState.isStreaming = false;" in fn, "a settled-but-stuck flag must be cleared"
     assert "window._updateSendBtnIcon()" in fn, "must repaint send/upload/mic via the global updater"
 
 
@@ -95,7 +96,7 @@ def test_reconciler_wired_to_gamechanged_visibility_and_bg_settle():
     assert "_syncSubmitButtonState()" in gc[:200], "gamechanged must reconcile the button"
     # tab-return must reconcile BEFORE the frozen-stream early-return (so a stuck Stop recovers).
     vis = js[js.index("document.addEventListener('visibilitychange'"):]
-    vis_head = vis[:vis.index("if (!isStreaming) return;")]
+    vis_head = vis[:vis.index("if (!chatState.isStreaming) return;")]
     assert "_syncSubmitButtonState()" in vis_head, "tab-return must reconcile before the !isStreaming guard"
     # The backgrounded-settle path (the `else` of `!_isBgFinally`) must reconcile the button.
     assert "} else {" in js[js.index("if (!_isBgFinally) {"):]

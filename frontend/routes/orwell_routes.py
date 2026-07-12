@@ -404,6 +404,42 @@ def _house_entry_overlay(user: Optional[str], st):
     return out
 
 
+def _casting_finalize_overlay(st):
+    """S2-1 — a STRUCTURAL 'Enter the house' affordance for the pre-game casting interview.
+
+    When the engine's casting intake is `finalizable` (a GENUINE interview has happened — name +
+    backstory + motivation + a persona/strategy answer; `finalizable` is the engine's own floor, not
+    the softer name-only `ready`) and no season has started yet, attach a Vault-free, renderable
+    affordance descriptor so the FE can offer 'Enter the house' as a real CONTROL — the player's own
+    structural door into the house — rather than relying on a line of prompt text the narration model
+    may or may not act on (the createCharacter under-call the belts already fight). The descriptor is
+    pure UI metadata derived from the public `casting.finalizable` boolean; it carries no game state.
+
+    Applied to `/state` BEFORE `_house_entry_overlay`, on the RAW engine truth: this only fires while
+    the season has genuinely not started (`started` not True) and casting is not `refused` (no game is
+    already in progress/over), so it can never collide with the post-createCharacter house-entry hold.
+    Pure overlay: pass-through (byte-identical) whenever casting is not finalizable, a game already
+    exists, or the read is malformed. Fail-open — any hiccup leaves the state untouched."""
+    try:
+        if not isinstance(st, dict) or st.get("started") is True:
+            return st
+        casting = st.get("casting")
+        if not isinstance(casting, dict) or not casting.get("finalizable"):
+            return st
+        # A season already exists (in-progress/over) — never offer entry from a stale interview view.
+        if casting.get("refused"):
+            return st
+        out = dict(st)
+        out["enterHouse"] = {
+            "available": True,
+            "label": "Enter the house",
+            "reason": "casting-finalizable",
+        }
+        return out
+    except Exception:
+        return st
+
+
 def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
     """The /roster response body from a set of roster cards: the cards plus the portrait-set
     counters, whether an image provider is configured, the live generation progress (L15), and a
@@ -726,7 +762,11 @@ def setup_orwell_routes() -> APIRouter:
             _clear_warn("state")
             # #1313: while the house-entry gate holds, report the casting/holding state, never a
             # started game (the engine season is live internally; the overlay is the player truth).
-            return _house_entry_overlay(_current_user(request), st)
+            # S2-1: the casting-finalize affordance is composed on the RAW engine truth FIRST (so it
+            # reads the real `started`), then the house-entry latch wraps it — the two phases are
+            # mutually exclusive, so `enterHouse` never survives into a house-entry hold.
+            return _house_entry_overlay(
+                _current_user(request), _casting_finalize_overlay(st))
         except Exception as e:
             detail = _err_detail(e)
             _warn_throttled("state", f"[orwell] state failed: {detail}")

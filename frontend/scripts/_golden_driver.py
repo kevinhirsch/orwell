@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -162,9 +163,53 @@ class GoldenDriver:
 
     # ── plumbing ──────────────────────────────────────────────────────────────────
 
+    # A read against the live FE/engine can TRANSIENTLY fail, or LAG, under a slow/contended
+    # runner (the CI case). Three shapes were observed, NONE a golden determinism failure — the
+    # underlying replay is byte-deterministic (the fixture is served by request key):
+    #   1. a SQLite reader momentarily blocked behind a writer surfaces as a one-call 404 on
+    #      GET /api/history/{session} (or a connection reset);
+    #   2. the assistant row can lag the read of a just-finished turn for a beat, then land;
+    #   3. MOST IMPORTANTLY, a heavy advance turn (advanceGame → staged-comp setup → the AWAITED
+    #      post-turn record belt) streams tool/agent events for longer than replay's tight 120s
+    #      per-turn budget on a contended runner, so the driver used to ABANDON the live stream
+    #      at that wall-clock deadline BEFORE the narration was persisted — and the post-turn
+    #      re-read could then never find a row that was never written (the load-only "no new
+    #      assistant message persisted" flake #1508 only partly closed: its re-read is bounded
+    #      well under a loaded heavy turn, and could not help once the stream was cut off early).
+    # The GET reads are IDEMPOTENT and the stream is now read to its NATURAL close (see _turn), so
+    # a bounded, backed-off retry + a generous convergence budget is safe and NON-masking: a
+    # genuine miss (the endpoint really 404s, the reply really never persisted, the stream truly
+    # hangs) still surfaces after the budget, while a transient blip / lagging persist is absorbed.
+    # Timing-independent by construction — every wait converges on the same committed state
+    # regardless of runner speed, so a healthy run reads once with no backoff and the deterministic
+    # digest is unchanged.
+    _READ_RETRIES = 10             # idempotent-GET transient-blip retries (was 6)
+    _READ_BACKOFF_S = 0.5          # base linear backoff step
+    _READ_BACKOFF_CAP_S = 3.0      # cap per-step backoff so a larger retry count stays bounded
+    # Post-turn "did a NEW assistant row land?" convergence budget (see _await_new_assistant).
+    # The row is persisted SYNCHRONOUSLY inside the stream generator (before the [DONE] sentinel),
+    # so once _turn has read the stream to its natural close the row is normally present on the
+    # FIRST read; this only absorbs a lagging persist/read on a loaded runner. Generous
+    # (retries × capped backoff ≈ 115s) and NON-masking: a turn that truly persisted nothing still
+    # raises after the budget.
+    _ASSISTANT_ROW_RETRIES = 100  # was 40 (~115s); ~300s budget for a slow-runner persist lag
+    _ASSISTANT_ROW_BACKOFF_S = 0.5
+    # Absolute cap on a single turn's stream read, as a multiple of turn_timeout. The per-read
+    # socket timeout (turn_timeout secs of total silence) is the real genuine-hang catch; this
+    # backstop only bounds a pathological never-closing stream. Both fail loudly — nothing masked.
+    _TURN_STREAM_BACKSTOP_MULT = 8
+
     def _get(self, base: str, path: str, timeout: int = 20):
-        with urllib.request.urlopen(base + path, timeout=timeout) as r:
-            return json.load(r)
+        last_err: Exception | None = None
+        for attempt in range(self._READ_RETRIES):
+            try:
+                with urllib.request.urlopen(base + path, timeout=timeout) as r:
+                    return json.load(r)
+            except Exception as e:  # HTTPError / URLError / socket timeout — all transient here
+                last_err = e
+                if attempt < self._READ_RETRIES - 1:
+                    time.sleep(min(self._READ_BACKOFF_S * (attempt + 1), self._READ_BACKOFF_CAP_S))
+        raise last_err  # type: ignore[misc]  # exhausted the budget — a real, persistent failure
 
     def _post_json(self, base: str, path: str, body: dict, timeout: int = 60):
         req = urllib.request.Request(
@@ -294,7 +339,27 @@ class GoldenDriver:
                       # refusals + strict-only retries). The golden record/replay must stay
                       # byte-deterministic with the legacy fail-soft call shapes, so the driver pins
                       # the LEGACY `soft` policy (exactly like the floor-start hatch above).
-                      ORWELL_ENRICHMENT_POLICY="soft")
+                      ORWELL_ENRICHMENT_POLICY="soft",
+                      # CI-load resilience (slow/contended gh-runner): the heavy advanceGame turn
+                      # (premiere→week1 — staged HOH setup + off-screen tick + folds) can blow the 30s
+                      # default FE→engine timeout, so the FE's engine call ReadTimeouts, chat_stream
+                      # closes mid-turn, and NO assistant row persists ("no new assistant message
+                      # persisted" — the golden-path CI flake #1512/#1514 only partly closed). Give the
+                      # golden boot GENEROUS engine timeouts: HARNESS-ONLY (production keeps its own
+                      # defaults) and DIGEST-NEUTRAL — a bigger timeout only lets a slow runner FINISH
+                      # the same deterministic work, never changing WHAT happens. Lifting the tight 3s
+                      # framing bound also stops a slow-runner framing read from timing out into the
+                      # fallback prompt and perturbing the recorded request stream (a would-be miss).
+                      # #1517's values (180/30/60) STILL fell back on the SLOWEST gh-runners: a
+                      # framing/state read that runs past the 30s bound during the heavy advanceGame
+                      # commit falls to the FALLBACK prompt → a different request digest → a fixture
+                      # MISS → "no new assistant message persisted" (a deterministic per-runner failure,
+                      # not the retry-able flake). #1474 passes 3/3 locally, confirming it is purely
+                      # slow-runner timeout. Max out the golden-boot tolerances so NO engine call on ANY
+                      # runner times out into the fallback path.
+                      ORWELL_ENGINE_TIMEOUT="300",
+                      ORWELL_ENGINE_FRAMING_TIMEOUT="120",
+                      ORWELL_ENGINE_POLL_TIMEOUT="120")
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture
@@ -457,19 +522,51 @@ class GoldenDriver:
         req = urllib.request.Request(
             f"{self.fe}/api/chat_stream", data=body, method="POST",
             headers={"content-type": "application/json"})
-        deadline = time.time() + self.turn_timeout
+        # Read the stream to its NATURAL close ([DONE] → the server closes the body → an empty
+        # read). Do NOT abandon a still-streaming turn at a fixed wall-clock deadline: on a
+        # contended runner a heavy advance turn legitimately streams tool/agent events for well
+        # past replay's tight 120s budget, and cutting the read there dropped the connection
+        # mid-round BEFORE the narration was persisted — so the assistant row never existed and
+        # the re-read below could never find it (the load-only "no new assistant" flake). The
+        # per-read socket timeout still catches a GENUINE hang (no bytes at all for turn_timeout
+        # secs → urlopen raises), and an absolute backstop bounds a pathological never-closing
+        # stream — both fail loudly, so nothing is masked. Timing-independent: the identical
+        # [DONE] arrives regardless of runner speed, so a healthy run reads byte-for-byte the same
+        # stream (the digest is preserved).
+        stream_backstop = time.time() + self.turn_timeout * self._TURN_STREAM_BACKSTOP_MULT
         with urllib.request.urlopen(req, timeout=self.turn_timeout) as r:
-            while time.time() < deadline:
-                chunk = r.read(65536)
+            while True:
+                try:
+                    chunk = r.read(65536)
+                except (http.client.IncompleteRead, ConnectionError):
+                    # The server closed the stream mid-chunk under load (a transient reset /
+                    # early close — NOT a genuine hang, which raises socket.timeout/TimeoutError
+                    # and still propagates). The chunks are read only to drive the server to its
+                    # natural finish; the reply is recovered from /api/history below, so treat an
+                    # early close like a natural close and fall through to the settle →
+                    # _quiesce_beats → _await_new_assistant reconciliation, which re-reads until
+                    # the row lands (or fails loudly if it TRULY never persisted). Nothing masked.
+                    break
                 if not chunk:
                     break
+                if time.time() > stream_backstop:
+                    raise RuntimeError(
+                        f"turn {text[:48]!r} streamed for over "
+                        f"{int(self.turn_timeout * self._TURN_STREAM_BACKSTOP_MULT)}s without "
+                        "closing — a genuine server hang under replay, not runner slowness")
         time.sleep(self.settle)
         # Per-turn serialization: the post-turn background fold (_auto_record_scene's
         # recordInteraction) must land BEFORE the next prompt builds, in both modes —
         # otherwise turnsHere/beatSeq in the next system prompt race the write and the
         # replay keys drift (the turnsHere 4-vs-3 class).
         self._quiesce_beats("post-turn", stable_polls=2, budget_s=20, poll_s=0.3, quiet=True)
-        msgs = self._history()
+        # The assistant row is persisted SYNCHRONOUSLY inside the stream generator (before the
+        # [DONE] sentinel), so having read the stream to its natural close above the row is
+        # normally present on the very first read; _await_new_assistant only absorbs a lagging
+        # persist/read on a contended runner. A turn that genuinely persisted NOTHING (a real
+        # desync / stale re-serve) still fails loudly after the budget — never masked; the reply
+        # that lands is byte-identical, so only WHETHER we've observed it yet is what settles.
+        msgs = self._await_new_assistant(prior_assistants)
         if sum(1 for m in msgs if m.get("role") == "assistant") <= prior_assistants:
             raise RuntimeError(
                 f"no new assistant message persisted for turn {text[:48]!r} — "
@@ -483,6 +580,22 @@ class GoldenDriver:
     def _history(self) -> list[dict]:
         h = self._get(self.fe, f"/api/history/{self.session}")
         return h.get("messages") or h.get("history") or (h if isinstance(h, list) else [])
+
+    def _await_new_assistant(self, prior_assistants: int) -> list[dict]:
+        """Re-read history until a NEW assistant row is observed, or the convergence budget
+        (``_ASSISTANT_ROW_RETRIES`` × capped backoff) elapses; return the final ``messages``.
+        Absorbs a lagging persist/read on a contended runner. NON-masking: it returns whatever the
+        budget settled on, so a turn that TRULY persisted nothing still fails at the caller's count
+        check (this loop never invents a row). Timing-independent + zero-cost on the happy path —
+        the first read normally already shows the row (the stream was read to its natural close),
+        so no retry/backoff runs and the deterministic digest is untouched."""
+        msgs = self._history()
+        for attempt in range(self._ASSISTANT_ROW_RETRIES):
+            if sum(1 for m in msgs if m.get("role") == "assistant") > prior_assistants:
+                break
+            time.sleep(min(self._ASSISTANT_ROW_BACKOFF_S * (attempt + 1), self._READ_BACKOFF_CAP_S))
+            msgs = self._history()
+        return msgs
 
     def _state(self) -> dict:
         return self._get(self.fe, "/api/orwell/state")

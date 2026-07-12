@@ -64,10 +64,10 @@ def _read(rel):
 def test_coalesce_lane_is_streaming_enqueue_only():
     """The aggregation lane is opt-in at enqueue time and ONLY for the rapid-succession case (a
     send made while a turn streams). Offline-queued items must keep #891's per-item drain."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _enqueueSend(text)"):]
     fn = fn[:fn.index("function _paintOutboxBubble")]
-    assert "coalesce: isStreaming === true && _outboxOnline()" in fn, (
+    assert "coalesce: chatState.isStreaming === true && _outboxOnline()" in fn, (
         "an item queued while a turn streams (and ONLY then, AND on a live link) may join the "
         "aggregation lane — the offline branch routes through this helper too, and an offline "
         "item that dropped its link mid-stream must stay a per-item idempotency unit, never fold"
@@ -75,7 +75,7 @@ def test_coalesce_lane_is_streaming_enqueue_only():
 
 
 def test_fold_helper_folds_to_head_identity_and_one_bubble():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "function _foldOutboxBatch(batch)" in js, "the batch fold helper must exist"
     fn = js[js.index("function _foldOutboxBatch(batch)"):]
     fn = fn[:fn.index("\n  /**\n   * Flush the next queued send")]
@@ -94,7 +94,7 @@ def test_flush_folds_only_the_safe_run_after_every_gate():
     """The fold may only cover `coalesce && !needsDedupe` same-lane items, must run AFTER the
     dedupe preflight + session-binding eligibility + the FIFO pick, and BEFORE the dispatch
     bookkeeping — and a single item must stay byte-identical (no fold below 2)."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     assert "item.coalesce && !item.needsDedupe" in fn, (
@@ -126,7 +126,7 @@ def test_restored_and_requeued_items_leave_the_aggregation_lane():
     """A RESTORED or network-REQUEUED item is its own at-most-once idempotency unit (its POST may
     already have reached the server), so it re-enters the queue OUTSIDE the aggregation lane:
     per-item drain, per-item dedupe, never folded — comment and code agree (PR #1398 review)."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     restore = js[js.index("function _restoreOutboxFromStorage()"):]
     restore = restore[:restore.index("function _outboxConfirmDelivery")]
     assert "coalesce: false" in restore, "the restore must force the item OUT of the aggregation lane"
@@ -149,7 +149,7 @@ def test_shadow_instance_never_restores_the_shared_outbox():
     instances share ONE sessionStorage outbox record. Only the window.chatModule-registered
     instance may boot-restore it — a shadow-instance restore repaints duplicate pending bubbles
     and can dispatch a real DOUBLE-SEND after its own dedupe pass verifies clean."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     restore = js[js.index("function _restoreOutboxFromStorage()"):]
     restore = restore[:restore.index("function _outboxConfirmDelivery")]
     assert "window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage" in restore, (
@@ -164,7 +164,7 @@ def test_strip_is_a_kit_composed_projection_with_no_second_send_path():
     """The aggregate affordance composes window.OrwellNoticeKit — the ONE stacked above-composer
     zone (ruling #642; test_on_notice_kit.py forbids hand-rolled anchors) — with role='status'
     (WCAG 4.1.3) and REAL text nodes; its retry routes through the ONE normal flush."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     upd = js[js.index("function _updateOutboxStrip()"):]
     upd = upd[:upd.index("\n  /** #891: capped exponential backoff")]
     assert "window.OrwellNoticeKit" in upd and "OrwellNoticeKit.create" in upd, (

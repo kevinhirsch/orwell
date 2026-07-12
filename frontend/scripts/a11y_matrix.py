@@ -99,19 +99,9 @@ AXE_OPTIONS = {
 # Populated from the first ENGINE-STAGED run on main (2026-07-11, engine-staged + FINISHED season).
 # Every entry below is a REAL rendered contrast finding for the lead to file — NOT a false positive.
 XFAIL = {
-    # The monogram winner badge (orwellMonogram.js, M2-2) carries an ARIA attribute prohibited for
-    # its role — axe `aria-prohibited-attr`. Renders on a finished season (the winner's monogram).
-    "#1375-g": "a11y:aria-prohibited-attr",
     # The decision-card hint ("Select N houseguests to enable Confirm") renders as near-black text on
     # the dark decision card — 1.30:1, effectively invisible. The worst finding; dark-on-dark.
     "#1375-a": "contrast:orwell-decision-card-hint:span#orwell-decision-card-hint.odec-hint",
-    # The status-gadget disclosure chevron '▾' — 3.66:1 dark glyph on the mid-tone glass header.
-    "#1375-b": "contrast:orwell-status:span.og-chev",
-    # The ACTIVE settings nav label ("Appearance") — white on the iOS accent-blue pill (#0A84FF-ish),
-    # 3.29:1 (a classic accent-blue-with-white AA miss; both phone & desktop settings tiers).
-    "#1375-c": "contrast:settings:span@settings-nav-item",
-    # The sidebar user-name label — 2.93:1 dark text on the translucent sidebar glass.
-    "#1375-d": "contrast:sidebar:span#user-bar-name.user-bar-name",
     # The sidebar "New Chat" label — 3.43:1 dark text on the translucent sidebar glass.
     "#1375-e": "contrast:sidebar:span.grow",
     # The sidebar "Orwell" brand title — 3.48:1 dark text on the translucent sidebar glass.
@@ -123,6 +113,20 @@ XFAIL = {
     # the lead files ONE issue ("the retro window has systemic dark-on-glass contrast"). REMOVE this
     # one entry when the retro window's glass/token is fixed and the whole surface ratchets clean.
     "#1375-h": "contrast:orwell-retro:",
+    # #1418 / S4-2: the finale panel (#orwell-finale) now SURVIVES the flip to `finished` (S4-2 makes
+    # finaleView return the completed reveal + crowned winner post-season), so it RENDERS on a finished
+    # season and is audited here for the first time. It is the SAME systemic dark-on-glass surface as
+    # the retro (#1375-h): the finalist/reveal names + the vote tally all read var(--fg) at ~3.66:1 on
+    # the mid-tone glass. Deliberately a SURFACE-LEVEL entry (mirrors #1375-h) tracked with the #738
+    # Liquid-Glass legibility batch — REMOVE it when the shared glass/token contrast fix lands and the
+    # whole surface ratchets clean.
+    "#1418-finale-contrast": "contrast:orwell-finale:",
+    # #1418 / S4-2: the finale body (#orwell-finale > .ow-body) is a scrollable region without keyboard
+    # access (axe scrollable-region-focusable) — a KIT-level gap (the shared OrwellWindow `.ow-body`
+    # scroll container is not tabbable) that only surfaces now that the finale renders on a finished
+    # season with enough content to overflow. Tracked as a kit a11y follow-up (add tabindex to the
+    # scrollable kit body); REMOVE when the kit makes its scroll region focusable.
+    "#1418-finale-scroll": "a11y:scrollable-region-focusable",
 }
 
 # Findings are collected into `found` keyed by their stable needle so a violation seen at N

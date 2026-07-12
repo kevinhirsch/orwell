@@ -233,7 +233,12 @@
       // a thin fixed bar; the card inside spans it. The body padding-top compensation (so the
       // banner never occludes the chat top) is set by the JS via --on-banner-inset.
       "#" + BANNER_ID + " {" +
-      "  position: fixed; top: 0; left: 0; right: 0; z-index: 11000;" +
+      // F1 (PWA notch/home-indicator): a position:fixed bar is immune to the body safe-area
+      // padding, so anchor it INSIDE the safe area itself. env() resolves to 0 in a normal
+      // browser tab / the headless matrix — byte-identical there — and pushes below the notch
+      // (portrait) or clear of the sensor housing (landscape) on a real device.
+      "  position: fixed; top: var(--safe-top, 0px);" +
+      "  left: var(--safe-left, 0px); right: var(--safe-right, 0px); z-index: 11000;" +
       "  display: flex; flex-direction: column; pointer-events: none; }" +
       "#" + BANNER_ID + ":empty { display: none; }" +
       // A banner-placed card stretches edge-to-edge, squares its corners, and centres its row.
@@ -262,7 +267,10 @@
       // at a time, like the old singleton #toast). Slides in from the RIGHT (matching the legacy
       // toast motion), auto-dismisses on a timer, OUT of the chat flow.
       "#" + TOAST_ID + " {" +
-      "  position: fixed; top: 16px; right: 16px; left: auto; bottom: auto; z-index: 11000;" +
+      // F1: the top-right toast keeps its 16px gutter BELOW/INSIDE the safe area (env() = 0 in a
+      // browser tab, so unchanged there; on a notched device it clears the status bar / sensor).
+      "  position: fixed; top: calc(16px + var(--safe-top, 0px)); right: calc(16px + var(--safe-right, 0px));" +
+      "  left: auto; bottom: auto; z-index: 11000;" +
       "  display: flex; flex-direction: column; align-items: flex-end; pointer-events: none;" +
       "  max-width: min(360px, calc(100vw - 32px)); }" +
       "#" + TOAST_ID + ":empty { display: none; }" +
@@ -283,7 +291,7 @@
       // Mobile: the host receives touches so the swipe-to-dismiss gesture works (desktop stays
       // pointer-events:none so a toast never blocks clicks; the card itself re-enables them).
       "@media (max-width: 768px) {" +
-      "  #" + TOAST_ID + " { top: 12px; right: 12px; max-width: calc(100vw - 24px); }" +
+      "  #" + TOAST_ID + " { top: calc(12px + var(--safe-top, 0px)); right: calc(12px + var(--safe-right, 0px)); max-width: calc(100vw - 24px); }" +
       "  #" + TOAST_ID + " .on-card { pointer-events: auto; touch-action: pan-x; } }" +
       "@media (prefers-reduced-motion: reduce) {" +
       "  .on-card.on-anim-in, .on-card.on-anim-out, .on-card.on-anim-banner-in," +

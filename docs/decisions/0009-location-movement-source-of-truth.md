@@ -1,6 +1,7 @@
 # 0009 — Location & movement: one source of truth, recorded movement, narration grounding
 
-> **Status:** **Accepted — built BDD/TDD-first (2026-06-21).** ALL increments shipped. D2 (record
+> **Status:** **Accepted — built BDD/TDD-first (2026-06-21); verified under stress + F-S4-F closed
+> (roadmap R4, #1415).** ALL increments shipped. D2 (record
 > movement for everyone), D3 (hard-fold: the location grounding barrier + the pre-emission
 > impossible-claim guard), and D4 (the dual-map contract + its calibration-neutrality guard) shipped in
 > PRs #454/#455/#456/#458/#459 + #463. **D1** (one occupancy snapshot per turn — the temporal-skew
@@ -207,6 +208,27 @@ snapshot skew:
    live-view degradation is visibly jarring, or (b) we want the moment-prompt grounding itself to defer
    the reshuffle in lockstep with the gadget (a single-source-of-truth win the FE-freeze cannot give).
    Until then the FE-freeze stands.
+
+## Verification (roadmap R4, #1415 — 2026-07-12)
+
+The R4 roadmap item verified this ADR under stress and folded in the audit's F-S4-F suspicion. No
+behaviour changed — the feature was already built; R4 added the regression pins the DoD asked for.
+
+- **Grounding under movement stress.** `tests/unit/locationGrounding0009.test.ts` drives many seeded
+  off-screen ticks interleaved with recorded narrated moves and, at every step, asserts the
+  narrator-facing `whereabouts()` projection (which the moment-prompt WHERE-YOU-ARE block AND the gadget
+  both read — so panel↔narration parity is by construction): every placed houseguest is **roster-named**
+  (each name routes through the canonical `nameOf` — a name cannot drift), **living** (never an
+  evicted/unknown houseguest), and **in exactly one place**. A recorded narrated move into the player's
+  room surfaces the same roster name to both the projection and the moment prompt (the D2→D3 fold).
+- **F-S4-F (resume name-drift) — confirmed NOT a structural degradation.** (a) `GET /api/chat/resume/{id}`
+  is a pure replay (`agent_runs.subscribe`; no agent loop, framing, or model call) → it cannot introduce a
+  name the original run did not emit. (b) Every model-invoking turn, including the fresh-context RE-ENTRY
+  turn a reopened session takes, is framed through `apply_game_framing` → `get_moment_prompt`, and
+  `buildSystemPrompt` always appends `renderGameContext` (the whole roster) → a resumed session re-grounds
+  names from engine truth. Pinned engine-side (the re-entry moment carries the full roster + the
+  single-source-of-truth anchor) and FE-side (`frontend/tests/test_fs4f_resume_name_grounding.py`). Any
+  residual "Lake Fleming" slip is model stochasticity, not a resume-path defect.
 
 ## Key files
 

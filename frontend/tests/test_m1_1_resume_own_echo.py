@@ -112,7 +112,9 @@ def test_history_render_callers_always_tag_even_without_metadata():
     `msg.metadata || null` variants alike — any of which reintroduce an untagged history bubble."""
     tern = re.compile(
         r"msg\.metadata\s*\?\s*\{[^{}]*_fromHistory:\s*true[^{}]*\}\s*:\s*(?P<else>[^;\n]+)", re.S)
-    for fname in ("sessions.js", "chat.js"):
+    # #1414 R3 PR7: the chat.js history-render ternary lives in softReloadHistory, moved to
+    # chatReconcile.js; the sessions.js session/archive-render ternary stays put.
+    for fname in ("sessions.js", "chatReconcile.js"):
         with open(os.path.join(JS, fname), encoding="utf-8") as fh:
             src = fh.read()
         matches = list(tern.finditer(src))

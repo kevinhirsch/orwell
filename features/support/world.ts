@@ -334,6 +334,17 @@ export class BbWorld extends World {
   dealThreatBefore?: number;
   dealVault?: VaultDatum;
 
+  // Feature 0121 — active-obligation deal kinds scratch state.
+  dealDepthLedger?: import("../../src/engine/deals").DealLedger;
+  dealDepthLedgerB?: import("../../src/engine/deals").DealLedger;
+  dealDepthDeal?: import("../../src/domain/deal").Deal;
+  dealDepthDealB?: import("../../src/domain/deal").Deal;
+  dealDepthRel?: RelationshipModel;
+  dealDepthTrustBefore?: number;
+  dealDepthDemerits?: Array<{ wronged: EntityId; breaker: EntityId }>;
+  dealDepthSandbox?: import("../../src/composition/registry").UserSandbox;
+  dealDepthRefused?: boolean;
+
   // Negotiated deal duration (0109) scratch state.
   ddLedger?: import("../../src/engine/deals").DealLedger;
   ddLedgerB?: import("../../src/engine/deals").DealLedger;
@@ -355,6 +366,31 @@ export class BbWorld extends World {
   confUserSandbox?: import("../../src/composition/registry").UserSandbox;
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
+
+  // Deeper character evolution (0124) scratch state.
+  dceSoul?: import("../../src/engine/characterFactory").Soul;
+  dceHoh?: EntityId;
+  dceNomsBase?: EntityId[];
+  dceNomsHardened?: EntityId[];
+  dceCompConfident?: number;
+  dceCompDistressed?: number;
+  dceClashSwing?: number;
+  dceBondSwing?: number;
+  dceSandbox?: import("../../src/composition/registry").UserSandbox;
+
+  // NPC-initiated deal offers (0123) scratch state.
+  dofSandbox?: import("../../src/composition/registry").UserSandbox;
+  dofOffer?: import("../../src/ports/GameSession").PendingDecisionView | null;
+  dofFrom?: EntityId;
+  dofBeforeThreat?: number;
+  dofBeforeDeals?: number;
+
+  // Deeper, daily NPC confessionals (0122) scratch state.
+  ddcSandbox?: import("../../src/composition/registry").UserSandbox;
+  ddcSweptBefore?: number;
+  ddcLivingNpcs?: number;
+  ddcBareIsSkipped?: boolean;
+  ddcDepth?: import("../../src/engine/confessionals").ConfessionalDepth;
 
   // Reactive confessionals (0089) scratch state.
   rcRegistry?: import("../../src/composition/registry").GameSessionRegistry;

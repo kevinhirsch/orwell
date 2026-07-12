@@ -1938,6 +1938,184 @@ export function displayMetrics(messageElement, metrics) {
   if (uiModule) uiModule.scrollHistory();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #1413-RENDER-MODEL-START  (feature #1413 / R2 · ADR-0015 — collapse the duplicated
+// live-vs-reload chat SETTLE render into one seam)
+//
+// `toRenderModel(input)` normalizes a SETTLED assistant turn — from EITHER the reload path
+// (`source: 'history'`, the persisted `{role, content, modelName, metadata}` that `addMessage`
+// receives) OR the live-finalize path (`source: 'live'`, the stream state chat.js holds at settle) —
+// onto ONE normalized "settled message" model. Both adapters normalize to the SAME canonical
+// `{role, content, modelName, metadata}` and DERIVE the structural fields (rounds / reasoning /
+// sources / …) from it, so the derived model is EQUAL by construction whenever the canonical
+// matches: "live == reload by construction" (ADR-0015). `renderAssistantMessage` then funnels the
+// model's canonical fields to the ONE canonical builder (`addMessage`), so a live finalize and a
+// history reload of the SAME turn paint identical DOM.
+//
+// These functions are DELIBERATELY pure — no DOM, no markdown, no ui — so they are Node-sliceable
+// and unit-tested (frontend/tests/test_1413_render_model.py asserts the history and live adapters
+// produce an EQUAL model for the same turn). The live adapter is defined + proven equal here; wiring
+// the chat.js sender finalize through `renderAssistantMessage(toRenderModel({source:'live', …}))` is
+// S3 — DEFERRED (that reroute is where the F5 mirror-parity risk lives; see the PR notes).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Reconstruct the per-round structure from the canonical turn. Mirrors addMessage's multi-bubble
+// grouping (round default 1; a text round is "last" when no later round carries text). A turn with
+// no tool events is a single round carrying the whole content.
+function _rm_deriveRounds(content, metadata) {
+  const toolEvents = (metadata && metadata.tool_events) || [];
+  if (toolEvents.length > 0) {
+    const roundTexts = (metadata && metadata.round_texts) || [];
+    const toolsByRound = {};
+    for (const ev of toolEvents) {
+      const r = ev.round || 1;
+      (toolsByRound[r] = toolsByRound[r] || []).push(ev);
+    }
+    let maxRound = roundTexts.length;
+    for (const k of Object.keys(toolsByRound)) maxRound = Math.max(maxRound, Number(k));
+    const rounds = [];
+    for (let r = 0; r < maxRound; r++) {
+      const txt = (roundTexts[r] || '').trim();
+      let isLastTextRound = true;
+      for (let rr = r + 1; rr < maxRound; rr++) {
+        if ((roundTexts[rr] || '').trim()) { isLastTextRound = false; break; }
+      }
+      rounds.push({ text: txt, tools: toolsByRound[r + 1] || [], isLastTextRound: isLastTextRound });
+    }
+    return rounds;
+  }
+  return [{ text: String(content == null ? '' : content), tools: [], isLastTextRound: true }];
+}
+
+function _rm_deriveReasoning(metadata) {
+  if (metadata && metadata.thinking) {
+    return { text: metadata.thinking, timeMs: metadata.thinking_time != null ? metadata.thinking_time : null };
+  }
+  return null;
+}
+
+function _rm_deriveSources(metadata) {
+  if (!metadata) return null;
+  if (metadata.research_sources && metadata.research_sources.length) {
+    return { kind: 'research', items: metadata.research_sources };
+  }
+  if (metadata.web_sources && metadata.web_sources.length) {
+    return { kind: 'web', items: metadata.web_sources };
+  }
+  return null;
+}
+
+// Build the canonical {role, content, modelName, metadata} for a live-finalized assistant turn,
+// matching exactly what /api/history persists + reloads for the same turn (so the reload adapter,
+// fed that persisted shape, derives the identical model). Pure.
+function _rm_liveToCanonical(live) {
+  const rnds = live.rounds || [];
+  const round_texts = rnds.map(function (r) { return r.replyText != null ? r.replyText : ''; });
+  const tool_events = [];
+  rnds.forEach(function (r, i) {
+    (r.tools || []).forEach(function (ev) {
+      const withRound = { round: i + 1 };
+      for (const k in ev) { if (Object.prototype.hasOwnProperty.call(ev, k)) withRound[k] = ev[k]; }
+      tool_events.push(withRound);
+    });
+  });
+  const content = live.content != null ? live.content
+    : round_texts.filter(function (t) { return t && t.trim(); }).join('\n\n');
+  const reasoningText = live.reasoningText != null ? live.reasoningText
+    : rnds.map(function (r) { return r.reasoningText || ''; }).filter(Boolean).join('\n\n');
+  const metadata = {};
+  if (tool_events.length) { metadata.tool_events = tool_events; metadata.round_texts = round_texts; }
+  if (reasoningText) {
+    metadata.thinking = reasoningText;
+    if (live.thinkingTimeMs != null) metadata.thinking_time = live.thinkingTimeMs;
+  }
+  if (live.sources) {
+    if (live.sources.kind === 'research') metadata.research_sources = live.sources.items;
+    else metadata.web_sources = live.sources.items;
+  }
+  if (live.findings) metadata.research_findings = live.findings;
+  if (live.ragSources) metadata.rag_sources = live.ragSources;
+  if (live.timestamp != null) metadata.timestamp = live.timestamp;
+  if (live.dbId != null) metadata._db_id = live.dbId;
+  if (live.seq != null) metadata._seq = live.seq;
+  if (live.clientMsgId != null) metadata.client_msg_id = live.clientMsgId;
+  if (live.stopped) metadata.stopped = true;
+  if (live.cancelled) metadata.cancelled = true;
+  if (live.memoriesUsed) metadata.memories_used = live.memoriesUsed;
+  return {
+    role: 'assistant',
+    content: content,
+    modelName: live.actualModel != null ? live.actualModel : null,
+    metadata: metadata,
+    rawForPersistence: live.rawForPersistence != null ? live.rawForPersistence : content,
+    ooc: !!live.ooc,
+  };
+}
+
+export function toRenderModel(input) {
+  input = input || {};
+  let role, content, modelName, metadata, rawForPersistence, ooc;
+  if (input.source === 'live') {
+    const norm = _rm_liveToCanonical(input);
+    role = norm.role; content = norm.content; modelName = norm.modelName;
+    metadata = norm.metadata; rawForPersistence = norm.rawForPersistence; ooc = norm.ooc;
+  } else {
+    role = input.role != null ? input.role : 'assistant';
+    content = input.content;
+    modelName = input.modelName != null ? input.modelName : null;
+    metadata = input.metadata || {};
+    rawForPersistence = input.rawForPersistence != null ? input.rawForPersistence
+      : (typeof content === 'string' ? content : '');
+    ooc = !!input.ooc;
+  }
+  metadata = metadata || {};
+  return {
+    role: role,
+    // Canonical passthrough — the ONLY thing renderAssistantMessage feeds to addMessage, so the
+    // render stays byte-identical to a direct reload.
+    raw: {
+      role: role, content: content, modelName: modelName, metadata: metadata,
+      rawForPersistence: rawForPersistence, ooc: ooc,
+    },
+    // Derived structural model — the contract the equality test pins; source-agnostic.
+    rounds: _rm_deriveRounds(content, metadata),
+    reasoning: _rm_deriveReasoning(metadata),
+    sources: _rm_deriveSources(metadata),
+    findings: (metadata.research_findings && metadata.research_findings.length) ? metadata.research_findings : null,
+    ragSources: (metadata.rag_sources && metadata.rag_sources.length) ? metadata.rag_sources : null,
+    model: {
+      requested: metadata.requested_model != null ? metadata.requested_model : (modelName != null ? modelName : null),
+      actual: metadata.model != null ? metadata.model : (modelName != null ? modelName : null),
+    },
+    timestamp: metadata.timestamp != null ? metadata.timestamp : null,
+    dbId: metadata._db_id != null ? metadata._db_id : null,
+    seq: metadata._seq != null ? metadata._seq : null,
+    clientMsgId: metadata.client_msg_id != null ? metadata.client_msg_id : null,
+    stopped: !!metadata.stopped,
+    cancelled: !!metadata.cancelled,
+    edited: !!metadata.edited,
+    variants: (metadata.variants && metadata.variants.length) ? metadata.variants : null,
+    variantIndex: metadata.variantIndex != null ? metadata.variantIndex : null,
+    memoriesUsed: (metadata.memories_used && metadata.memories_used.length) ? metadata.memories_used : null,
+  };
+}
+// #1413-RENDER-MODEL-END
+
+/**
+ * Render a settled ASSISTANT turn from a normalized render model (#1413 / R2 · ADR-0015).
+ *
+ * The model-typed front door BOTH the reload path and (S3, deferred) the live-finalize path funnel
+ * through: it hands the model's canonical `{role, content, modelName, metadata}` to the ONE canonical
+ * builder, `addMessage`, so a live finalize and a history reload of the same turn paint IDENTICAL
+ * DOM ("live == reload by construction"). Pure DOM: no session/subscribe/selectSession/resumeStream
+ * side-effects — it only builds bubbles. (S3 will additionally carry the model's `rawForPersistence`
+ * onto the settled bubble's `dataset.raw`; the reload path derives that from the persisted text.)
+ */
+export function renderAssistantMessage(model) {
+  const raw = (model && model.raw) || {};
+  return addMessage(raw.role != null ? raw.role : 'assistant', raw.content, raw.modelName, raw.metadata);
+}
+
 /**
  * Add a message to the chat history.
  */
@@ -2556,6 +2734,8 @@ const chatRenderer = {
   createMsgFooter,
   displayMetrics,
   addMessage,
+  toRenderModel,
+  renderAssistantMessage,
   updateMessageAttachments,
   applyOocClass,
 };

@@ -123,6 +123,15 @@ export interface Character {
   age: number;
   presentation: string;
   /**
+   * Feature 0116 — the model-authored FREEFORM identity concept, in the model's own words (e.g. "a
+   * chaos-agent podcaster who treats the house like a live show"). PUBLIC and Vault-free — the open-set
+   * identity the narrator voices (ADR 0005 generalized to world-gen: recorded faithfully, NEVER
+   * normalized). It rides ALONGSIDE the DERIVED `archetype` tag (the mechanical coupling key), never
+   * replacing it. Present only when cast genesis authored the skeleton; absent ⇒ the deterministic floor
+   * cast (the archetype IS the identity). Byte-stable once committed, like the rest of the static Character.
+   */
+  identityConcept?: string;
+  /**
    * Concrete, DIVERSE backstory facets (L28, 2026-06-19) — generated at cast time so the cast is a
    * producer-filtered crew (varied jobs & geography) that NEVER mirrors the player, and so the
    * narrator voices the STORED origin instead of re-inventing (and drifting) it. Public, Vault-free:
@@ -217,6 +226,22 @@ export interface Soul {
   /** The persisted trajectory of `emotionalState` — the season arc (0041), monotonic (0007/0030). */
   emotionalHistory: number[];
   memory: string[];
+  /**
+   * 0124 — the DEEPER-evolution fields, all OPTIONAL + hidden (present only when the `ORWELL_SOUL_DEPTH`
+   * layer is on; absent ⇒ the 0041 single-scalar behavior, byte-identical). Never cross the Vault Wall.
+   * - `distress` / `confidence`: INDEPENDENT affect axes (0..1) — a houseguest can ride a comp win high
+   *   (`confidence`▲) while rattled by a blindside (`distress`▲) at the same time, unlike the single
+   *   `emotionalState` slider. Composed into the competition modifier + decision leanings when present.
+   * - `temperamentDrift`: a bounded signed lean ([-1,+1], + toward clash-paranoia / − toward bond-trust)
+   *   that accrues from events and mean-reverts toward 0; bends the EFFECTIVE disposition, never the
+   *   static CHARACTER (0007).
+   * - `settleScale`: a disposition-derived multiplier on how fast a calm stretch settles them (clash < 1
+   *   ⇒ agitation lingers; bond > 1 ⇒ shrugs it off). Set at cast genesis from their disposition.
+   */
+  distress?: number;
+  confidence?: number;
+  temperamentDrift?: number;
+  settleScale?: number;
 }
 
 export interface Houseguest {
@@ -864,8 +889,9 @@ export interface OobeInput {
   genderPresentation?: "man" | "woman" | "nonbinary";
 }
 
-/** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). */
-const VOL_OF: Record<Disposition, number> = { clash: 0.7, bond: 0.3, neutral: 0.5 };
+/** Per-disposition emotional volatility seed (the emotional-modifier baseline, decision 0001). Exported so
+ *  0124's disposition-tuned reactivity (part C) stamps NPCs from the SAME table the player already uses. */
+export const VOL_OF: Record<Disposition, number> = { clash: 0.7, bond: 0.3, neutral: 0.5 };
 
 /**
  * The placeholder archetype slot the player carries when they supplied no recognizable archetype

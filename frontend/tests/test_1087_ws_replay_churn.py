@@ -228,8 +228,11 @@ def _read_static_js(name: str) -> str:
 
 
 def test_ws_chat_splice_discards_rich_run_holder_instead_of_adopting():
-    src = _read_static_js("chat.js")
-    body = src.split("function _onWsChatFrame")[1].split("\n  function ")[0]
+    # #1414 (R3 PR4): the WS chat-splice cluster (_onWsChatFrame / _wsResetRound) moved from
+    # chat.js to chatWsSplice.js (a behavior-preserving extraction). The consumer is now a
+    # top-level `export function`, so the body is isolated on the `\nexport function ` boundary.
+    src = _read_static_js("chatWsSplice.js")
+    body = src.split("function _onWsChatFrame")[1].split("\nexport function ")[0]
     for marker in ("agent_step", "tool_start"):
         assert f"'{marker}'" in body, f"the WS splice must detect the {marker} rich-run marker"
     assert "_wsRichRun = true" in body, "a rich marker must flag the run"

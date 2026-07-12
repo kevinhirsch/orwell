@@ -277,6 +277,26 @@ import { onNarrowChange } from './platform.js';
           #orwell-status .os-tile { transition: none; }
           #orwell-status .os-tile:hover { transform: none; }
         }
+        /* WCAG 2.5.5 (Target Size) / the repo's 44px coarse-pointer floor: the premiere "meet the
+           house" tiles are the player's FIRST interactive gesture on mobile, yet each visible tile is
+           a dense 30×30 (sixteen across a scrollable strip) — well below the 44px floor every other
+           control meets. Grow only the HIT area with an invisible ≥44px ::after (the same idiom as the
+           window-kit titlebar controls in orwellWindow.js and the frosted traffic-lights) — the visible
+           30px face is untouched. Two clip fixes make the ::after reachable in BOTH axes: the tile drops
+           overflow:hidden (redundant — the .ow-mono-face clips its OWN portrait via its own
+           overflow:hidden) so the ::after can escape the 30px box, and the strip gains ~7px padding on
+           ALL sides so the ::after's ±7px overhang lands inside the strip's clip box on BOTH axes — the
+           y-overhang isn't guillotined by overflow-y:hidden, AND the first/last tiles' x-overhang isn't
+           clipped at the overflow-x scroll endpoints (CodeRabbit). The gap widens to 14px (2×7px overhang) so adjacent
+           44px hit regions abut without intersecting. Touch only — desktop chrome stays compact. */
+        @media (pointer: coarse) {
+          #orwell-status .os-tile { overflow: visible; }
+          #orwell-status .os-tile::after {
+            content: ""; position: absolute; top: 50%; left: 50%;
+            width: 44px; height: 44px; transform: translate(-50%, -50%);
+          }
+          #orwell-status .os-prem-strip { gap: 14px; padding: 7px; }
+        }
         /* M2-3 (audit B2): the pre-HOH board line — before the first HOH exists (week 1, no HOH yet)
            the three dead "HOH — / Noms — / Veto —" rows read as broken. This single line replaces
            them until the first HOH crowns. */
@@ -740,10 +760,22 @@ import { onNarrowChange } from './platform.js';
   let _failures = 0;
   function _pollDelay() { return Math.min(POLL_MS * Math.pow(2, _failures), 120000); }
 
+  // 4.1.3: false = feed believed connected (the default). Announce on a genuine FLIP only.
+  let _staleAnnounced = false;
   function markStale(on) {
     const el = document.getElementById(ID);
     const dot = el && el.querySelector("#os-stale");
     if (dot) dot.hidden = !on;
+    // WCAG 4.1.3 (Status Messages): the amber dot is a purely visual cue. Mirror the sibling HUD
+    // deltas (announceDeltas → #os-announce) by pushing ONE polite line when the feed's connected
+    // state actually FLIPS — never on every poll (a live region must not chatter), and never on the
+    // initial connected state (no phantom "reconnected" on first load).
+    const nextState = !!on;
+    if (_staleAnnounced !== nextState) {
+      _staleAnnounced = nextState;
+      const a = el && el.querySelector("#os-announce");
+      if (a) a.textContent = nextState ? "Reconnecting to the feed." : "Feed reconnected.";
+    }
   }
 
   // M1-3 (audit A3): beatSeq catch-up. A gamechanged event can CLAIM a committed beat

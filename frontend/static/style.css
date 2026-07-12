@@ -2053,7 +2053,10 @@ body.bg-pattern-perlin-flow {
     /* the floating mobile opener (hidden on desktop) */
     .gadget-rail-open {
       position: fixed; right: 12px; bottom: calc(var(--composer-clearance, 84px) + 8px); z-index: 46;
-      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+      /* F4a: express the 44px HIG tap target via the token (was a bare 42px). Shown only on the
+         coarse-pointer tier, where the responsive-tokens floor already promotes it to 44 — so this
+         is source hygiene with no visual change, and it stays correct on non-coarse touch too. */
+      width: var(--tap-min); height: var(--tap-min); border-radius: 50%; border: 1px solid var(--border);
       background: var(--accent, #e06c75); color: var(--on-accent, #fff); font-size: 1.1rem; cursor: pointer;
       box-shadow: 0 4px 12px rgba(0,0,0,.3); display: none;
     }
@@ -2091,7 +2094,10 @@ body.bg-pattern-perlin-flow {
       font-weight: 600; letter-spacing: .03em;
     }
     .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
-    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
+    /* #729/#770: the .og-head focus ring is owned by the runtime kit (orwellGadget.js — the neutral
+       system-blue --ow-ios-blue ring). The stale accent-red (--accent) declaration that used to sit
+       here was inert (overridden by the injected rule) and contradicted the neutral-ring rule, so it
+       was removed to prevent a latent regression. */
     .og-card .og-icon { flex: 0 0 auto; display: inline-flex; }
     .og-card .og-title {
       flex: 1 1 auto; min-width: 0;
@@ -2793,6 +2799,40 @@ body.bg-pattern-perlin-flow {
       border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
     }
     .ooc-producer-aside > :first-child:not(::before) { margin-top: 0; }
+
+    /* issue 829 turn-coalescing — per-SEGMENT producer aside. A coalesced turn stacks each round
+       as its own segment (the live `.stream-content`, frozen to `.round-seg`) inside ONE bubble,
+       so an OOC/producer round is classified on ITS segment (not the shared bubble — a later
+       non-OOC round would otherwise strip the treatment off the whole bubble). The wrap-scoped
+       `.msg-ooc-producer .body` / `.role::after` rules can't reach a segment, so mirror the same
+       quiet, dashed, badged "to production" look at the segment level. Theme-token driven.
+       (No hex here — the L36 aside/hint block forbids any literal, colors derive from --fg.) */
+    .msg .body .stream-content.msg-ooc-producer,
+    .msg .body .round-seg.msg-ooc-producer {
+      border: 1px dashed color-mix(in srgb, var(--fg) 28%, transparent);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+      opacity: 0.92;
+    }
+    .msg .body .stream-content.msg-ooc-producer::before,
+    .msg .body .round-seg.msg-ooc-producer::before {
+      content: 'production';
+      display: inline-block;
+      margin-bottom: 4px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
 
     /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
        width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
@@ -4385,8 +4425,13 @@ body.bg-pattern-perlin-flow {
     }
 
     /* Round-cap "Continue" affordance — a cohesive centered pill at the chat
-       bottom (not the bare red in-message stopped style). */
-    .rounds-exhausted {
+       bottom (not the bare red in-message stopped style).
+       ADR 0010 #4 (.response-truncated): the chat-mode "reply cut off by the
+       output token cap → Continue ▸" note shares the same pill so a token-cap
+       cutoff reads identically to a round-cap one — NOT the bare red stopped row
+       with the giant glyph-sized base `.continue-btn` (font-size 2.6em). */
+    .rounds-exhausted,
+    .response-truncated {
       justify-content:center;
       gap:12px;
       width:fit-content;
@@ -4396,13 +4441,16 @@ body.bg-pattern-perlin-flow {
       border:1px solid var(--border);
       border-radius:999px;
       background:color-mix(in srgb, var(--fg) 4%, transparent);
+      color:color-mix(in srgb, var(--fg) 60%, transparent);
       opacity:1;
     }
-    .rounds-exhausted .rounds-exhausted-label {
+    .rounds-exhausted .rounds-exhausted-label,
+    .response-truncated .rounds-exhausted-label {
       color:color-mix(in srgb, var(--fg) 60%, transparent);
       font-size:0.95em;
     }
-    .rounds-exhausted .continue-btn {
+    .rounds-exhausted .continue-btn,
+    .response-truncated .continue-btn {
       font-size:0.9em;
       font-weight:600;
       opacity:1;
@@ -4412,7 +4460,8 @@ body.bg-pattern-perlin-flow {
       padding:4px 14px;
       line-height:1.3;
     }
-    .rounds-exhausted .continue-btn:hover {
+    .rounds-exhausted .continue-btn:hover,
+    .response-truncated .continue-btn:hover {
       opacity:0.88;
     }
     .ctx-indicator {
@@ -8793,7 +8842,13 @@ button.hamburger {
 body.hide-thinking .thinking-section { display: none !important; }
 
 /* Thinking process styles — colors follow theme accent */
-.msg .body .stream-content {
+.msg .body .stream-content,
+.msg .body .round-seg {
+  /* #829 turn-coalescing: a committed round is re-classed `.round-seg` (a frozen segment that the
+     next round's fresh `.stream-content` stacks below, so one turn bubble GROWS). It keeps the same
+     full-width layout as the live segment; the rendered markdown's own paragraph margins space the
+     stacked rounds so they read as one continuous message. No transition — growth is plain DOM
+     append (reduced-motion safe, no layout thrash). */
   width: 100%;
 }
 .thinking-section {

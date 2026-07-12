@@ -58,6 +58,7 @@ function bootFlags(): Record<string, boolean> {
     compIntent: strict(process.env.ORWELL_COMP_INTENT),
     voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
     timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
+    dealDepth: strict(process.env.ORWELL_DEAL_DEPTH),
   };
 }
 
@@ -128,7 +129,11 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", "updateCasting", "getMomentPrompt",
   // 0065: pre-warming the cast happens pre-game (it mints + persists the season seed into a fresh
   // sandbox during casting), so it legitimately runs BEFORE a game exists — like updateCasting.
-  "preSeedCast"]);
+  "preSeedCast",
+  // 0116: the model-authored cast-genesis skeleton write-back runs pre-game (DURING the casting interview,
+  // onto the preSeedCast warm), so it is exempt from the known-user gate like the other pre-game tools. It
+  // refuses cleanly with no warmed cast, so an early call before preSeedCast is a harmless no-op.
+  "recordCastGenesis"]);
 
 function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
   return typeof (d as HttpMcpResolver).resolve === "function";
