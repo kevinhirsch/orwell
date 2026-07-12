@@ -91,6 +91,7 @@ module.exports = {
       "docs/features/0118-ceremonies-as-timed-interrupts.feature",
       "docs/features/0119-per-event-felt-durations.feature",
       "docs/features/0120-strategic-drive-offscreen-cadence.feature",
+      "docs/features/0121-deal-depth-kinds-and-reliability-rewards.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },
