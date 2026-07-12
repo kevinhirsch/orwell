@@ -28,6 +28,13 @@ yields a positive int and always wins.
 ``reasoning`` is the OpenRouter form ``{"effort": "low"|"medium"|"high"}`` or
 ``None`` when the effort is ``"off"`` (the field is omitted from the payload).
 Pure and side-effect-free.
+
+Model-aware sizing (ADR 0010 follow-on #2) lives in this same pure module:
+``resolve_output_cap(model)`` (the folded #481 4096→8192 stopgap, now a family-sized
+computed default) and ``resolve_reasoning_max_tokens(output_cap)`` (the reasoning
+sub-budget, hard-bounded so it can never starve the visible reply — the F-S4-D
+mechanism). The call site (``llm_core``) knows the concrete model, so it passes the
+resolved cap in; the numbers themselves are owned here, never at the call site.
 """
 
 from __future__ import annotations
@@ -158,3 +165,99 @@ def resolve_token_policy(call_class: str, settings: dict | None = None) -> dict:
         "caching": True,
         "context_budget": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Model-aware OUTPUT cap + reasoning-budget sizing (ADR 0010 follow-on #2).
+#
+# Two joined jobs, both folded HERE out of scattered ``llm_core`` literals so the
+# resolver is the single source of the numbers (a *computed policy*, never a magic
+# literal at the call site):
+#
+#   1. ``resolve_output_cap(model)`` — the model-aware DEFAULT output ceiling. The
+#      Anthropic builder REQUIRES an explicit ``max_tokens`` and 400s if it exceeds
+#      the family hard cap; the OpenAI/OpenRouter path uses it as the model-sized
+#      default when no explicit cap is set. This is PR #481's 4096→8192 stopgap
+#      folded into a family table with a conservative 8192 floor for anything
+#      unrecognized (so an unknown model is never sent a value that 400s).
+#
+#   2. ``resolve_reasoning_max_tokens(output_cap)`` — the reasoning SUB-budget, sized
+#      as a fraction of the resolved model's output cap and hard-bounded so a fixed
+#      share of that budget is ALWAYS reserved for the visible reply. A reasoning
+#      model bills its hidden chain-of-thought against the SAME output budget as the
+#      answer, so an unbounded think starves the reply mid-sentence (the F-S4-D
+#      truncation, #835/#620 NARR-5). Bounding reasoning below the reply reserve is
+#      the structural cure — the reply is guaranteed room by construction, not by
+#      luck or by a bigger flat cap.
+#
+# No number computed here EVER reaches the player (mandate #3; ADR 0010 Principle 6):
+# these only shape the provider request. Pure integer arithmetic — this module still
+# imports nothing.
+# ---------------------------------------------------------------------------
+
+# The conservative floor supported by every modern Claude model (the folded #481 stopgap).
+_DEFAULT_OUTPUT_CAP = 8192
+# (substring, cap) — checked in order; the FIRST hit wins, so the most-specific/limited
+# qualifier must come first (Haiku-3/3.5 caps at 8192 even though "claude-…-4-…" patterns
+# are 32K+). Generous-but-safe per-family reasoning+answer headroom, all under each hard cap.
+_OUTPUT_CAP_BY_FAMILY = (
+    ("haiku-3", 8192),       # Haiku 3 / 3.5 — 8192 hard cap
+    ("claude-3-5", 8192),    # other Claude-3.5 snapshots — 8192
+    ("opus-4", 32768),       # Opus 4.x — supports up to 128K; 32K is a safe, generous floor
+    ("sonnet-4", 32768),     # Sonnet 4.x — up to 64K; 32K floor
+    ("haiku-4", 16384),      # Haiku 4.x — up to 64K; 16K floor (Haiku answers are shorter)
+)
+
+# Reasoning-budget sizing knobs. The reasoning sub-budget is a fraction of the output cap,
+# clamped to [floor, ceil], then hard-bounded so at least ``_REPLY_RESERVE_FRACTION`` of the
+# output cap always survives for the visible reply. Retune here without touching a call site.
+#   reasoning = min( clamp(FRACTION × cap, FLOOR, CEIL),  cap − ceil(RESERVE_FRACTION × cap) )
+# so the reply keeps ≥ RESERVE_FRACTION of the cap always, and ≥ (1 − FRACTION) of it whenever
+# the fraction (not the floor) binds — i.e. ≥ half in the common case.
+_REASONING_OUTPUT_FRACTION = 0.5   # nominally, up to half the output budget may go to thinking
+_REASONING_FLOOR = 1024            # even a tiny model keeps *some* room to think…
+_REASONING_CEIL = 32000            # …but never budget an unbounded think (also stays under caps)
+_REPLY_RESERVE_FRACTION = 0.4      # ≥40% of the output cap is ALWAYS reserved for the reply
+
+
+def resolve_output_cap(model: str) -> int:
+    """The model-aware DEFAULT output ceiling for ``model`` (ADR 0010 follow-on #2).
+
+    Used as the ``max_tokens`` default when the caller set no explicit cap: the Anthropic
+    builder requires an explicit value (and 400s above the family hard cap), while the
+    OpenAI/OpenRouter path applies it only when > 0. Sized per model family so a reasoning
+    model has room to think AND answer; unknown models fall back to the conservative 8192
+    floor (the folded #481 stopgap — no hardcoded literal at the call site anymore).
+    Pure and side-effect-free."""
+    m = (model or "").lower()
+    for needle, cap in _OUTPUT_CAP_BY_FAMILY:
+        if needle in m:
+            return cap
+    return _DEFAULT_OUTPUT_CAP
+
+
+def resolve_reasoning_max_tokens(output_cap: int) -> int:
+    """The model-aware reasoning SUB-budget, sized so it can NEVER starve the visible reply.
+
+    Given the effective output cap (``resolve_output_cap(model)`` when no explicit cap is set,
+    else the explicit per-request/admin cap), return a reasoning token budget that is a fraction
+    of that cap, clamped to [``_REASONING_FLOOR``, ``_REASONING_CEIL``], then hard-bounded so at
+    least ``_REPLY_RESERVE_FRACTION`` of the output cap is left for the answer. This is the F-S4-D
+    guarantee expressed as a number: reasoning + reply share one budget on a reasoning model, so
+    bounding reasoning below the reply's reserved headroom keeps the answer from being truncated
+    mid-sentence (#835/#620). The reply always keeps ≥ ``_REPLY_RESERVE_FRACTION`` of the cap;
+    with the 0.5 fraction and 0.4 reserve it keeps ≥ half whenever the fraction binds.
+
+    Defensive: a non-positive/garbage ``output_cap`` falls back to the conservative default cap so
+    the caller always gets a sane, positive budget. Pure and side-effect-free."""
+    if not isinstance(output_cap, int) or isinstance(output_cap, bool) or output_cap <= 0:
+        output_cap = _DEFAULT_OUTPUT_CAP
+    # Headroom the reply keeps no matter what: ceil(output_cap × reserve_fraction) via integer math
+    # (-(-a // 1) == ceil(a)), so even a small cap reserves a whole token for the reply.
+    reserve = int(-(-(output_cap * _REPLY_RESERVE_FRACTION) // 1))
+    budget = int(output_cap * _REASONING_OUTPUT_FRACTION)
+    # Clamp to the sane thinking band…
+    budget = min(max(budget, _REASONING_FLOOR), _REASONING_CEIL)
+    # …then never cross into the reply's reserved headroom (this bound WINS — the reply is sacred).
+    budget = min(budget, output_cap - reserve)
+    return max(budget, 1)  # always a positive budget

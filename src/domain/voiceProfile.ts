@@ -22,4 +22,16 @@ export interface VoiceProfile {
   signature: string;
   /** A SMALL set of habitual words/fillers — a light seasoning, never a catchphrase routine. */
   lexicon: string[];
+  /**
+   * Feature 0084 / #1395 — a SMALL set (up to a few) of characteristic PHRASINGS this houseguest
+   * genuinely falls back on: how THIS person actually puts things ("at the end of the day", "I'm not
+   * here to make friends", "we move"). AUTHENTIC verbal texture, grounded in their archetype/backstory,
+   * NOT a comedy bit. Authored at casting from the deep-authoring call; OPTIONAL — the seeded floor
+   * mints none (voice's dedicated side-rng draw count stays fixed), so an un-authored houseguest simply
+   * has no catchphrases and the narrator leans on their register/rhythm/lexicon instead. PUBLIC + Vault-
+   * free (how a person talks is observable) and BYTE-STABLE once folded (voice is identity, never
+   * drifts). Reconciles with the standing no-catchphrase rule: the narrator uses these SPARINGLY as
+   * texture, never hammered into a repeated punchline or a per-scene routine (see `momentPrompts`).
+   */
+  catchphrases?: string[];
 }

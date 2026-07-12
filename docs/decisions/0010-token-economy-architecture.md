@@ -209,7 +209,18 @@ tactical fix surfaced, to land **with** the slices (full list + dispositions in 
   ruling #1 gives the reasoning budget (Decision B today makes only reasoning runtime-editable);
 - the **reasoning budget is sized model-aware** — relative to the resolved model's output cap/window so it
   cannot starve the visible reply (the F-S4-D mechanism), and the Anthropic `max_tokens` fallback (#481's
-  4096→8192 stopgap) **folds into the resolver** instead of staying a hardcoded literal;
+  4096→8192 stopgap) **folds into the resolver** instead of staying a hardcoded literal. ✅ **DONE**
+  (2026-07-12, issue #1420 item #2): the resolver `token_policy.py` now owns **both** halves —
+  `resolve_output_cap(model)` (the folded #481 stopgap: a per-family table with the conservative 8192
+  floor; `llm_core._model_max_output_tokens` is now a thin delegate) **and**
+  `resolve_reasoning_max_tokens(output_cap)`, the reasoning sub-budget. The formula:
+  `reasoning = min( clamp(0.5 × cap, 1024, 32000),  cap − ceil(0.4 × cap) )` — a fraction of the output
+  cap, floored/ceiled, then hard-bounded so **≥40% of the cap is always reserved for the visible reply**
+  (≥ half whenever the fraction binds). Sized off the *tighter* of the explicit per-request/admin cap and
+  the model default, so a small admin cap is respected. `llm_core._apply_reasoning_budget` attaches it as
+  the OpenRouter unified `reasoning.max_tokens` alongside the ratified `effort` (o-series stays effort-only;
+  direct thinking providers stay effort-only/byte-identical). No number ever reaches the player (mandate
+  #3). Gate: `frontend/tests/test_adr0010_{token_policy,reasoning_budget}.py`;
 - the Slice-A envelope additionally records the **applied `max_tokens` + `finish_reason`** so an in-season
   capture pinpoints *which* cap truncated a turn (no live repro);
 - the #481 truncation `Continue ▸` affordance reaches **chat mode** too, or its agent-only scope is recorded.

@@ -137,6 +137,13 @@ export interface SessionCore {
   legendCount?: number;
   legendLastActTick?: number;
   /**
+   * Feature 0122 — the last in-game day the daily confessional sweep closed (`GameSessionAdapter.
+   * lastConfessionalSweepDay`), persisted so a mid-season reload doesn't re-sweep an already-closed day and,
+   * on the standalone (non-registry) restart path where the adapter is reused across seasons, a stale value
+   * can't suppress the new season's sweep (reset at every season boundary). Absent ⇒ 0.
+   */
+  lastConfessionalSweepDay?: number;
+  /**
    * Feature 0099 (hidden half) — the off-screen NPC↔NPC secret barter. `secretBarterTickCount` is the
    * DEDICATED barter-rng tick counter (forked off the game seed, NEVER the shared society/competition/vote
    * stream — see `GameSessionAdapter.secretBarterTick`), persisted so the isolated stream stays

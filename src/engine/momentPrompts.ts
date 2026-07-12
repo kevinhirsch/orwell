@@ -165,15 +165,13 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    that competition and handed you the winner. If you catch yourself typing \"you are the new HOH\",",
   "    STOP: you have not advanced there yet, so you do not know who won — the game does, and",
   "    it may well be someone else.",
-  "  · THE STAGED REVEALS ARE THE EXCEPTION to 'advance one beat, then let the day breathe': an",
-  "    eviction's ballot drip and the finale's jury-vote reveal are read out beat by beat, so THERE you",
-  "    DO keep calling advanceGame through the reveal — walking one anonymized ballot / one juror's vote",
-  "    at a time to the result. That continuous read-out IS the live moment, not a race to a future",
-  "    ceremony; 'do not chain advanceGame' bars sprinting to the NEXT ceremony, never voicing a reveal",
-  "    the game is actively handing you.",
-  "  · When advanceGame hands back a pending BINDING decision, the player's own decision card already",
-  "    presents the legal options — set the scene and let that card take the choice; do NOT also re-ask",
-  "    the same decision with ask_user (that double-asks the player the same thing two ways).",
+  // #1391 dedup (size-only, behavior-preserving): two redundant bullets removed here.
+  //  · The "STAGED REVEALS ARE THE EXCEPTION" bullet is fully covered by the `eviction` + `jury-finale`
+  //    moment fragments, which already drive the ballot / jury-vote reveal beat-by-beat.
+  //  · The "don't re-ask a pending BINDING decision with ask_user" bullet duplicated the P4-pinned
+  //    carve-out in the LEVERS intro ("ask_user is NEVER for the game's pending BINDING decision
+  //    options … decision card already presents those").
+  // Neither rule is lost — the surviving copy lives in the fragment / the LEVERS intro. NO reorder.
   "",
   // ── #1127 ANTI-MONTAGE / TIME DISCIPLINE (new section — the post-HOH fast-forward fix) ──────────
   // The model reliably MONTAGES elapsed time ("a day passes…", "the house resets", "now it's day three")
@@ -306,14 +304,16 @@ export const BASE_GAME_MASTER_PROMPT = [
   "answers. Each roster line carries that person's demeanor (\"comes across as …\") — use it. If every",
   "houseguest sounds the same warm, quick-bantering note, you have flattened the cast; make them sound",
   "like genuinely different people. Voice the demeanor; never label it out loud.",
-  "  · VOICE FINGERPRINT (0084/0090): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
+  "  · VOICE FINGERPRINT (0084/0090/#1395): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
   "    register, rhythm, energy, directness, humor, and what their voice does under stress, plus a one-line",
-  "    signature and one or two habitual fillers. It governs DICTION AND CADENCE, not just word-choice — a",
-  "    clipped voice says it in five words; a rambling one circles the same point. Voice them through it",
-  "    CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one rambles,",
-  "    and two houseguests of the SAME archetype must still sound like two different people. It is a TEXTURE, not a bit:",
-  "    weave the signature and the odd filler in naturally; NEVER turn it into a catchphrase, a routine, or a",
-  "    repeated punchline. Under pressure, lean their `stressTell` (they go quiet / over-explain / deflect).",
+  "    signature, one or two habitual fillers, and (when present) a few `catchphrases` — the characteristic",
+  "    PHRASINGS this exact person falls back on (how THEY put things). It governs DICTION AND CADENCE, not just",
+  "    word-choice — a clipped voice says it in five words; a rambling one circles the same point. Voice them",
+  "    through it CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one",
+  "    rambles, and two of the SAME archetype must still sound like two different people. It is a TEXTURE, not a bit:",
+  "    weave the signature, the odd filler, and a catchphrase in naturally and SPARINGLY — NEVER hammer one",
+  "    into a repeated punchline, a routine, or a stand-up bit. Under pressure, lean their `stressTell` (they go",
+  "    quiet / over-explain / deflect).",
   "SHOWMANCES ARE RARE — do NOT read romance into ordinary closeness. Most strong bonds in this house",
   "are friendship, strategy, or alliance, NOT attraction. A real season has at most one or two genuine",
   "showmances, and they build slowly over weeks — never a week-one spark, never several at once. The",
@@ -1007,6 +1007,41 @@ export function momentForPhase(phase: string): string {
   if (p === "setup") return "character-creation";
   if (p === "premiere") return "premiere";
   return "default";
+}
+
+/**
+ * #1411 — the closed-set beats where exactly ONE engine-owned lever is legal, so the narrator's only
+ * job is to CALL it and VOICE the deterministic result. Exactly the deterministic competition /
+ * ceremony / eviction beats: the comp winner + every staged drop are the engine's to compute, and the
+ * ceremony/eviction beats are the engine's to drip — the model must `advanceGame` to surface the next
+ * one. This is the SINGLE source of the beat→lever mapping the front-end used to hard-code
+ * (`_FORCE_COMP_PHASES ∪ _FORCE_ADVANCE_PHASES`) and could drift from the tool registry; it is now
+ * SIGNALED on `GameStateView.requiredLever`. `premiere`/`finale`/`final-eviction`/`twist-reveal` are
+ * deliberately OUT (their own belts; more delicate) — mirroring the retired FE literal exactly.
+ */
+export const CLOSED_SET_ADVANCE_PHASES: ReadonlySet<string> = new Set([
+  "hoh-competition",
+  "veto-competition",
+  "nominations",
+  "veto-ceremony",
+  "eviction",
+]);
+
+/**
+ * The single ENGINE-OWNED lever a closed-set `phase` REQUIRES the narrator to call this turn, or `null`
+ * when the beat has no single legal lever (every ordinary/social/premiere/finale beat, where
+ * spontaneous calling stays primary). The closed-set counterpart to `momentForPhase`: a pure function
+ * of the live `phase`, surfaced on `GameStateView.requiredLever` (#1411) so the FRONT-END forces
+ * whatever the engine NAMES on the wire instead of keeping its own beat→lever map. Vault-free (a lever
+ * NAME only — no secret, no number). NEVER returns `submitDecision`: that carries the player's binding
+ * pick, and forcing it would make the model invent the player's choice (the mandate's exact inverse).
+ *
+ * Byte-identity (the golden gate): the set is EXACTLY the FE's retired `_FORCE_COMP_PHASES ∪
+ * _FORCE_ADVANCE_PHASES`, so the same forced `tool_choice` fires on the same beats — the recorded
+ * golden requests are unchanged. Absent field ⇒ no forcing ⇒ byte-identical (0065 sync-spine discipline).
+ */
+export function requiredLeverForPhase(phase: string): string | null {
+  return CLOSED_SET_ADVANCE_PHASES.has((phase || "").toLowerCase()) ? "advanceGame" : null;
 }
 
 /** The managed fragment for a moment (falls back to `default`). */

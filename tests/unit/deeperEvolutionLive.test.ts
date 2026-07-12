@@ -66,22 +66,27 @@ describe("0124 (C) — NPC reactivity is disposition-derived, not a flat random 
 });
 
 describe("0124 — the deeper evolution is Vault-free", () => {
-  it("no affect axis, temperament, or reactivity number reaches a player surface", () => {
+  it("no affect axis, temperament, or reactivity number reaches the player OR admin surface", () => {
     const sb = newGame("evo-wall", 7, true);
     drive(sb, 60); // let souls evolve (distress/confidence/drift populate via the live folds)
     const house = sb.session.snapshot().house!;
     const evolved = house.npcs.filter((n) => n.soul.distress !== undefined);
     expect(evolved.length, "there IS hidden evolved axis state to leak").toBeGreaterThan(0);
 
+    // The mandate (CLAUDE.md) requires proving BOTH the player AND admin/God-Mode paths expose no Vault
+    // data — the admin is walled from the soul too. Sweep both surfaces.
+    sb.syncAdmin();
     const surface = [
       JSON.stringify(sb.session.getGameState()),
       JSON.stringify(sb.session.gameStatus()),
       JSON.stringify(sb.session.getMomentPrompt({})),
+      JSON.stringify(sb.player.getVisibleState()),
+      JSON.stringify(sb.admin.inspect()),
     ].join("\n---\n");
     // The real leak shape is a SERIALIZED soul object — the JSON key `"distress":` — not the bare English
     // word "confidence" (which legitimately appears in narration prose). Check for the key form.
     for (const field of ["distress", "confidence", "temperamentDrift", "settleScale", "volatility", "emotionalState"]) {
-      expect(surface.includes(`"${field}":`), `the hidden soul field ${field} leaked onto a player surface`).toBe(false);
+      expect(surface.includes(`"${field}":`), `the hidden soul field ${field} leaked onto a player/admin surface`).toBe(false);
     }
     void PLAYER;
   });

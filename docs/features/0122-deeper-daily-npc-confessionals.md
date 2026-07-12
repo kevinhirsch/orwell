@@ -135,7 +135,7 @@ player or admin (Vault Wall #1/#2) — and **folded into the soul** so the NPC's
 
 ## 5. Contracts (stack-agnostic)
 
-```
+```text
 confessionalFor(npc, others, rel, ctx): Confessional     // ctx gains grounded role/beat inputs; content may
                                                          // now carry plan / standing / grudge / aftermath /
                                                          // adjacent-move facets — each optional, engine-true

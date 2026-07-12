@@ -7,8 +7,18 @@ import { RelationshipModel } from "./relationships";
 import type { InteractionType, EdgeSignals } from "./relationships";
 import {
   CONSEQUENCE_DIRECTION_IMPACTS, CONSEQUENCE_EMPHASIS, THIRD_PARTY_CONSEQUENCE, RELATIONSHIP_CONSTANTS,
-  clamp01, scaleImpact, type ConsequenceDirection, type RelationshipConstants,
+  clamp01, scaleImpact, scaleImpactByValence, type ConsequenceDirection, type RelationshipConstants,
 } from "./relationshipConstants";
+
+/**
+ * #1419 — the ASYMMETRIC fatigue valence for a scene's INITIATOR: a tired actor's WARMING folds land
+ * softer (`warm` < 1) and their SOURING folds cut deeper (`sore` > 1). `{ warm: 1, sore: 1 }` (the
+ * default everywhere) is a no-op ⇒ byte-identical to the pre-#1419 fold. Supplied on the player channel
+ * from the session's rest deficit; absent / rested / clock-off ⇒ `NO_FATIGUE`.
+ */
+export interface FatigueValence { warm: number; sore: number }
+export const NO_FATIGUE: FatigueValence = { warm: 1, sore: 1 };
+const rested = (v: FatigueValence): boolean => v.warm === 1 && v.sore === 1;
 import { InMemoryEventStore } from "../adapters/inmemory/InMemoryEventStore";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 
@@ -111,12 +121,16 @@ export function foldHiddenImpact(
   toward?: readonly EntityId[],
   cap = Number.POSITIVE_INFINITY,
   bystanders?: readonly EntityId[],
+  fatigue: FatigueValence = NO_FATIGUE,
 ): void {
-  // PARTNERS — those the initiator actually engaged: the full directed fold.
+  // PARTNERS — those the initiator actually engaged: the full directed fold. #1419 — scaled by the
+  // initiator's fatigue valence (warming dampened, souring amplified); `NO_FATIGUE` ⇒ byte-identical.
   const partners = (toward ?? witnessSet.filter((w) => w !== initiator)).slice(0, cap);
-  for (const o of partners) rel.applyDirected(o, initiator, kind, rng);
+  for (const o of partners) rel.applyDirectedValence(o, initiator, kind, rng, fatigue.warm, fatigue.sore);
   // BYSTANDERS — co-present witnesses who merely SAW it (audit 2026-06-18): each reacts by their
   // OWN beliefs, small and individuated, never the partner's full bond and never a uniform step.
+  // (A bystander reads the scene by their OWN beliefs, so the initiator's fatigue does NOT scale it —
+  // fatigue is the actor's reduced EFFECTIVENESS on the person they ENGAGED, not on a passer-by's read.)
   if (bystanders) {
     const seen = new Set(partners);
     for (const b of bystanders) {
@@ -195,6 +209,7 @@ export function foldGenerativeConsequence(
   initiator: EntityId,
   edges: readonly EdgeConsequence[],
   spend: (toward: EntityId) => boolean = () => true,
+  fatigue: FatigueValence = NO_FATIGUE,
 ): Set<EntityId> {
   const moved = new Set<EntityId>();
   for (const e of edges) {
@@ -209,7 +224,10 @@ export function foldGenerativeConsequence(
     // a silent `NaN` into the PERMANENT relationship layer. Skip the edge instead — a proposal the
     // engine doesn't recognize folds nothing rather than crashing the call or corrupting state.
     if (!base || factor === undefined) continue;
-    rel.applyImpactDirected(e.toward, initiator, scaleImpact(base, factor), rng);
+    // #1419 — a tired initiator's generative fold is valence-scaled too (charm dampened, barbs amplified);
+    // `NO_FATIGUE` ⇒ `scaleImpact(base, factor)` unchanged (byte-identical).
+    const scaled = scaleImpact(base, factor);
+    rel.applyImpactDirected(e.toward, initiator, rested(fatigue) ? scaled : scaleImpactByValence(scaled, fatigue.warm, fatigue.sore), rng);
     moved.add(e.toward);
   }
   return moved;
@@ -250,6 +268,7 @@ export function foldThirdPartyConsequence(
   witnessSet: ReadonlySet<EntityId> | readonly EntityId[],
   edges: readonly ThirdPartyConsequence[],
   spend: (holder: EntityId, about: EntityId) => boolean = () => true,
+  fatigue: FatigueValence = NO_FATIGUE,
 ): Set<EntityId> {
   const witnesses = witnessSet instanceof Set ? witnessSet : new Set(witnessSet);
   const moved = new Set<EntityId>();
@@ -277,7 +296,10 @@ export function foldThirdPartyConsequence(
     // `direction`/`emphasis` must fold nothing, never crash or write NaN into the third-party edge.
     if (!base || factor === undefined) continue;
     const trustMult = B.trustFloor + (1 - B.trustFloor) * clamp01(trustOfInitiator);
-    rel.applyImpactDirected(e.holder, e.about, scaleImpact(base, factor * trustMult), rng);
+    // #1419 — a tired initiator lands a third-party pitch less warmly / more cuttingly too (valence-scaled
+    // on top of the trust gate); `NO_FATIGUE` ⇒ byte-identical to the pre-#1419 pitch.
+    const pitch = scaleImpact(base, factor * trustMult);
+    rel.applyImpactDirected(e.holder, e.about, rested(fatigue) ? pitch : scaleImpactByValence(pitch, fatigue.warm, fatigue.sore), rng);
     moved.add(e.holder);
   }
   return moved;

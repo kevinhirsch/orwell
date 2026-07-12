@@ -71,7 +71,8 @@ describe("0124 (C) — disposition-tuned reactivity", () => {
   it("a clash soul settles SLOWER than a bond soul over a calm stretch", () => {
     const clash = soul({ volatility: 0.9, settleScale: settleScaleOf("clash") });
     const bond = soul({ volatility: 0.9, settleScale: settleScaleOf("bond") });
-    for (let i = 0; i < 4; i++) { evolveEmotion(clash, "calm"); evolveEmotion(bond, "calm"); }
+    // settleScale only applies under the soul-depth gate (else byte-identical to 0041), so pass DEPTH.
+    for (let i = 0; i < 4; i++) { evolveEmotion(clash, "calm", undefined, undefined, DEPTH); evolveEmotion(bond, "calm", undefined, undefined, DEPTH); }
     expect(clash.volatility).toBeGreaterThan(bond.volatility); // agitation lingers on the temperamental one
   });
 
@@ -99,5 +100,14 @@ describe("0124 — with soul-depth OFF, evolution is byte-identical to 0041", ()
     expect(composedEmotion(off)).toBe(off.emotionalState);
     // effectiveDisposition with no drift returns the baseline unchanged.
     expect(effectiveDisposition("bond", off)).toBe("bond");
+  });
+
+  it("a PERSISTED settleScale is ignored when the flag is off (byte-identical across a flag flip)", () => {
+    // A soul created flag-ON carries a disposition-tuned settleScale; evolved later flag-OFF it must settle
+    // exactly like a plain 0041 soul — the default-off contract holds even across a flag flip (Greptile P1).
+    const withScale = soul({ volatility: 0.9, settleScale: settleScaleOf("clash") });
+    const plain = soul({ volatility: 0.9 });
+    for (let i = 0; i < 4; i++) { evolveEmotion(withScale, "calm"); evolveEmotion(plain, "calm"); }
+    expect(withScale.volatility).toBe(plain.volatility);
   });
 });

@@ -24,6 +24,8 @@ resolve_token_policy = token_policy.resolve_token_policy
 valid_efforts = token_policy.valid_efforts
 max_tokens_bounds = token_policy.max_tokens_bounds
 CALL_CLASSES = token_policy.CALL_CLASSES
+resolve_output_cap = token_policy.resolve_output_cap
+resolve_reasoning_max_tokens = token_policy.resolve_reasoning_max_tokens
 
 
 # --- 1. Each class resolves its ratified default effort + default max_tokens ---
@@ -256,3 +258,66 @@ def test_max_tokens_budget_not_a_dict_never_raises():
 def test_max_tokens_bounds_shape():
     lo, hi = max_tokens_bounds()
     assert isinstance(lo, int) and isinstance(hi, int) and 0 < lo < hi
+
+
+# --- 7. ADR 0010 follow-on #2: model-aware output cap (the folded #481 stopgap) ---
+#
+# resolve_output_cap owns the family table + the conservative 8192 floor that USED to be a hardcoded
+# literal in llm_core (the #481 4096→8192 stopgap). llm_core._model_max_output_tokens now delegates to
+# it (proven in test_fs4d_truncation / test_narration_maxtokens_no_truncate); here we pin the pure
+# resolver directly.
+
+def test_output_cap_family_table():
+    # Reasoning-family floors: generous room to think AND answer, all under each hard cap.
+    assert resolve_output_cap("claude-opus-4-8") == 32768
+    assert resolve_output_cap("claude-sonnet-4-6") == 32768
+    assert resolve_output_cap("claude-haiku-4-1") == 16384
+    # Haiku-3.5 / other Claude-3.5 snapshots keep their hard 8192 cap — the larger "-4" floors must
+    # NOT match them (first-hit-wins ordering: the limited qualifier comes first).
+    assert resolve_output_cap("claude-3-5-haiku-20241022") == 8192
+
+
+def test_output_cap_unknown_and_empty_fall_back_to_the_8192_floor():
+    for m in ("deepseek/deepseek-v4-pro", "z-ai/glm-4.7", "some-unknown-model", "", None):
+        assert resolve_output_cap(m) == 8192, m
+
+
+# --- 8. ADR 0010 follow-on #2: model-aware reasoning sub-budget (the F-S4-D cure) ---
+#
+# The reasoning budget is a fraction of the output cap, clamped [floor, ceil], and hard-bounded so a
+# reserved share of the cap ALWAYS survives for the visible reply. Pure — no model, no provider here.
+
+_RESERVE = 0.4  # must track _REPLY_RESERVE_FRACTION in token_policy
+
+
+def test_reasoning_sub_budget_always_reserves_reply_headroom():
+    # The core invariant: whatever the cap, the reply keeps at least the reserve fraction of it.
+    for cap in (256, 512, 1000, 2000, 4096, 8192, 16384, 32768, 64000, 200000):
+        r = resolve_reasoning_max_tokens(cap)
+        assert 0 < r < cap, (cap, r)
+        assert cap - r >= int(_RESERVE * cap), f"reply starved at cap={cap}: reasoning={r}"
+
+
+def test_reasoning_sub_budget_is_half_the_cap_when_unclamped():
+    # In the common band (floor and ceil don't bind, reserve doesn't bind since 0.5 < 1-0.4), the
+    # budget is exactly half the output cap.
+    for cap in (8192, 16384, 32768, 50000):
+        assert resolve_reasoning_max_tokens(cap) == cap // 2, cap
+
+
+def test_reasoning_sub_budget_floor_and_ceil_bind_at_the_extremes():
+    # A tiny cap floors the think (but the reply reserve still wins if it must)…
+    assert resolve_reasoning_max_tokens(2000) == 1024   # 0.5*2000=1000 < floor 1024; reserve leaves 1200
+    # …and a huge cap ceils it (never an unbounded think).
+    assert resolve_reasoning_max_tokens(200000) == 32000
+    # A very small cap where the floor would exceed the reply reserve: the RESERVE wins (reply sacred).
+    r = resolve_reasoning_max_tokens(256)
+    assert r < 1024 and 256 - r >= int(_RESERVE * 256)
+
+
+def test_reasoning_sub_budget_garbage_cap_falls_back_to_a_sane_positive_budget():
+    for bad in (0, -1, -8192, "8192", 4096.0, True, False, None, [8192]):
+        r = resolve_reasoning_max_tokens(bad)
+        assert isinstance(r, int) and not isinstance(r, bool) and r > 0, bad
+        # falls back to the 8192-floor sizing ⇒ half of it
+        assert r == 4096, bad
