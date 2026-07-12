@@ -41,7 +41,7 @@
          never asserted fact — italics is the ENTIRE signal; still no number anywhere. */
       .ofl-row.ofl-belief .ofl-text { font-style: italic; opacity: .92; }
       .ofl-source {
-        margin-top: .12rem; font-size: .68rem; letter-spacing: .02em; opacity: .6;
+        margin-top: .12rem; font-size: var(--fs-2xs); letter-spacing: .02em; opacity: .6;
       }
       body.theme-frosted .ofl-row { border-color: rgba(255,255,255,0.14); }
     `;
