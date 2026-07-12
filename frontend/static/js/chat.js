@@ -35,6 +35,19 @@ import { chatState } from './chatState.js';
 // _initChatScrollEdges() from init() exactly as before, the logic just lives in its own
 // module now. Imported here only (never app.js / an html shell) so #1399 single-eval holds.
 import { _initChatScrollEdges } from './chatScrollEdges.js';
+// #1414 (R3 PR2): the composer submit-button state machine (#971 button reconciler / #986).
+// Behavior-preserving: chat.js calls these three exactly as before — updateSubmitButton() to paint
+// the Stop/Send face, and _foregroundStreamLive()/_syncSubmitButtonState() to reconcile it to the
+// true streaming state. They read/write the shared streaming single-flight state via the chatState
+// singleton (PR0). Imported here only, so #1399 single-eval holds; the two on the chatModule public
+// API (_syncSubmitButtonState / _foregroundStreamLive) are re-exported below byte-identically.
+import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } from './chatSubmitButton.js';
+// #1414 (R3 PR3): chat attachment opening (image → new tab; pdf/text/code → Documents viewer;
+// anything else → raw file). Behavior-preserving: chat.js re-exports `openAttachment` on the
+// chatModule public API below (chatRenderer.js calls it via window.chatModule.openAttachment), and
+// injects the API_BASE resolver so the module reads chat.js's live value. Imported here only, so
+// #1399 single-eval holds.
+import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -67,6 +80,10 @@ import { _initChatScrollEdges } from './chatScrollEdges.js';
     "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back.";
 
   let API_BASE = '';
+  // #1414 (R3 PR3): feed the extracted chatAttachments.js chat.js's live API_BASE. A closure over
+  // this `let` (set once in init) so openAttachment reads the current value — an imported binding
+  // would be read-only. Registered at module-eval (order-independent of init).
+  _setAttachmentsApiBase(() => API_BASE);
   // #1414 (R3 PR0): streaming/send/display/continue mutable state moved to the shared `chatState`
   // singleton — chatState.currentAbort, .isStreaming, ._sendInFlight, ._displayOverride,
   // ._hideUserBubble, ._pendingContinue. See chatState.js for the per-field docs.
@@ -414,108 +431,10 @@ import { _initChatScrollEdges } from './chatScrollEdges.js';
   var hideWelcomeScreen = chatRenderer.hideWelcomeScreen;
   var showWelcomeScreen = chatRenderer.showWelcomeScreen;
 
-  /**
-   * Update submit button state
-   */
-  function updateSubmitButton(state, submitBtn) {
-    if (!submitBtn) return;
-
-    if (state === 'streaming') {
-      // Clear any pending transitions from + → arrow swap
-      submitBtn.classList.remove('anim-spin', 'anim-spin-swap', 'anim-land', 'mic-mode', 'newchat-mode', 'newchat-expanded', 'recording');
-      // Ensure arrow icon is showing before launch
-      var icons = window._orwellBtnIcons;
-      if (icons) submitBtn.innerHTML = icons.send;
-      void submitBtn.offsetWidth;
-      // Arrow launches up, then stop icon lands in
-      submitBtn.classList.add('anim-launch');
-      const _stopSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
-      // Wait for the launch keyframe to finish (0.3s) before swapping the
-      // arrow out for the stop icon — otherwise the swap happens mid-flight
-      // and the user sees nothing fly out.
-      setTimeout(() => {
-        submitBtn.innerHTML = _stopSvg;
-        submitBtn.classList.remove('anim-launch');
-        void submitBtn.offsetWidth;
-        submitBtn.classList.add('anim-land');
-        submitBtn.addEventListener('animationend', () => submitBtn.classList.remove('anim-land'), { once: true });
-      }, 300);
-      submitBtn.title = 'Stop generation';
-      submitBtn.dataset.mode = 'streaming';
-      submitBtn.dataset.phase = 'processing';
-      chatState.isStreaming = true;
-    } else if (state === 'idle') {
-      submitBtn.dataset.mode = '';
-      delete submitBtn.dataset.phase;
-      submitBtn.classList.remove('recording');
-      chatState.isStreaming = false;
-      // Defer to global updater which handles mic/newchat/send modes
-      if (window._updateSendBtnIcon) {
-        setTimeout(window._updateSendBtnIcon, 50);
-      } else {
-        var icons = window._orwellBtnIcons;
-        submitBtn.innerHTML = icons ? icons.send : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
-        submitBtn.title = 'Send message';
-        submitBtn.classList.remove('mic-mode', 'newchat-mode');
-      }
-    }
-  }
-
-  // #971 — RECONCILE the composer button to the TRUE streaming state. The button is a state machine
-  // (Stop while streaming → Send/upload-file when idle, the latter via _updateSendBtnIcon's mic/
-  // newchat/send modes). It DESYNCS when a stream settles on a path that never calls
-  // updateSubmitButton('idle') — the chief offender is a BACKGROUNDED stream finishing (the
-  // `_isBgFinally` branch skips the idle reset), which strands `isStreaming = true` +
-  // `dataset.mode = 'streaming'`; the global `_updateSendBtnIcon` then early-returns on that stale
-  // 'streaming' mode and NEVER recovers, so the button is stuck on Stop even though nothing is
-  // streaming in the foreground. (The Enter/keydown SEND path is unaffected — it reads the live text,
-  // not the button — which is why "Enter still sends" while the button lies.)
-  //
-  // `_foregroundStreamLive()` is the single source of truth for "a turn is genuinely streaming into the
-  // session the user is looking at RIGHT NOW": isStreaming + a live reader (currentAbort) + we are on
-  // the streaming session and it is NOT detached to the background. Compose with #993: a non-empty
-  // composer while that is true should still read as SEND (the queue enqueues — it is NOT a Stop), so
-  // the button only shows Stop for a live foreground stream with an EMPTY composer; otherwise the
-  // global updater paints send/upload/mic from the composer/attachment state.
-  function _foregroundStreamLive() {
-    if (!chatState.isStreaming || !chatState.currentAbort) return false;
-    try {
-      const cur = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
-      if (cur != null && chatState._streamSessionId != null && cur !== chatState._streamSessionId) return false;
-      if (chatState._streamSessionId != null && chatState._backgroundStreams.has(chatState._streamSessionId)) return false;
-    } catch (_) {}
-    return true;
-  }
-  function _syncSubmitButtonState() {
-    const submitBtn = document.querySelector('.send-btn') || document.getElementById('submit');
-    if (!submitBtn) return;
-    const live = _foregroundStreamLive();
-    if (live) {
-      // A turn is genuinely streaming in the foreground. The button shows Stop ONLY when the composer
-      // is empty; with text it stays a Send affordance (#993 enqueues — never a silent Stop-and-drop).
-      const _mi = uiModule.el('message');
-      const hasText = !!(_mi && (_mi.value || '').trim().length > 0);
-      if (!hasText) {
-        if (submitBtn.dataset.mode !== 'streaming') updateSubmitButton('streaming', submitBtn);
-      } else if (submitBtn.dataset.mode === 'streaming') {
-        // Text was typed while a foreground stream runs: drop the Stop face, show Send, but DON'T flip
-        // the live `isStreaming` flag — clear only the button mode so _updateSendBtnIcon can repaint.
-        submitBtn.dataset.mode = '';
-        if (window._updateSendBtnIcon) window._updateSendBtnIcon();
-      }
-      return;
-    }
-    // Not streaming in the foreground. If the button is stuck on the Stop face (a backgrounded/settled
-    // stream left it there), clear the stale flag+mode and let the global updater repaint send/upload/
-    // mic from the live composer/attachment state.
-    if (chatState.isStreaming) chatState.isStreaming = false;
-    if (submitBtn.dataset.mode === 'streaming') {
-      submitBtn.dataset.mode = '';
-      delete submitBtn.dataset.phase;
-      submitBtn.classList.remove('recording', 'anim-launch', 'anim-land');
-    }
-    if (window._updateSendBtnIcon) window._updateSendBtnIcon();
-  }
+  // #1414 (R3 PR2): the submit-button state machine — updateSubmitButton / _foregroundStreamLive /
+  // _syncSubmitButtonState — moved VERBATIM to chatSubmitButton.js (imported at the top of this file).
+  // chat.js still calls them exactly as before and re-exports the two public-API ones (#971 gate) in
+  // the chatModule object below.
 
   // -----------------------------------------------------------------------
   // Slash commands — now in slashCommands.js
@@ -7289,93 +7208,8 @@ import { _initChatScrollEdges } from './chatScrollEdges.js';
     handleChatSubmit(null, 'Continue from where you left off.'); // headless — no composer puppeteering
   }
 
-  // Open a chat attachment in the right place: images → Gallery editor; PDFs &
-  // text/code/markdown → Documents viewer; anything else → raw file. A given
-  // upload's imported document is reused (cached by upload id) so clicking it
-  // again re-opens the same doc instead of making duplicates.
-  const _attachDocCache = new Map();  // upload id -> doc id
-  function _attachLang(name) {
-    const m = (name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
-    const ext = m ? m[1] : '';
-    const map = { md:'markdown', markdown:'markdown', js:'javascript', ts:'typescript',
-      jsx:'javascript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
-      java:'java', c:'c', cpp:'cpp', h:'c', hpp:'cpp', cs:'csharp', php:'php', html:'html',
-      htm:'html', css:'css', scss:'scss', json:'json', yaml:'yaml', yml:'yaml', sh:'bash',
-      bash:'bash', sql:'sql', csv:'csv', xml:'xml' };
-    return map[ext] || '';
-  }
-  async function openAttachment(att, isImage) {
-    if (!att || !att.id) return;
-    const id = att.id, name = att.name || '', mime = att.mime || '';
-    const url = `${API_BASE}/api/upload/${id}`;
-
-    // Game build (feature 0032): the Gallery image editor is removed — open
-    // attached images in a new tab instead.
-    if (isImage) {
-      window.open(url, '_blank');
-      return;
-    }
-
-    const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name);
-    const TEXT_EXT = /\.(txt|md|markdown|js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|html?|css|scss|sass|less|json|ya?ml|toml|ini|conf|env|sh|bash|sql|csv|tsv|xml|log|vue|svelte)$/i;
-    const isTextDoc = TEXT_EXT.test(name) || /^text\//.test(mime);
-    if (!isPdf && !isTextDoc) { window.open(url, '_blank'); return; }  // binary/unknown → raw
-
-    // Reuse the doc we already imported for this upload, if it still loads.
-    const cached = _attachDocCache.get(id);
-    if (cached) {
-      try {
-        documentModule.openPanel && documentModule.openPanel();
-        await documentModule.loadDocument(cached);
-        return;
-      } catch (_) { _attachDocCache.delete(id); }
-    }
-
-    // Need a session to attach the doc to (bare-session fallback, same as compose).
-    let sid = '';
-    try { sid = sessionModule.getCurrentSessionId() || ''; } catch (_) {}
-    if (!sid) {
-      try {
-        const _fd = new FormData();
-        _fd.append('name', name || 'Attachment');
-        _fd.append('skip_validation', 'true');
-        const r = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: _fd, credentials: 'same-origin' });
-        if (r.ok) { const d = await r.json(); if (d && d.id) { sid = d.id; if (sessionModule.loadSessions) await sessionModule.loadSessions(); } }
-      } catch (_) {}
-    }
-
-    try {
-      let doc;
-      if (isPdf) {
-        // import-pdf wants a fresh file upload — re-fetch the stored blob and post it.
-        const blob = await (await fetch(url)).blob();
-        const fd = new FormData();
-        fd.append('file', blob, name || 'document.pdf');
-        if (sid) fd.append('session_id', sid);
-        const res = await fetch(`${API_BASE}/api/documents/import-pdf`, { method: 'POST', body: fd, credentials: 'same-origin' });
-        if (!res.ok) throw new Error('import-pdf ' + res.status);
-        doc = await res.json();
-      } else {
-        const text = await (await fetch(url)).text();
-        const res = await fetch(`${API_BASE}/api/document`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sid || null, title: name.replace(/\.[^.]+$/, '') || 'Document', content: text, language: _attachLang(name) }),
-        });
-        if (!res.ok) throw new Error('document ' + res.status);
-        doc = await res.json();
-      }
-      if (doc && doc.id) {
-        _attachDocCache.set(id, doc.id);
-        documentModule.openPanel && documentModule.openPanel();
-        if (documentModule.injectFreshDoc) documentModule.injectFreshDoc(doc);
-        else await documentModule.loadDocument(doc.id);
-      }
-    } catch (e) {
-      console.error('open attachment as document failed', e);
-      import('./ui.js').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
-      window.open(url, '_blank');  // fallback so the file is still reachable
-    }
-  }
+  // #1414 (R3 PR3): openAttachment / _attachLang / the per-upload doc cache moved to
+  // chatAttachments.js (imported above, re-exported on chatModule below). Behavior-preserving.
 
   // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
   //
