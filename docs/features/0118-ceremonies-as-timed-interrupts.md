@@ -1,6 +1,6 @@
 # 0118 — Ceremonies as timed, telegraphed interrupts (the day has a shape)
 
-> **Status:** Building (BDD/TDD-first). **Phase 2 of the in-game-time pivot** (owner directive,
+> **Status:** Built (BDD/TDD-first; engine + FE). **Phase 2 of the in-game-time pivot** (owner directive,
 > 2026-07-11; design confirmed 2026-07-12). Phase 1 (0117) made the house live *between* ceremonies;
 > Phase 2 makes the ceremonies themselves **milestones on the in-game clock**: the day has a known
 > schedule, the player is **told when the next one lands** ("the HOH competition is this afternoon"),
@@ -79,18 +79,22 @@ renderGameContext(view): string                            // primes the narrato
 
 ## 5. Definition of Done
 
-- [ ] **Schedule + telegraphing:** with the clock live, the game view exposes the next milestone and its
+- [x] **Schedule + telegraphing:** with the clock live, the game view exposes the next milestone and its
       scheduled phase; the narrator context names it ("the veto competition is set for this afternoon —
-      the house knows it's coming"), so run-up scenes are primed.
-- [ ] **Due signal:** `milestoneDue()` is false before the scheduled phase and true once the clock reaches
+      the house knows it's coming"), so run-up scenes are primed. *(`dayScheduleTimedInterrupts.test.ts`; BDD 1.)*
+- [x] **Due signal:** `milestoneDue()` is false before the scheduled phase and true once the clock reaches
       it; it drives the FE forced-advance nudge (time-aware), which fires the ceremony + the 0106 gather.
-- [ ] **Soft bedtime preserved:** `turnIn` stays the only player-sleep path; no forced curfew is added.
-- [ ] **Byte-identical / golden-safe:** with time-of-day off (the seeded spine) and with the
+      *(engine: BDD 2 + unit due-flip; FE: `chat_helpers._LAST_MILESTONE_DUE` → `agent_loop._want_advance`
+      bypass, `test_0118_timed_ceremony_nudge.py`.)*
+- [x] **Soft bedtime preserved:** `turnIn` stays the only player-sleep path; no forced curfew is added
+      (untouched).
+- [x] **Byte-identical / golden-safe:** with time-of-day off (the seeded spine) and with the
       per-conversation clock off (golden replay), the `daySchedule` field and the priming text are absent
-      and the beat stream is unchanged; heavy calibration sims **byte-identical**; **no golden re-record**.
-- [ ] **Vault-free:** the schedule reads only the live loop state + clock; `npm run test:arch` green.
-- [ ] Name-agnostic tests (roles only); BDD-gated in `cucumber.cjs`; `npm test` green; FE nudge covered by
-      a pytest gate (stubbed model).
+      and the beat stream is unchanged; the FE `due` cache is False; heavy calibration sims
+      **byte-identical**; **no golden re-record**. *(BDD 3; clock-off unit test; the FE bypass reads False.)*
+- [x] **Vault-free:** the schedule reads only the live loop state + clock; `npm run test:arch` green. *(BDD 4.)*
+- [x] Name-agnostic tests (roles only); BDD-gated in `cucumber.cjs`; `npm test` green; FE nudge covered by
+      a pytest gate keyed the single-tenant-safe way (`test_0118_timed_ceremony_nudge.py`).
 
 ## 6. Dependencies & traceability
 
