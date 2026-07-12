@@ -71,10 +71,12 @@ def test_reasoning_fires_for_the_live_model_via_openrouter(monkeypatch):
     p = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro",
                          policy={"reasoning": {"effort": "medium"}, "max_tokens": 4096})
     r = p.get("reasoning")
-    assert isinstance(r, dict) and r.get("effort") == "medium", r
-    # ADR 0010 follow-on #2 (F-S4-D): a MODEL-AWARE reasoning `max_tokens` sub-budget rides ALONGSIDE
-    # the effort so thinking can never starve the visible reply. No explicit request cap here ⇒ it's
-    # sized off the model-aware default output cap, and reserves reply headroom by construction.
+    # OpenRouter's unified `reasoning` takes EITHER effort OR max_tokens, NEVER BOTH (a 400 otherwise
+    # — see test_openrouter_reasoning_never_sends_both_effort_and_max_tokens). We send the precise
+    # `max_tokens` bound ALONE and DROP effort: the budget still reaches the wire (the DeepSeek-V4
+    # point stands), sized off the model-aware output cap and reserving reply headroom by construction
+    # (F-S4-D, #1420-#2).
+    assert isinstance(r, dict) and "effort" not in r, r
     cap = resolve_output_cap("deepseek/deepseek-v4-pro")
     assert r.get("max_tokens") == resolve_reasoning_max_tokens(cap), r
     assert 0 < r["max_tokens"] < cap, "reasoning must leave the reply room within the output cap"
@@ -102,6 +104,24 @@ def test_explicit_tight_request_cap_shrinks_the_reasoning_budget(monkeypatch):
     tight = p_tight["reasoning"]["max_tokens"]
     assert tight == resolve_reasoning_max_tokens(2000), tight
     assert 2000 - tight >= int(0.4 * 2000), "even a tight cap must reserve reply headroom"
+
+
+def test_openrouter_reasoning_never_sends_both_effort_and_max_tokens(monkeypatch):
+    # THE regression guard for the live bug (found by the 0108 golden RECORD): OpenRouter's unified
+    # `reasoning` accepts EITHER `effort` OR `max_tokens`, never both — sending both returns
+    # HTTP 400 "Only one of reasoning.effort and reasoning.max_tokens can be specified" (observed on
+    # z-ai/glm-5.2 via Novita), which EMPTIES the response and stalls the game. Every automated gate
+    # stubs the LLM, so only a real key exercised this — this test pins the invariant at the payload
+    # layer across models + caps so it can't regress silently again.
+    for model in ("deepseek/deepseek-v4-pro", "z-ai/glm-5.2", "qwen/qwen3.6-flash"):
+        for mt in (0, 2000, 256):
+            p = _capture_payload(monkeypatch, OR_URL, model,
+                                 policy={"reasoning": {"effort": "high"}}, max_tokens=mt)
+            r = p.get("reasoning") or {}
+            both = ("effort" in r) and ("max_tokens" in r)
+            assert not both, f"{model} @max_tokens={mt}: reasoning carries BOTH effort+max_tokens ⇒ OpenRouter 400: {r}"
+            # and it must carry at least ONE of them (reasoning still reaches the wire)
+            assert ("effort" in r) or ("max_tokens" in r), f"{model} @max_tokens={mt}: reasoning empty {r}"
 
 
 def test_openrouter_anthropic_omits_a_subfloor_reasoning_max_tokens(monkeypatch):
