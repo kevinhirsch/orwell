@@ -36,6 +36,7 @@
     "final-eviction": "vote",
     "juror-vote": "vote",
     "goodbye-message": "vote", // E34: the chosen tone rides `vote` (options are the tones)
+    "deal-offer": "vote", // 0123: accept/decline of an NPC's floated deal rides `vote` (options are the two)
     "replacement": "replacement",
   };
   const COMP_INTENTS = ["compete", "throw", "play-safe"];
@@ -406,11 +407,13 @@
       "juror-question": "Your jury question — ask the finalist",
       "juror-vote": "Your jury vote — crown a winner",
       "self-evict": "Self-eviction — leave the game?",
+      "deal-offer": "A houseguest's offer — accept or decline",
     }[kind] || "Your decision";
   }
 
   function confirmLabelFor(kind, binding) {
     if (kind === "self-evict") return "Confirm — leave the game (final)";
+    if (kind === "deal-offer") return "Confirm your answer"; // 0123: a light social choice, not a binding fate
     if (kind === "comp-round") return binding === false ? "Push through this round" : "Lock in your approach";
     return "Confirm — this is binding";
   }

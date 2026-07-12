@@ -49,6 +49,7 @@ import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeC
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { isPositiveObligation } from "../../domain/deal";
+import type { DealKind } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
 import { confessionalFor, involvedConfessionals, isBareGame, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
@@ -471,6 +472,14 @@ const DEAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_DEAL_DEPTH === "1";
 const CONFESSIONAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_CONFESSIONAL_DEPTH === "1";
 
 /**
+ * 0123 — whether the NPC-initiated deal-OFFER layer runs by DEFAULT (a motivated houseguest floats the
+ * player a deal at a lull; accept → a real deal, decline → a cooling). OFF unless `ORWELL_NPC_DEAL_OFFERS=1`.
+ * A DEDICATED flag (sibling to `ORWELL_DEAL_DEPTH`/`ORWELL_CONFESSIONAL_DEPTH`) so calibration neutrality is
+ * provable in isolation: unset ⇒ no offer is generated, no pending is raised, nothing folds ⇒ byte-identical.
+ */
+const NPC_DEAL_OFFERS_ENABLED_DEFAULT = process.env.ORWELL_NPC_DEAL_OFFERS === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -861,6 +870,8 @@ export class GameSessionAdapter implements GameSession {
   private dealReputationSink?: (honorer: EntityId, other: EntityId) => void;
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
+  /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
+  private npcDealOffersEnabled = NPC_DEAL_OFFERS_ENABLED_DEFAULT;
   /** 0122 — the last in-game day the daily confessional sweep ran, so it fires at most once per day. */
   private lastConfessionalSweepDay = 0;
   /**
@@ -6256,6 +6267,12 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the deeper+daily confessional layer is live (0122). */
   confessionalDepthEnabledNow(): boolean { return this.confessionalDepthEnabled; }
 
+  /** Turn the 0123 NPC-initiated deal-offer layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ no offer is ever generated ⇒ byte-identical). */
+  setNpcDealOffersEnabled(on: boolean): void { this.npcDealOffersEnabled = on; }
+  /** Whether the NPC-initiated deal-offer layer is live (0123). */
+  npcDealOffersEnabledNow(): boolean { return this.npcDealOffersEnabled; }
+
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
   strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
@@ -7419,7 +7436,11 @@ export class GameSessionAdapter implements GameSession {
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
     const view = this.inOneCommit(() => {
       let ev: BeatEvent | null = null;
-      if (!this.live!.pending && !this.live!.finished) {
+      // 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER. No-op unless
+      // the layer is on; when it fires it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the
+      // beat does NOT advance this turn — the player answers the offer first. Flag off ⇒ byte-identical.
+      this.maybeOfferPlayerDeal();
+      if (!this.live!.pending && !this.live!.dealOffer && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
         // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
         // toward late-night and wrapping to a new morning (banking a late night the player never ended).
@@ -7486,6 +7507,9 @@ export class GameSessionAdapter implements GameSession {
     // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
     if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
+    // 0123 — an NPC deal offer resolves through its own path (NOT the ceremony-pending machinery): it
+    // lives on `live.dealOffer`, not `live.pending`. `vote:"accept"` makes the deal; anything else declines.
+    if (req.kind === "deal-offer") return remember(this.resolveDealOffer(req.vote === "accept"));
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
@@ -8710,6 +8734,84 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * 0123 — the NPC->player deal OFFER (the counterpart of `makeDeal`). At a LULL a motivated houseguest
+   * pulls the player aside and floats a deal, GROUNDED in their real read (a strong bond ⇒ a final-two ask;
+   * otherwise a mutual-safety ask). Bounded: at most one open offer, at most one per in-game week, seeded +
+   * probability-gated. Sets `live.dealOffer` (surfaced as a `deal-offer` pending) and records the approach
+   * as a PLAYER-WITNESSED event (not hidden — the NPC came to them). No-op unless the layer is on and the
+   * game is at a genuine lull (no ceremony pending), so a ceremony is never preempted and the flag-off path
+   * is byte-identical. The choice of NPC + kind draws a DEDICATED seeded rng (never the shared vote stream).
+   */
+  private maybeOfferPlayerDeal(): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    if (!this.npcDealOffersEnabled) return;                       // the layer is opt-in
+    if (s.pending || s.dealOffer || s.finished) return;           // lull-only, one open offer at a time
+    if (s.hoh === undefined) return;                              // the game must be live (an HOH crowned)
+    if (s.lastDealOfferWeek === s.week) return;                   // at most one offer per in-game week
+    const O = DECISION.playerOffer;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:deal-offer:${s.week}:${s.beat ?? ""}`));
+    if (rng.next() >= O.prob) return;
+    // Pick the most-motivated living NPC not already bound to the player: max(bond, threat) over the floor.
+    const evicted = new Set(s.evictionOrder);
+    const boundToPlayer = (id: EntityId): boolean =>
+      this.deals.open().some((d) => d.parties.includes(PLAYER) && d.parties.includes(id));
+    let from: EntityId | undefined;
+    let best: number = O.motivationMin;
+    for (const n of this.house.npcs) {
+      if (evicted.has(n.id) || boundToPlayer(n.id)) continue;
+      const e = this.rel.edge(n.id, PLAYER);
+      const motivation = Math.max((e.trust + e.affinity) / 2, e.threat); // wants alliance OR wants safety
+      if (motivation > best) { best = motivation; from = n.id; }
+    }
+    if (!from) return;                                            // a house with no motivated NPC floats nothing
+    const e = this.rel.edge(from, PLAYER);
+    const bond = (e.trust + e.affinity) / 2;
+    const kind: DealKind = bond >= O.finalTwoBond ? "final-two" : "safety";
+    const terms = kind === "final-two"
+      ? "take me to the end and I'll take you"
+      : "you keep me safe, I keep you safe";
+    s.dealOffer = { id: `offer:${from}:${s.week}`, from, kind, terms, madeWeek: s.week };
+    s.lastDealOfferWeek = s.week;
+    // A PLAYER-WITNESSED approach (not hidden — the NPC came to them; 0002): the offer is the player's
+    // own knowledge, never Vault content. The paraphrase carries no number, no sealed state.
+    this.onPlayerEvent(`${this.nameOf(from)} pulls ${this.nameOf(PLAYER)} aside to float a ${kind} deal`, [PLAYER, from], "conversation");
+  }
+
+  /**
+   * 0123 — resolve an open NPC deal offer. `accept` routes through the SAME `deals.make` spine every deal
+   * binds against (a real player↔NPC deal, reconciled/folded like any other); `decline` creates NO deal but
+   * applies one bounded, seeded directed COOLING of the rebuffed NPC's read of the player (a mild `conflict`
+   * move — never a betrayal-shock; the change is real, recorded, and invisible — the Vault Wall working).
+   * Either way the offer is consumed. A no-op (safe) if no offer stands.
+   */
+  private resolveDealOffer(accept: boolean): AdvanceView {
+    const s = this.live;
+    if (!s?.dealOffer || !this.house) return this.advanceView(null);
+    return this.inOneCommit(() => {
+      const o = s.dealOffer!;
+      s.dealOffer = undefined; // consumed either way
+      if (accept) {
+        const evId = this.onPlayerEvent?.(
+          `${this.nameOf(PLAYER)} accepts ${this.nameOf(o.from)}'s ${o.kind} deal: ${o.terms}`,
+          [PLAYER, o.from], "deal",
+        );
+        this.deals.make([PLAYER, o.from], o.kind, o.terms, evId, o.madeWeek);
+      } else {
+        this.onPlayerEvent?.(
+          `${this.nameOf(PLAYER)} declines ${this.nameOf(o.from)}'s ${o.kind} offer`,
+          [PLAYER, o.from], "conversation",
+        );
+        // The rebuffed houseguest cools on the player a touch (bounded, seeded, hidden — never surfaced).
+        const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:deal-decline:${o.from}:${o.madeWeek}`));
+        this.rel.applyDirected(o.from, PLAYER, "conflict", rng);
+      }
+      this.persist();
+      return this.advanceView(null);
+    });
+  }
+
+  /**
    * Vault-free projection of a player-party deal: parties (names) + kind + terms + status. No numbers.
    * A7/E12: a deal `sealedBallot` marks broken — via the SEALED eviction ballot, not the player's own
    * vote — projects as still "open" until the season finishes: the raw internal `d.status` ("broken")
@@ -8861,6 +8963,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "self-evict", confirmed: req.confirmed === true };
       case "secret-veto": // 0025: the player plays (true) or holds (false) their one-time safety.
         return { kind: "secret-veto", use: req.use === true };
+      case "deal-offer": // 0123: intercepted in `submitDecision` BEFORE this map (its own path) — never here.
+        throw new Error("deal-offer resolves through resolveDealOffer, not the ceremony-decision map");
     }
   }
 
@@ -8879,6 +8983,18 @@ export class GameSessionAdapter implements GameSession {
         kind: "self-evict", by,
         prompt: "Leaving the game is final — a real walk-out you cannot undo. Confirm to self-evict and end your season, or cancel to stay in the house.",
         options: [], pick: 0,
+      };
+    }
+    // 0123 — an NPC-initiated deal offer awaiting the player (only when no ceremony pending blocks it, and
+    // never on the self-evict channel above). A player-witnessed approach with two picks: accept / decline.
+    if (!p && this.live?.dealOffer && this.house) {
+      const o = this.live.dealOffer;
+      return {
+        kind: "deal-offer", by: this.named(PLAYER)!,
+        prompt: `${this.nameOf(o.from)} pulls you aside with a ${o.kind} deal: ${o.terms}. Accept, or decline.`,
+        options: [{ id: "accept", name: "Accept the deal" }, { id: "decline", name: "Decline" }],
+        offer: { from: this.named(o.from)!, kind: o.kind, terms: o.terms },
+        pick: 1,
       };
     }
     if (!p) return null;
