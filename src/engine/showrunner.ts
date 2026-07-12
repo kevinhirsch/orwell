@@ -122,21 +122,30 @@ export function emphasisForThread(note: ShowrunnerNote | undefined, threadId: st
  * is its own id-keyed side rng invariant to order, every fold magnitude stays engine-owned + seeded, no
  * closed-set decision is touched — ADR 0005).
  *
- * PURE + deterministic (a stable sort keyed by note-rank then derive index). No note / empty emphases /
- * `slots <= 0` ⇒ the IDENTITY order (byte-identical to no reweight), so an absent/off note is a no-op by
- * construction. A thread not on the (clamped-to-`slots`) shortlist keeps the baseline priority — the
- * reweight is boost-only (it never DEMOTES a thread below its own derive-order pacing, only promotes the
- * shortlist above it), mirroring the Phase-1 `minEmphasis` floor.
+ * PURE + deterministic (a stable sort keyed by note-rank then derive index). No note / empty emphases / an
+ * all-baseline note (every emphasis at `minEmphasis`) / `slots <= 0` ⇒ the IDENTITY order (byte-identical to
+ * no reweight), so an absent/off/un-emphasized note is a no-op by construction. Only GENUINELY-emphasized
+ * threads (`emphasis > minEmphasis` — the SAME predicate `showrunnerEmphasizes` uses) enter the shortlist, so
+ * a baseline (score-0, "no change") thread never jumps the queue on the mere tiebreaker. A thread not on the
+ * (clamped-to-`slots`) shortlist keeps the baseline priority — the reweight is boost-only (it never DEMOTES a
+ * thread below its own derive-order pacing, only promotes the shortlist above it), mirroring the Phase-1
+ * `minEmphasis` floor.
  */
 export function reweightThreadOrder(
   threadIds: readonly string[], note: ShowrunnerNote | undefined, slots: number = SHOWRUNNER.reweightSlots,
 ): number[] {
   const identity = threadIds.map((_, i) => i);
   if (!note || note.emphases.length === 0 || slots <= 0) return identity;
-  // The shortlist that jumps the queue: the note's top-`slots` emphases, in note order (already
-  // score-ranked, most-emphasized first). `rank` maps a shortlisted thread id → its front-of-queue slot.
+  // The shortlist that jumps the queue: the note's top-`slots` GENUINELY-emphasized emphases, in note order
+  // (already score-ranked, most-emphasized first). A BASELINE entry (score 0 ⇒ `emphasis === minEmphasis`,
+  // "no change") is NOT a real emphasis — it matches `showrunnerEmphasizes`'s `> minEmphasis` predicate
+  // exactly — so it must never consume a scarce reweight slot or reorder the queue on the mere id tiebreaker.
+  // Filter FIRST, then take the top-`slots` (the emphases sort score-desc, so any baseline entries sit last).
+  const shortlist = note.emphases.filter((e) => e.emphasis > SHOWRUNNER.minEmphasis).slice(0, slots);
+  if (shortlist.length === 0) return identity; // an all-baseline note emphasizes nothing ⇒ identity (no reweight)
+  // `rank` maps a shortlisted thread id → its front-of-queue slot.
   const rank = new Map<string, number>();
-  for (let i = 0; i < note.emphases.length && i < slots; i++) rank.set(note.emphases[i]!.threadId, i);
+  shortlist.forEach((e, i) => rank.set(e.threadId, i));
   // STABLE partition: shortlisted threads first (by their slot), then every other thread in DERIVE order
   // (the derive index is the tiebreaker for both partitions), so nothing but the promotion changes.
   return identity.sort((a, b) => {

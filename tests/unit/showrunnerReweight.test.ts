@@ -7,6 +7,7 @@ import { GameSessionRegistry } from "../../src/composition/registry";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { Orchestrator } from "../../src/composition/orchestrator";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
+import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import type { UserSandbox } from "../../src/composition/registry";
 
 /**
@@ -56,6 +57,25 @@ describe("0101/#1401 Phase-2 — reweightThreadOrder (the pure reorder)", () => 
     expect(reweightThreadOrder(ids, note(["t3", "t1"]))).toEqual([3, 1, 0, 2, 4]);
   });
 
+  it("IGNORES baseline emphases (score 0 ⇒ emphasis === minEmphasis) — an all-baseline note is the IDENTITY", () => {
+    // A note whose entire shortlist is BASELINE (no real emphasis) emphasizes NOTHING, so it must NOT reorder
+    // the queue on the mere id tiebreaker — matching `showrunnerEmphasizes`'s `> minEmphasis` predicate exactly.
+    const baseline = (threadIds: string[]): ShowrunnerNote => ({
+      seq: 1, week: 2, phase: "nominations",
+      emphases: threadIds.map((threadId) => ({ threadId, emphasis: SHOWRUNNER.minEmphasis, rationale: "x" })),
+    });
+    expect(reweightThreadOrder(ids, baseline(["t3", "t1"]))).toEqual([0, 1, 2, 3, 4]);
+    // MIXED: only the ABOVE-baseline thread jumps the queue; the baseline entry stays in derive order — the
+    // filter isn't over-broad (a genuine emphasis still promotes, a baseline one riding the same note does not).
+    const mixed: ShowrunnerNote = {
+      seq: 1, week: 2, phase: "nominations", emphases: [
+        { threadId: "t3", emphasis: SHOWRUNNER.maxEmphasis, rationale: "x" }, // genuinely emphasized ⇒ jumps to front
+        { threadId: "t1", emphasis: SHOWRUNNER.minEmphasis, rationale: "x" }, // baseline ⇒ stays in derive order
+      ],
+    };
+    expect(reweightThreadOrder(ids, mixed)).toEqual([3, 0, 1, 2, 4]);
+  });
+
   it("respects `reweightSlots` — only the top-N emphases jump the queue", () => {
     // slots=1: only the most-emphasized (t4) jumps; t2/t0 keep derive order after it.
     expect(reweightThreadOrder(ids, note(["t4", "t2", "t0"]), 1)).toEqual([4, 0, 1, 2, 3]);
@@ -73,6 +93,45 @@ describe("0101/#1401 Phase-2 — reweightThreadOrder (the pure reorder)", () => 
     const perm = reweightThreadOrder(ids, note(["t4"]));
     const nonShortlist = perm.filter((i) => i !== 4);
     expect(nonShortlist).toEqual([0, 1, 2, 3]); // strictly ascending — relative derive order preserved
+  });
+});
+
+// ── the monotonic count guard: an all-baseline note fires NO reweight (end-to-end via the scheduler) ────
+
+describe("0101/#1401 Phase-2 — an all-baseline note advances no reweight count (the count guard)", () => {
+  type Internals = {
+    storyThreads: { id: string }[];
+    showrunnerNotes: ShowrunnerNote[];
+    scheduleStoryThreads: (rng: SeededRandom) => void;
+  };
+  const peek = (sb: UserSandbox): Internals => sb.session as unknown as Internals;
+
+  it("all-baseline note ⇒ the reweight count stays 0; a genuinely-emphasized note DOES advance it", () => {
+    GameSessionAdapter.setShowrunnerReweightEnabled(true);
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("sr-reweight-baseline");
+    sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: 5 });
+    const internals = peek(sb);
+    const ids = internals.storyThreads.map((t) => t.id);
+    expect(ids.length, "the season seeded ≥2 threads to reorder").toBeGreaterThan(1);
+    const snap = sb.session.snapshot();
+    const mkNote = (emphasisFor: (id: string) => number): ShowrunnerNote => ({
+      seq: 1, week: snap.week, phase: snap.phase,
+      emphases: ids.map((threadId) => ({ threadId, emphasis: emphasisFor(threadId), rationale: "x" })),
+    });
+
+    // (1) ALL-BASELINE (every emphasis at minEmphasis): the scheduler consumes the note but promotes NOTHING,
+    //     so the monotonic reweight count (bumped iff the visitation order genuinely changed) never advances.
+    internals.showrunnerNotes.push(mkNote(() => SHOWRUNNER.minEmphasis));
+    internals.scheduleStoryThreads(new SeededRandom(1));
+    expect(sb.session.showrunnerReweightCountNow(), "an all-baseline note reorders nothing ⇒ count unchanged").toBe(0);
+
+    // (2) A GENUINE emphasis (the LAST derive-order thread — promoting it is a real reorder): the scheduler
+    //     re-orders the queue and the count advances — proving the baseline filter is not over-broad.
+    const promote = ids[ids.length - 1]!;
+    internals.showrunnerNotes.push(mkNote((id) => (id === promote ? SHOWRUNNER.maxEmphasis : SHOWRUNNER.minEmphasis)));
+    internals.scheduleStoryThreads(new SeededRandom(2));
+    expect(sb.session.showrunnerReweightCountNow(), "a genuinely-emphasized note re-orders the queue ⇒ count advances").toBe(1);
   });
 });
 
