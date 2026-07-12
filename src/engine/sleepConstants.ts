@@ -104,10 +104,21 @@ export const SLEEP: SleepConstants = {
 // the dedicated social-fatigue flag is on ⇒ scale 1 / no drain ⇒ byte-identical.
 
 export interface SocialFatigueConstants {
-  /** The dampening of social sway at a FULL sleep deficit (1). 0 ⇒ no effect even at max deficit. */
+  /**
+   * The dampening of WARMING (positive) social sway at a FULL sleep deficit (1). Tired ⇒ worse at charm:
+   * bonding, building trust, warming a bond all land LESS. 0 ⇒ no effect even at max deficit.
+   */
   swayDamp: number;
-  /** The floor sway-scale: even a fully-wrecked houseguest still moves the needle this much. */
+  /** The floor WARMING sway-scale: even a fully-wrecked houseguest still charms this much. */
   swayFloor: number;
+  /**
+   * The ASYMMETRIC negative bias (#1419 owner ruling): tired ⇒ barbs cut DEEPER. A SOURING (negative)
+   * fold — conflict, souring a bond, raising threat — is AMPLIFIED by this gain × the deficit, so it
+   * is *harder to scheme* when you're not sleeping (positive nudges weaken) while spats hit harder.
+   */
+  soreGain: number;
+  /** The cap on the souring amplification, so a tired spat stays bounded (never runs away). */
+  soreCap: number;
   /** How many HOURS earlier ONE conflict pulls a houseguest's character bedtime tonight. */
   conflictBedtimeDrainHours: number;
   /** The earliest a conflict-drained houseguest will bed (hour floor) — never before the early-evening. */
@@ -115,19 +126,31 @@ export interface SocialFatigueConstants {
 }
 
 export const SOCIAL_FATIGUE: SocialFatigueConstants = {
-  swayDamp: 0.6,
+  swayDamp: 0.6,   // at full deficit a WARMING fold lands at the floor (×0.4)
   swayFloor: 0.4,
+  soreGain: 0.35,  // at full deficit a SOURING fold hits ~×1.35 (capped)
+  soreCap: 1.4,
   conflictBedtimeDrainHours: 1, // one fight pulls bedtime ~an hour earlier
   bedtimeHourFloor: 20,         // never before 8pm (the start of `night`)
 };
 
 /**
- * The fold-magnitude scale (≤1) for a houseguest carrying `deficit` sleep debt (0..1). 1 at deficit 0
- * (rested ⇒ byte-identical), dropping to the floor at a full deficit. Symmetric: worse at warming AND at
- * souring. Pure (no rng) — it scales an ALREADY-decided fold; it never adds a draw to any stream.
+ * The WARMING fold-magnitude scale (≤1) for a houseguest carrying `deficit` sleep debt (0..1). 1 at
+ * deficit 0 (rested ⇒ byte-identical), dropping to the floor at a full deficit — a tired houseguest is
+ * worse at charm (bonding / trust-building / warming a bond). Pure (no rng) — it scales an ALREADY-decided
+ * fold; it never adds a draw to any stream. Pairs with `soreSwayScale` for the asymmetric (#1419) model.
  */
 export function socialSwayScale(deficit: number): number {
   return Math.max(SOCIAL_FATIGUE.swayFloor, 1 - SOCIAL_FATIGUE.swayDamp * clamp(deficit, 0, 1));
+}
+
+/**
+ * The SOURING fold-magnitude scale (≥1) for a houseguest carrying `deficit` sleep debt (#1419 asymmetric
+ * ruling: "a bias for negative consequence"). 1 at deficit 0 (rested ⇒ byte-identical), rising to
+ * `soreCap` at a full deficit — a tired houseguest's spats and threat-reads cut DEEPER. Pure (no rng).
+ */
+export function soreSwayScale(deficit: number): number {
+  return Math.min(SOCIAL_FATIGUE.soreCap, 1 + SOCIAL_FATIGUE.soreGain * clamp(deficit, 0, 1));
 }
 
 // --- Extension 3: the compounding multi-night fatigue meter (its own opt-in flag) -----------------

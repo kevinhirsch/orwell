@@ -4,7 +4,7 @@ import type { SessionSnapshot } from "../engine/sessionSnapshot";
 import { toGameState, sessionCoreCounts, sessionCoreCountsNonDecreasing, sessionCoreIsSuperset } from "../engine/sessionSnapshot";
 import { counts, isSuperset, countsNonDecreasing } from "../domain/saveState";
 import { richOffscreenStretch } from "../engine/offscreen";
-import { scaleImpact, natureFoldImpact } from "../engine/relationshipConstants";
+import { scaleImpactByValence, natureFoldImpact } from "../engine/relationshipConstants";
 import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional, selectRecentForConfessional } from "../engine/confessionals";
@@ -668,13 +668,16 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
     // scene (bonding/showmance — ordinary downtime warmth) folds AFFINITY ONLY, no strategic weight, no
     // vote-affecting change. Always `applyImpactDirected` now, which takes the SAME four jitter draws as
     // the old `applyDirected`, so the stream stays in phase — only friendly magnitudes shift (re-calibrated).
-    const swayScale = sandbox.session.socialFoldScale(s.initiator);
+    // #1419 — ASYMMETRIC social fatigue: a tired initiator is worse at CHARM (warm < 1 dampens the
+    // warming fold) but their barbs cut DEEPER (sore ≥ 1 amplifies the souring fold). `{1,1}` (rested /
+    // flag-off / clock-off) ⇒ byte-identical to the calibration spine. GAME natures fold their full
+    // valence-scaled strategic impact; FRIENDLY natures fold affinity only (unchanged nature split).
+    const sway = sandbox.session.socialFoldValence(s.initiator);
     const foldImpact = natureFoldImpact(s.type);
-    sandbox.engine.relationships.applyImpactDirected(
-      s.partner, s.initiator,
-      swayScale === 1 ? foldImpact : scaleImpact(foldImpact, swayScale),
-      rng,
-    );
+    const scaled = sway.warm === 1 && sway.sore === 1
+      ? foldImpact
+      : scaleImpactByValence(foldImpact, sway.warm, sway.sore);
+    sandbox.engine.relationships.applyImpactDirected(s.partner, s.initiator, scaled, rng);
     // NOTE (audit 2026-06-18): whole-house transitivity for OFF-SCREEN NPC↔NPC scenes (co-present
     // bystanders reading a scene by structural balance) was prototyped here but destabilized the
     // tuned jury-reach calibration gate (a passive player's finale wins crept past the cap) — the

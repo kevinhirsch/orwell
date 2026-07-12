@@ -167,6 +167,27 @@ export function scaleImpact(impact: Partial<EdgeSignals>, factor: number): Parti
 }
 
 /**
+ * #1419 — scale a fold ASYMMETRICALLY by each component's VALENCE. A WARMING component (trust/affinity/
+ * alignment UP, or threat DOWN) is scaled by `warmScale`; a SOURING component (the opposite sign) by
+ * `soreScale`. Used by the social-fatigue model so a tired houseguest is worse at charm (`warmScale` < 1)
+ * while their barbs cut deeper (`soreScale` ≥ 1) — "harder to scheme when you aren't sleeping." With
+ * `warmScale === soreScale === 1` it is byte-identical to the unscaled fold (the flag-off / rested path).
+ */
+export function scaleImpactByValence(
+  impact: Partial<EdgeSignals>, warmScale: number, soreScale: number,
+): Partial<EdgeSignals> {
+  const out: Partial<EdgeSignals> = {};
+  for (const [k, v] of Object.entries(impact)) {
+    const val = v as number;
+    // Warming = the houseguest feels BETTER about the initiator: trust/affinity/alignment rise, or threat
+    // falls. Threat is the one inverted axis (a positive threat delta is a SOURING move).
+    const warming = k === "threat" ? val < 0 : val > 0;
+    out[k as keyof EdgeSignals] = val * (warming ? warmScale : soreScale);
+  }
+  return out;
+}
+
+/**
  * The FRIENDLY natures (feature 0078 Phase 2) — downtime social warmth, NOT game talk: a pair just
  * hanging out or growing close. A house isn't always plotting, so these are the DEFAULT texture of
  * ordinary life. Everything else (alliance / strategy / conflict / betrayal / gossip) is a GAME nature.

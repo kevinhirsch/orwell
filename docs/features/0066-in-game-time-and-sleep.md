@@ -129,10 +129,13 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 ## 9. Phase-2 extensions — BUILT (#1125, 2026-06-28)
 
 > **RESOLVED + BUILT (owner, 2026-06-28): all three Phase-2 extensions, on the 24-hour model below.**
-> Each rides its OWN opt-in flag, default OFF, byte-identical to the seeded calibration spine when off
+> Each rides its OWN flag, byte-identical to the seeded calibration spine when the master clock is off
 > (a dedicated per-extension neutrality proof each), priority-ordered per the owner: per-conversation
 > clock advance first (pacing-only), then NPC next-day social fatigue, then the compounding multi-night
-> meter. The env-default split stays (engine `ORWELL_TIME_OF_DAY` OFF for calibration; the FE session
+> meter. Per-conversation advance + social fatigue now **default ON** (the fast-forward fix / #1419 —
+> `ORWELL_TIME_PER_CONVERSATION=0` / `ORWELL_SOCIAL_FATIGUE=0` escape); the multi-night meter stays
+> opt-in (`ORWELL_MULTI_NIGHT_FATIGUE`, default OFF). All self-gate on the master clock, so the
+> env-default split still holds (engine `ORWELL_TIME_OF_DAY` OFF for calibration; the FE session
 > default ON for real play, ruling #583). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27/28).
 
 1. **Per-conversation clock advance** — `ORWELL_TIME_PER_CONVERSATION`. The clock advances as the player
@@ -140,9 +143,18 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
    day's finite scheming time is felt turn-by-turn. Pacing-only; it clamps at the bitter pre-dawn edge and
    never wraps the night without the player's own `turnIn` (ADR 0003 / the lull rule) — an engaged scene is
    never cut. The felt per-turn duration is the LOOSE, type-bounded conversation duration (§10, Extension 5).
-2. **NPC next-day social fatigue** — `ORWELL_SOCIAL_FATIGUE`. A tired houseguest moves the needle LESS in
-   the next day's social scenes (`socialSwayScale` dampens the off-screen fold magnitude — effectiveness,
-   never a personality change), and a character conflict drains the houseguest in it to an earlier bedtime.
+2. **NPC next-day social fatigue** — `ORWELL_SOCIAL_FATIGUE` (**default ON** since #1419, `=0` escapes; sleep
+   cost must reach social play, not just competitions). A tired houseguest's next-day social scenes fold
+   **asymmetrically** (#1419, owner ruling 2026-07-12 — "a bias for negative consequence"): a **WARMING**
+   fold (bonding, trust, charm) is **dampened** (`socialSwayScale` → the warm scale, floor ×0.4) so it is
+   *harder to scheme when you aren't sleeping*, while a **SOURING** fold (conflict, threat, souring) is
+   **amplified** (`soreSwayScale`, up to ×1.4) so *spats cut deeper*. Applied per-component by valence
+   (`scaleImpactByValence`; threat is the inverted axis). Still **effectiveness, never a personality change**
+   — the scene's nature is unchanged (a tired peacemaker does not start picking fights); a character conflict
+   drains the houseguest in it to an earlier bedtime. Self-gated on the master clock ⇒ byte-identical to the
+   calibration spine when the clock is off. *(Fast-follow: the same asymmetric valence for the PLAYER's own
+   recorded scenes — `foldHiddenImpact`/`foldGenerativeConsequence` in `consequence.ts` — touches the seeded
+   fold internals, so it ships as its own calibration-gated change.)*
 3. **A compounding multi-night fatigue meter** — `ORWELL_MULTI_NIGHT_FATIGUE`. An EMA of nightly deficits
    (`accrueFatigue`/`combinedRestDeficit`): consecutive late nights stack a deeper deficit; a rested night
    recovers. It adds (bounded) to both the comp fold and the social sway.

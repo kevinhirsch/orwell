@@ -148,7 +148,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, soreSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists, planReserveTwists } from "../../engine/reserveTwists";
@@ -501,7 +501,11 @@ const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
 // with per-conversation advance OFF the day had no in-fiction time between ceremonies (the fast-forward
 // bug). `=0` is the escape hatch. Still self-gated on `timeOfDayEnabled`, so the clock-off sims are byte-identical.
 const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION !== "0";
-const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE === "1";
+// Default ON — sleep cost must reach social play, not just competitions. When tired, warming folds are
+// dampened (harder to bond/scheme) and souring folds are amplified (spats cut deeper) — an asymmetric bias
+// toward negative consequence (owner ruling 2026-07-12). `=0` is the escape hatch. Self-gated on
+// `timeOfDayEnabled`, so the clock-off calibration sims stay byte-identical.
+const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE !== "0";
 const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
 
 /**
@@ -3434,6 +3438,20 @@ export class GameSessionAdapter implements GameSession {
   socialFoldScale(id: EntityId): number {
     if (!this.socialFatigueEnabled) return 1; // Extension 2 off ⇒ the off-screen fold is byte-identical
     return socialSwayScale(this.restDeficitOf(id));
+  }
+
+  /**
+   * #1419 — the ASYMMETRIC social-fatigue scale for a scene's INITIATOR: a tired houseguest is worse at
+   * charm (`warm` < 1 dampens WARMING folds — bonding, trust, warming a bond) while their barbs cut DEEPER
+   * (`sore` ≥ 1 amplifies SOURING folds — conflict, threat, souring). "A bias for negative consequence":
+   * harder to scheme when you aren't sleeping. `{ warm: 1, sore: 1 }` (no change) unless the social-fatigue
+   * flag is on AND the clock is running ⇒ the hidden society + its seeded calibration spine are BYTE-
+   * IDENTICAL; the asymmetric fold fires only on the live clock-ON game. Pure — no rng, no number crosses.
+   */
+  socialFoldValence(id: EntityId): { warm: number; sore: number } {
+    if (!this.socialFatigueEnabled) return { warm: 1, sore: 1 };
+    const deficit = this.restDeficitOf(id);
+    return { warm: socialSwayScale(deficit), sore: soreSwayScale(deficit) };
   }
 
   /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how

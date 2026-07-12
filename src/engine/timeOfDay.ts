@@ -283,7 +283,7 @@ export function eventSpillsPeriod(startHour: number, spanHours: number): boolean
 // commits the LOOSE, type-bounded felt duration. All pure — no rng — and gated OFF (scale 1 / meter 0 /
 // baseline floor) by their dedicated flags ⇒ byte-identical when off.
 export {
-  socialSwayScale, accrueFatigue, combinedRestDeficit, conversationHours,
+  socialSwayScale, soreSwayScale, accrueFatigue, combinedRestDeficit, conversationHours,
   SOCIAL_FATIGUE, FATIGUE, CONVERSATION_DURATION,
   type ConversationKind,
 } from "./sleepConstants";
