@@ -1100,11 +1100,31 @@ async def producer_vault(user: str | None = None) -> dict:
     return await _admin_call("producerVault", {}, user=user)
 
 
+# 0121 R2 — the engine's boot-time behavioral-flags block (GET /health `flags`), cached from the health
+# probe so the tool-schema layer can read a live feature flag (e.g. `dealDepth`) synchronously without its
+# own async call. Empty until the first successful probe ⇒ every flag reads its default (False), which keeps
+# the flag-gated makeDeal schema at its base kinds — the golden-path fixture (probe-less, flag-off) is safe.
+_ENGINE_FLAGS: dict = {}
+
+
+def engine_flag(name: str, default: bool = False) -> bool:
+    """A cached engine boot flag from GET /health `flags` (0121 R2). Default (unprobed / unknown) ⇒ False."""
+    v = _ENGINE_FLAGS.get(name)
+    return bool(v) if isinstance(v, bool) else default
+
+
 async def _probe_health_once() -> dict:
     """ONE /health probe. ``{"ok": True}`` when the engine answers 200, else ``{"ok": False, "error": …}``.
     Raises on a transport outage so the retry loop can give a momentary blip another try."""
     r = await _shared_client().get(ENGINE_URL.rstrip("/") + "/health", timeout=5.0)
     if r.status_code == 200:
+        # Cache the boot-flags block (0121 R2) — best-effort; a malformed body just leaves flags unchanged.
+        try:
+            flags = (r.json() or {}).get("flags")
+            if isinstance(flags, dict):
+                _ENGINE_FLAGS.update({k: bool(v) for k, v in flags.items() if isinstance(v, bool)})
+        except Exception:
+            pass
         return {"ok": True, "engineUrl": ENGINE_URL}
     if r.status_code in _TRANSIENT_STATUSES:
         # A gateway 502/503/504 on /health is a momentary blip — raise so we retry, not surface red.

@@ -237,6 +237,8 @@ from src.tool_parsing import (  # noqa: E402, F401
 from src.tool_schemas import (  # noqa: E402, F401
     FUNCTION_TOOL_SCHEMAS,
     function_call_to_tool_block,
+    with_deal_depth_kinds,
+    current_deal_kinds,
 )
 
 # Execution
