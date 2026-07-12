@@ -108,6 +108,13 @@ export interface HouseguestCard {
    */
   demeanor?: string;
   /**
+   * The model-authored FREEFORM identity concept (feature 0116) — who this houseguest IS in the model's
+   * own words, the open-set identity the narrator voices ALONGSIDE the derived `archetype` tag (never
+   * replacing it — ADR 0005 generalized to world-gen). PUBLIC, Vault-free, byte-stable. Present only on a
+   * model-authored genesis cast; absent on the deterministic floor cast (where the archetype IS the identity).
+   */
+  identityConcept?: string;
+  /**
    * The PUBLIC deep-profile facets (feature 0058): a multi-sentence `biography` (the presentable
    * backstory) and the STRUCTURED `physicalCharacteristics` facet (the single source of truth the
    * narration AND the portrait prompt both read, L29/L23). Public, Vault-free, byte-stable. The
@@ -566,7 +573,9 @@ export interface SecretLeverDescriptor {
 
 export interface MakeDealReq {
   with: EntityId;
-  kind: "safety" | "vote" | "final-two" | "target-other";
+  // 0121 — the two ACTIVE-obligation kinds (comp-throw / veto-save) are accepted only when the deal-depth
+  // layer is on (`makeDeal` refuses them otherwise); off ⇒ only the four defensive kinds, byte-identical.
+  kind: "safety" | "vote" | "final-two" | "target-other" | "comp-throw" | "veto-save";
   terms: string;
   /**
    * 0093 — OPTIONAL leverage: a secret the player holds ABOUT the deal partner (`with`), pressed to make
@@ -1731,6 +1740,73 @@ export interface RecordCastIdentityResult {
   reason?: string;
 }
 
+/**
+ * Feature 0116 — the model-authored cast-genesis write-back (phase 2 of the casting upgrade). The FE
+ * producer-LLM proposes the ENTIRE 15-NPC SKELETON — names, freeform identities (the archetype tag is
+ * DERIVED, not a generative constraint), personas, hidden elements, banded stats, and the pre-show tie
+ * graph — steered by a SEEDED season brief and carrying ZERO knowledge of the player. The ENGINE runs the
+ * proposal through its validation ENVELOPE (`castGenesis.validateCastGenesis`): banded stat clamp (no
+ * model number escapes), the cast-wide variance floor, name validators (uniqueness / plausibility /
+ * legacy-Bible deny-list / player-collision), the closed hidden-element kinds + C9 gates, tie-graph
+ * sanity, and hidden-game-weight stripping — then folds the committed skeleton onto the PRE-WARMED cast
+ * (`preSeedCast` must have run first). Generalizes ADR 0005 to world-gen: identity is open-set (recorded
+ * faithfully), power is closed-set (engine-dictated). A PRE-GAME operation only — refused once a season
+ * runs. Descriptive 0063 identity facets (ethnicity/gender/orientation/age) continue to route through the
+ * UNCHANGED `recordCastIdentity` pipeline, not this call. Vault-free out (violations name NPC/field/rule,
+ * never a hidden value). Not a model lever (FE-driven, like preSeedCast/recordCastProfile).
+ */
+export interface GenesisStatDTO { physical?: number; mental?: number; social?: number }
+export interface GenesisHiddenElementDTO { kind?: string; detail?: string }
+/** One proposed pre-show tie — two NPC ids (never the player), a nature + freeform backstory (flavor). */
+export interface GenesisTieDTO { a?: EntityId; b?: EntityId; nature?: string; backstory?: string }
+/** One proposed NPC skeleton slot. `id` binds it to the warmed cast; every other field is optional (an omitted/failing field keeps the deterministic floor). */
+export interface GenesisNpcDTO {
+  id?: EntityId;
+  name?: string;
+  /** The freeform identity concept, in the model's own words — stored verbatim; the narrator voices this, never the bare tag. */
+  identity?: string;
+  /** The nearest canonical archetype tag (a derived coupling key); validated ∈ enum, else the floor tag stands. */
+  archetype?: string;
+  vocation?: string;
+  hometown?: string;
+  demeanor?: string;
+  background?: string;
+  biography?: string;
+  presentation?: string;
+  appearance?: string;
+  /** Per-NPC banded stat proposal — the engine clamps the total into its band; no raw number is committed. */
+  stats?: GenesisStatDTO;
+  /** Per-NPC hidden elements (kind ∈ the closed set; details are open-set prose). Vault-routed; never projected. */
+  hiddenElements?: GenesisHiddenElementDTO[];
+}
+export interface RecordCastGenesisReq {
+  /** The whole-cast skeleton proposal (expected 15 NPCs). */
+  npcs: GenesisNpcDTO[];
+  /** The proposed pre-show tie graph (0–2 pairs; excess dropped, sanity-validated, sealed). */
+  ties?: GenesisTieDTO[];
+}
+/** One structured, Vault-free validation violation (never echoes a hidden value). */
+export interface GenesisViolationDTO {
+  /** Per-NPC (re-roll that one NPC) vs cast-wide (re-roll the cast slice). */
+  scope: "npc" | "cast";
+  npcId?: EntityId;
+  field: string;
+  rule: string;
+  action: "clamped" | "repaired" | "stripped" | "re-roll" | "ignored" | "dropped";
+}
+export interface RecordCastGenesisResult {
+  /** True iff a PRE-WARMED cast existed to fold the validated skeleton onto (false ⇒ refused; see `reason`). */
+  accepted: boolean;
+  /** How many warmed NPC slots the proposal actually touched (folded ≥1 field onto). */
+  committed: number;
+  /** The structured violations (which NPC, which field, which rule, which action) — Vault-free, for the bounded FE re-roll. */
+  violations: GenesisViolationDTO[];
+  /** Whether the committed cast cleared the cast-wide stat variance floor (false ⇒ stats fell back to the floor + a cast re-roll is named). */
+  varianceOk: boolean;
+  /** Set when not accepted (no warmed cast / a season already running). Vault-free reason. */
+  reason?: string;
+}
+
 /** The Vault-free skeleton of one recorded off-screen scene — public participant ids, room, and nature only (0070). */
 export interface OffscreenSceneSkeleton {
   /** The event id — used by the FE to address the texture write-back. */
@@ -2197,6 +2273,16 @@ export interface GameSession {
    * or the live house; idempotent; with no proposal the deterministic floor stands. Vault-free out.
    */
   recordCastIdentity(req: RecordCastIdentityReq): RecordCastIdentityResult;
+
+  /**
+   * Feature 0116 — the model-authored cast-genesis write-back. Validate the whole-cast SKELETON proposal
+   * against the engine's envelope (banded stats / variance floor / name validators / closed hidden-element
+   * kinds / tie-graph sanity / hidden-weight stripping) and fold the committed skeleton onto the PRE-WARMED
+   * cast (`preSeedCast` must have run). A PRE-GAME operation only — refused once a season runs. Returns the
+   * structured, Vault-free violations for the bounded FE re-roll. Idempotent; with no proposal the
+   * deterministic floor simply stands (byte-neutral). FE-driven; not a model lever.
+   */
+  recordCastGenesis(req: RecordCastGenesisReq): RecordCastGenesisResult;
 
   /**
    * 0070: the Vault-free skeletons of the off-screen scenes recorded in the most recent tick —

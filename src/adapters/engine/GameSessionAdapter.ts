@@ -12,6 +12,7 @@ import type {
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   RecordCastIdentityReq, RecordCastIdentityResult, ProposedCastIdentityFacets,
+  RecordCastGenesisReq, RecordCastGenesisResult, GenesisViolationDTO,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView, MarkHouseguestMetOpts,
   StateDeltaView, DeltaEventView,
@@ -47,6 +48,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
+import { isPositiveObligation } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
@@ -210,7 +212,9 @@ import {
   preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
   tieExposureOf, tieNatureProse, exposedTies, nextTieExposure,
 } from "../../engine/seededRelationships";
-import type { SeededRelationships } from "../../engine/seededRelationships";
+import type { SeededRelationships, PreGameTie } from "../../engine/seededRelationships";
+import { validateCastGenesis, generateSeasonBrief } from "../../engine/castGenesis";
+import type { CastGenesisProposal, SeasonBrief, GenesisContext } from "../../engine/castGenesis";
 import { surfaceSeededTies } from "../../engine/seededTieSurfacing";
 import type { SurfacedTie } from "../../engine/seededTieSurfacing";
 import { overhearTieReveal } from "../../engine/tieReveal";
@@ -384,6 +388,12 @@ interface PrewarmCast {
   privateOrientations: Record<EntityId, Orientation>;
   groundedSkinTones: Record<EntityId, string>;
   portraitStyleAnchor: string;
+  // 0116 — model-authored cast genesis: present once `recordCastGenesis` authored the warmed skeleton.
+  // The validated tie graph rides here so createCharacter's adopt path can prefer it over the floor draw;
+  // the seeded brief + provenance persist with the warm. Absent ⇒ the deterministic floor cast (byte-neutral).
+  genesisTies?: PreGameTie[];
+  seasonBrief?: SeasonBrief;
+  genesisAuthored?: boolean;
 }
 
 /**
@@ -439,6 +449,15 @@ const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
  * `setStrategicCadenceEnabled`. When on, sharper/more-strategic houseguests scheme a touch more often.
  */
 const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
+
+/**
+ * 0121 — whether the DEAL-DEPTH layer runs by DEFAULT (the active-obligation kinds `comp-throw`/`veto-save`
+ * + the reliability rewards). OFF unless `ORWELL_DEAL_DEPTH=1`. A DEDICATED flag (sibling to
+ * `ORWELL_STRATEGIC_CADENCE`/`ORWELL_CAMPAIGNS`) so calibration neutrality is provable in isolation: unset ⇒
+ * the new kinds can't be made and every deal fold is exactly 0039/0109 ⇒ byte-identical. NOT yet in the
+ * deploy — the live-loop reconciliation of the new kinds + the reward folds land before it opts in.
+ */
+const DEAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_DEAL_DEPTH === "1";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -824,6 +843,8 @@ export class GameSessionAdapter implements GameSession {
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
   /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
+  /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
+  private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -1358,6 +1379,18 @@ export class GameSessionAdapter implements GameSession {
    * budget (0016-style) — never the content.
    */
   private seededRels: SeededRelationships = { ties: [], showmances: [] };
+
+  /**
+   * Feature 0116 — the model-authored pre-show tie graph (validated by the genesis envelope). When
+   * non-null, `seedSeededRelationships` PREFERS it over the floor draw at createCharacter (folding the
+   * engine-owned `TIE_AFFINITY_BIAS` + sealing, exactly as for a floor tie); showmances stay engine-seeded.
+   * Null ⇒ the deterministic floor tie draw stands, so the seeded sims are byte-identical (byte-neutral).
+   */
+  private genesisTies: PreGameTie[] | null = null;
+  /** 0116 — the seeded season brief the genesis proposal was steered by (persisted as part of the world-gen artifact). */
+  private seasonBrief: SeasonBrief | null = null;
+  /** 0116 — provenance: true once cast genesis authored this cast's skeleton (distinguishes an authored cast from the floor). */
+  private genesisAuthored = false;
   private tieBudget = DEFAULT_TIE_BUDGET;
   private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
 
@@ -2294,6 +2327,94 @@ export class GameSessionAdapter implements GameSession {
     return { accepted: true, applied };
   }
 
+  /**
+   * Feature 0116 — the model-authored cast-genesis write-back. Validate the whole-cast SKELETON proposal
+   * through the engine's envelope (`castGenesis.validateCastGenesis`) and fold the COMMITTED skeleton onto
+   * the PRE-WARMED cast: names (validated, not pooled), the freeform identity (verbatim), the derived
+   * archetype tag, the banded stats (no raw number escapes the clamp), the closed-kind C9-gated hidden
+   * elements, the persona prose, and the sanity-validated pre-show tie graph. Generalizes ADR 0005 to
+   * world-gen: identity is OPEN-set (recorded faithfully), power is CLOSED-set (engine-owned, banded,
+   * clamped). Hidden game weights are never proposable (stripped + flagged); the descriptive 0063 identity
+   * facets (ethnicity/gender/orientation/age) continue to route through the UNCHANGED `recordCastIdentity`
+   * pipeline, not this call.
+   *
+   * A PRE-GAME operation ONLY (the §4 decided lifecycle: genesis runs async DURING the casting interview,
+   * onto the `preSeedCast` warm). Refused once a season runs — never mutate a live cast's stats/identity
+   * mid-game (the calibration/fairness hazard). Player-BLIND: the player NAME (from the in-flight intake)
+   * feeds ONLY the post-hoc name near-duplicate NUDGE, never the accepted identity. Idempotent; durable
+   * pre-game state (0030). With NO proposal this call is never made and the deterministic floor stands
+   * (byte-neutral). Returns the structured, Vault-free violations for the bounded FE re-roll.
+   */
+  recordCastGenesis(req: RecordCastGenesisReq): RecordCastGenesisResult {
+    // Refused mid-season: genesis is a pre-game operation (never mutate a live cast's stats/identity).
+    if (this.house) {
+      return { accepted: false, committed: 0, violations: [], varianceOk: true,
+        reason: this.live?.finished ? "over" : "a season is already running" };
+    }
+    // Requires a pre-warmed cast to fold onto (preSeedCast mints + warms the deterministic floor first).
+    if (!this.prewarm) {
+      return { accepted: false, committed: 0, violations: [], varianceOk: true, reason: "no warmed cast — call preSeedCast first" };
+    }
+    const cast = this.prewarm;
+
+    // The player-BLIND validation context, built from the warmed FLOOR cast (the per-NPC fallback source).
+    // The in-flight intake NAME feeds ONLY the post-hoc name near-duplicate NUDGE — it is never woven into
+    // any accepted identity (sycophancy-proof by construction). The player carries no vocation/hometown
+    // facet in the current model, so the vocation+hometown nudge is dormant until that is added.
+    const gctx: GenesisContext = {
+      npcs: cast.npcs.map((n) => ({
+        id: n.id, floorArchetype: n.character.archetype,
+        floorStats: { ...n.character.stats }, floorName: n.name,
+      })),
+      playerId: PLAYER,
+      ...(this.intake.playerName && this.intake.playerName.trim() ? { playerName: this.intake.playerName.trim() } : {}),
+    };
+    const result = validateCastGenesis(req as unknown as CastGenesisProposal, gctx);
+
+    // Fold the committed skeleton onto each byte-stable warmed Character (the recordCastIdentity /
+    // recordCastProfile per-field-fallback discipline): an absent committed field keeps the floor value,
+    // so a proposal that failed a re-roll validator for one facet never breaks the whole houseguest.
+    let committed = 0;
+    for (const c of result.npcs) {
+      const target = cast.npcs.find((n) => n.id === c.id);
+      if (!target) continue;
+      let touched = false;
+      if (c.name !== undefined) { target.name = c.name; touched = true; }
+      if (c.identityConcept !== undefined) { target.character.identityConcept = c.identityConcept; touched = true; }
+      if (c.archetype !== undefined) { target.character.archetype = c.archetype; touched = true; }
+      if (c.stats !== undefined) { target.character.stats = { ...c.stats }; touched = true; }
+      if (c.hiddenElements !== undefined) { target.character.hiddenElements = c.hiddenElements; touched = true; }
+      if (c.vocation !== undefined) { target.character.vocation = c.vocation; touched = true; }
+      if (c.hometown !== undefined) { target.character.hometown = c.hometown; touched = true; }
+      if (c.demeanor !== undefined) { target.character.demeanor = c.demeanor; touched = true; }
+      if (c.background !== undefined) { target.character.background = c.background; touched = true; }
+      // Authoring the biography over the floor placeholder is the same season-start UPGRADE as
+      // recordCastProfile (#1067): mark the provenance so the 0031 superset check reads it as an
+      // accretion, not degradation, once the cast goes live.
+      if (c.biography !== undefined) { target.character.biography = c.biography; target.character.deepProfileAuthored = true; touched = true; }
+      if (c.presentation !== undefined) { target.character.presentation = c.presentation; touched = true; }
+      if (c.appearance !== undefined) { target.character.appearance = c.appearance; touched = true; }
+      if (touched) committed++;
+    }
+
+    // The validated tie graph → stored for `seedSeededRelationships` to prefer over the floor draw at
+    // createCharacter (where the move-in edges exist, so TIE_AFFINITY_BIAS folds + the ties seal). The
+    // seeded season brief + provenance ride the prewarm as the persisted world-gen artifact (mandate #4).
+    this.genesisTies = result.ties;
+    this.seasonBrief = generateSeasonBrief(cast.seed);
+    this.genesisAuthored = true;
+    cast.genesisTies = result.ties;
+    cast.seasonBrief = this.seasonBrief;
+    cast.genesisAuthored = true;
+
+    this.persist(); // durable pre-game state (0030), exactly like preSeedCast / a prewarm recordCastIdentity fold
+
+    const violations: GenesisViolationDTO[] = result.violations.map((v) => ({
+      scope: v.scope, ...(v.npcId ? { npcId: v.npcId } : {}), field: v.field, rule: v.rule, action: v.action,
+    }));
+    return { accepted: true, committed, violations, varianceOk: result.varianceOk };
+  }
+
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
   seasonRecap(): SeasonRecapView {
     const events = this.record?.events() ?? [];
@@ -2753,6 +2874,12 @@ export class GameSessionAdapter implements GameSession {
       ...(Object.keys(this.playerBluffBelief).length ? { secretPlayerBluffBelief: cloneSession(this.playerBluffBelief) } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
+      // 0116 — the model-authored world-gen artifact: the seeded season brief (mandate #4 — the committed
+      // genesis is the persisted artifact, recalled never regenerated) + the authored-skeleton provenance.
+      // (The genesis TIE graph is NOT persisted here — pre-game it rides the `prewarm`, and post-createCharacter
+      // it lives in `seededRelationships` above with exposure "sealed"; so it is durable without a third copy.)
+      ...(this.seasonBrief ? { seasonBrief: cloneSession(this.seasonBrief) } : {}),
+      ...(this.genesisAuthored ? { genesisAuthored: true } : {}),
       // 0059 §5 — the tie-surfacing scheduler's hidden bookkeeping: the season player-surface cap counter,
       // the subjects already surfaced to the player (so a tie never re-spends the cap), and the dedicated
       // stream's tick counter. Persisted so a discovered tie stays discovered, the cap is never re-opened
@@ -3092,6 +3219,14 @@ export class GameSessionAdapter implements GameSession {
     } else {
       this.seededRels = { ties: [], showmances: [] };
     }
+    // 0116 — restore the model-authored world-gen artifact. The seeded season brief + the authored-skeleton
+    // provenance are recalled, never regenerated (mandate #4). `genesisTies` is NOT a persisted top-level
+    // field (pre-game it rides the restored `prewarm`; post-createCharacter the ties live in `seededRels`
+    // above, already folded + sealed), so it stays null here — the floor-vs-genesis choice was made at
+    // createCharacter and is baked into `seededRels`. Absent on a pre-0116 save ⇒ null/false (the floor cast).
+    this.seasonBrief = core.seasonBrief ? cloneSession(core.seasonBrief) : null;
+    this.genesisAuthored = core.genesisAuthored ?? false;
+    this.genesisTies = null;
     // 0059 §5 — restore the tie-surfacing bookkeeping (absent on pre-§5 saves ⇒ zero/empty: the cap is
     // intact, no tie has surfaced, the dedicated stream restarts at 0). Never silently re-opens the cap.
     this.playerTieSurfaceCount = core.playerTieSurfaceCount ?? 0;
@@ -4001,6 +4136,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.age !== undefined ? { age: n.character.age } : {}),
       ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
       ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
     };
   }
@@ -4315,6 +4451,12 @@ export class GameSessionAdapter implements GameSession {
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
       this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
+      // 0116 — carry the model-authored genesis layer off the warm: the validated tie graph (preferred
+      // over the floor draw by seedSeededRelationships below), the seeded season brief, and the provenance.
+      // Absent on a non-genesis warm ⇒ null/false, so seedSeededRelationships draws the floor ties.
+      this.genesisTies = adopt.genesisTies ?? null;
+      this.seasonBrief = adopt.seasonBrief ?? null;
+      this.genesisAuthored = adopt.genesisAuthored ?? false;
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -4333,6 +4475,10 @@ export class GameSessionAdapter implements GameSession {
       // #1140 — NOW the name-keyed deep layer is fixed off the original names; apply the deferred gender-
       // coherent renames onto the byte-stable Character (no-op when nothing was renamed).
       this.applyDiversityRenames();
+      // 0116 — a plain (non-adopted) start has no model-authored genesis: the floor tie draw stands.
+      this.genesisTies = null;
+      this.seasonBrief = null;
+      this.genesisAuthored = false;
       // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
       this.prewarm = null;
     }
@@ -4493,6 +4639,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
       ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
       ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
       ...(n.character.physicalCharacteristics !== undefined
         ? { physicalCharacteristics: n.character.physicalCharacteristics }
@@ -4583,6 +4730,11 @@ export class GameSessionAdapter implements GameSession {
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
+    // 0116 — a freshly-warmed cast carries no model-authored genesis yet (recordCastGenesis, if the FE
+    // wires a model, authors it AFTER this warm). The floor tie draw stands until then (byte-neutral).
+    this.genesisTies = null;
+    this.seasonBrief = null;
+    this.genesisAuthored = false;
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -5071,8 +5223,19 @@ export class GameSessionAdapter implements GameSession {
   private seedSeededRelationships(seed: number): void {
     if (!this.house) return;
     const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
-    this.seededRels = loadSeededRelationships(
+    const floor = loadSeededRelationships(
       this.house.npcs, this.tieBudget, this.showmanceBudget, rng, this.showmanceEligiblePredicate());
+    // 0116 — when cast genesis authored the pre-show tie graph, PREFER it over the floor draw (already
+    // envelope-validated: ≤ budget, distinct pairs, no NPC doubled, never the player, exposure "sealed").
+    // SHOWMANCES stay engine-seeded (§2 — a showmance seed is outcome-adjacent dynamics, not identity).
+    // No genesis ties (the floor / no-model path) ⇒ the floor layer stands verbatim, so the seeded sims
+    // (which never wire a model) are BYTE-IDENTICAL to before this feature. A defensive id-filter guards
+    // against a persisted tie referencing a since-evicted/unknown id.
+    const knownIds = new Set(this.house.npcs.map((n) => n.id));
+    const ties: PreGameTie[] = this.genesisTies
+      ? this.genesisTies.filter((t) => knownIds.has(t.a) && knownIds.has(t.b))
+      : floor.ties;
+    this.seededRels = { ties, showmances: floor.showmances };
     // Fold the small standing affinity bias between each seeded pair (both directions). NEVER a
     // deterministic advantage — just unconscious warmth a careful player reads only as behavior (§3).
     const bias = (a: EntityId, b: EntityId, amount: number): void => {
@@ -6058,6 +6221,12 @@ export class GameSessionAdapter implements GameSession {
   /** Turn the 0120 STRATEGIC-DRIVE initiator cadence on/off. Off by default — the calibration harness leaves
    *  it off (with it off the off-screen tick passes no `initiatorDriveOf` ⇒ the seeded spine is byte-identical). */
   setStrategicCadenceEnabled(on: boolean): void { this.strategicCadenceEnabled = on; }
+
+  /** Turn the 0121 deal-depth layer on/off (active-obligation kinds + reliability rewards). Off by default —
+   *  the calibration harness leaves it off (off ⇒ the new kinds can't be made ⇒ byte-identical). */
+  setDealDepthEnabled(on: boolean): void { this.dealDepthEnabled = on; }
+  /** Whether the deal-depth layer is live (0121). */
+  dealDepthEnabledNow(): boolean { return this.dealDepthEnabled; }
 
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
@@ -7499,6 +7668,9 @@ export class GameSessionAdapter implements GameSession {
     // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
+    // 0121: the ACTIVE-obligation kinds (comp-throw / veto-save) exist only when the deal-depth layer is on
+    // (off ⇒ refuse, so no such deal is ever made in the calibration harness / a stock game — byte-identical).
+    if (isPositiveObligation(req.kind) && !this.dealDepthEnabled) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
     const isActiveOther = target !== PLAYER
@@ -8137,6 +8309,10 @@ export class GameSessionAdapter implements GameSession {
     const { broken } = this.deals.reconcile(action, {
       rel: this.rel,
       rng: this.beatRng(),
+      // 0121: the deal-depth layer — a kept deal compounds via the LOYALTY STREAK (consecutive kept deals
+      // with the same partner scale the honored fold, bounded). OFF ⇒ the plain 0039/0109 honored fold,
+      // byte-identical. (The diffusing "keeps their word" reputation reward is wired in a follow-up.)
+      dealDepth: this.dealDepthEnabled,
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
@@ -8178,6 +8354,28 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     if (!s) return [];
     switch (ev.beat) {
+      // 0121: a comp CROWN is where a `comp-throw` promise resolves — judged by OUTCOME (did the promisor
+      // WIN the comp they swore to throw?), which is observable here; no fragile comp-intent threading.
+      // A compete action per competitor: the winner "won" (breaks a throw-promise), everyone else "threw"
+      // (kept — they didn't take the power). Gated on the deal-depth layer (off ⇒ no comp-throw deals ⇒
+      // a no-op anyway — byte-identical). The intermediate inert comp-round/comp-elimination beats never
+      // reach here (distinct beat keys); this fires only at the crown, where the winner is set.
+      case "hoh-competition": {
+        if (!this.dealDepthEnabled || !s.hoh) return [];
+        const finalThree = s.active.length === 3; // Final 3 lifts the outgoing-HOH sit-out
+        const field = s.active.filter((id) => finalThree || id !== s.outgoingHoh);
+        return field.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.hoh ? "won" : "threw") as "won" | "threw",
+        }));
+      }
+      case "veto-competition": {
+        if (!this.dealDepthEnabled || !s.vetoHolder || !s.vetoField) return [];
+        return s.vetoField.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.vetoHolder ? "won" : "threw") as "won" | "threw",
+        }));
+      }
       case "nominations":
         return s.hoh && s.nominees
           ? [{
@@ -8185,8 +8383,20 @@ export class GameSessionAdapter implements GameSession {
               alternatives: s.active.filter((h) => h !== s.hoh),
             }]
           : [];
-      case "veto-ceremony":
-        return s.hoh && s.replacement ? [{ actor: s.hoh, kind: "replace", targets: [s.replacement] }] : [];
+      case "veto-ceremony": {
+        const actions: BindingAction[] = [];
+        if (s.hoh && s.replacement) actions.push({ actor: s.hoh, kind: "replace", targets: [s.replacement] });
+        // 0121: the veto DECISION as a positive-obligation action — a `veto-save` promise resolves here.
+        // `nominees` is who was originally on the block (the replacement is EXCLUDED — it was not up when
+        // the veto could have saved anyone); `saved` is who the veto actually pulled down. Gated on the
+        // deal-depth layer (off ⇒ no veto-save deals exist ⇒ this would be a no-op anyway — byte-identical).
+        if (this.dealDepthEnabled && s.vetoHolder) {
+          const saved = s.saved ? [s.saved] : [];
+          const onBlock = [...(s.nominees ?? []).filter((n) => n !== s.replacement), ...saved];
+          actions.push({ actor: s.vetoHolder, kind: "veto-use", targets: [], saved, nominees: onBlock });
+        }
+        return actions;
+      }
       case "eviction": {
         const e = s.eviction;
         const evictee = ev.participants[0];
@@ -9323,6 +9533,9 @@ export class GameSessionAdapter implements GameSession {
         // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
         // is not a room of identical warm professionals. Public, Vault-free.
         ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+        // 0116: the model-authored FREEFORM identity concept the narrator voices alongside the archetype
+        // tag. Public, Vault-free; absent on the deterministic floor cast.
+        ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
         // 0058: the PUBLIC multi-sentence biography. Public, Vault-free; the HIDDEN profile
         // (secrets/goals/weakness/perception) is NEVER selected here.
         ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),

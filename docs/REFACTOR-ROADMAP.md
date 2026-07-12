@@ -153,7 +153,10 @@ Three independent, low-risk fixes to the FE↔engine sync spine (audit A-S5 / A-
 ## R7 — Polish bundle **[POST-LAUNCH · Wave 4]**
 Contained, independent, mostly one-file (full list + evidence in `AUDIT-LOG.md`). **Issue #1418 pass
 (2026-07-12, FE-safe-subset delegate):** the non-fenced FE subset was executed; the fenced/engine-
-adjacent items are handed off. Status per sub-item below.
+adjacent items are handed off. **2nd pass (2026-07-12, safe-remainder delegate):** the cast fast-poll
+gate was confirmed + PINNED (`test_1418_r7_poll_gating.py`), the broad poller-coalescing recorded as
+superseded by WS-default-on + g15, and F-S1-I/J/S4-A/S1-K re-verified as gated/resolved/deferred with
+no product change. Status per sub-item below.
 
 - ✅ **F-S1-H — DONE (#1418).** `theme.js`'s two cross-device prefs fetches (`GET /api/prefs/theme`,
   `GET /api/prefs/custom-themes`) fired pre-auth on `/login` (login_bg.js imports theme.js for the
@@ -168,30 +171,54 @@ adjacent items are handed off. Status per sub-item below.
   404s — the route returns `{"status":"idle"}` (200) instead of 404 (`chat_routes.py` M1-8/audit A8). No
   edit needed; `boot_smoke`/`browser_smoke` are console-clean in the game build. (The deep-research
   poller lives in the FENCED `chat.js`; it was already fixed, so no fenced edit was required.)
-- ✅ **F-S4-A — DONE / VERIFIED (#1418, no change).** The L40 "everyone romanced everyone" saturation is
-  already fixed sparsely: `src/engine/seededRelationships.ts` seeds ≤ `DEFAULT_SHOWMANCE_BUDGET` (2)
-  showmances/season, each slot only ~50% loaded (`SEED_LOAD_PROB = 0.5`) over DISTINCT houseguests — so
-  0–2 per season, never a dense set. (Engine-fenced; read-only verification only.)
-- ◻️ **F-S1-D — PARTIAL (#1418).** The **prewarm-cast fast-poll IS already gated to the mounted cast
-  window** (verified): `orwellCast.js scheduleNextPoll()` returns early unless `_open`, and the
-  `FAST_POLL_MS` cadence only applies to the open-panel roster poll (`_timer` re-arms only while `_open`;
-  closing clears it). The 20s gate poll is fixed-cadence, not fast. **DEFERRED:** the "~10 uncoordinated
-  `/state` pollers behind one shared poller" is a genuine ~15-file refactor (each panel has its own
-  `getJSON`/`jget`/`jgetSafe`), several with **source-pinned tests on the literal `/api/orwell/state`
-  string** (`test_c21_roster.py`, `test_c28_presence.py`, `test_m3_1_room_strip.py`) — churny and
-  regression-prone, matching this file's own "Refactor (shared poller), not a leaf patch" classification.
-  Do it as a dedicated coalescing pass (a short-TTL shared `/state` dedupe cache all panels route through
-  while keeping the literal URL for the pinned tests).
-- ✅ **F-S1-J — IDENTIFIED / already-resolved (#1418).** The "username-field dot" was the **Remember-me
-  checkbox** that used to overlay the username input (unlabelled 14×14 glyph); **S1-A already relocated it
-  to a labelled `.remember-row`** (login.html) — the username field now has only its `<label>` and no
-  overlaying glyph. No residual dot to label.
-- ⏸️ **F-S1-I — DEFERRED (#1418).** Stripping the inherited-workspace DOM from the template is the
-  **deep code-level prune that `game-trim.css` explicitly defers** ("a deeper code-level prune is a
-  separate pass, to be verified against a running instance"). The *visible* landing copy is already
-  game-build-gated (index.html welcome-tip arrays swap to BB copy under `data-game-build`); the remaining
-  workspace copy is hidden-not-rendered modals/tools. Out of scope for a low-risk polish pass — pair it
-  with the game-trim deep prune.
+- ✅ **F-S4-A — DONE / VERIFIED + PIN CONFIRMED (#1418, no change).** The L40 "everyone romanced everyone"
+  saturation is already fixed sparsely: `src/engine/seededRelationships.ts` seeds ≤
+  `DEFAULT_SHOWMANCE_BUDGET` (2) showmances/season, each slot only ~50% loaded (`SEED_LOAD_PROB = 0.5`)
+  over DISTINCT houseguests — so 0–2 per season, never a dense set. The sparseness is **already pinned**
+  by an existing engine gate, `tests/unit/seededRelationships.test.ts` ("stays within budget, over
+  DISTINCT houseguests, across many seeds — the L40 saturation guard"), which asserts per-season budget
+  ≤ 2 and, over 80 seeds, `everSeeded < 80 × (TIE_BUDGET + SHOWMANCE_BUDGET)` (far below "everyone
+  paired"). No new test is warranted — the data lives ONLY in the fenced engine (no FE showmance
+  table), so a fe-unit pin could not reach it, and the correct pin already exists. (Engine-fenced;
+  read-only verification only.)
+- ◻️ **F-S1-D — SCOPED SLICE TAKEN, broad refactor SUPERSEDED (#1418; 2nd pass 2026-07-12).** The **cast
+  fast-poll cadences are already gated to a mounted/live cast surface** (verified + now PINNED):
+  `orwellCast.js scheduleNextPoll()` early-returns unless `_open` (and drops the periodic timer entirely
+  when `_wsActive()`), the `FAST_POLL_MS` cadence only applies to the open-panel roster poll while a run
+  is in flight, and the deferred fetch re-checks `_open` before spending; `orwellHeadshot.js`'s 4s
+  background re-check gates `route()` on `_win || box || _maybePregame`, so once the season is underway
+  with the box unmounted each tick is an inert DOM read (no network). The new source-pinned gate
+  **`frontend/tests/test_1418_r7_poll_gating.py`** (5 tests) locks both so a regression that lifts the
+  fast cadence out of its mount/pre-game guard fails loudly. The 20s gate poll is fixed-cadence, not fast.
+  **BROAD COALESCING DEFERRED — and now largely SUPERSEDED, not merely churny.** With **WS transport
+  default-ON (#1357)** every `/state` poller cancels its periodic TIMER on `orwell:ws-active` and refreshes
+  from the server `state`/`hud` push, and off-WS the **g15 `orwell:gamechanged`** seam (one debounced
+  dispatcher, `platform.js`) drives an immediate refresh on every mutation — so on the real deploy the
+  ~17 well-behaved pollers (each already bounded-exponential-backoff, `gamechanged`-driven, WS-timer-
+  cancelling) are mostly quiescent already. The "~17 uncoordinated `/state` pollers behind one shared
+  poller" rewrite is therefore a high-blast-radius (~15 files, several with source-pinned tests on the
+  literal `/api/orwell/state` string — `test_c21_roster.py`, `test_c28_presence.py`,
+  `test_m3_1_room_strip.py`), tiny-win refactor whose main benefit WS + g15 already delivers. Only the
+  cited perf slice (cast fast-poll gate confirmation + pin) was taken; if ever revisited, do it as a
+  dedicated short-TTL shared `/state` dedupe cache all panels route through while keeping the literal URL.
+- ✅ **F-S1-J — IDENTIFIED / already-resolved, RE-VERIFIED (#1418; 2nd pass 2026-07-12).** The
+  "username-field dot" was the **Remember-me checkbox** that used to overlay the username input
+  (unlabelled 14×14 glyph); **S1-A already relocated it to a labelled `.remember-row`** (login.html,
+  `min-height: 24px`, a visible `<label>` + custom checkbox) — the username field now has only its
+  `<label>` and no overlaying glyph. Confirmed: no residual unlabelled dot near the username/header to
+  label. No change.
+- ⏸️ **F-S1-I — DEFERRED, gating RE-VERIFIED (#1418; 2nd pass 2026-07-12).** Stripping the
+  inherited-workspace DOM from the template is the **deep code-level prune that `game-trim.css`
+  explicitly defers** ("a deeper code-level prune is a separate pass, to be verified against a running
+  instance"). The *visible* workspace surface is **already game-build-gated, not merely dormant**:
+  `game-trim.css` `display:none !important`-s every inherited workspace launcher under
+  `body[data-game-build]` (the icon-rail `#rail-{research,gallery,notes,tasks,compare,cookbook,…}`, the
+  sidebar `#tool-*-btn` list, `#chats-library-btn`, `#email-section`, the composer capability toggles,
+  the dropped settings tabs), and the index.html welcome-tip copy swaps to BB copy under
+  `data-game-build`; the residual workspace copy is hidden-not-rendered modals/indicators
+  (`#workspace-indicator-btn` is inline `display:none` and never un-hidden in the game build). So the
+  requested "remove OR game-build-gate" is satisfied at the *gated* level; only the DOM-removal prune
+  remains, and it stays out of scope for a low-risk polish pass — pair it with the game-trim deep prune.
 - ✅ **F-S1-E — DONE (#1418, post-#736 style.css unfenced).** `.model-picker-btn` was `height: 21px`
   (below the WCAG 2.5.8 AA 24px target-size floor). Desktop base bumped to `height: 24px` (the glyph —
   11px label + 10px chevron — is unchanged and stays centred; only the hit/hover box grows 3px), and a

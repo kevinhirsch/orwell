@@ -1106,7 +1106,8 @@ def main() -> int:
               const el = document.getElementById('orwell-finale');
               const rail = document.getElementById('gadget-rail');
               const body = document.getElementById('gadget-rail-body');
-              const user = (document.body && document.body.dataset.user) || '';
+              // R5/#1416b: read the docked flag under the SAME key the app writes — via the shared
+              // helper (keys under ':local' in the no-auth smoke env where data-user is empty).
               const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-finale"]');
               return { exists: !!el,
                        // minimize DOCKS the full window into the control room (static, in the rail body)…
@@ -1115,7 +1116,7 @@ def main() -> int:
                        staticPos: !!el && getComputedStyle(el).position === 'static',
                        visible: !!el && getComputedStyle(el).display !== 'none',
                        railShown: !!rail && !rail.hasAttribute('hidden'),
-                       dockedFlag: localStorage.getItem('orwell-orwell-finale-docked:' + user),
+                       dockedFlag: localStorage.getItem(window.orwellUserKey('orwell-orwell-finale-docked')),
                        // …and parks NO chip in the legacy "Windows" strip (the gesture split is retired).
                        noChip: !chip };
             }""")
@@ -1132,10 +1133,10 @@ def main() -> int:
             page.wait_for_timeout(250)
             restored = page.evaluate("""() => {
               const el = document.getElementById('orwell-finale');
-              const user = (document.body && document.body.dataset.user) || '';
+              // R5/#1416b: read the float flag via the shared helper (the key the app writes).
               return !!el && getComputedStyle(el).display !== 'none'
                 && !el.classList.contains('ow-docked')
-                && localStorage.getItem('orwell-orwell-finale-docked:' + user) === '0';
+                && localStorage.getItem(window.orwellUserKey('orwell-orwell-finale-docked')) === '0';
             }""")
             check(restored is True,
                   "T20/#573: undocking floats the finale back (visible, un-docked, float persisted)")
@@ -1551,7 +1552,6 @@ def main() -> int:
               w.toggleDock();  // float -> dock
               const d = document.getElementById('ow-dock-smoke');
               const railBody = document.getElementById('gadget-rail-body');
-              const user = (document.body && document.body.dataset.user) || '';
               return {
                 hasToggle,
                 beforeFixed,
@@ -1559,7 +1559,8 @@ def main() -> int:
                 dockedClass: d.classList.contains('ow-docked'),
                 dockedPos: getComputedStyle(d).position,   // docked: static
                 kitWindow: d.hasAttribute('data-ow-window'),
-                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+                // R5/#1416b: read the docked flag via the shared helper (the key the app writes).
+                flag: localStorage.getItem(window.orwellUserKey('orwell-ow-dock-smoke-docked')),
                 noChip: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-dock-smoke"]'),
               };
             }""")
@@ -1573,13 +1574,13 @@ def main() -> int:
             undock = page.evaluate("""() => {
               window._owDock.toggleDock();  // dock -> float
               const d = document.getElementById('ow-dock-smoke');
-              const user = (document.body && document.body.dataset.user) || '';
               const railBody = document.getElementById('gadget-rail-body');
               const out = {
                 floats: getComputedStyle(d).position === 'fixed',
                 notDocked: !d.classList.contains('ow-docked'),
                 notInRail: !(railBody && railBody.contains(d)),
-                flag: localStorage.getItem('orwell-ow-dock-smoke-docked:' + user),
+                // R5/#1416b: read the float flag via the shared helper (the key the app writes).
+                flag: localStorage.getItem(window.orwellUserKey('orwell-ow-dock-smoke-docked')),
               };
               window._owDock.close();
               return out;
@@ -1895,9 +1896,9 @@ def main() -> int:
             g16.click("#orwell-cast .ow-min")
             g16.wait_for_selector(  # the dock re-home mounts the full window into the rail body
                 "#gadget-rail-body > #orwell-cast.ow-docked", timeout=5000)
+            # R5/#1416b: read the docked flag via the shared helper (the key the app now writes).
             f2_flag = g16.evaluate(
-                "localStorage.getItem('orwell-orwell-cast-docked:' +"
-                " ((document.body && document.body.dataset.user) || ''))")
+                "localStorage.getItem(window.orwellUserKey('orwell-orwell-cast-docked'))")
             check(f2_flag == "1", f"G16/F2: minimize DOCKS the cast and persists the docked flag ({f2_flag!r})")
             f2_dock = g16.evaluate("""() => {
               const cast = document.getElementById('orwell-cast');
@@ -1953,8 +1954,8 @@ def main() -> int:
             restored1 = g16.evaluate("""() => ({
               visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
               undocked: !document.getElementById('orwell-cast').classList.contains('ow-docked'),
-              flag: localStorage.getItem('orwell-orwell-cast-docked:' +
-                ((document.body && document.body.dataset.user) || '')),
+              // R5/#1416b: read the float flag via the shared helper (the key the app writes).
+              flag: localStorage.getItem(window.orwellUserKey('orwell-orwell-cast-docked')),
             })""")
             check(restored1.get("visible") is True and restored1.get("undocked") is True
                   and restored1.get("flag") == "0",
@@ -2296,8 +2297,8 @@ def main() -> int:
               el.querySelector('[data-role="portraits"]').innerHTML =
                 '<div class="ocp-face"><span class="ocp-ph">x</span></div>' +
                 '<div class="ocp-face ocp-evicted"><span class="ocp-ph">x</span></div>';
-              const user = (document.body && document.body.dataset.user) || '';
-              const flag = localStorage.getItem('orwell-cast-pinned:' + user);
+              // R5/#1416b: read the pinned flag via the shared helper (the key the app now writes).
+              const flag = localStorage.getItem(window.orwellUserKey('orwell-cast-pinned'));
               const faces = el.querySelectorAll('.ocp-face').length;
               return { ok: true, inRail, flag, faces,
                        hasUnpin: !!el.querySelector('[data-act="unpin"]') };
@@ -2309,9 +2310,9 @@ def main() -> int:
             l12b = page.evaluate("""() => {
               window.OrwellCastPin.setPinned(false);
               const el = document.getElementById('orwell-cast-pin');
-              const user = (document.body && document.body.dataset.user) || '';
+              // R5/#1416b: read the pinned flag via the shared helper (the key the app now writes).
               return { hidden: getComputedStyle(el).display === 'none',
-                       flag: localStorage.getItem('orwell-cast-pinned:' + user) };
+                       flag: localStorage.getItem(window.orwellUserKey('orwell-cast-pinned')) };
             }""")
             check(l12b.get("hidden") is True and l12b.get("flag") in (None, "0"),
                   f"L12: un-pinning hides the gadget and the pin flag is un-set ({l12b})")

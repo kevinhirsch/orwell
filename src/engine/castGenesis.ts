@@ -1,0 +1,605 @@
+import type { EntityId } from "../domain/ids";
+import { SeededRandom } from "../adapters/random/SeededRandom";
+import {
+  hashSeed, ARCHETYPES, isPlausibleArchetype,
+  HIDDEN_ELEMENT_GATES, CONCEALED_APTITUDES,
+} from "./characterFactory";
+import type { Archetype, HiddenElement, HiddenElementKind } from "./characterFactory";
+import { TIE_NATURES } from "./seededRelationships";
+import type { PreGameTie, TieNature } from "./seededRelationships";
+import {
+  GENESIS_TOTAL_BAND, GENESIS_STAT_CLAMP, GENESIS_VARIANCE_FLOOR,
+  GENESIS_HIDDEN_ELEMENT_RANGE, GENESIS_TIE_BUDGET,
+  BRIEF_DEMOGRAPHIC_SKEWS, BRIEF_REGIONAL_FLAVORS, BRIEF_ENSEMBLE_VIBES,
+} from "./genesisConstants";
+
+/**
+ * Feature 0116 — model-authored cast genesis: the ENGINE VALIDATION ENVELOPE (pure, no I/O).
+ *
+ * The narration model proposes the ENTIRE 15-NPC skeleton (names, freeform identities, personas,
+ * hidden elements, the pre-show tie graph, per-NPC stats); this module VALIDATES that proposal against
+ * the envelope the engine OWNS (the §3 contract table), clamps/repairs what it can, re-rolls what it
+ * cannot, and produces a COMMITTED skeleton the adapter folds onto the (already-warmed, deterministic)
+ * cast. It generalizes ADR 0005 to world-generation: **identity is open-set** (the model authors it, the
+ * engine records it faithfully and never normalizes it) and **power is closed-set** (the engine dictates
+ * stat magnitudes, banded + clamped, and every hidden game weight stays engine-seeded).
+ *
+ * PURE + player-blind by construction: the envelope reads the proposal + a small validation CONTEXT
+ * (the warmed floor cast's ids/archetypes/stats/names for fallback, plus the player's name/vocation/
+ * hometown ONLY for the post-hoc near-duplicate NUDGE — never woven into the accepted identity). No
+ * model number escapes the clamp (mandate #3); no hidden game weight is ever proposable (§3 last row).
+ *
+ * The deterministic FLOOR is unchanged: with no model wired there is no proposal, this module is never
+ * consulted, and the cast is byte-identical to today's `CharacterFactory` (the §7/§8 byte-neutrality
+ * gate). Nothing here touches the seeded competition/vote/jury stream — it validates identity + banded
+ * stat magnitudes, both descriptive of who the cast IS, not how the seeded loop resolves.
+ */
+
+// ── The seeded SEASON BRIEF (§2 DECIDED #5) ─────────────────────────────────────────────────────────
+export interface SeasonBrief {
+  demographicSkew: string;
+  regionalFlavor: string;
+  ensembleVibe: string;
+}
+
+/**
+ * Derive the seeded season brief off a DEDICATED side-stream (`:genesis:brief`) — same seed ⇒ same
+ * brief (replayable), player-INDEPENDENT (derived only from the seed). It STEERS the model's open-ended
+ * generation; it never binds a validator (only the engine's caps/floors/bands bind, §3). The dimension
+ * space is finite, so distinct seeds can occasionally deal a similar brief — the brief steers variety,
+ * it is not a uniqueness guarantee (§2).
+ */
+export function generateSeasonBrief(seed: number): SeasonBrief {
+  const rng = new SeededRandom(hashSeed(`${seed}:genesis:brief`));
+  return {
+    demographicSkew: rng.pick(BRIEF_DEMOGRAPHIC_SKEWS),
+    regionalFlavor: rng.pick(BRIEF_REGIONAL_FLAVORS),
+    ensembleVibe: rng.pick(BRIEF_ENSEMBLE_VIBES),
+  };
+}
+
+/** Render the brief as one short casting-direction line (for the FE sketch prompt — the follow-on driver). */
+export function renderSeasonBrief(b: SeasonBrief): string {
+  return `This season: ${b.demographicSkew}; ${b.regionalFlavor}; ${b.ensembleVibe}.`;
+}
+
+// ── The legacy-Bible deny-list (§5 ruling-#1 amendment) ─────────────────────────────────────────────
+/**
+ * The 3 DISTINCTIVE legacy-Bible sample given names, banned on BOTH paths (§5): excluded from the
+ * corpora (the floor) AND enforced by the genesis name validator (this module). A genesis proposal whose
+ * ANY name token matches one of these (case-insensitive) is refused for that NPC — the deny-list gate
+ * holds on the genesis path exactly as it holds on the floor. (Kept as a small explicit list, grep-able,
+ * matching the `data/givenNames.ts` header note; a test asserts none appear in the corpus either.)
+ */
+export const LEGACY_BIBLE_NAMES: readonly string[] = ["Ryne", "Marcus", "Felix"];
+
+// ── The proposal shape (LOOSE / untrusted — the model's raw output) ────────────────────────────────
+/** One proposed stat line (raw model numbers — the engine owns the band; nothing here is trusted). */
+export interface GenesisStatProposal {
+  physical?: number;
+  mental?: number;
+  social?: number;
+}
+
+/** One proposed hidden element (kind ∈ the closed set is VALIDATED; detail is open-set prose). */
+export interface GenesisHiddenElementProposal {
+  kind?: string;
+  detail?: string;
+}
+
+/** One proposed pre-show tie — references two NPC ids (never the player); nature/backstory are flavor. */
+export interface GenesisTieProposal {
+  a?: EntityId;
+  b?: EntityId;
+  nature?: string;
+  backstory?: string;
+}
+
+/**
+ * One proposed NPC skeleton. Every field is OPTIONAL: an omitted (or validation-failing) field falls
+ * back to the deterministic floor for that NPC, so the committed cast is always complete (the
+ * recordCastProfile per-field-fallback discipline). The `id` binds the proposal to the warmed cast slot.
+ *
+ * The HIDDEN-GAME-WEIGHT fields (`influence`/`volatility`/`dayOnePerception`/`persuasiveness`/
+ * `susceptibility`) are typed here ONLY so the envelope can DETECT + FLAG + IGNORE them — they are
+ * structurally unproposable (§3 last row / mandate #3). They never commit.
+ */
+export interface GenesisNpcProposal {
+  id?: EntityId;
+  name?: string;
+  /** The freeform identity concept, in the model's own words — stored VERBATIM (open set). */
+  identity?: string;
+  /** The nearest canonical archetype tag — validated ∈ enum; invalid/absent ⇒ the floor tag stands. */
+  archetype?: string;
+  vocation?: string;
+  hometown?: string;
+  demeanor?: string;
+  background?: string;
+  biography?: string;
+  presentation?: string;
+  appearance?: string;
+  age?: number;
+  stats?: GenesisStatProposal;
+  hiddenElements?: GenesisHiddenElementProposal[];
+  // 0063 descriptive identity facets — routed through the unchanged repairDiversityLayer pipeline by the
+  // adapter (NOT validated here; this envelope only forwards them as a ProposedIdentityFacets map).
+  ethnicity?: string;
+  genderPresentation?: string;
+  orientation?: string;
+  out?: boolean;
+  // Structurally UNPROPOSABLE hidden game weights — detected + flagged + ignored, never committed.
+  influence?: unknown;
+  volatility?: unknown;
+  dayOnePerception?: unknown;
+  persuasiveness?: unknown;
+  susceptibility?: unknown;
+  trigger?: unknown;
+}
+
+/** The whole-cast proposal (expected 15 NPCs + 0–2 ties). */
+export interface CastGenesisProposal {
+  npcs: GenesisNpcProposal[];
+  ties?: GenesisTieProposal[];
+}
+
+// ── The validation CONTEXT (the warmed floor cast + player facets for the nudge) ────────────────────
+export interface GenesisNpcContext {
+  id: EntityId;
+  floorArchetype: Archetype;
+  floorStats: { physical: number; mental: number; social: number };
+  floorName: string;
+}
+export interface GenesisContext {
+  /** The warmed floor cast, in order — the per-NPC fallback source (archetype/stats/name). */
+  npcs: readonly GenesisNpcContext[];
+  /** The player id (never a valid tie endpoint) — omit pre-name (defaults to none). */
+  playerId?: EntityId;
+  /** The player's name — the post-hoc name near-duplicate NUDGE (ignored when < 3 chars). */
+  playerName?: string;
+  /** The player's vocation + hometown — the post-hoc vocation+hometown near-duplicate NUDGE. */
+  playerVocation?: string;
+  playerHometown?: string;
+  /** NAME-1 (#547): prior seasons' names the new cast must avoid (given-token exclusion). */
+  priorSeasonNames?: readonly string[];
+}
+
+// ── Structured VIOLATIONS (what the FE driver echoes into a bounded re-roll) ─────────────────────────
+/** The engine's action on a proposal field that failed a validator (§3 "On violation"). */
+export type GenesisAction = "clamped" | "repaired" | "stripped" | "re-roll" | "ignored" | "dropped";
+export interface GenesisViolation {
+  /** Per-NPC (re-roll that ONE NPC) vs cast-wide (re-roll the cast slice) — §4. */
+  scope: "npc" | "cast";
+  /** The affected NPC (present for scope "npc"). */
+  npcId?: EntityId;
+  /** The proposal field/area that failed. */
+  field: string;
+  /** The rule it broke (a short, Vault-free label — never echoes a hidden value). */
+  rule: string;
+  action: GenesisAction;
+}
+
+// ── The COMMITTED per-NPC skeleton (validated / clamped / repaired — the adapter folds this) ─────────
+export interface CommittedGenesisNpc {
+  id: EntityId;
+  /** Accepted display name — present iff a valid, non-colliding, deny-list-clear name passed. Else the floor name stands. */
+  name?: string;
+  /** The freeform identity concept, stored VERBATIM (C8-capped) — present iff proposed non-empty. */
+  identityConcept?: string;
+  /** The derived archetype tag — present iff a valid enum tag was proposed (else the adapter keeps the floor tag). */
+  archetype?: Archetype;
+  /** The clamped banded stat line — present iff proposed AND the cast cleared the variance floor. */
+  stats?: { physical: number; mental: number; social: number };
+  /** The validated hidden elements — present iff proposed (count-clamped, kind-checked, C9-gated). Else the floor stands. */
+  hiddenElements?: HiddenElement[];
+  // Public persona prose (C8-neutralized/-capped, recorded faithfully — never normalized). Present iff proposed non-empty.
+  vocation?: string;
+  hometown?: string;
+  demeanor?: string;
+  background?: string;
+  biography?: string;
+  presentation?: string;
+  appearance?: string;
+  age?: number;
+}
+
+/** The whole envelope result — the committed skeleton, the validated tie graph, and the violation set. */
+export interface CastGenesisResult {
+  npcs: CommittedGenesisNpc[];
+  /** The validated pre-show ties — ≤ budget, distinct pairs, no NPC doubled, never the player, exposure "sealed". */
+  ties: PreGameTie[];
+  violations: GenesisViolation[];
+  /**
+   * The cast cleared the stat variance floor. When FALSE, the proposed stats are NOT committed (every
+   * NPC's `stats` is absent ⇒ the floor stands, which is guaranteed varied) and a cast-scope violation
+   * is raised so the FE re-rolls the cast slice — the committed cast is never a flat super-/dud-cast.
+   */
+  varianceOk: boolean;
+}
+
+// ── C8 prose neutralization (structure is the attack surface; the castingIntake precedent) ──────────
+const PROSE_MAX = 500;
+const SHORT_PROSE_MAX = 160;
+/** Flatten control chars / collapse whitespace / length-cap a prompt-echoed value (C8). Empty ⇒ undefined. */
+function neutralizeProse(v: string | undefined, max = SHORT_PROSE_MAX): string | undefined {
+  if (typeof v !== "string") return undefined;
+  // eslint-disable-next-line no-control-regex
+  const flat = v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
+  if (flat.length === 0) return undefined;
+  return flat.length <= max ? flat : flat.slice(0, max);
+}
+
+// ── Name validation (§3 "Names": validated, not pooled) ─────────────────────────────────────────────
+const NAME_TOKEN_RE = /^[A-Z][a-z]*([-'][A-Z]?[a-z]+)?$/;
+const NAME_VOWEL_RE = /[aeiouy]/i;
+const NAME_CONSONANT_RUN_RE = /[bcdfghjklmnpqrstvwxz]{4,}/i;
+/** Max total display-name length (C8 cap) + token bounds — a name is prompt-echoed everywhere. */
+export const GENESIS_NAME_MAX_LEN = 48;
+const NAME_TOKEN_MIN = 2;
+const NAME_TOKEN_MAX = 14;
+
+/**
+ * Is `s` a plausibly-shaped human display name for the genesis path (a sibling of the adapter's
+ * `isReasonableName`, kept engine-side so `src/engine` never imports an adapter): 2–4 whitespace tokens,
+ * each a capitalized name part (optional hyphen/apostrophe compound), 2–14 chars, with a vowel and no
+ * 4+ consonant run, and NO digits or markup (the token regex admits only letters + one hyphen/apostrophe,
+ * so digits/markup fail structurally), under the total length cap. Rejects a single token, gibberish, and
+ * anything smuggling structure. Pure.
+ */
+export function isPlausibleGenesisName(s: string): boolean {
+  const name = s.trim();
+  if (name.length === 0 || name.length > GENESIS_NAME_MAX_LEN) return false;
+  const tokens = name.split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 4) return false;
+  for (const t of tokens) {
+    if (t.length < NAME_TOKEN_MIN || t.length > NAME_TOKEN_MAX) return false;
+    if (!NAME_TOKEN_RE.test(t)) return false;
+    if (!NAME_VOWEL_RE.test(t)) return false;
+    if (NAME_CONSONANT_RUN_RE.test(t)) return false;
+  }
+  return true;
+}
+
+/** A name token collides with the legacy-Bible deny-list (case-insensitive, whole-token). */
+export function hitsLegacyDenyList(name: string): boolean {
+  const tokens = name.trim().toLowerCase().split(/\s+/);
+  const deny = new Set(LEGACY_BIBLE_NAMES.map((n) => n.toLowerCase()));
+  return tokens.some((t) => deny.has(t));
+}
+
+// ── Stat band clamp + renormalize (§3 "Stats": no model number escapes the clamp) ───────────────────
+const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+const STAT = GENESIS_STAT_CLAMP;
+
+/**
+ * Clamp a proposed stat line into the engine-owned band (§3/§8). FIRST per-stat clamp into [min,max]
+ * (so NO raw model number is ever committed unclamped), THEN scale the total proportionally toward the
+ * nearest band edge (preserving the proposal's relative SHAPE), THEN re-fit any stat the scale pushed
+ * past a bound by water-filling the residual among the stats with headroom. The band `[lo,hi]` sits
+ * strictly inside `[3·min, 3·max]`, so a feasible fit always exists and the loop converges. Pure.
+ */
+export function clampStatsIntoBand(raw: GenesisStatProposal): { physical: number; mental: number; social: number } {
+  const num = (v: number | undefined): number => (typeof v === "number" && Number.isFinite(v) ? v : 0.5);
+  // 1. Per-stat clamp — no raw value escapes [min,max].
+  const s: [number, number, number] = [
+    clamp(num(raw.physical), STAT.min, STAT.max),
+    clamp(num(raw.mental), STAT.min, STAT.max),
+    clamp(num(raw.social), STAT.min, STAT.max),
+  ];
+  const { lo, hi } = GENESIS_TOTAL_BAND;
+  // 2. Proportional total-band scale (preserves relative shape) + 3. water-fill the residual.
+  for (let iter = 0; iter < 8; iter++) {
+    const total = s[0] + s[1] + s[2];
+    if (total >= lo - 1e-9 && total <= hi + 1e-9) break;
+    const target = total > hi ? hi : lo;
+    if (iter === 0 && total > 0) {
+      // First pass: proportional scale — ratios preserved exactly in the common (no re-clamp) case.
+      const factor = target / total;
+      for (let i = 0; i < 3; i++) s[i] = clamp(s[i] * factor, STAT.min, STAT.max);
+      continue;
+    }
+    // Subsequent passes: distribute the remaining delta ONLY among stats with headroom in that direction.
+    const delta = target - total;
+    const adjustable = [0, 1, 2].filter((i) => (delta < 0 ? s[i] > STAT.min : s[i] < STAT.max));
+    if (adjustable.length === 0) break;
+    const share = delta / adjustable.length;
+    for (const i of adjustable) s[i] = clamp(s[i] + share, STAT.min, STAT.max);
+  }
+  return { physical: s[0], mental: s[1], social: s[2] };
+}
+
+/** Population standard deviation of a number list (0 for < 2 entries). */
+function popStdev(xs: readonly number[]): number {
+  if (xs.length < 2) return 0;
+  const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+  const varc = xs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / xs.length;
+  return Math.sqrt(varc);
+}
+
+/**
+ * Does the committed-candidate cast clear the cast-wide VARIANCE FLOOR (§3/§8)? A real dispersion of
+ * TOTALS AND of EACH stat across the cast — no super-cast, no dud-cast, no fifteen identical mid-liners.
+ * A flat cast has ~0 dispersion and fails. Pure.
+ */
+export function castVarianceOk(stats: ReadonlyArray<{ physical: number; mental: number; social: number }>): boolean {
+  if (stats.length < 2) return true; // a degenerate/tiny cast has nothing to spread
+  const totals = stats.map((s) => s.physical + s.mental + s.social);
+  if (popStdev(totals) < GENESIS_VARIANCE_FLOOR.totalStdev) return false;
+  for (const key of ["physical", "mental", "social"] as const) {
+    if (popStdev(stats.map((s) => s[key])) < GENESIS_VARIANCE_FLOOR.perStatStdev) return false;
+  }
+  return true;
+}
+
+// ── Hidden-element validation (§3 "Hidden elements": kinds closed, C9 consistency) ──────────────────
+const HIDDEN_KIND_SET: ReadonlySet<string> = new Set<HiddenElementKind>([
+  "secret-motive", "pre-game-tie", "concealed-aptitude", "divergent-persona", "trigger",
+]);
+const CONCEALED_APTITUDE_DETAILS: ReadonlyMap<string, "physical" | "mental" | "social"> =
+  new Map(CONCEALED_APTITUDES.map((a) => [a.detail, a.stat]));
+
+/**
+ * Validate one NPC's proposed hidden elements (§3 / the C9 gates, applied to the genesis path):
+ *   - kind ∈ the closed `HiddenElementKind` set (an unknown kind is STRIPPED — the KINDS are mechanical
+ *     couplings; only the DETAILS are open-set prose);
+ *   - a `concealed-aptitude` must be genuinely STAT-BACKED (the committed stat clears `statFloor`) AND
+ *     publicly CONCEALED (the public archetype bias sits under `publicBiasCeiling`) — else stripped;
+ *   - at most one `secret-motive` (a character can't play for redemption AND fame) — the excess stripped;
+ *   - the per-NPC COUNT is clamped into `HIDDEN_ELEMENT_RANGE` (3–6): excess trimmed; a shortfall is a
+ *     RE-ROLL signal (the engine can't invent coherent secrets — the floor stands and the FE re-rolls).
+ * Returns the accepted elements + the violations. Never emits a `trigger` (0091 arms triggers on its own
+ * dedicated side-rng from an already-minted volatile wording — never a model proposal).
+ */
+export function validateHiddenElements(
+  proposed: readonly GenesisHiddenElementProposal[] | undefined,
+  committedStats: { physical: number; mental: number; social: number },
+  publicBias: { physical: number; mental: number; social: number },
+  npcId: EntityId,
+): { elements: HiddenElement[] | undefined; violations: GenesisViolation[] } {
+  const violations: GenesisViolation[] = [];
+  if (!Array.isArray(proposed) || proposed.length === 0) {
+    // Nothing proposed ⇒ the floor stands (absent ⇒ no fold; not a violation).
+    return { elements: undefined, violations };
+  }
+  const G = HIDDEN_ELEMENT_GATES;
+  const out: HiddenElement[] = [];
+  const seen = new Set<string>();
+  let motives = 0;
+  for (const el of proposed) {
+    const kind = typeof el?.kind === "string" ? el.kind.trim() : "";
+    const detail = neutralizeProse(el?.detail, PROSE_MAX);
+    if (!HIDDEN_KIND_SET.has(kind) || kind === "trigger") {
+      violations.push({ scope: "npc", npcId, field: "hiddenElements.kind", rule: "kind outside the closed set", action: "stripped" });
+      continue;
+    }
+    if (!detail) {
+      violations.push({ scope: "npc", npcId, field: "hiddenElements.detail", rule: "empty detail", action: "stripped" });
+      continue;
+    }
+    if (kind === "concealed-aptitude") {
+      const backedStat = CONCEALED_APTITUDE_DETAILS.get(detail);
+      // C9: a concealed aptitude must name a KNOWN stat-backed detail, be genuinely stat-backed, and be
+      // publicly concealed. A free-text "concealed aptitude" the engine can't verify is stripped.
+      const backed = backedStat !== undefined
+        && committedStats[backedStat] >= G.statFloor
+        && publicBias[backedStat] <= G.publicBiasCeiling;
+      if (!backed) {
+        violations.push({ scope: "npc", npcId, field: "hiddenElements.concealed-aptitude", rule: "aptitude not stat-backed or not concealed (C9)", action: "stripped" });
+        continue;
+      }
+    }
+    if (kind === "secret-motive" && motives >= G.maxSecretMotives) {
+      violations.push({ scope: "npc", npcId, field: "hiddenElements.secret-motive", rule: "more than one secret motive (C9)", action: "stripped" });
+      continue;
+    }
+    const key = `${kind}::${detail}`;
+    if (seen.has(key)) continue; // dedupe silently
+    seen.add(key);
+    out.push({ kind: kind as HiddenElementKind, detail });
+    if (kind === "secret-motive") motives++;
+    if (out.length >= GENESIS_HIDDEN_ELEMENT_RANGE.max) break; // count cap — trim the excess
+  }
+  if (out.length > GENESIS_HIDDEN_ELEMENT_RANGE.max) out.length = GENESIS_HIDDEN_ELEMENT_RANGE.max;
+  if (out.length < GENESIS_HIDDEN_ELEMENT_RANGE.min) {
+    // Shortfall: too few coherent elements survived — the engine can't invent them, so DROP the whole
+    // authored set (the deterministic floor's 3–6 coherent secrets stand) and signal a re-roll.
+    violations.push({ scope: "npc", npcId, field: "hiddenElements", rule: `count below ${GENESIS_HIDDEN_ELEMENT_RANGE.min}`, action: "re-roll" });
+    return { elements: undefined, violations };
+  }
+  return { elements: out, violations };
+}
+
+// ── Hidden-game-weight detection (§3 last row: structurally unproposable) ───────────────────────────
+const FORBIDDEN_WEIGHT_KEYS: readonly string[] = [
+  "influence", "volatility", "dayOnePerception", "persuasiveness", "susceptibility", "trigger",
+  "trustLean", "affinityLean", "threatLean", "emotionalBaseline", "emotionalState",
+];
+/** Which forbidden hidden-weight keys a proposed NPC illegally carried (present ⇒ flagged + ignored). */
+function forbiddenWeightKeys(p: GenesisNpcProposal): string[] {
+  return FORBIDDEN_WEIGHT_KEYS.filter((k) => (p as Record<string, unknown>)[k] !== undefined);
+}
+
+// ── The whole-cast envelope ─────────────────────────────────────────────────────────────────────────
+const bias = new Map<Archetype, { physical: number; mental: number; social: number }>(
+  ARCHETYPES.map((a) => [a.archetype, a.bias]),
+);
+
+/**
+ * Validate + clamp + repair the whole-cast genesis proposal against the envelope the engine owns (§3),
+ * returning the committed skeleton + the structured violations + the validated tie graph. PURE.
+ *
+ * Per-NPC, in order: resolve the display name (validators, not a pool), the freeform identity (verbatim),
+ * the archetype tag (∈ enum, else the floor tag), the banded stats (clamped — no raw number escapes), the
+ * hidden elements (kinds closed, C9-gated, count-clamped), and the persona prose (C8-capped, recorded
+ * faithfully). Cast-wide: the stat VARIANCE floor (fail ⇒ drop the stats, re-roll the slice), the tie
+ * graph sanity (≤ budget, distinct pairs, no NPC doubled, never the player), and the post-hoc player
+ * near-duplicate NUDGE (name / vocation+hometown collision ⇒ re-roll that facet). Hidden game weights are
+ * detected, flagged, and ignored — never committed.
+ */
+export function validateCastGenesis(proposal: CastGenesisProposal, ctx: GenesisContext): CastGenesisResult {
+  const violations: GenesisViolation[] = [];
+  const byId = new Map<EntityId, GenesisNpcContext>(ctx.npcs.map((n) => [n.id, n]));
+  const proposals = Array.isArray(proposal?.npcs) ? proposal.npcs : [];
+
+  // Bind each proposal to a warmed cast slot by id; fall back to positional binding for a proposal that
+  // omitted its id (the model authored a slot but didn't echo the engine id).
+  const boundById = new Map<EntityId, GenesisNpcProposal>();
+  const unbound: GenesisNpcProposal[] = [];
+  for (const p of proposals) {
+    if (p?.id !== undefined && byId.has(p.id) && !boundById.has(p.id)) boundById.set(p.id, p);
+    else unbound.push(p);
+  }
+
+  // Cross-cast name-uniqueness sets (given / surname / full — the #853 discipline) + prior-season memory.
+  const usedGiven = new Set<string>();
+  const usedSurname = new Set<string>();
+  const usedFull = new Set<string>();
+  const priorGiven = new Set<string>((ctx.priorSeasonNames ?? []).map((n) => (n ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "").filter(Boolean));
+  const playerName = (ctx.playerName ?? "").trim();
+  const playerLower = playerName.toLowerCase();
+
+  const committed: CommittedGenesisNpc[] = [];
+  const committedStatsForVariance: Array<{ physical: number; mental: number; social: number }> = [];
+  const statsById = new Map<EntityId, { physical: number; mental: number; social: number }>();
+
+  let cursor = 0;
+  for (const cx of ctx.npcs) {
+    const p = boundById.get(cx.id) ?? unbound[cursor++] ?? {};
+    const out: CommittedGenesisNpc = { id: cx.id };
+
+    // Hidden game weights — detect, flag, ignore (never commit). §3 last row / mandate #3.
+    for (const k of forbiddenWeightKeys(p)) {
+      violations.push({ scope: "npc", npcId: cx.id, field: k, rule: "hidden game weight is not proposable", action: "ignored" });
+    }
+
+    // NAME — validated, not pooled. Reject: implausible shape / digits / markup / length, the legacy
+    // deny-list, a player-name collision, a prior-season repeat, and an in-cast duplicate (given/surname/
+    // full). A rejected name falls back to the floor name (which is corpus-clean + unique) — the NPC is
+    // never broken. (The post-hoc near-duplicate name nudge is folded into the player-collision check.)
+    if (typeof p.name === "string" && p.name.trim().length > 0) {
+      const name = p.name.trim();
+      const tokens = name.split(/\s+/);
+      const given = tokens[0]!.toLowerCase();
+      const surname = tokens[tokens.length - 1]!.toLowerCase();
+      const full = name.toLowerCase();
+      let rejectRule: string | null = null;
+      if (!isPlausibleGenesisName(name)) rejectRule = "implausible name shape / length / markup";
+      else if (hitsLegacyDenyList(name)) rejectRule = "legacy-Bible deny-list name";
+      else if (playerLower.length >= 3 && (full === playerLower || given === playerLower.split(/\s+/)[0]))
+        rejectRule = "collides with the player's name";
+      else if (priorGiven.has(given)) rejectRule = "repeats a prior season's houseguest";
+      else if (usedFull.has(full) || usedGiven.has(given) || usedSurname.has(surname))
+        rejectRule = "duplicate name within the cast";
+      if (rejectRule) {
+        violations.push({ scope: "npc", npcId: cx.id, field: "name", rule: rejectRule, action: "re-roll" });
+      } else {
+        out.name = name;
+        usedGiven.add(given); usedSurname.add(surname); usedFull.add(full);
+      }
+    }
+
+    // FREEFORM IDENTITY — stored verbatim (C8-capped), the open-set concept the narrator voices.
+    const identity = neutralizeProse(p.identity, PROSE_MAX);
+    if (identity) out.identityConcept = identity;
+
+    // ARCHETYPE TAG — the derived coupling key. Keep a valid proposed enum member; else the adapter keeps
+    // the floor tag (re-derive engine-side). The freeform identity rides beside it, never replaced by it.
+    let archetype: Archetype = cx.floorArchetype;
+    if (typeof p.archetype === "string" && isPlausibleArchetype(p.archetype.trim())) {
+      archetype = p.archetype.trim() as Archetype;
+      out.archetype = archetype;
+    } else if (p.archetype !== undefined) {
+      violations.push({ scope: "npc", npcId: cx.id, field: "archetype", rule: "archetype tag outside the enum", action: "repaired" });
+    }
+
+    // STATS — banded variable totals; no raw number escapes the clamp. Proposed ⇒ clamp into the band;
+    // absent ⇒ the floor stats stand. (Committed only if the cast-wide variance floor holds — checked below.)
+    const statLine = p.stats && typeof p.stats === "object" ? clampStatsIntoBand(p.stats) : cx.floorStats;
+    if (p.stats && typeof p.stats === "object") {
+      out.stats = statLine; // provisional — cleared below if the cast fails the variance floor
+    }
+    statsById.set(cx.id, statLine);
+    committedStatsForVariance.push(statLine);
+
+    // HIDDEN ELEMENTS — kinds closed, C9-gated, count-clamped (against the COMMITTED stats + archetype bias).
+    const hb = bias.get(archetype)!;
+    const he = validateHiddenElements(p.hiddenElements, statLine, hb, cx.id);
+    if (he.elements) out.hiddenElements = he.elements;
+    violations.push(...he.violations);
+
+    // PUBLIC PERSONA PROSE — recorded faithfully (C8-capped), never normalized (ADR 0005 open set).
+    const vocation = neutralizeProse(p.vocation);
+    const hometown = neutralizeProse(p.hometown);
+    if (vocation) out.vocation = vocation;
+    if (hometown) out.hometown = hometown;
+    const demeanor = neutralizeProse(p.demeanor);
+    if (demeanor) out.demeanor = demeanor;
+    const background = neutralizeProse(p.background);
+    if (background) out.background = background;
+    const biography = neutralizeProse(p.biography, PROSE_MAX);
+    if (biography) out.biography = biography;
+    const presentation = neutralizeProse(p.presentation);
+    if (presentation) out.presentation = presentation;
+    const appearance = neutralizeProse(p.appearance, PROSE_MAX);
+    if (appearance) out.appearance = appearance;
+    if (typeof p.age === "number" && Number.isFinite(p.age)) out.age = Math.max(18, Math.min(75, Math.floor(p.age)));
+
+    // Post-hoc near-duplicate NUDGE (§2): a committed-candidate NPC that mirrors the player's
+    // vocation+hometown re-rolls the colliding FACET (drop the vocation), preserving the rest of the
+    // identity. (The name collision is already handled in the name gate above.)
+    if (
+      out.vocation && out.hometown && ctx.playerVocation && ctx.playerHometown
+      && out.vocation.toLowerCase() === ctx.playerVocation.trim().toLowerCase()
+      && out.hometown.toLowerCase() === ctx.playerHometown.trim().toLowerCase()
+    ) {
+      violations.push({ scope: "npc", npcId: cx.id, field: "vocation", rule: "mirrors the player's vocation + hometown", action: "re-roll" });
+      delete out.vocation; // drop the colliding facet ⇒ the floor vocation stands; identity preserved
+    }
+
+    committed.push(out);
+  }
+
+  // CAST-WIDE variance floor — fail ⇒ DROP every proposed stat line (the floor's guaranteed-varied stats
+  // stand) and raise a cast-scope re-roll. Never commit a flat super-/dud-cast.
+  const varianceOk = castVarianceOk(committedStatsForVariance);
+  if (!varianceOk) {
+    for (const c of committed) delete c.stats;
+    violations.push({ scope: "cast", field: "stats.variance", rule: "cast-wide stat variance floor not met", action: "re-roll" });
+  }
+
+  // TIE GRAPH — sanity (§3 / 0059 sparseness): valid distinct NPC pairs, never the player, no NPC in two
+  // ties, ≤ budget; excess dropped; nature validated; exposure sealed. The affinity fold magnitude stays
+  // engine-owned (folded at createCharacter time, never here).
+  const ties: PreGameTie[] = [];
+  const tiedNpcs = new Set<EntityId>();
+  const seenPairs = new Set<string>();
+  for (const t of proposal?.ties ?? []) {
+    if (ties.length >= GENESIS_TIE_BUDGET) {
+      violations.push({ scope: "cast", field: "ties", rule: `more than ${GENESIS_TIE_BUDGET} ties (sparse by design)`, action: "dropped" });
+      continue;
+    }
+    const a = t?.a; const b = t?.b;
+    const invalidEndpoint =
+      a === undefined || b === undefined || a === b
+      || !byId.has(a) || !byId.has(b)
+      || a === ctx.playerId || b === ctx.playerId;
+    if (invalidEndpoint) {
+      violations.push({ scope: "cast", field: "ties", rule: "tie endpoint invalid (self / unknown / the player)", action: "re-roll" });
+      continue;
+    }
+    const pairKey = [a, b].sort().join("|");
+    if (seenPairs.has(pairKey)) {
+      violations.push({ scope: "cast", field: "ties", rule: "duplicate tie pair", action: "dropped" });
+      continue;
+    }
+    if (tiedNpcs.has(a) || tiedNpcs.has(b)) {
+      violations.push({ scope: "cast", field: "ties", rule: "a houseguest carries more than one tie", action: "re-roll" });
+      continue;
+    }
+    seenPairs.add(pairKey);
+    tiedNpcs.add(a); tiedNpcs.add(b);
+    const nature: TieNature = TIE_NATURES.includes(t?.nature as TieNature) ? (t!.nature as TieNature) : "old-acquaintance";
+    ties.push({ a, b, nature, exposure: "sealed" });
+  }
+
+  return { npcs: committed, ties, violations, varianceOk };
+}

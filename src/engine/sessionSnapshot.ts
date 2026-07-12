@@ -258,6 +258,12 @@ export interface SessionCore {
     privateOrientations: Record<EntityId, import("./diversityConstants").Orientation>;
     groundedSkinTones: Record<EntityId, string>;
     portraitStyleAnchor: string;
+    // 0116 — the model-authored genesis layer on the warm: the validated tie graph (adopted at
+    // createCharacter, preferred over the floor draw) + the seeded brief + the authored-skeleton provenance.
+    // Absent on a non-genesis warm / pre-0116 save (⇒ the deterministic floor cast, byte-neutral).
+    genesisTies?: import("./seededRelationships").PreGameTie[];
+    seasonBrief?: import("./castGenesis").SeasonBrief;
+    genesisAuthored?: boolean;
   };
   /**
    * 0065 (advance-warm) — the durable NEXT-season holding-store mirror: the cast pre-warmed DURING the
@@ -364,6 +370,14 @@ export interface SessionCore {
    * reasoning as deepProfiles above). Absent on pre-0059 saves (re-derived from the seed on restore).
    */
   seededRelationships?: import("./seededRelationships").SeededRelationships;
+  /**
+   * Feature 0116 — the model-authored world-gen artifact (post-createCharacter): the SEEDED season brief the
+   * genesis proposal was steered by (recalled, never regenerated — mandate #4) + the authored-skeleton
+   * provenance flag. The genesis TIE graph is NOT persisted here — it lives in `seededRelationships` above
+   * (folded + sealed at createCharacter). Absent on a floor cast / pre-0116 save (⇒ null/false).
+   */
+  seasonBrief?: import("./castGenesis").SeasonBrief;
+  genesisAuthored?: boolean;
   /**
    * 0059 §5 — the organic tie-surfacing scheduler's hidden bookkeeping (the DEFERRED follow-on, opt-in).
    * `playerTieSurfaceCount` is the per-season count of pre-game ties that have surfaced TO THE PLAYER (the

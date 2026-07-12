@@ -123,6 +123,15 @@ export interface Character {
   age: number;
   presentation: string;
   /**
+   * Feature 0116 — the model-authored FREEFORM identity concept, in the model's own words (e.g. "a
+   * chaos-agent podcaster who treats the house like a live show"). PUBLIC and Vault-free — the open-set
+   * identity the narrator voices (ADR 0005 generalized to world-gen: recorded faithfully, NEVER
+   * normalized). It rides ALONGSIDE the DERIVED `archetype` tag (the mechanical coupling key), never
+   * replacing it. Present only when cast genesis authored the skeleton; absent ⇒ the deterministic floor
+   * cast (the archetype IS the identity). Byte-stable once committed, like the rest of the static Character.
+   */
+  identityConcept?: string;
+  /**
    * Concrete, DIVERSE backstory facets (L28, 2026-06-19) — generated at cast time so the cast is a
    * producer-filtered crew (varied jobs & geography) that NEVER mirrors the player, and so the
    * narrator voices the STORED origin instead of re-inventing (and drifting) it. Public, Vault-free:
