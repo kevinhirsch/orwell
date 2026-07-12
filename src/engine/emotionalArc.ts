@@ -187,8 +187,10 @@ export function evolveEmotion(
 
   // volatility: shocks raise it; calm/bonding settle it. Bounded. 0124 (part C): a disposition-derived
   // `settleScale` slows/speeds ONLY the SETTLING (negative arousal) — a clash soul's agitation lingers, a
-  // bond soul shrugs it off; shocks (positive arousal) spike fully. Absent settleScale ⇒ ×1 (byte-identical).
-  const settleScale = arousal < 0 ? (soul.settleScale ?? 1) : 1;
+  // bond soul shrugs it off; shocks (positive arousal) spike fully. Gated on `opts.soulDepth` so a save that
+  // PERSISTED a `settleScale` (created flag-on) then runs flag-OFF is byte-identical to 0041 — the default-off
+  // contract holds even across a flag flip (Greptile P1). Off / absent settleScale ⇒ ×1.
+  const settleScale = opts.soulDepth && arousal < 0 ? (soul.settleScale ?? 1) : 1;
   soul.volatility = clamp01(soul.volatility + arousal * k * settleScale);
 
   // 0124 (parts A + B): when the deeper-evolution layer is on, move the INDEPENDENT affect axes and the
