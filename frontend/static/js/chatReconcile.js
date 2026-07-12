@@ -104,7 +104,7 @@ export function _setReconcileDeps(deps) {
     if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
     return '';
   }
-  function _isSkippableUserPrompt(text) {
+  export function _isSkippableUserPrompt(text) {
     const t = (text || '').trim();
     return t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
       t.startsWith('Your previous response was interrupted.') ||
