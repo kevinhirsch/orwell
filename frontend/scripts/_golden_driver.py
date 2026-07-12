@@ -192,7 +192,7 @@ class GoldenDriver:
     # FIRST read; this only absorbs a lagging persist/read on a loaded runner. Generous
     # (retries × capped backoff ≈ 115s) and NON-masking: a turn that truly persisted nothing still
     # raises after the budget.
-    _ASSISTANT_ROW_RETRIES = 40
+    _ASSISTANT_ROW_RETRIES = 100  # was 40 (~115s); ~300s budget for a slow-runner persist lag
     _ASSISTANT_ROW_BACKOFF_S = 0.5
     # Absolute cap on a single turn's stream read, as a multiple of turn_timeout. The per-read
     # socket timeout (turn_timeout secs of total silence) is the real genuine-hang catch; this
@@ -350,9 +350,16 @@ class GoldenDriver:
                       # the same deterministic work, never changing WHAT happens. Lifting the tight 3s
                       # framing bound also stops a slow-runner framing read from timing out into the
                       # fallback prompt and perturbing the recorded request stream (a would-be miss).
-                      ORWELL_ENGINE_TIMEOUT="180",
-                      ORWELL_ENGINE_FRAMING_TIMEOUT="30",
-                      ORWELL_ENGINE_POLL_TIMEOUT="60")
+                      # #1517's values (180/30/60) STILL fell back on the SLOWEST gh-runners: a
+                      # framing/state read that runs past the 30s bound during the heavy advanceGame
+                      # commit falls to the FALLBACK prompt → a different request digest → a fixture
+                      # MISS → "no new assistant message persisted" (a deterministic per-runner failure,
+                      # not the retry-able flake). #1474 passes 3/3 locally, confirming it is purely
+                      # slow-runner timeout. Max out the golden-boot tolerances so NO engine call on ANY
+                      # runner times out into the fallback path.
+                      ORWELL_ENGINE_TIMEOUT="300",
+                      ORWELL_ENGINE_FRAMING_TIMEOUT="120",
+                      ORWELL_ENGINE_POLL_TIMEOUT="120")
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture
