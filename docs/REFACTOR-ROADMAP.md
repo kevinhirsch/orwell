@@ -185,11 +185,15 @@ adjacent items are handed off. Status per sub-item below.
   game-build-gated (index.html welcome-tip arrays swap to BB copy under `data-game-build`); the remaining
   workspace copy is hidden-not-rendered modals/tools. Out of scope for a low-risk polish pass — pair it
   with the game-trim deep prune.
-- 🚧 **F-S1-E — FLAG (needs the fenced `static/style.css`).** The model-picker tap target is
-  `.model-picker-btn { height: 21px }` (below AA 24px / AAA 44px), styled in `static/style.css` — which
-  this pass is fenced from. The clean fix is a base-component min-tap-target there (or a padding-based hit
-  area to avoid distorting the compact composer pill); an inline-markup override would either distort the
-  composer at 44px or land a sub-AA half-measure. Hand to the style.css owner.
+- ✅ **F-S1-E — DONE (#1418, post-#736 style.css unfenced).** `.model-picker-btn` was `height: 21px`
+  (below the WCAG 2.5.8 AA 24px target-size floor). Desktop base bumped to `height: 24px` (the glyph —
+  11px label + 10px chevron — is unchanged and stays centred; only the hit/hover box grows 3px), and a
+  coarse-pointer block `@media (hover: none) and (pointer: coarse) { .model-picker-btn { min-height: 44px;
+  height: auto; } }` lifts it to the 44px touch floor, mirroring the `.copy-btn` / kit touch-target idiom
+  (no width limit — so it also covers a wide touch device, where the picker *is* shown; on ≤768px the
+  picker is `display:none` by design). **Verified (headless before→after, origin/main vs branch): desktop
+  picker height 21px → 24px; touch 44px; composer textarea + send x/y/w unchanged (≤1px).** FE non-browser
+  suite 5048 passed; `browser_smoke` EXIT 0.
 - ⏸️ **F-S1-K — DEFERRED / FLAG (#1418).** The two homes are both off-limits or risky: `LEAK_RE` lives in
   the **fenced `scripts/browser_smoke.py`**, and the ancestor-descendant overlap classifier
   (`frontend/src/visual_geometry.py`) is now a **CI-gated harness** for 0113/0114

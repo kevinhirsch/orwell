@@ -3507,7 +3507,11 @@ body.bg-pattern-perlin-flow {
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      height: 21px;
+      /* F-S1-E: the hit box is >= 24px (WCAG 2.5.8 target-size floor) on desktop — was 21px.
+         The glyph (11px label + 10px chevron) is unchanged and stays centred; only the
+         clickable/hover box grows the 3px. The coarse-pointer rule below lifts it to the 44px
+         touch floor without enlarging the glyph. */
+      height: 24px;
       padding: 0 6px;
       font-size: 11px;
       font-weight: 500;
@@ -3535,6 +3539,14 @@ body.bg-pattern-perlin-flow {
     .model-picker-btn svg {
       flex-shrink: 0;
       opacity: 0.5;
+    }
+    /* F-S1-E: on a coarse pointer (touch) lift the model switcher to the 44px tap floor,
+       mirroring the .copy-btn / kit touch-target idiom — min-height grows the hit box past the
+       glyph (the label already exceeds 44px wide) while the text stays its small size, and at
+       rest the chrome is transparent so the taller box adds no visible bulk. Desktop keeps the
+       compact 24px pill. */
+    @media (hover: none) and (pointer: coarse) {
+      .model-picker-btn { min-height: 44px; height: auto; }
     }
     .model-picker-logo {
       display: inline-flex;
