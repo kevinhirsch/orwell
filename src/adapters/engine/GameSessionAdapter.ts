@@ -8796,14 +8796,20 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * Vault-free projection of an in-progress finale (0037): names, the current stage, the
-   * juror asking, and the votes REVEALED SO FAR (`revealIx`) only. No lean, no tally, no
-   * manner, and no pre-reveal winner ever crosses — a juror's vote appears only after it is
-   * revealed in order. Null unless the finale is actively staging.
+   * Vault-free projection of a finale (0037): names, the current stage, the juror asking, and the
+   * votes REVEALED SO FAR (`revealIx`) only. No lean, no tally, no manner, and no pre-reveal winner
+   * ever crosses — a juror's vote appears only after it is revealed in order.
+   *
+   * S4-2: this read SURVIVES THE FLIP TO `finished`. The `finale` progress is durable (persisted +
+   * restart-safe via the snapshot), so once the season is over it returns the COMPLETED finale (every
+   * reveal, stage `reveal`) plus the crowned `winner` — the same public winner `gameStatus`/
+   * `seasonRecap` expose — instead of null, so a finale-panel client agrees with every surface
+   * post-finish. `winner` stays null while the finale is still staging (the pre-reveal winner never
+   * crosses). Null only when no finale exists at all (never staged / no game).
    */
   finaleView(): FinaleView | null {
     const f: FinaleProgress | undefined = this.live?.finale;
-    if (!f || this.live?.finished) return null;
+    if (!f) return null;
     const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
     const q = f.script.questions[f.questionIx];
     return {
@@ -8813,6 +8819,9 @@ export class GameSessionAdapter implements GameSession {
       reveals: f.script.revealOrder.slice(0, f.revealIx).map((juror) => ({
         juror: ref(juror), votedFor: ref(f.votes![juror]!),
       })),
+      // The crowned winner is a PUBLIC fact only once the season is over — null while staging so the
+      // pre-reveal winner never crosses (mirrors gameStatus/seasonRecap/AdvanceView post-finish).
+      winner: this.live?.finished ? this.named(this.live.winner) : null,
     };
   }
 
