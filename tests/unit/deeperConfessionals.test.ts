@@ -76,6 +76,31 @@ describe("0122 — a confessional voices only the facets its situation TRIGGERS"
     expect(conf.content).toContain(D);
   });
 
+  it("a veto-holder gets a veto-flavored plan (role-specific)", () => {
+    const conf = confessionalFor(A, [A, B, C, D], riggedRel(), { rng: rng(), depth: { role: "veto-holder" } });
+    expect(conf.plan, "a veto-holder holds power ⇒ a plan fires").toBeDefined();
+    expect(conf.plan).toContain(C); // still grounded in their real target
+  });
+
+  it("when the lowest-trust peer IS the target, the grudge falls to a distinct runner-up", () => {
+    const rel = new RelationshipModel(0.5);
+    rel.edge(A, B).threat = 0.95; // B is the top threat → target
+    rel.edge(A, B).trust = 0.02; // ...and also the lowest trust — but the grudge must stay DISTINCT
+    rel.edge(A, C).trust = 0.1; // C is the runner-up betrayal (below the grudge floor)
+    const conf = confessionalFor(A, [A, B, C, D], rel, { rng: rng(), depth: { role: "none" } });
+    expect(conf.target).toBe(B);
+    expect(conf.grudge).toBe(C); // fell to the distinct runner-up, not the target
+  });
+
+  it("an adjacent TARGET on the block reads through the rivalry", () => {
+    const conf = confessionalFor(A, [A, B, C, D], riggedRel(), {
+      rng: rng(),
+      depth: { role: "none", adjacent: { relation: C, bond: "target", beat: "nominated" } },
+    });
+    expect(conf.adjacent).toEqual({ relation: C, bond: "target", beat: "nominated" });
+    expect(conf.content).toContain(C);
+  });
+
   it("an HOH with power, danger AND a fresh grudge strings SEVERAL facets; content grows", () => {
     const deep = confessionalFor(A, [A, B, C, D], riggedRel(), {
       rng: rng(),
