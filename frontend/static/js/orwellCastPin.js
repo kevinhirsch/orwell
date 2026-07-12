@@ -179,6 +179,62 @@
     });
   }
 
+  // Transient-animation audit (poll-panel innerHTML churn): the scroll grid used to be torn down
+  // and re-parsed via `faces.innerHTML = …` on EVERY poll — including the FAST_POLL_MS (4s) cadence
+  // while portraits are still generating. That reset the scroll container's scrollTop to 0 (yanking
+  // a scrolling player back to the top every 4s) and re-decoded every lazy <img>, causing visible
+  // churn/flicker. Fix: reconcile per-tile keyed by houseguest id — reuse the existing tile + its
+  // decoded <img> node whenever the tile's visual signature (portrait / eviction status / role
+  // badge) is unchanged, rebuild only genuinely-changed tiles, and reorder by MOVING existing nodes
+  // (never re-parsing). Node identity survives the poll, so scrollTop and decoded portraits persist.
+  function _tileKey(hg) {
+    return String(hg && hg.id != null ? hg.id : (hg && hg.name) || "?");
+  }
+  function _tileSig(hg, roles) {
+    var role = (roles && hg) ? (roles[hg.id] || roles[hg.name] || "") : "";
+    return [(hg && hg.portrait) || "", (hg && hg.status) || "active", role].join("|");
+  }
+  function _buildTile(hg, roles) {
+    var tpl = document.createElement("template");
+    tpl.innerHTML = faceHtml(hg, roles);
+    return tpl.content.firstElementChild;
+  }
+  function reconcileFaces(container, ordered, roles) {
+    // snapshot the tiles currently mounted, keyed
+    var have = new Map();
+    Array.prototype.forEach.call(container.children, function (node) {
+      var k = node.getAttribute && node.getAttribute("data-ocp-key");
+      if (k != null) have.set(k, node);
+    });
+    // walk desired order back-to-front, placing each node directly before `ref` (its correct next
+    // sibling) — a standard keyed reconcile: an already-in-place node is never touched, so an
+    // unchanged poll mutates nothing and scrollTop + decoded <img>s are preserved.
+    var want = new Set();
+    var ref = null;
+    for (var i = ordered.length - 1; i >= 0; i--) {
+      var hg = ordered[i];
+      var key = _tileKey(hg);
+      var sig = _tileSig(hg, roles);
+      want.add(key);
+      var node = have.get(key);
+      if (!node || node.getAttribute("data-ocp-sig") !== sig) {
+        var fresh = _buildTile(hg, roles);
+        if (!fresh) continue; // degenerate build — leave order to the surviving tiles
+        fresh.setAttribute("data-ocp-key", key);
+        fresh.setAttribute("data-ocp-sig", sig);
+        if (node) container.replaceChild(fresh, node);
+        node = fresh;
+        have.set(key, node);
+      }
+      // insert when not yet a child (a freshly-built/replaced tile) OR when out of position;
+      // a node already correctly placed is left untouched (scroll + decoded <img> preserved).
+      if (node.parentNode !== container || node.nextSibling !== ref) container.insertBefore(node, ref);
+      ref = node;
+    }
+    // drop any tiles whose houseguest is no longer in the roster
+    have.forEach(function (node, k) { if (!want.has(k)) node.remove(); });
+  }
+
   function render(data) {
     var el = ensureEl();
     if (!isPinned()) { _gadget.hide(); return; }
@@ -197,8 +253,9 @@
     var ordered = roster.slice().sort(function (a, b) { return rank(a) - rank(b); });
 
     var faces = el.querySelector('[data-role="portraits"]');
-    faces.innerHTML = ordered.map(function (h) { return faceHtml(h, _roles); }).join("")
-      || '<div class="ocp-face">' + OCP_SILHOUETTE + "</div>";
+    // Keyed per-tile reconcile (never a wholesale `faces.innerHTML = …`) so scrollTop + decoded
+    // portrait <img>s survive the 4s generation-cadence poll (see reconcileFaces above).
+    reconcileFaces(faces, ordered, _roles);
 
     var present = roster.filter(function (h) { return !h.status || h.status === "active"; }).length;
     var foot = el.querySelector('[data-role="foot"]');

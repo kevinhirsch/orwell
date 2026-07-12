@@ -33,7 +33,7 @@ Dependencies/sequencing · Verification.** Severity per the brief: **[LAUNCH-BLO
   auto-derived `gamechanged` set, stale-409 fold preservation) · **R2** collapse the duplicated
   live-vs-reload chat render paths · **R3** decompose the `chat.js` god-object + add the missing
   guardrail-lattice + FE-write-back test seams.
-- **Post-launch, medium:** **R4** movement/location grounding (ADR 0009) · ~~**R5** per-user client-storage
+- **Post-launch, medium:** ~~**R4** movement/location grounding (ADR 0009)~~ **(DONE, #1415)** · ~~**R5** per-user client-storage
   isolation guard~~ **(DONE, #1416)** · **R6** the failure-mode UX (system-error notice, truncation affordance) · **R7** the
   polish bundle.
 
@@ -115,14 +115,28 @@ Three independent, low-risk fixes to the FE↔engine sync spine (audit A-S5 / A-
   unit harnesses green + no behavior change (golden transcripts). *(settings.js 290KB / slashCommands.js
   270KB are workspace-inherited outliers — split only if game-build-relevant.)*
 
-## R4 — Location/movement source-of-truth (ADR 0009) **[POST-LAUNCH · Wave 3]**
+## R4 — Location/movement source-of-truth (ADR 0009) **[DONE — #1415]**
 - *Requirement:* "people make sense — one place at a time"; narration must ground to engine whereabouts.
-  *Current:* movement grounding is documented as imperfect (the L21/L24 family; ADR 0009 root-causes it
-  + records the fold-first PO ruling). *Target:* per ADR 0009 (operator-owned). My audit corroborates the
-  positive side (presence panel matched narration in the parity run) but did not stress movement; defer
-  to ADR 0009. *Risk/effort:* per ADR 0009. *Verify:* ADR 0009's gate. **Also fold in F-S4-F** (the
-  suspected resume-context name-drift "Luke Fleming"→"Lake Fleming") — confirm whether name grounding
-  degrades specifically on the resumable-stream resume path.
+  *Was:* movement grounding documented as imperfect (the L21/L24 family; ADR 0009 root-causes it + records
+  the fold-first PO ruling). *Verified (#1415):* ADR 0009 is fully built (D1 freeze · D2 record-move + FE
+  belt · D3 barrier directive + pre-emission guard · D4 dual-map) and its gate is green. The one authority
+  is `GameSessionAdapter.whereabouts()` — a Vault-free projection whose every name routes through the
+  canonical `nameOf` (the roster), read by BOTH the narrator's moment-prompt WHERE-YOU-ARE block and "The
+  House" gadget (parity by construction). A new gate, `tests/unit/locationGrounding0009.test.ts`, pins the
+  four grounding guarantees under a **movement stress run** (many seeded ticks interleaved with recorded
+  narrated moves): every placed houseguest is roster-named (no drift), living (never evicted/unknown), and
+  in exactly one place; a recorded narrated move surfaces the same roster name to both the projection and
+  the moment prompt.
+- **F-S4-F (resume name-drift) — CONFIRMED not a structural degradation.** Two facts close it: (a) the
+  resumable-stream endpoint `GET /api/chat/resume/{id}` is a PURE REPLAY (`agent_runs.subscribe` — no agent
+  loop, no framing, no model call), so it cannot INTRODUCE a name the original run did not emit; (b) every
+  model-invoking turn — including the fresh-context RE-ENTRY turn a reopened session takes — is framed
+  through `apply_game_framing` → `get_moment_prompt`, whose prompt always carries the full roster
+  (`buildSystemPrompt` always appends `renderGameContext`). So a resumed session RE-GROUNDS names from
+  engine truth; grounding does not thin on resume. Any residual "Lake Fleming" slip is model stochasticity,
+  not a resume-path defect. Pinned by `tests/unit/locationGrounding0009.test.ts` (re-entry moment carries
+  the whole roster + the single-source-of-truth anchor) and `frontend/tests/test_fs4f_resume_name_grounding.py`
+  (resume is a pure replay; re-entry re-grounds). *No source/prompt change ⇒ the golden fixture is unaffected.*
 
 ## R5 — Per-user client-storage isolation guard **[DONE — #1416]**
 - *Requirement (0021):* client-layer per-user isolation. *Was (audit A-data-user):* every per-user
@@ -251,7 +265,7 @@ no product change. Status per sub-item below.
 2. **Post-launch Wave 1:** **R1a/b/c** (independent, low-risk, high-leverage consistency hardening).
 3. **Wave 2:** **R2** (render unification) — *after/with* R0 (shared render/merge surface), then **R3**
    (decompose + test seams) which is easier once R2 lands one render path.
-4. **Wave 3:** **R4** (ADR 0009), ~~**R5** (isolation guard)~~ **— R5 DONE (#1416)**.
+4. **Wave 3:** ~~**R4** (ADR 0009)~~ **— R4 DONE (#1415)**, ~~**R5** (isolation guard)~~ **— R5 DONE (#1416)**.
 5. **Wave 4:** **R6** (failure UX), **R7** (polish).
 
 Dependency direction is already correct (engine imports nothing from the FE; Vault structurally walled)
