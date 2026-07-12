@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts._golden_driver import fixture_models, run_once  # noqa: E402
@@ -58,23 +59,26 @@ def _default_fixture() -> str:
 # never-closing-stream backstop = a genuine hang) is re-raised immediately, never retried.
 _TRANSIENT_CRASH_SIG = "no new assistant message persisted"
 _RUN_RETRIES = 2  # total attempts per run = 1 + _RUN_RETRIES
+_RETRY_BACKOFF_S = 3  # brief pause before a retry so CI CPU contention can clear (the root cause)
 
 
 def _replay_run(n: int, **kw):
-    """One replay run, retried on the transient CI-load crash (see the note above). Fresh ports
-    per attempt so a lagging shutdown / TIME_WAIT socket never blocks the reboot."""
+    """One replay run, retried on the transient CI-load crash (see the note above). Each (run,
+    attempt) gets a UNIQUE port slot — collision-free even for large --runs, engine/fe kept a
+    fixed 1000 apart — so a lagging shutdown / TIME_WAIT socket never blocks the reboot."""
     last = None
     for attempt in range(1 + _RUN_RETRIES):
+        slot = n * (1 + _RUN_RETRIES) + attempt  # unique per (run, attempt); no cross-run overlap
         try:
-            return run_once(mode="replay", engine_port=8971 + n + attempt * 40,
-                            fe_port=7971 + n + attempt * 40, **kw)
+            return run_once(mode="replay", engine_port=8971 + slot, fe_port=7971 + slot, **kw)
         except RuntimeError as e:
             if _TRANSIENT_CRASH_SIG not in str(e):
                 raise  # a genuine hang / unexpected error — never masked
             last = e
             print(f"  ⚠ replay run {n + 1}: transient CI-load crash on attempt "
-                  f"{attempt + 1}/{1 + _RUN_RETRIES} — retrying on a fresh engine "
-                  f"(a real staling miss would fail every attempt). {e}", flush=True)
+                  f"{attempt + 1}/{1 + _RUN_RETRIES} — pausing {_RETRY_BACKOFF_S}s, then retrying "
+                  f"on a fresh engine (a real staling miss would fail every attempt). {e}", flush=True)
+            time.sleep(_RETRY_BACKOFF_S)  # let the runner's CPU contention ease before the reboot
     raise last  # exhausted → a persistent (deterministic) failure surfaces honestly
 
 

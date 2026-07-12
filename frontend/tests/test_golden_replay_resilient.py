@@ -30,6 +30,7 @@ def test_replay_run_absorbs_a_transient_crash_then_succeeds(monkeypatch):
         return ok
 
     monkeypatch.setattr(gr, "run_once", flaky)
+    monkeypatch.setattr(gr.time, "sleep", lambda *_a, **_k: None)  # no real backoff wait
     assert gr._replay_run(0, fixture="f", model="m", utility_model="m") is ok
     assert calls["n"] == 3  # retried past both transient crashes rather than failing the gate
 
@@ -44,6 +45,7 @@ def test_replay_run_uses_fresh_ports_per_attempt(monkeypatch):
         return _Driver()
 
     monkeypatch.setattr(gr, "run_once", record_ports)
+    monkeypatch.setattr(gr.time, "sleep", lambda *_a, **_k: None)
     gr._replay_run(0, fixture="f", model="m", utility_model="m")
     assert len(set(seen)) == len(seen)  # each attempt used a DISTINCT (engine, fe) port pair
 
@@ -72,6 +74,7 @@ def test_replay_run_surfaces_a_persistent_transient_after_the_budget(monkeypatch
         raise RuntimeError("no new assistant message persisted")
 
     monkeypatch.setattr(gr, "run_once", always)
+    monkeypatch.setattr(gr.time, "sleep", lambda *_a, **_k: None)
     with pytest.raises(RuntimeError, match="no new assistant"):
         gr._replay_run(0, fixture="f", model="m", utility_model="m")
     assert calls["n"] == 1 + gr._RUN_RETRIES  # bounded — never an infinite loop
