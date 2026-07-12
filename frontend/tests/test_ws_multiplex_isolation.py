@@ -130,7 +130,9 @@ def test_router_dispatches_strictly_by_channel_no_cross_bleed():
 
 WS = _read("static", "js", "orwellWs.js")
 PLATFORM = _read("static", "js", "platform.js")
-CHAT = _read("static", "js", "chat.js")
+# #1414 (R3 PR4): the chat WS-splice consumer (_onWsChatFrame + the reasoning split) moved from
+# chat.js to chatWsSplice.js (a behavior-preserving extraction) — source-pin it there.
+WSSPLICE = _read("static", "js", "chatWsSplice.js")
 
 
 def test_orwellws_routes_by_ch_with_a_registry_per_channel():
@@ -157,7 +159,7 @@ def test_state_and_hud_bridge_calls_the_one_gamechanged_dispatcher():
 def test_chat_reasoning_split_survives_on_the_socket():
     # The chat consumer keeps the reasoning split VERBATIM (§3.4): d.thinking → reasoning
     # buffer (the accordion), else → the reply body — reasoning can never reach the body.
-    assert "_onWsChatFrame" in CHAT
-    assert "d.thinking" in CHAT and "round.reasoning" in CHAT and "round.reply" in CHAT
+    assert "_onWsChatFrame" in WSSPLICE
+    assert "d.thinking" in WSSPLICE and "round.reasoning" in WSSPLICE and "round.reply" in WSSPLICE
     # It reuses the SHARED incremental renderer, not a second engine (ADR 0015).
-    assert "_renderLiveStream(round.contentDiv" in CHAT
+    assert "_renderLiveStream(round.contentDiv" in WSSPLICE

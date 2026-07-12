@@ -48,6 +48,14 @@ import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } fro
 // injects the API_BASE resolver so the module reads chat.js's live value. Imported here only, so
 // #1399 single-eval holds.
 import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
+// #1414 (R3 PR4): the WebSocket Phase-1 chat live-splice cluster (ADR 0017). Behavior-preserving:
+// the splice was already isolated behind _wsRegisterChat; chat.js still drives the same call points
+// (_wsChatActive/_wsPinRound in handleChatSubmit's up-frame reroute, _wsResetRound on refusal, and
+// the boot registration below), and injects the three chat.js-internal deps the consumer reads
+// (_renderLiveStream — the R2 render seam; softReloadHistory — reconcile; _senderLabel — the single-
+// source sender label) via _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern. None of these
+// are on the chatModule public API. Imported here only, so #1399 single-eval holds.
+import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _setWsSpliceDeps } from './chatWsSplice.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -1392,8 +1400,8 @@ import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
         const _bodyDiv = holder.querySelector('.body');
         let _sc = _bodyDiv && _bodyDiv.querySelector('.stream-content');
         if (_bodyDiv && !_sc) { _sc = document.createElement('div'); _sc.className = 'stream-content'; _bodyDiv.appendChild(_sc); }
-        _wsRound = { holder: holder, contentDiv: _sc, state: {}, reply: '', reasoning: '',
-                     sessionId: streamSessionId, clientMsgId: _clientMsgId, _spinner: spinner };
+        _wsPinRound({ holder: holder, contentDiv: _sc, state: {}, reply: '', reasoning: '',
+                     sessionId: streamSessionId, clientMsgId: _clientMsgId, _spinner: spinner });
         try {
           await window.OrwellWs.sendTurn({
             message: _finalMsgWithInject,
@@ -7211,113 +7219,19 @@ import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
   // #1414 (R3 PR3): openAttachment / _attachLang / the per-upload doc cache moved to
   // chatAttachments.js (imported above, re-exported on chatModule below). Behavior-preserving.
 
-  // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
-  //
-  // When OrwellWs is live, the player's turn goes UP as a `turn` frame (the reroute in
-  // handleChatSubmit) and the reply comes back as `chat` `event` frames — the SAME
-  // replay-then-tail broadcast both the sender and a peer window receive. We render
-  // those frames through the SAME shared incremental renderer the SSE path uses
-  // (`_renderLiveStream` → `createStreamRenderer`, ADR 0015) — NOT a second engine —
-  // and we keep the reasoning split VERBATIM (§3.4): a delta with `d.thinking` truthy
-  // lands in the reasoning accordion, never the public reply body.  This is the exact
-  // `roundReplyText`/`roundReasoningText` contract, socket-side.
-  //
-  // Dormant when the flag is off (`isActive()` false): the fetch/SSE path stays
-  // byte-identical, so F1–F5, g15, and the reasoning-scrub gate are untouched. Full
-  // live finalize/dedup runs after the server route (claude/ws-phase1-server) lands.
-  function _wsChatActive() {
-    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
-    catch (_) { return false; }
-  }
-
-  // The live WS round render target. When the sender fires a turn we pin its
-  // already-created streaming holder here (below) so the inbound consumer renders into
-  // it — the sender's own turn. A peer/observer window has no pinned holder and mounts
-  // its own live bubble, exactly as resumeStream does for the SSE mirror.
-  let _wsRound = null;   // { holder, contentDiv, state, reply, reasoning, sessionId, clientMsgId, _spinner }
-  // Is the CURRENT run tool-rich (multi-round)? A rich run's narration spans N rounds that history
-  // reconstructs as N bubbles (chatRenderer "Agent multi-bubble reconstruction"), so its ONE live WS
-  // holder must never be adopted at settle — it would keep round 1..N merged in a single bubble
-  // beside (or in place of) the reconstruction, the mirror-toolturn divergence. Same contract as the
-  // SSE observer's rich resume (resumeStream rich=true: discard the live holder, reload). Reset per
-  // run at `done` (frames arrive in run order, `done` last).
-  let _wsRichRun = false;
-  const _wsLiveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
-  function _wsResetRound() { _wsRound = null; _wsRichRun = false; }
-
-  function _wsEnsureRound() {
-    if (_wsRound && _wsRound.holder && _wsRound.holder.isConnected) return _wsRound;
-    const box = document.getElementById('chat-history');
-    if (!box) return null;
-    const holder = document.createElement('div');
-    holder.className = 'msg msg-ai';
-    const roleLabel = _senderLabel(_shortModel(sessionModule.getCurrentModel && sessionModule.getCurrentModel()));
-    const roleTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) +
-      ' <span class="role-timestamp">' + roleTs + '</span></div>' +
-      '<div class="body"><div class="stream-content"></div></div>';
-    box.appendChild(holder);
-    _wsRound = { holder: holder, contentDiv: holder.querySelector('.stream-content'),
-                 state: {}, reply: '', reasoning: '',
-                 sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null };
-    uiModule.scrollHistory();
-    return _wsRound;
-  }
-
-  // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
-  function _onWsChatFrame(frame) {
-    const d = (frame && frame.d) || {};
-    // A tool/agent-round marker ⇒ this run is RICH (multi-round). The WS splice renders the whole
-    // run into one holder (it has no per-round bubble machinery), so flag it — the `done` branch
-    // discards the merged holder and lets softReloadHistory rebuild the N-bubble reconstruction.
-    if (d.type === 'agent_step' || d.type === 'tool_start' || d.type === 'tool_output' || d.type === 'tool_progress') {
-      _wsRichRun = true;
-      return;
-    }
-    if (typeof d.delta === 'string') {
-      const round = _wsEnsureRound();
-      if (!round) return;
-      if (round._spinner) { try { round._spinner.destroy(); } catch (_) {} round._spinner = null; }
-      // The reasoning CHANNEL SPLIT is sacred (§3.4): thinking → the accordion, the
-      // clean reply → the body. `_renderLiveStream` places reasoning in a default-
-      // collapsed `.thinking-section` and the reply in `.live-reply-content` — reasoning
-      // can NEVER paint in the public reply container, by construction.
-      if (d.thinking) round.reasoning += d.delta;
-      else            round.reply += d.delta;
-      _renderLiveStream(round.contentDiv, round.reply, round.reasoning, _wsLiveRender, round.state, round.holder);
-      return;
-    }
-    if (d.type === 'message_saved') {
-      // Stamp the server db id so the settle reconcile adopts THIS bubble with zero
-      // churn (mirrors resumeStream's savedDbId — no db-id-less duplicate).
-      if (_wsRound && _wsRound.holder && d.id != null) _wsRound.holder.dataset.dbId = String(d.id);
-      return;
-    }
-    if (d.done) {
-      // Terminal sentinel (maps `[DONE]`, §3.2). Release the live holder and run the
-      // settle reconcile from history — the SAME idempotent, seq-aware softReloadHistory
-      // the SSE path settles through; it adopts the streamed bubble by {id, seq}.
-      const round = _wsRound;
-      const rich = _wsRichRun;
-      const sid = (round && round.sessionId) ||
-                  (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) ||
-                  (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-      if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) {} }
-      // A RICH (multi-round) run's live holder holds rounds 1..N MERGED — never adoptable (history
-      // reconstructs the turn as N bubbles). Discard it; the reload below rebuilds the real shape.
-      // Mirrors the SSE observer's rich resume contract (mirror-toolturn parity, #1087).
-      if (rich && round && round.holder) { try { round.holder.remove(); } catch (_) {} }
-      _wsResetRound();
-      if (sid && chatState._streamSessionId === sid) chatState._streamSessionId = null; // release the active-stream lock
-      if (sid) { try { softReloadHistory(sid); } catch (_) {} }
-      return;
-    }
-  }
-
-  function _wsRegisterChat() {
-    try { if (window.OrwellWs && window.OrwellWs.onFrame) window.OrwellWs.onFrame('chat', _onWsChatFrame); }
-    catch (_) {}
-  }
+  // #1414 (R3 PR4): the WebSocket Phase-1 chat live-splice cluster (ADR 0017 §3) —
+  // _wsChatActive / _wsResetRound / _wsPinRound / _wsEnsureRound / _onWsChatFrame /
+  // _wsRegisterChat — moved to chatWsSplice.js (imported above). Behavior-preserving: chat.js
+  // still drives the same call points (the up-frame reroute in handleChatSubmit pins the holder
+  // via _wsPinRound and falls soft via _wsResetRound; the boot registration stays below), and
+  // injects the three chat.js-internal deps the consumer reads — _renderLiveStream (the R2 render
+  // seam), softReloadHistory (the settle reconcile), and _senderLabel (the single-source sender
+  // label) — through _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern.
+  _setWsSpliceDeps({
+    renderLiveStream: _renderLiveStream,
+    softReloadHistory: softReloadHistory,
+    senderLabel: _senderLabel,
+  });
   if (typeof window !== 'undefined') {
     if (window.OrwellWs) _wsRegisterChat();
     else window.addEventListener('orwell:ws-ready', _wsRegisterChat, { once: true });
