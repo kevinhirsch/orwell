@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -515,7 +516,17 @@ class GoldenDriver:
         stream_backstop = time.time() + self.turn_timeout * self._TURN_STREAM_BACKSTOP_MULT
         with urllib.request.urlopen(req, timeout=self.turn_timeout) as r:
             while True:
-                chunk = r.read(65536)
+                try:
+                    chunk = r.read(65536)
+                except (http.client.IncompleteRead, ConnectionError):
+                    # The server closed the stream mid-chunk under load (a transient reset /
+                    # early close — NOT a genuine hang, which raises socket.timeout/TimeoutError
+                    # and still propagates). The chunks are read only to drive the server to its
+                    # natural finish; the reply is recovered from /api/history below, so treat an
+                    # early close like a natural close and fall through to the settle →
+                    # _quiesce_beats → _await_new_assistant reconciliation, which re-reads until
+                    # the row lands (or fails loudly if it TRULY never persisted). Nothing masked.
+                    break
                 if not chunk:
                     break
                 if time.time() > stream_backstop:

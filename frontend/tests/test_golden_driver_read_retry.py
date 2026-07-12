@@ -15,6 +15,7 @@ a transient one-call blip is absorbed, while a genuinely persistent failure stil
 the retry budget. These tests pin both halves — no live engine/FE needed."""
 from __future__ import annotations
 
+import http.client
 import io
 import json
 import urllib.error
@@ -204,3 +205,42 @@ def test_turn_reads_stream_to_close_and_a_never_closing_stream_still_fails(tmp_p
 
     with pytest.raises(RuntimeError, match="without closing"):
         d._turn("Let's keep the week moving — what does production have for us next?")
+
+
+def test_turn_absorbs_a_mid_stream_incomplete_read(tmp_path, monkeypatch):
+    """The record/heavy-load case in the PR title: the server closes the chat_stream body
+    mid-chunk under load, so r.read() raises http.client.IncompleteRead (the
+    ``IncompleteRead(18391 bytes read)`` crash from the record log). The chunks are read only
+    to drive the server to its natural finish — the reply is recovered from /api/history — so an
+    early close is treated like a natural close and reconciled through _await_new_assistant. The
+    turn completes on the persisted row instead of crashing. NON-masking: a genuine hang raises
+    socket.timeout/TimeoutError (NOT a ConnectionError/IncompleteRead), so it still propagates,
+    and a turn that truly persisted nothing still fails at the caller's count check."""
+    d = _driver(tmp_path)
+    hist = {"n": 0}
+
+    def history():
+        hist["n"] += 1
+        # The top-of-_turn read sees `prior` (1); the post-stream reconcile sees the fresh row (2).
+        return _msgs(1 if hist["n"] == 1 else 2)
+
+    monkeypatch.setattr(d, "_history", history)
+    monkeypatch.setattr(d, "_quiesce_beats", lambda *a, **k: None)  # skip the beatSeq poll
+    monkeypatch.setattr(gd.time, "sleep", lambda *_a, **_k: None)
+
+    class _ResetMidStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, _n):
+            # The server drops the connection mid-chunk (a transient reset under load).
+            raise http.client.IncompleteRead(b"partial")
+
+    monkeypatch.setattr(gd.urllib.request, "urlopen", lambda *a, **k: _ResetMidStream())
+
+    text = d._turn("Let's keep the week moving — what does production have for us next?")
+    assert text == "a"      # the persisted reply was recovered despite the mid-stream reset
+    assert hist["n"] >= 2   # reconciled via a post-stream history read, not the crashed stream
