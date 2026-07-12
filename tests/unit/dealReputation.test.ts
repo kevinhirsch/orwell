@@ -19,13 +19,13 @@ import type { AdvanceView, GameSession } from "../../src/ports/GameSession";
 // A comp-round resolver that THROWS every comp (so the player never wins the HOH ⇒ a comp-throw promise is
 // always KEPT — the honorer path fires deterministically). Every other pending resolves legally.
 function resolveThrowing(s: Pick<GameSession, "submitDecision">, p: NonNullable<AdvanceView["pending"]>): void {
-  if (p.kind === "comp-round") return s.submitDecision({ kind: "comp-round", intent: "throw" });
-  if (p.kind === "nominations") return s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
-  if (p.kind === "veto-decision") return s.submitDecision({ kind: "veto-decision", use: false });
-  if (p.kind === "replacement") return s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
-  if (p.kind === "houseguests-choice") return s.submitDecision({ kind: "houseguests-choice", vote: p.options[0]!.id });
-  if (p.kind === "goodbye-message") return s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id });
-  return s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
+  if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "throw" });
+  else if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+  else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "houseguests-choice") s.submitDecision({ kind: "houseguests-choice", vote: p.options[0]!.id });
+  else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id });
+  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
 }
 
 describe("0121 R1 — spreadReliableReputation (the pure helper)", () => {
@@ -81,7 +81,7 @@ describe("0121 R1 — the ledger fires the reputation hook only under the deal-d
     const calls: Array<{ honorer: string; other: string }> = [];
     ledger.reconcile(
       { actor: PROMISOR, kind: "compete", targets: [], outcome: "threw" },
-      { rel: undefined, rng: new SeededRandom(1), dealDepth, reputation: (honorer, other) => calls.push({ honorer, other }) } as never,
+      { rel: undefined, rng: new SeededRandom(1), dealDepth, reputation: (honorer: string, other: string) => calls.push({ honorer, other }) } as never,
     );
     return calls;
   }
