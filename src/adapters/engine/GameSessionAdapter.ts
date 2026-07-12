@@ -176,7 +176,7 @@ import {
   type Trajectory, type FoldSignal,
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
-import { buildSystemPrompt, momentForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, requiredLeverForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -9811,6 +9811,12 @@ export class GameSessionAdapter implements GameSession {
     const daySchedule = nextM
       ? { next: nextM.beat, phase: nextM.phase, due: milestoneDueOf(this.live) }
       : undefined;
+    // #1411 — the single closed-set lever this beat requires the narrator to CALL (advanceGame at the
+    // deterministic comp/ceremony/eviction beats), or null otherwise. The FE forces THIS on the wire
+    // instead of keeping its own beat→lever map that could drift from the tool registry. Vault-free (a
+    // lever NAME only); a pure function of `phase`, so it never perturbs the golden replay's non-force
+    // turns. Absent (spread below) at every non-force beat ⇒ byte-identical / no forcing.
+    const requiredLever = requiredLeverForPhase(this.phase);
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -9838,6 +9844,9 @@ export class GameSessionAdapter implements GameSession {
       phase: this.phase,
       ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay, asleep: this.asleepNpcs() ?? [] } : {}), // ADR 0006: the public day-phase + who's turned in
       moment,
+      // #1411: the closed-set required lever (present ONLY at a comp/ceremony/eviction beat) — the FE's
+      // engine-signaled force directive. Absent everywhere else ⇒ byte-identical / no forcing.
+      ...(requiredLever ? { requiredLever } : {}),
       player: {
         id: p.id,
         name: p.name,

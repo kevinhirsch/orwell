@@ -145,7 +145,7 @@ def test_day_break_social_hold_suppresses_the_wire_force():
     """The held day-break turn frames moment=`social`, which the forced-tool_choice gate already
     suppresses (J-3) — pinned here as the P1-2 'no force-march off a day-break' guarantee."""
     got = agent_loop._forced_tool_choice_for_beat(
-        ("2", "veto-ceremony", "social"), set(), pending_open=False)
+        ("2", "veto-ceremony", "social"), set(), pending_open=False, required_lever="advanceGame")
     assert got is None
 
 
