@@ -1820,11 +1820,13 @@ def main() -> int:
             # persistence key is unchanged, owned by the panel via persistCollapsed:false).
             g16.click("#orwell-status .og-head")
             f1_keys = g16.evaluate("""() => {
-              const user = (document.body && document.body.dataset.user) || '';
               return {
                 collapsed: document.getElementById('orwell-status').classList.contains('og-collapsed'),
                 keys: Object.keys(localStorage).filter(k => k.startsWith('orwell-status-collapsed')),
-                expected: 'orwell-status-collapsed:The Player:' + user,
+                // R5/#1416: the app derives its per-user key via window.orwellUserKey, which keys
+                // under 'local' in the no-auth smoke env (data-user empty). Compute the expected
+                // key the SAME way the app writes it — never the raw dataset.user derivation.
+                expected: 'orwell-status-collapsed:' + window.orwellUserKey('The Player'),
               };
             }""")
             check(f1_keys.get("collapsed") is True
@@ -2336,8 +2338,9 @@ def main() -> int:
               const before = window.OrwellGadgetRail.currentOrder();
               window.OrwellGadgetRail.reorder(before.slice().reverse());
               const after = window.OrwellGadgetRail.currentOrder();
-              const user = (document.body && document.body.dataset.user) || '';
-              const saved = localStorage.getItem('orwell-gadget-order:' + user);
+              // R5/#1416: read the order under the SAME key the app writes it — via the shared
+              // helper (keys under 'local' in the no-auth smoke env where data-user is empty).
+              const saved = localStorage.getItem(window.orwellUserKey('orwell-gadget-order'));
               // Edit mode: the header toggle is labeled; entering it makes the gadgets
               // keyboard-focusable; no overlay grip covers content.
               const btn = document.getElementById('gadget-rail-rearrange');
@@ -2361,8 +2364,8 @@ def main() -> int:
             # clean up the synthetic probe so it can't bleed into later assertions
             page.evaluate("""() => {
               const p = document.getElementById('orwell-l13-probe'); if (p) p.remove();
-              const u = (document.body && document.body.dataset.user) || '';
-              localStorage.removeItem('orwell-gadget-order:' + u);
+              // R5/#1416: clean up under the same helper-derived key the app writes.
+              localStorage.removeItem(window.orwellUserKey('orwell-gadget-order'));
             }""")
 
             # Side-swap (⇄): swaps the dock AND the nav sidebar in LOCKSTEP. The bug was two
