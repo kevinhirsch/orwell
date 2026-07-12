@@ -8796,7 +8796,13 @@ button.hamburger {
 body.hide-thinking .thinking-section { display: none !important; }
 
 /* Thinking process styles — colors follow theme accent */
-.msg .body .stream-content {
+.msg .body .stream-content,
+.msg .body .round-seg {
+  /* #829 turn-coalescing: a committed round is re-classed `.round-seg` (a frozen segment that the
+     next round's fresh `.stream-content` stacks below, so one turn bubble GROWS). It keeps the same
+     full-width layout as the live segment; the rendered markdown's own paragraph margins space the
+     stacked rounds so they read as one continuous message. No transition — growth is plain DOM
+     append (reduced-motion safe, no layout thrash). */
   width: 100%;
 }
 .thinking-section {

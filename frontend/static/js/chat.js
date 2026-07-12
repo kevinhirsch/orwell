@@ -1606,20 +1606,23 @@ import { isNarrow } from './platform.js';
       // Streaming TTS: synthesize sentence-by-sentence during streaming (assigns the hoisted flag).
       streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
-      // Multi-bubble agent tracking
-      let roundHolder = holder;       // Current AI text bubble (changes per round)
-      // #834: has a VISIBLE turn-header bubble (role + timestamp, not a continuation) been shown
-      // yet? The initial `holder` carries the header, but it is hidden at agent_step when the round
-      // produced no narration (a pure hidden tool-call round, e.g. getGameState). When that header
-      // is hidden, the next continuation bubble must be PROMOTED to the turn header (role +
-      // timestamp, NOT a continuation) so the received message still shows a timestamp.
-      let turnHeaderShown = true;     // the initial holder starts as the visible header
+      // #829 turn-coalescing: ALL agent-loop rounds of one player turn render into the ONE `holder`
+      // bubble as stacked frozen segments (the "growing bubble"). `roundHolder` therefore stays ===
+      // `holder` for the whole turn — it is kept as an alias so the per-round render/finalize sites
+      // read uniformly. (Pre-#829 this was reassigned to a fresh per-round bubble; that per-round
+      // mount/hide/jump — plus the #834 turn-header-promotion it needed — is gone with one bubble.)
+      let roundHolder = holder;       // The one turn bubble (alias of holder; never reassigned)
       let roundText = '';             // Text accumulated for current round (MERGED reply+reasoning)
       // F8: per-round channel-split buffers. The BODY renders roundReplyText (reasoning-free by
       // construction); the live "Thinking" accordion renders roundReasoningText. These MUST be
       // reset wherever roundText is reset (agent_step / teacher_takeover) — see those sites.
       let roundReplyText = '';        // deltas with json.thinking falsy (the public reply)
       let roundReasoningText = '';    // deltas with json.thinking truthy (reasoning → accordion)
+      // #829 turn-coalescing: has this turn spanned 2+ agent-loop rounds (i.e. did an
+      // agent_step fire)? When true, ALL rounds render into the ONE `holder` bubble as
+      // stacked frozen segments (the "growing bubble") — the stream-end finalize then
+      // commits only the LAST round's segment instead of re-rendering the whole body.
+      let _turnCoalesced = false;
       let currentToolBubble = null;   // Current tool execution bubble
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -1805,6 +1808,59 @@ import { isNarrow } from './platform.js';
              }));
         renderer.update(displayText);
         uiModule.scrollHistory();
+      };
+
+      // #829 turn-coalescing (coalesceRounds / oneBubblePerTurn — the "growing bubble"):
+      // FREEZE the CURRENT agent-loop round's reply + reasoning as a permanent segment INSIDE
+      // the one turn bubble, so the next round appends a fresh `.stream-content` segment BELOW
+      // it (the bubble GROWS) instead of minting a per-round `.msg-continuation` bubble. The
+      // reply is rendered reply-ONLY (roundReplyText, F8) through the SAME processWithThinking
+      // chain the reload/tool_start paths use; the round's reasoning stays in its own
+      // `.thinking-section` accordion (built inside this same `.stream-content`) and is NEVER
+      // spliced into the reply body — the reply/reasoning channel split holds per round. An
+      // empty round (no reply, no reasoning) drops its segment so no hidden per-round holder
+      // lingers; the turn bubble itself always persists (no mount/hide/jump).
+      const _commitRoundSegment = () => {
+        if (!roundHolder) return;
+        const _cBody = roundHolder.querySelector('.body');
+        if (!_cBody) return;
+        const seg = _cBody.querySelector('.stream-content');
+        if (!seg) return;
+        const dtRaw = stripToolBlocks(roundReplyText);
+        const hasReply = !!dtRaw.trim();
+        const thinkSection = seg.querySelector('.thinking-section');
+        const hasReasoning = !!(thinkSection && thinkSection.textContent.trim());
+        if (!hasReply && !hasReasoning) {
+          seg.remove();  // empty round → no lingering holder; the turn bubble persists
+          return;
+        }
+        if (hasReply) {
+          // Same OOC-classify + reply-only render the tool_start/reload finalizers apply.
+          const dt = chatRenderer.applyOocClass(roundHolder, dtRaw.trim(), 'assistant').text;
+          const html = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
+          const liveReply = seg.querySelector('.live-reply-content');
+          if (liveReply) {
+            // Reasoning accordion above stays put; render ONLY into the reply container.
+            liveReply.innerHTML = html;
+            liveReply.classList.remove('live-reply-content');
+          } else if (thinkSection) {
+            // Accordion present but no dedicated reply container — append the reply AFTER it so
+            // the reasoning is preserved (never overwritten into the reply body).
+            let rc = seg.querySelector('.round-reply');
+            if (!rc) { rc = document.createElement('div'); rc.className = 'round-reply'; seg.appendChild(rc); }
+            rc.innerHTML = html;
+          } else {
+            seg.innerHTML = html;  // plain reply-only segment (no reasoning this round)
+          }
+          if (window.hljs) seg.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+        }
+        seg.style.minHeight = '';
+        // Freeze: drop the `.stream-content` class so the next round's _ensureStreamLayout mints
+        // a FRESH sibling segment below this one (the bubble grows, nothing re-mounts).
+        seg.classList.remove('stream-content');
+        seg.classList.add('round-seg');
+        seg._streamRenderer = null;
+        seg._streamRendererOoc = undefined;
       };
 
       let _nextIsError = false;
@@ -3262,80 +3318,48 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
-                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
-                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
-                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
-                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
-                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
-                  roundHolder.style.display = 'none';
-                  // #834: this round's bubble is being hidden. If it was the turn's only visible
-                  // header (no later visible bubble has taken over yet), the turn currently has NO
-                  // visible header — flag it so the NEXT bubble is promoted to header + timestamp.
-                  if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;
-                }
-                // Mark thread as connected to bubble below
+                // #829 turn-coalescing (coalesceRounds / oneBubblePerTurn — one "growing bubble"):
+                // a NEW agent-loop round is starting, but ALL rounds of ONE player turn render into
+                // ONE bubble that GROWS. FREEZE this round's reply/reasoning as a segment INSIDE the
+                // SAME `roundHolder` bubble and let the next round append a fresh `.stream-content`
+                // segment BELOW it — instead of minting a per-round `.msg-continuation` bubble (the
+                // pre-#829 path: the per-round mount/hide/jump the reverted #822 also exhibited).
+                // Reasoning stays in the segment's `.thinking-section` accordion and is NEVER spliced
+                // into the reply body, so the F8 reply/reasoning channel split holds per round.
+                _commitRoundSegment();
+                _turnCoalesced = true;
+                // Mark the tool thread as connected (the rail sits below the growing bubble).
                 const _activeThread = document.querySelector('.agent-thread.streaming');
                 if (_activeThread) {
                   _activeThread.classList.add('has-bottom');
                 }
-                // --- New round: create fresh AI bubble with spinner ---
+                // Reuse the SAME turn bubble — roundHolder / currentHolder / holder all STAY put (no
+                // new `.msg-ai` mount). Its role+timestamp header, set at stream start, is the turn
+                // header for the whole turn (with ONE bubble there is no #834 promotion to do). If a
+                // pure-tool round hid the bubble (tool_start empty-branch), un-hide it — it is the one
+                // growing bubble.
+                if (roundHolder && roundHolder.style.display === 'none') roundHolder.style.display = '';
                 currentToolBubble = null;
                 roundFinalized = false;
                 isThinking = false;
                 _docFenceOpened = false;
                 _docFenceContentStart = -1;
-                const box = document.getElementById('chat-history');
-                const newWrap = document.createElement('div');
-                // #834: when no visible turn-header exists yet (round 0 was a hidden tool-call), this
-                // bubble is the FIRST VISIBLE one — promote it to the header (role + timestamp, NOT a
-                // continuation) so the received message carries a timestamp. Otherwise it's a normal
-                // continuation. Mirrors the reload path's first-visible logic in chatRenderer.js.
-                const _isTurnHeader = !turnHeaderShown;
-                newWrap.className = 'msg msg-ai streaming' + (_isTurnHeader ? '' : ' msg-continuation');
-                // Add model name label
-                const newRole = document.createElement('div');
-                newRole.className = 'role';
-                const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
-                const _roundRequested = holder?._requestedModel || metaS?.model;
-                const _roundActual = holder?._actualModel || _roundRequested;
-                // C14/immersion: a continuation round in the game build is still the show —
-                // never the raw model name as the sender.
-                newRole.textContent = isGameBuild() ? GAME_NARRATOR : (_modelRouteLabel(_roundRequested, _roundActual) || '');
-                _applyModelColor(newRole, _roundActual);
-                // #834: a promoted header bubble carries the timestamp (matches the initial holder +
-                // the reload path). roleTimestamp() with no arg falls back to "now" — correct for a
-                // live turn. Continuation rounds keep no per-round timestamp (unchanged).
-                if (_isTurnHeader) {
-                  newRole.appendChild(chatRenderer.roleTimestamp());
-                  turnHeaderShown = true;
-                }
-                newWrap.appendChild(newRole);
-                const newBody = document.createElement('div');
-                newBody.className = 'body';
-                newWrap.appendChild(newBody);
-                box.appendChild(newWrap);
-                roundHolder = newWrap;
-                // F5/mirror-toolturn dedup fix: `currentHolder` MUST track the round holder in lockstep
-                // (like roundText/roundReplyText/roundReasoningText above). It was left pinned at the
-                // FIRST round's bubble (set once at stream start, chat.js ~1169), so on a multi-round
-                // tool-rich turn the `message_saved` handler (~2375) stamped `data-db-id` onto round 1's
-                // bubble instead of the LAST round's — the round that actually corresponds to what the
-                // server persisted. softReloadHistory's adopt pass (~4256) then matched the WRONG bubble
-                // by id, and every earlier-round bubble (never stamped) survived as a permanent
-                // dup/orphan the reconcile's id-order check couldn't see (only its separate
-                // `_visibleMsgCount` orphan guard could, and only on a later trigger) — the
-                // "duplicating messages" symptom on a tool-rich turn (mirror_toolturn_parity.mjs).
-                currentHolder = newWrap;
+                // Fresh thinking-accordion refs so the NEXT round builds its OWN accordion; the
+                // committed segment kept the previous round's accordion frozen in place.
+                _liveThinkSection = null; _liveThinkContent = null; _liveThinkInner = null;
+                _liveThinkHeader = null; _liveThinkSpinnerSlot = null; _liveThinkTimerEl = null;
+                _liveThinkToggle = null; _liveThinkDomId = null;
                 roundText = '';
                 roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
                 roundReasoningText = '';
-                // Destroy any previous spinner before creating new one
+                // Destroy any previous spinner before creating a new one — appended to the SAME body
+                // while the next round's first text is awaited (a fresh `.stream-content` mints on the
+                // first delta, below the frozen segment).
                 if (spinner && spinner.element) spinner.destroy();
-                // Show spinner while waiting for text (skip for research — has its own progress)
-                if (!_researchingStreamIds.has(streamSessionId)) {
+                const _coalBody = roundHolder.querySelector('.body');
+                if (_coalBody && !_researchingStreamIds.has(streamSessionId)) {
                   spinner = spinnerModule.create(_inProgressLabel('Generating response'), 'right', 'wave');
-                  newBody.appendChild(spinner.createElement());
+                  _coalBody.appendChild(spinner.createElement());
                   spinner.start();
                 }
                 if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
@@ -3491,6 +3515,30 @@ import { isNarrow } from './platform.js';
         const _streamContent = roundHolder.querySelector('.stream-content');
         if (_streamContent) _streamContent.style.minHeight = '';
 
+        if (_turnCoalesced) {
+          // #829 turn-coalescing: the whole turn is ONE growing bubble of stacked frozen segments
+          // (each committed at its agent_step). COMMIT ONLY the FINAL round's segment — the legacy
+          // finalize below re-renders the whole `.body`, which would CLOBBER the earlier rounds'
+          // frozen segments. Reasoning stays in each segment's own `.thinking-section` accordion.
+          _commitRoundSegment();
+          const _cf = roundHolder.querySelector('.body');
+          // A trailing pure-tool round hides nothing (its empty segment is just dropped); if a
+          // pure-tool round HAD hidden the bubble but earlier rounds left content, re-show the one
+          // bubble so its accumulated narration stays visible.
+          if (roundHolder.style.display === 'none'
+              && _cf && _cf.querySelector('.round-seg, .stream-content, .thinking-section')) {
+            roundHolder.style.display = '';
+          }
+          // Sources / findings attach to the ONE bubble (the same data the non-coalesced finalize
+          // renders on the final round); RAG is handled uniformly further below for both paths.
+          if (_cf && _sourcesData) {
+            const _cfWasExpanded = _sourcesExpanded || !!_cf.querySelector('.sources-content.expanded');
+            const _cfSrc = document.createElement('div');
+            _cfSrc.innerHTML = _buildSourcesBox(_sourcesData, _sourcesType, _cfWasExpanded);
+            _cf.insertBefore(_cfSrc.firstChild || _cfSrc, _cf.firstChild);
+          }
+          if (_cf && _findingsData) _cf.insertAdjacentHTML('beforeend', chatRenderer.buildFindingsBox(_findingsData));
+        } else {
         // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM.
         // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion
         // already, so no extraction is needed (the old garbled-<think>/prefix dance is gone).
@@ -3562,6 +3610,7 @@ import { isNarrow } from './platform.js';
             }
           }
         }
+        }  // #829: end of the !_turnCoalesced legacy finalize branch
 
 
         if (window.hljs) {
