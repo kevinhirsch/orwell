@@ -5,16 +5,30 @@ import { DealLedger } from "../../src/engine/deals";
 import { buildEngineCore } from "../../src/composition/engineRoot";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { GameSessionRegistry } from "../../src/composition/registry";
+import { reliableFactId, reliableHonorerFrom } from "../../src/domain/deal";
 import { PLAYER, npc } from "../../src/domain/ids";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import type { AdvanceView, GameSession } from "../../src/ports/GameSession";
 
 /**
- * 0121 R1 — the diffusing "keeps their word" REPUTATION reward. A kept deal spreads a Vault-free reputation
- * about the honorer NPC→NPC; a third party who HEARS it leans toward the honorer as a safer deal partner
- * (the positive `GOSSIP_HEARD.reliable` fold). Gated behind the deal-depth layer (off ⇒ never seeded ⇒
- * byte-identical). Roles only — an "honorer"/"other"/"third party" are structural roles, no names.
+ * 0121 R1 — the diffusing "keeps their word" REPUTATION reward (the knowledge-belief design). A kept deal
+ * seeds a hidden `reliable:<honorer>` belief that spreads NPC→NPC; the DEAL consequence is an explicit,
+ * bounded deal-willingness lean read from that belief (`mintNpcDeal`), and a small AFFINITY-ONLY whisper
+ * makes reliable players faintly more liked — kept OFF the deal-trust read so the two never double-count.
+ * Gated behind the deal-depth layer (off ⇒ never seeded ⇒ byte-identical). Roles only — an
+ * "honorer"/"other"/"third party" are structural roles, no names.
  */
+
+describe("0121 R1 — the reliable-fact lineage round-trips (the read side can resolve the honorer)", () => {
+  it("reliableFactId(honorer) ⇄ reliableHonorerFrom", () => {
+    const honorer = npc(9);
+    const fid = reliableFactId(honorer);
+    expect(fid).toBe(`reliable:${honorer}`);
+    expect(reliableHonorerFrom(fid)).toBe(honorer);
+    // A non-reliable lineage (an ordinary gossip fact) resolves to nothing.
+    expect(reliableHonorerFrom(`fact:${npc(1)}:1234`)).toBeUndefined();
+  });
+});
 
 // A comp-round resolver that THROWS every comp (so the player never wins the HOH ⇒ a comp-throw promise is
 // always KEPT — the honorer path fires deterministically). Every other pending resolves legally.
@@ -29,7 +43,7 @@ function resolveThrowing(s: Pick<GameSession, "submitDecision">, p: NonNullable<
 }
 
 describe("0121 R1 — spreadReliableReputation (the pure helper)", () => {
-  it("a third party who hears it leans toward the honorer; the deal partner + honorer never do", () => {
+  it("a third party who hears it warms in AFFINITY ONLY toward the honorer; the deal partner + honorer never do", () => {
     const core = buildEngineCore();
     const honorer = npc(9), other = npc(1);
     // A chain from the deal partner: other → npc2 → npc3. transmitProb 1 ⇒ deterministic spread.
@@ -37,26 +51,29 @@ describe("0121 R1 — spreadReliableReputation (the pure helper)", () => {
     const candidates = [other, npc(2), npc(3), honorer];
     const before2 = { ...core.relationships.edge(npc(2), honorer) };
 
-    const { leaned } = spreadReliableReputation({
+    const { leaned, factId } = spreadReliableReputation({
       knowledge: core.knowledge, rel: core.relationships, graph, rng: new SeededRandom(1),
-      honorer, other, content: "the honorer keeps their word", candidates, transmitProb: 1, rounds: 6,
+      honorer, other, content: "the honorer keeps their word", candidates,
+      factId: reliableFactId(honorer), transmitProb: 1, rounds: 6,
     });
 
-    // The belief spread to the third parties (origin `other` holds it too — seeded unconditionally).
+    // The belief spread under the STABLE lineage — every holder's belief resolves back to the honorer.
+    expect(factId).toBe(reliableFactId(honorer));
     for (const id of [other, npc(2), npc(3)]) {
-      expect(core.knowledge.knownTo(id).some((k) => k.content.includes("keeps their word")), `${id} heard it`).toBe(true);
+      const heard = core.knowledge.knownTo(id).find((k) => k.factId === reliableFactId(honorer));
+      expect(heard, `${id} heard it`).toBeDefined();
+      expect(reliableHonorerFrom(heard!.factId!)).toBe(honorer);
     }
     // Only THIRD parties leaned — never the deal partner (`other`, who earned the direct fold) or the honorer.
     expect(leaned).toContain(npc(2));
     expect(leaned).toContain(npc(3));
     expect(leaned).not.toContain(other);
     expect(leaned).not.toContain(honorer);
-    // A third party reads the honorer as a safer partner: trust/affinity rose toward them.
+    // The whisper is AFFINITY-ONLY: a third party likes the honorer a bit more, but TRUST is untouched (the
+    // deal consequence lives in the explicit willingness lean, not here — so the two never double-count).
     const after2 = core.relationships.edge(npc(2), honorer);
-    expect(after2.trust).toBeGreaterThan(before2.trust);
     expect(after2.affinity).toBeGreaterThan(before2.affinity);
-    // The deal partner's edge toward the honorer is NOT moved by this reward (no double-count).
-    expect(core.relationships.edge(other, honorer)).toEqual(core.relationships.edge(other, honorer)); // sanity: defined
+    expect(after2.trust).toBe(before2.trust);
   });
 
   it("is deterministic (same seed ⇒ same leaned set)", () => {
@@ -118,13 +135,26 @@ describe("0121 R1 — the registry seam is live end-to-end (a kept deal seeds th
     return { sb, other };
   }
 
-  it("a kept comp-throw seeds the honorer's 'keeps their word' reputation in the deal partner's knowledge", () => {
+  it("a kept comp-throw seeds the honorer's 'keeps their word' reputation under the stable, resolvable lineage", () => {
     const { sb, other } = playKeptCompThrow("dr-on", true);
     expect(other, "a comp-throw was struck").toBeDefined();
     expect(sb.session.snapshot().live!.hoh, "an NPC crowned (the player threw)").not.toBe(PLAYER);
-    // The seam fired: the deal partner (the diffusion origin) holds the Vault-free reputation belief.
-    const heard = sb.engine.knowledge.knownTo(other!).some((k) => k.content.includes("keeps their word"));
-    expect(heard, "the registry reputation seam is wired end-to-end").toBe(true);
+    // The seam fired: the deal partner (the diffusion origin) holds the Vault-free reputation belief about the
+    // HONORER (the player, who kept the throw) under the STABLE `reliable:<honorer>` lineage the read side needs.
+    const belief = sb.engine.knowledge.knownTo(other!).find((k) => k.factId === reliableFactId(PLAYER));
+    expect(belief, "the registry reputation seam is wired end-to-end").toBeDefined();
+    expect(reliableHonorerFrom(belief!.factId!), "resolves back to the honorer").toBe(PLAYER);
+    // Idempotent: a single honoring seeds the belief exactly once (no duplicate on the partner).
+    const count = sb.engine.knowledge.knownTo(other!).filter((k) => k.factId === reliableFactId(PLAYER)).length;
+    expect(count).toBe(1);
+    // The read side resolves it: replicating the registry's reliabilityReader over the partner's knowledge
+    // yields the honorer as a credited "keeps their word" partner — the input to `mintNpcDeal`'s deal lean.
+    const credited = new Set(
+      sb.engine.knowledge.knownTo(other!)
+        .map((k) => (k.factId ? reliableHonorerFrom(k.factId) : undefined))
+        .filter((h): h is string => h !== undefined),
+    );
+    expect(credited.has(PLAYER)).toBe(true);
   });
 
   it("with the deal-depth layer OFF, no reputation belief is ever seeded (byte-identical)", () => {

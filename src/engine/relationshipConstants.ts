@@ -363,6 +363,21 @@ export const DEAL_DURATION = {
 } as const;
 
 /**
+ * 0121 R1 — the explicit "keeps their word" deal-willingness lean (deal-depth layer, `ORWELL_DEAL_DEPTH`).
+ * A kept deal diffuses a hidden `reliable:<honorer>` belief NPC→NPC (0038 gossip); a houseguest who HOLDS it
+ * reads the honorer as a more-appealing partner. `dealLean` is the bounded, positive nudge added to the NPC
+ * deal-formation WILLINGNESS read (`GameSessionAdapter.mintNpcDeal`) when a candidate credits the other as
+ * reliable — a HIDDEN magnitude (mandate #2/#3): the player never sees a number, only that reliable players
+ * get offered deals. This is the deal consequence (distinct from the affinity-only social whisper in
+ * `GOSSIP_HEARD.reliable`, so the two never double-count). The KIND of pact stays keyed to the BARE mutual
+ * trust — reputation buys the OPPORTUNITY, not a bigger promise. Off unless the deal-depth flag is on ⇒ no
+ * lean ⇒ byte-identical.
+ */
+export const DEAL_REPUTATION = {
+  dealLean: 0.12,
+} as const;
+
+/**
  * Feature 0088 — a derived carriage word from the live NPC→player edge.
  * A sibling of `relationshipLabel`, oriented at the player and delta-aware
  * (drift = warming / cooling / steady since a per-week anchor). Pure read,
