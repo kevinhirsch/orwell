@@ -68,6 +68,49 @@ import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _setWsSplic
 // _setMessageActionsDeps, mirroring the PR2/PR3/PR4 injection pattern. Imported here only, so #1399
 // single-eval holds.
 import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMessage, editAIMessage, rewriteWith, continueFrom, _attachVariantNav, _setMessageActionsDeps } from './chatMessageActions.js';
+// #1414 (R3 PR6): the SEND-OUTBOX subsystem (#985 P2-A / #891 / #830) — the reload-durable,
+// session-bound, self-continuing queue for sends made while a turn streams / while offline.
+// Behavior-preserving: the three queues + two single-flight guards live on the chatState singleton
+// (PR0); chat.js still calls the moved helpers from handleChatSubmit (enqueue / offline / requeue /
+// mark-failed), the stream-settle finally (flush), and the adopt pass (confirm), and re-exports the
+// browser-gate surface on chatModule below byte-identically. Two chat.js-internal deps are injected
+// (below, at module-eval): the SOLE production dispatch (a headless handleChatSubmit) through
+// _setOutboxDispatch, and a () => API_BASE resolver through _setOutboxDeps. Imported here only, so
+// #1399 single-eval holds; sessions.js's selectSession drain-nudge rides the chatModule re-export.
+import {
+  _enqueueSend, _flushSendOutbox, _restoreOutboxFromStorage, _outboxConfirmDelivery,
+  _requeueOutboxItem, _isNetworkSendFailure, _dedupeOutboxAgainstServer, _setDeliveryState,
+  _markSendFailedById, _retryFailedSend, _persistOutbox, _updateOutboxStrip, _outboxOnline,
+  _armOutboxRetry, _setQueuedTag, _outboxPeekStorage, _setOutboxDispatch, _setOutboxDeps,
+} from './chatOutbox.js';
+// #1414 (R3 PR7): the cross-device RECONCILE / seq-order / peer-resume cluster (ADR 0008/0012) —
+// softReloadHistory (the render-and-reconcile total-order rebuild) + the seq helpers + the
+// orphan-aware bubble count + the deferred peer-resume seam. Behavior-preserving: chat.js still drives
+// the same call points (softReloadHistory at the stream-settle + adopt sites, flushPendingReconcile /
+// flushPendingPeerResume in the stream-end finally, _isEmptyTurnNoSave in the finalize) and re-exports
+// the browser-gate surface on chatModule below byte-identically (softReloadHistory /
+// flushPendingReconcile / deferPeerResume / flushPendingPeerResume / isSkippableUserPrompt / _msgSeq /
+// _insertBySeq / _reorderBySeq / _isEmptyTurnNoSave / _visibleMsgCount / _expectedVisibleBubbleCount).
+// Three chat.js-internal deps are injected (below, at module-eval) via _setReconcileDeps: hasActiveStream
+// (the SSE-reader liveness helper), resumeStream (the R2 live-resume attach) — both STAY here — and a
+// () => API_BASE resolver. Imported here only, so #1399 single-eval holds; sessions.js /sessionSync.js
+// reach the cluster through the chatModule re-export, unchanged.
+import {
+  softReloadHistory, flushPendingReconcile, deferPeerResume, flushPendingPeerResume,
+  _isSkippableUserPrompt, _isEmptyTurnNoSave, _msgSeq, _insertBySeq, _reorderBySeq,
+  _visibleMsgCount, _expectedVisibleBubbleCount, _setReconcileDeps,
+} from './chatReconcile.js';
+// #1414 (R3 PR8): the SEVERABLE stream-presentation helpers (PARTIAL by design — the ~1,660-line
+// SSE `while(true)` dispatch STAYS in handleChatSubmit; it cannot be lifted without rewriting the
+// turn orchestrator's ~30 in-place-reassigned per-turn locals into `ctx.X`, the exact "gamble the
+// live stream" the roadmap forbids — see chatStreamLoop.js's header + the #1414 PR8 report). Only
+// the pure, closure-free, non-pinned helpers move: _ensureStreamLayout (the `.stream-content`
+// render target), _toolLabels + _thinkingLabel (the tool-aware spinner label), _showThinkingSpinner
+// (the transient dots bubble). They touch NO chat.js-internal state (deps: ui/spinner/document), so
+// there is NO _setStreamLoopDeps to wire. `_thinkingLabel` now takes `lastToolName` as an argument
+// (chat.js passes its `_lastToolName` local). None are on chatModule / called cross-file, so no
+// re-export. Imported here only, so #1399 single-eval holds.
+import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner } from './chatStreamLoop.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -104,6 +147,14 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
   // this `let` (set once in init) so openAttachment reads the current value — an imported binding
   // would be read-only. Registered at module-eval (order-independent of init).
   _setAttachmentsApiBase(() => API_BASE);
+  // #1414 (R3 PR6): register the outbox's two chat.js-internal deps at module-eval. The SOLE
+  // production dispatch is a headless handleChatSubmit (byte-identical to the pre-PR6 default) —
+  // routed through the same _setOutboxDispatch seam the browser gate uses to install a stub, so
+  // production and test share one entry point (last writer wins). API_BASE is read live via the
+  // resolver (the _setAttachmentsApiBase precedent). handleChatSubmit is a hoisted declaration, so
+  // capturing it here (it is only INVOKED at flush time) is safe.
+  _setOutboxDeps({ apiBase: () => API_BASE });
+  _setOutboxDispatch((text, opts) => handleChatSubmit(null, text, opts));
   // #1414 (R3 PR0): streaming/send/display/continue mutable state moved to the shared `chatState`
   // singleton — chatState.currentAbort, .isStreaming, ._sendInFlight, ._displayOverride,
   // ._hideUserBubble, ._pendingContinue. See chatState.js for the per-field docs.
@@ -114,99 +165,11 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
   // (next submit is an auto-continue — don't reset the counter). Moved to chatState.js, #1414 R3 PR0.
   const _AUTO_NUDGE_CAP = 3;
 
-  // ── #985 P2-A: the SEND OUTBOX ──────────────────────────────────────────────
-  // A message the player sends WHILE a turn is streaming must NOT be silently dropped (the old
-  // `isStreaming → Stop` branch aborted the reply and `return`ed before the new text was ever read).
-  // The owner's ruling was "Queue it": enqueue the new message into this in-memory FIFO, paint its
-  // optimistic bubble immediately (composes with #992 render-by-seq — a pending bubble carries a
-  // clientMsgId, NO dbId/seq, so it floats to the tail until its seq lands), clear the composer (the
-  // text is now safely captured here, not lost), and flush the queue IN ORDER the moment the current
-  // turn settles — one in flight at a time, mirroring the engine's server-side `_framed` serialization.
-  // Idempotent + multibrowser-safe: each item is keyed by its `clientMsgId`, which the existing
-  // optimistic-adopt path reconciles by, so a flush is at-most-once and reconciles cleanly across
-  // windows (sends target the canonical session per #990, render by seq per #992, mirror per #991).
-  // Items: { clientMsgId, text, bubbleEl }. STOP is reserved for the explicit Stop button / an EMPTY
-  // composer — "stop the current reply" and "send a new message" are no longer collapsed onto one
-  // silent action.
-  // chatState._sendOutbox is this in-memory FIFO; chatState._flushingOutbox is the single-flight
-  // re-entrancy guard (only one flush send dispatched at a time). Moved to chatState.js, #1414 R3 PR0.
-
-  // ── #891 P0 (messaging resilience): the RELOAD-DURABLE half of the outbox + honest offline status ──
-  // The #985 outbox above was in-memory only — a hard reload while a send sat QUEUED lost it (the
-  // explicitly-deferred half; audit row INT-3). Now every queued item is persisted the instant it
-  // enters the queue and stays persisted until a SERVER row carrying its clientMsgId is observed:
-  //
-  //     enqueue → persist { clientMsgId, text, sessionId, ts } (sessionStorage, per-tab)
-  //     dispatch → item moves to _outboxAwaitingConfirm (STILL persisted — a reload mid-flight restores it)
-  //     server row with the clientMsgId observed (adopt pass / pre-send dedupe) → confirmed, released
-  //
-  // STORAGE CHOICE — sessionStorage, deliberately (vs IndexedDB/localStorage): the payload contract is
-  // tiny (a handful of {id, text} strings — no blobs, no attachments), so IndexedDB's async machinery
-  // buys nothing; and the outbox is PER-TAB by design (ADR 0008/0012 — a drained send flows through
-  // THIS tab's normal canonical-session send path; localStorage is shared across tabs, so two tabs
-  // restoring one queue would double-send the same message). sessionStorage is the tab-scoped store
-  // that survives a reload — the exact durability owed — and follows the composer-draft precedent
-  // (orwellComposerDraft.js, G17). Known boundary: closing the TAB discards its queue (a per-tab queue
-  // has no other tab allowed to drain it); that residual is #891's cross-tab/service-worker tier.
-  //
-  // AT-MOST-ONCE across a reload: restored (and network-requeued) items carry `needsDedupe` — before
-  // re-dispatch, ONE /api/history fetch drops any item whose client_msg_id the server already has
-  // (the server stamps it on the persisted user row, chat_helpers.add_user_message). Fail-closed: if
-  // the check cannot run, the item stays queued and the backoff retries — never an unverified re-send.
-  //
-  // HONEST STATUS (#891 P0-2): a queued bubble carries a real-text-node `.queued-tag` ('queued' /
-  // 'queued — offline' — same a11y reasoning as `.unsent-tag`), the drain gates on navigator.onLine,
-  // and the 'online' event + a capped exponential backoff auto-drain the queue. A send attempted
-  // while OFFLINE goes straight to the outbox (no doomed POST), and a send that dies at the network
-  // layer before any byte arrived is classified (`_isNetworkSendFailure`) and re-queued instead of
-  // surfacing as a raw error.
-  // chatState._outboxAwaitingConfirm: dispatched, not yet server-confirmed (persisted alongside the queue). #1414 R3 PR0.
-  //
-  // ── #891 F-A7 (per-bubble delivery state): the DURABLE-FAILED bucket ──
-  // A message's lifecycle is queued → sending → delivered | failed, projected onto its user bubble
-  // (`dataset.deliveryState`, a REAL text/aria surface — never CSS-only) and — the load-bearing half
-  // — persisted so a RELOAD shows the TRUE state, not a stranded pending bubble. queued/sending are
-  // already reload-durable (the queue + awaiting-confirm records above); `delivered` releases the
-  // durable copy. The missing terminal state is `failed`: a send that exhausted its network-requeue
-  // cap (`_OUTBOX_MAX_RETRIES`) used to be DROPPED to the generic error surface, so a reload lost the
-  // "not delivered" signal entirely. Such items now live here — persisted (`state:'failed'`),
-  // repainted on reload, HELD OUT of the auto-drain, and cleared only by an explicit per-bubble Retry
-  // (which re-enters the ONE normal flush, `needsDedupe`-armed) or by a server row proving the POST
-  // did land after all (`_outboxConfirmDelivery`). Kept separate from `_sendOutbox` so the drain,
-  // backoff, and aggregation never touch a terminally-failed turn.
-  // chatState._outboxFailed holds these durable terminally-failed items. Moved to chatState.js, #1414 R3 PR0.
-  //
-  // ── #830 (optimistic-always + aggregated unsent queue): the AGGREGATION lane ──
-  // The owner's ruling: "aggregate what you send quickly … when it's time to send the payload it
-  // sends all messages in one turn." Items queued WHILE A TURN WAS STREAMING (the rapid-succession
-  // case — the player keeps talking while the model replies) carry `coalesce: true`; at drain time
-  // a same-lane run of such items FOLDS into ONE combined turn (`_foldOutboxBatch`): one payload
-  // (texts joined by a blank line), ONE clientMsgId (the head's), ONE bubble (the batch's separate
-  // pending bubbles collapse into a single combined bubble via the same render path), ONE server
-  // row. A single queued item dispatches byte-identical to the pre-#830 path (no fold, no marker).
-  // DELIBERATELY NOT aggregated: OFFLINE-queued, network-requeued and reload-RESTORED items — each
-  // is its own at-most-once idempotency unit (its POST may already have reached the server, so the
-  // per-item `needsDedupe` verification and per-item drain of #891/#1379 must stand; folding items
-  // with divergent delivery states could double- or half-send a batch). Aggregation therefore
-  // requires `coalesce && !needsDedupe`, and never crosses a same-lane item that can't join (order
-  // within a conversation is preserved). When ≥2 items sit queued, an aggregated status strip
-  // (`#send-queue-strip`, role="status" — real text, WCAG 4.1.3) shows the count + a manual
-  // "Send now" retry that resets the backoff and drains through the ONE normal flush.
-  // chatState._outboxRestoreDone gates the once-per-page boot restore. Moved to chatState.js, #1414 R3 PR0.
-  let _outboxRetryTimer = null;
-  let _outboxRetryDelayMs = 0;        // 0 → next arm starts at the base delay
-  const _OUTBOX_RETRY_BASE_MS = 2000;
-  const _OUTBOX_RETRY_MAX_MS = 60000;
-  const _OUTBOX_MAX_RETRIES = 4;      // per-item network-requeue cap — beyond it the normal error surface speaks
-  const _OUTBOX_BOOT_RETRY_MS = [600, 1400, 2600, 4200]; // restore attempts (idempotent) past the boot renders
-  function _outboxKey() {
-    // E71 pattern (same as the composer draft): scoped per user so one account's queue never
-    // bleeds into another's. Read lazily — body/data-user exist by the time any send runs.
-    return 'orwell-send-outbox:' + ((document.body && document.body.dataset.user) || '');
-  }
-  function _outboxOnline() {
-    return typeof navigator === 'undefined' || navigator.onLine !== false;
-  }
+  // ── #985 P2-A / #891 / #830: the SEND OUTBOX subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
+  // Its state — the three queues (chatState._sendOutbox / ._outboxAwaitingConfirm / ._outboxFailed)
+  // and the two single-flight guards (chatState._flushingOutbox / ._outboxRestoreDone) — lives on the
+  // chatState singleton (PR0); the _outboxKey / _outboxOnline helpers and the _OUTBOX_* backoff
+  // constants moved with the subsystem. The helpers are imported above and re-exported on chatModule.
 
   // shortModel and modelColor are now in chatRenderer.js
   var _shortModel = chatRenderer.shortModel;
@@ -1540,18 +1503,8 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
       // _keepResearchOn removed — clarification state now persisted server-side via DB mode
       // Insert sources box as a stable DOM node that won't be replaced during streaming.
       // Returns the content container to use for innerHTML updates.
-      function _ensureStreamLayout(body) {
-        if (!body) return body;
-        // Sources are deferred to final render — don't insert during streaming
-        // Ensure a stable content div exists for text content
-        var contentDiv = body.querySelector('.stream-content');
-        if (!contentDiv) {
-          contentDiv = document.createElement('div');
-          contentDiv.className = 'stream-content';
-          body.appendChild(contentDiv);
-        }
-        return contentDiv;
-      }
+      // _ensureStreamLayout moved to ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top;
+      // called below (in _renderStream + the delta/tool handlers) exactly as before.
       const esc = uiModule.esc;
       // Remove thinking spinner helper
       _removeThinkingSpinner = () => {
@@ -1562,9 +1515,11 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
         }
       };
 
-      // Tool-aware thinking spinner
+      // Tool-aware thinking spinner: `_lastToolName` tracks the latest tool the model invoked and
+      // STAYS here (the tool handlers reassign it). The label map (_toolLabels), the label lookup
+      // (_thinkingLabel), the search icon, and the spinner mount (_showThinkingSpinner) all moved to
+      // ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top; called below unchanged.
       let _lastToolName = '';
-      const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
       // C14 (immersion): the Big Brother engine tools render as quiet production
       // beats — a label, never raw camelCase names or JSON payloads in the player's
       // transcript. Applies wherever these names appear (they exist only in the game).
@@ -1577,54 +1532,10 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
       // _orwellToolBeats now lives in ./orwellToolBeats.js (single source of truth,
       // imported at module top, shared with the history-reload path in
       // chatRenderer.js so the live + reload renders cannot drift).
-      const _toolLabels = {
-        'web_search': _searchIcon + 'Searching',
-        'bash': 'Running',
-        'python': 'Running',
-        'create_document': 'Writing',
-        'update_document': 'Writing',
-        'read_document': 'Reading',
-        'edit_file': 'Editing',
-        'read_file': 'Reading',
-        'write_file': 'Writing',
-        'list_files': 'Browsing',
-        'image_gen': 'Generating',
-        'generate_image': 'Generating',
-        'manage_memory': 'Remembering',
-        'save_memory': 'Remembering',
-        'search_memory': 'Recalling',
-        'manage_session': 'Organizing',
-        'deep_research': 'Researching',
-        'list_models': 'Browsing',
-        'ui_control': 'Adjusting',
-      };
-      function _thinkingLabel() {
-        if (!_lastToolName) {
-          return 'Thinking';
-        }
-        // Check exact match first, then prefix match
-        const lower = _lastToolName.toLowerCase();
-        if (_toolLabels[lower]) return _toolLabels[lower];
-        for (const [key, label] of Object.entries(_toolLabels)) {
-          if (lower.includes(key) || key.includes(lower)) return label;
-        }
-        return 'Thinking';
-      }
-
-      function _showThinkingSpinner(label) {
-        if (document.querySelector('.agent-thinking-dots')) return;
-        const _thinkMsg = document.createElement('div');
-        _thinkMsg.className = 'msg msg-ai agent-thinking-dots';
-        const _thinkBody = document.createElement('div');
-        _thinkBody.className = 'body';
-        const _ts = spinnerModule.create(label || 'Thinking', 'right', 'wave');
-        _thinkBody.appendChild(_ts.createElement());
-        _ts.start(120);
-        _thinkMsg._spinner = _ts;
-        _thinkMsg.appendChild(_thinkBody);
-        document.getElementById('chat-history').appendChild(_thinkMsg);
-        uiModule.scrollHistory();
-      }
+      // _toolLabels, _thinkingLabel, and _showThinkingSpinner moved to ./chatStreamLoop.js
+      // (#1414 R3 PR8) — imported at module top. `_toolLabels` is used by the tool_start handler
+      // below (`_toolLabels[json.tool.toLowerCase()]`); `_thinkingLabel(_lastToolName)` +
+      // `_showThinkingSpinner` are driven by `_scheduleThinkingSpinner` below.
 
       // Auto-show thinking spinner after text stops streaming
       let _textPauseTimer = null;
@@ -1632,7 +1543,7 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
         if (_textPauseTimer) clearTimeout(_textPauseTimer);
         _textPauseTimer = setTimeout(() => {
           if (!document.querySelector('.agent-thinking-dots') && chatState.isStreaming) {
-            _showThinkingSpinner(_thinkingLabel());
+            _showThinkingSpinner(_thinkingLabel(_lastToolName));
           }
         }, 400);
       }
@@ -4144,754 +4055,12 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
     }
   }
 
-  // ── #985 P2-A: SEND OUTBOX — enqueue + flush ────────────────────────────────
-  /**
-   * Enqueue a Send made WHILE a turn is streaming. Paints the optimistic bubble NOW (pending shape:
-   * clientMsgId, no dbId/seq → floats to the tail per #992), captures the text in the FIFO, clears the
-   * composer (the words are safely held in the queue, never lost), and routes the freshness seam — so
-   * nothing is dropped and the queue flushes in order when the current turn settles. Mirrors the
-   * optimistic-bubble + composer-clear contract of the normal send path so a queued send is
-   * indistinguishable from an in-line one once it reconciles.
-   */
-  function _enqueueSend(text) {
-    const clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : (Date.now() + '-' + Math.random().toString(36).slice(2)));
-    const item = {
-      clientMsgId,
-      text,
-      sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
-      ts: Date.now(),
-      retries: 0,
-      needsDedupe: false,
-      // #830: an item queued WHILE A TURN STREAMS is the rapid-succession case — it aggregates
-      // with its same-lane siblings into ONE combined turn at drain time (_foldOutboxBatch). An
-      // OFFLINE-queued item keeps #891's per-item at-most-once drain — the offline branch (~L801)
-      // also routes here, and a device that dropped its link mid-stream must NOT fold (each offline
-      // item is its own idempotency unit whose eventual POST may land independently), so coalesce
-      // additionally requires a live link.
-      coalesce: chatState.isStreaming === true && _outboxOnline(),
-      bubbleEl: null,
-    };
-    // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
-    _paintOutboxBubble(item);
-    chatState._sendOutbox.push(item);
-    _refreshOutboxStatusTags(); // honest status the moment it queues: 'queued' / 'queued — offline'
-    _persistOutbox();           // #891 P0-1: reload-durable from the instant it enters the queue
-    // Clear the composer — the text is now held in the outbox (+ bubble), so it is safe (and expected:
-    // the player is free to compose the next message). Mirror the normal-send composer reset.
-    try {
-      const mi = uiModule.el('message');
-      if (mi) {
-        mi.value = '';
-        mi.style.height = '';
-        mi.dispatchEvent(new Event('input'));
-      }
-      if (window._orwellComposerDraftClear) window._orwellComposerDraftClear();
-    } catch (_) {}
-  }
-
-  /** #891: paint (or re-paint after a reload) a queued item's optimistic pending bubble. */
-  function _paintOutboxBubble(item) {
-    try {
-      const bubbleEl = chatRenderer.addMessage('user', item.text, null, null);
-      if (bubbleEl) {
-        bubbleEl.dataset.clientMsgId = item.clientMsgId;
-        bubbleEl.classList.add('msg-pending');
-      }
-      item.bubbleEl = bubbleEl || null;
-      if (uiModule.setAutoScroll) uiModule.setAutoScroll(true);
-      if (uiModule.scrollHistory) uiModule.scrollHistory();
-    } catch (_) {
-      // A paint failure must not strand the text — it's still captured in the queue.
-      item.bubbleEl = null;
-    }
-  }
-
-  // ── #891 P0-1: outbox persistence (sessionStorage — per-tab; see the design note at the top) ──
-  /** Serialize queue + awaiting-confirm. An item leaves storage ONLY on server-confirmed delivery
-   *  (or the dedupe pass proving its row already exists) — never merely because it was dispatched. */
-  function _persistOutbox() {
-    try {
-      // #830: `coalesce` is deliberately NOT persisted — a restored item is its own at-most-once
-      // unit and re-enters the queue outside the aggregation lane (the restore forces it false),
-      // so a persisted copy of the flag would be dead weight the restore ignores.
-      const items = chatState._outboxAwaitingConfirm
-        .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
-        .concat(chatState._sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })))
-        // #891 F-A7: terminally-failed sends persist too — a reload must show 'failed' (with its
-        // Retry), never a stranded pending bubble or a vanished turn. `state:'failed'` routes the
-        // restore to the failed bucket instead of the auto-drain.
-        .concat(chatState._outboxFailed.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'failed' })));
-      if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
-      sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
-    } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
-  }
-
-  /** #891: restore the persisted queue after a reload — repaint pending bubbles, mark every restored
-   *  item `needsDedupe` (at-most-once: the pre-send history check drops already-delivered rows), and
-   *  kick the drain. Idempotent (runs once per page); scheduled past the boot renders so the bubbles
-   *  land after the history paint. Returns the number of items restored (test seam). */
-  function _restoreOutboxFromStorage() {
-    if (chatState._outboxRestoreDone) return 0;
-    if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
-    // #830 hardening, retained as DEFENSE-IN-DEPTH. chat.js USED to be evaluated TWICE on this
-    // page (app.js imports './chat.js' bare while index.html ALSO script-tagged 'chat.js?v=…' —
-    // two URLs ⇒ two module instances, each with its own queue state but SHARING one sessionStorage
-    // record). #1399 removed the versioned <script> tag, so chat.js now evaluates ONCE and this
-    // guard is trivially satisfied — but it is kept so that if a second load path ever regresses,
-    // only the instance registered as window.chatModule restores: a shadow instance restoring the
-    // same record repaints duplicate pending bubbles and — once its own dedupe pass verifies clean
-    // — dispatches a SECOND time (a real double-send). Fail-open when no handle exists (stripped
-    // test DOMs).
-    try {
-      if (window.chatModule && window.chatModule._restoreOutboxFromStorage &&
-          window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage) {
-        chatState._outboxRestoreDone = true; // this shadow instance never restores (nor re-attempts)
-        return 0;
-      }
-    } catch (_) { /* fail-open */ }
-    let rec = null;
-    try { rec = JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) {}
-    chatState._outboxRestoreDone = true;
-    const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
-    let restored = 0;
-    let restoredFailed = 0; // #891 F-A7: durable-failed items repaint but never auto-drain
-    for (const it of items) {
-      if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
-      if (typeof it.text !== 'string' || !it.text) continue;
-      if (chatState._sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
-          chatState._outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId) ||
-          chatState._outboxFailed.some((x) => x.clientMsgId === it.clientMsgId)) continue;
-      // #891 F-A7: a persisted `state:'failed'` item restores into the DURABLE-FAILED bucket — its
-      // bubble repaints as 'failed' + Retry, and it is NOT re-queued for the auto-drain (retries were
-      // exhausted; only an explicit Retry, or a proven-delivered server row, moves it).
-      if (it.state === 'failed') {
-        const failedItem = {
-          clientMsgId: it.clientMsgId,
-          text: it.text,
-          sessionId: it.sessionId || null,
-          ts: it.ts || Date.now(),
-          retries: it.retries || 0,
-          needsDedupe: false,
-          coalesce: false,
-          failed: true,
-          bubbleEl: null,
-        };
-        _paintOutboxBubble(failedItem);
-        _setDeliveryState(failedItem.bubbleEl, 'failed');
-        chatState._outboxFailed.push(failedItem);
-        restoredFailed++;
-        continue;
-      }
-      const item = {
-        clientMsgId: it.clientMsgId,
-        text: it.text,
-        sessionId: it.sessionId || null,
-        ts: it.ts || Date.now(),
-        retries: it.retries || 0,
-        needsDedupe: true, // EVERY restored item verifies against the server log before re-sending
-        // #830: a RESTORED item is its own at-most-once idempotency unit (its POST may already
-        // have reached the server), so it re-enters the queue OUTSIDE the aggregation lane —
-        // per-item drain, per-item dedupe, never folded (matches the design note at the top).
-        coalesce: false,
-        bubbleEl: null,
-      };
-      _paintOutboxBubble(item);
-      chatState._sendOutbox.push(item);
-      restored++;
-    }
-    _persistOutbox(); // normalize (drops a corrupt/empty record)
-    if (restored || restoredFailed) _refreshOutboxStatusTags();
-    // Only DRAINABLE (queued) restores kick the flush — a restored 'failed' item waits for its
-    // explicit Retry, never re-sending on its own.
-    if (restored) setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 250);
-    return restored;
-  }
-
-  /** #891: a server row carrying this clientMsgId was OBSERVED (adopt pass / dedupe) — delivery is
-   *  proven, so release the durable copy. Cheap no-op when nothing is queued (the common case). */
-  function _outboxConfirmDelivery(clientMsgId) {
-    if (!clientMsgId) return;
-    if (!chatState._outboxAwaitingConfirm.length && !chatState._sendOutbox.length && !chatState._outboxFailed.length) return;
-    let hit = false;
-    // #891 F-A7: a proven-delivered server row can rescue even a bubble we'd marked 'failed' (its
-    // POST DID land — the reader just died before the confirm). Scan the failed bucket too and settle
-    // the bubble to 'delivered' (clears the Retry).
-    for (const arr of [chatState._outboxAwaitingConfirm, chatState._sendOutbox, chatState._outboxFailed]) {
-      const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
-      if (i >= 0) {
-        const removed = arr.splice(i, 1)[0];
-        if (removed && removed.bubbleEl) _setDeliveryState(removed.bubbleEl, 'delivered');
-        hit = true;
-      }
-    }
-    if (hit) {
-      _outboxRetryDelayMs = 0; // a confirmed delivery proves the link — reset the backoff
-      _persistOutbox();
-      _updateOutboxStrip(); // #830: the aggregate count just shrank
-    }
-  }
-
-  /** #891 P0-2: re-queue a send that died at the network layer (or dead-ended) back into the durable
-   *  outbox — front of the queue (it is the OLDEST turn), `needsDedupe` armed (the POST may still have
-   *  reached the server), bubble kept with an honest queued tag. Idempotent per clientMsgId; capped at
-   *  _OUTBOX_MAX_RETRIES so a non-network failure misclassified once can't retry silently forever. */
-  function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId) {
-    if (!clientMsgId || typeof text !== 'string' || !text) return false;
-    const ai = chatState._outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
-    let item = ai >= 0 ? chatState._outboxAwaitingConfirm.splice(ai, 1)[0] : null;
-    if (chatState._sendOutbox.some((it) => it && it.clientMsgId === clientMsgId)) {
-      _persistOutbox(); // already queued — idempotent (the awaiting copy, if any, was just folded out)
-      return true;
-    }
-    if (!item) {
-      // #891 P1 fix (cross-session bleed): bind the fresh item to the session the failed send was
-      // ACTUALLY targeting (the caller passes the turn's streamSessionId) — not whatever session is
-      // current at catch-time (the user may have switched mid-turn). Fallback: current, then null.
-      item = {
-        clientMsgId, text,
-        sessionId: sessionId ||
-          (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
-        ts: Date.now(), retries: 0, bubbleEl: null,
-      };
-    }
-    item.retries = (item.retries || 0) + 1;
-    if (item.retries > _OUTBOX_MAX_RETRIES) {
-      _persistOutbox(); // out of retries — hand the turn back to the normal error surface
-      return false;
-    }
-    item.needsDedupe = true;
-    // #830: a network-requeued item (like a restored one) is its own at-most-once unit — it never
-    // re-joins the aggregation lane, even when the failed dispatch was itself a folded batch (the
-    // batch already IS one item here; it must not fold AGAIN with newer streaming sends).
-    item.coalesce = false;
-    if (bubbleEl) item.bubbleEl = bubbleEl;
-    if (item.bubbleEl) {
-      item.bubbleEl.classList.add('msg-pending');
-      item.bubbleEl.classList.remove('msg-unsent');
-      delete item.bubbleEl.dataset.unsent;
-    }
-    chatState._sendOutbox.unshift(item);
-    _refreshOutboxStatusTags();
-    _persistOutbox();
-    _armOutboxRetry();
-    return true;
-  }
-
-  /** #891: classify a send failure as NETWORK-layer (device offline / fetch never reached the server).
-   *  Deliberately NARROWER than _isRecoverableStreamErr — only the browser's fetch-network messages
-   *  qualify, so a client-side TypeError from a coding bug can't masquerade as "offline" and loop. */
-  function _isNetworkSendFailure(err) {
-    if (!_outboxOnline()) return true;
-    const m = ((err && err.message) || '').toLowerCase();
-    return /failed to fetch|networkerror|network request failed|load failed|err_internet|err_network|err_connection/.test(m);
-  }
-
-  /** #891: at-most-once across a reload — before dispatching any `needsDedupe` item, verify it against
-   *  the server log and drop any item whose client_msg_id the server already persisted. FAIL-CLOSED:
-   *  returns false (drain deferred, backoff armed) when any needed verification is unavailable — never
-   *  an unverified re-send. A 404 session (never materialized / since deleted) verifies trivially clean.
-   *
-   *  #891 P1 fix (cross-session bleed — PR #1379 review): each item is verified against ITS OWN
-   *  recorded session's history, NEVER the currently-selected session's. The old code preferred the
-   *  current session id, so a restored session-A item was "verified" against session B's log whenever
-   *  B was current after the reload — vacuously clean, then dispatched into B by the old drain gate.
-   *  Items are grouped by their recorded sessionId (one fetch per distinct session, normally one). An
-   *  item with NO recorded sessionId was queued before any session existed — there is no server log it
-   *  could have written into, so it verifies trivially clean (current-session-at-queue-time semantics,
-   *  documented at the drain's eligibility check). */
-  async function _dedupeOutboxAgainstServer() {
-    const flagged = chatState._sendOutbox.filter((it) => it && it.needsDedupe);
-    if (!flagged.length) return true;
-    const bySid = new Map();
-    for (const it of flagged) {
-      if (!it.sessionId) { it.needsDedupe = false; continue; }
-      if (!bySid.has(it.sessionId)) bySid.set(it.sessionId, []);
-      bySid.get(it.sessionId).push(it);
-    }
-    let allVerified = true;
-    for (const [sid, items] of bySid) {
-      let seen = null;
-      try {
-        // Bounded: a hung verification fetch must not wedge the drain (the flush holds
-        // _flushingOutbox across this await). On timeout it rejects → fail-closed → backoff.
-        const _dedupeOpts = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
-          ? { signal: AbortSignal.timeout(15000) } : {};
-        const res = await fetch(`${API_BASE}/api/history/${sid}`, _dedupeOpts);
-        if (res.status === 404) { items.forEach((it) => { it.needsDedupe = false; }); continue; }
-        if (res.ok) {
-          const data = await res.json();
-          seen = new Set((data.history || [])
-            .map((m) => m && m.metadata && m.metadata.client_msg_id)
-            .filter(Boolean));
-        }
-      } catch (_) { /* network hiccup — fail closed for this session's items */ }
-      if (!seen) { allVerified = false; continue; }
-      for (const it of items) {
-        it.needsDedupe = false;
-        if (seen.has(it.clientMsgId)) {
-          // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
-          // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
-          const i = chatState._sendOutbox.indexOf(it);
-          if (i >= 0) chatState._sendOutbox.splice(i, 1);
-          if (it.bubbleEl) _setDeliveryState(it.bubbleEl, 'delivered');
-        }
-      }
-    }
-    _persistOutbox();
-    _updateOutboxStrip(); // #830: proven-delivered drops may have shrunk the aggregate count
-    return allVerified;
-  }
-
-  // ── #891 P0-2: honest queued/offline status on the message bubble ──
-  /** Set/clear the `.queued-tag` status on a queued bubble. mode: 'queued' | 'offline' | null. The tag
-   *  is a REAL text node (the .unsent-tag a11y precedent — WCAG 4.1.3), never CSS generated content. */
-  function _setQueuedTag(bubbleEl, mode) {
-    if (!bubbleEl) return;
-    try {
-      const role = bubbleEl.querySelector('.role');
-      let tag = role && role.querySelector('.queued-tag');
-      if (!mode) {
-        if (tag) tag.remove();
-        bubbleEl.classList.remove('msg-queued-offline');
-        return;
-      }
-      if (!tag && role) {
-        tag = document.createElement('span');
-        tag.className = 'queued-tag';
-        role.appendChild(tag);
-      }
-      if (tag) tag.textContent = mode === 'offline' ? 'queued — offline' : 'queued';
-      bubbleEl.classList.toggle('msg-queued-offline', mode === 'offline');
-    } catch (_) {}
-  }
-
-  /** #891: sweep every queued bubble's status to the live connectivity truth. Routes through
-   *  `_setDeliveryState` so `dataset.deliveryState` stays in lockstep with the visible `.queued-tag`
-   *  ('queued' | 'queued — offline'). Terminally-failed bubbles are NOT swept — connectivity doesn't
-   *  un-fail them; only an explicit Retry does. */
-  function _refreshOutboxStatusTags() {
-    const mode = _outboxOnline() ? 'queued' : 'offline';
-    for (const it of chatState._sendOutbox) { if (it) _setDeliveryState(it.bubbleEl, mode); }
-    _updateOutboxStrip(); // #830: keep the aggregate affordance in lockstep with the per-bubble tags
-  }
-
-  // ── #891 F-A7: per-bubble delivery state (queued → sending → delivered | failed) ──
-  /** Project a message's delivery lifecycle onto its user bubble. `state`:
-   *    'queued'    — held in the outbox, link up            → `.msg-pending` + `.queued-tag` 'queued'
-   *    'offline'   — held, this device has no link          → `.queued-tag` 'queued — offline' + accent
-   *    'sending'   — dispatched, awaiting server confirm     → `.msg-pending` (dim = in-progress), no tag
-   *    'delivered' — a server row proved it landed / settled → all transient markers cleared
-   *    'failed'    — terminal (retries exhausted)            → `.msg-unsent` + a REAL 'Not delivered' +
-   *                                                            Retry affordance
-   *    null        — clear every marker (settled)
-   *  The state is ALSO stamped on `dataset.deliveryState` — a machine-readable, a11y-adjacent projection
-   *  that (for 'failed') is reconstructed on reload from the persisted outbox record, so a reload shows
-   *  the TRUE state. Reuses the existing message-state CSS vocabulary (`.msg-pending` / `.queued-tag` /
-   *  `.msg-unsent`); it adds no new stylesheet rules. */
-  function _setDeliveryState(bubbleEl, state) {
-    if (!bubbleEl) return;
-    try {
-      if (!state || state === 'delivered') {
-        _setQueuedTag(bubbleEl, null);
-        _clearDeliveryRetry(bubbleEl);
-        bubbleEl.classList.remove('msg-pending', 'msg-unsent');
-        delete bubbleEl.dataset.unsent;
-        if (state === 'delivered') bubbleEl.dataset.deliveryState = 'delivered';
-        else delete bubbleEl.dataset.deliveryState;
-        return;
-      }
-      if (state === 'queued' || state === 'offline') {
-        _clearDeliveryRetry(bubbleEl);
-        bubbleEl.classList.remove('msg-unsent');
-        delete bubbleEl.dataset.unsent;
-        bubbleEl.classList.add('msg-pending');
-        _setQueuedTag(bubbleEl, state); // real `.queued-tag` text node (the existing a11y contract)
-        bubbleEl.dataset.deliveryState = state;
-        return;
-      }
-      if (state === 'sending') {
-        _clearDeliveryRetry(bubbleEl);
-        bubbleEl.classList.remove('msg-unsent');
-        delete bubbleEl.dataset.unsent;
-        bubbleEl.classList.add('msg-pending'); // dim = "in progress" (the existing vocabulary)
-        _setQueuedTag(bubbleEl, null);         // the 'queued' text would be a lie once it's dispatched
-        bubbleEl.dataset.deliveryState = 'sending';
-        return;
-      }
-      if (state === 'failed') {
-        _setQueuedTag(bubbleEl, null);
-        bubbleEl.classList.remove('msg-pending');
-        bubbleEl.classList.add('msg-unsent');
-        bubbleEl.dataset.unsent = '1';
-        bubbleEl.dataset.deliveryState = 'failed';
-        _attachDeliveryRetry(bubbleEl, bubbleEl.dataset.clientMsgId || null);
-        return;
-      }
-    } catch (_) { /* delivery-state chrome is best-effort — never let it break the send/queue */ }
-  }
-
-  /** #891 F-A7: remove the per-bubble failed-delivery Retry affordance (if present). */
-  function _clearDeliveryRetry(bubbleEl) {
-    try {
-      const n = bubbleEl.querySelector('.msg-delivery-retry');
-      if (n) n.remove();
-    } catch (_) {}
-  }
-
-  /** #891 F-A7: attach a REAL "Not delivered" label + Retry button to a failed user bubble (WCAG
-   *  4.1.3 — the meaning lives in text nodes, never CSS-only). The button re-enters the ONE normal
-   *  flush via `_retryFailedSend`; it reuses the existing `.continue-btn` style (no new CSS). */
-  function _attachDeliveryRetry(bubbleEl, clientMsgId) {
-    try {
-      const host = bubbleEl.querySelector('.body') || bubbleEl;
-      if (!host || host.querySelector('.msg-delivery-retry')) return;
-      const note = document.createElement('div');
-      note.className = 'msg-delivery-retry';
-      note.setAttribute('role', 'status');
-      note.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:4px;opacity:0.9;font-style:italic;';
-      const label = document.createElement('span');
-      label.textContent = 'Not delivered.';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'continue-btn';
-      btn.textContent = 'Retry';
-      btn.addEventListener('click', () => {
-        _clearDeliveryRetry(bubbleEl);
-        _retryFailedSend(clientMsgId || bubbleEl.dataset.clientMsgId || null);
-      });
-      note.appendChild(label);
-      note.appendChild(btn);
-      host.appendChild(note);
-    } catch (_) {}
-  }
-
-  /** #891 F-A7: move a terminally-failed send into the durable-failed bucket, paint its bubble
-   *  'failed' + Retry, and persist ('state:failed') so a reload shows the true state. Idempotent per
-   *  clientMsgId. `_markSendFailedById` is the caller-facing entry when only the id/text/bubble are in
-   *  hand (the stream catch-hook, after the network-requeue cap is hit). */
-  function _markSendFailed(item) {
-    if (!item || !item.clientMsgId) return false;
-    for (const arr of [chatState._sendOutbox, chatState._outboxAwaitingConfirm]) {
-      const i = arr.indexOf(item);
-      if (i >= 0) arr.splice(i, 1);
-    }
-    if (!chatState._outboxFailed.some((it) => it && it.clientMsgId === item.clientMsgId)) {
-      item.failed = true;
-      item.coalesce = false;
-      chatState._outboxFailed.push(item);
-    }
-    if (item.bubbleEl) _setDeliveryState(item.bubbleEl, 'failed');
-    _persistOutbox();
-    _updateOutboxStrip();
-    return true;
-  }
-
-  function _markSendFailedById(clientMsgId, text, bubbleEl, sessionId) {
-    if (!clientMsgId || typeof text !== 'string' || !text) return false;
-    // Reclaim any live copy so it can't also drain; otherwise build the record fresh (the capped
-    // requeue already spliced it out of every bucket).
-    let item = null;
-    for (const arr of [chatState._sendOutbox, chatState._outboxAwaitingConfirm, chatState._outboxFailed]) {
-      const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
-      if (i >= 0) { item = arr.splice(i, 1)[0]; break; }
-    }
-    if (!item) {
-      item = {
-        clientMsgId, text,
-        sessionId: sessionId ||
-          (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
-        ts: Date.now(), retries: _OUTBOX_MAX_RETRIES + 1, bubbleEl: null,
-      };
-    }
-    if (bubbleEl && !item.bubbleEl) item.bubbleEl = bubbleEl;
-    const ok = _markSendFailed(item);
-    return ok;
-  }
-
-  /** #891 F-A7: the user tapped Retry on a failed bubble — re-enter the ONE normal flush. The send is
-   *  `needsDedupe`-armed (its earlier POST may have partially landed) and unshifted to the FRONT (it
-   *  is the oldest turn), exactly like a network requeue. Fresh retry budget (the user chose this). */
-  function _retryFailedSend(clientMsgId) {
-    if (!clientMsgId) return false;
-    const i = chatState._outboxFailed.findIndex((it) => it && it.clientMsgId === clientMsgId);
-    if (i < 0) return false;
-    const item = chatState._outboxFailed.splice(i, 1)[0];
-    item.failed = false;
-    item.retries = 0;              // user-initiated — a fresh attempt, not a continuation of the cap
-    item.needsDedupe = true;       // its earlier POST may have reached the server — verify first
-    item.coalesce = false;         // its own at-most-once unit, never folded
-    if (item.bubbleEl) _setDeliveryState(item.bubbleEl, _outboxOnline() ? 'queued' : 'offline');
-    chatState._sendOutbox.unshift(item);
-    _persistOutbox();
-    _armOutboxRetry();
-    try { _flushSendOutbox(); } catch (_) {}
-    return true;
-  }
-
-  // ── #830: the AGGREGATED unsent-queue affordance ──
-  // When ≥2 sends sit queued, the scattered per-bubble tags gain one aggregate status card above
-  // the composer: the count, whether the batch will send as ONE turn (the coalesce lane), the
-  // offline truth, and a manual "Send now" retry. The card COMPOSES window.OrwellNoticeKit — the
-  // ONE stacked above-composer zone (ruling 642; the anti-fragmentation gate in
-  // test_on_notice_kit.py forbids hand-rolled anchors) — kind 'continue' (a quiet ambient notice),
-  // role 'status' + real text nodes (WCAG 4.1.3, the .unsent-tag precedent). It is a PROJECTION of
-  // the #891 outbox: no queue state of its own, and its retry routes through the ONE normal flush
-  // (every guard re-checked; never a second send path).
-  let _outboxNotice = null;   // the kit notice handle (created lazily at ≥2 queued items)
-  let _outboxStripRow = null; // the body row (label + retry button) inside the kit card
-
-  /** #830: project the outbox onto the aggregate card. Visible only at ≥2 queued items (a single
-   *  item's per-bubble tag already tells the whole story); closed the moment the queue drains. */
-  function _updateOutboxStrip() {
-    try {
-      const n = chatState._sendOutbox.length;
-      if (n < 2) {
-        if (_outboxNotice) {
-          try { _outboxNotice.hide(); } catch (_) {}
-          _outboxNotice = null;
-          _outboxStripRow = null;
-        }
-        return;
-      }
-      if (!window.OrwellNoticeKit) return; // fail-open: the per-bubble queued tags still speak
-      if (!_outboxNotice || !(_outboxNotice.isShown && _outboxNotice.isShown())) {
-        // Belt: a just-hidden card may still be animating out under the same id — clear it so the
-        // zone never briefly holds two.
-        const leftover = document.getElementById('send-queue-strip');
-        if (leftover && leftover.isConnected) { try { leftover.remove(); } catch (_) {} }
-        _outboxNotice = window.OrwellNoticeKit.create({
-          id: 'send-queue-strip',
-          kind: 'continue',    // a quiet ambient above-composer notice (polite live region)
-          role: 'status',      // WCAG 4.1.3 — announced without focus
-          title: '',           // single-line affordance: the row lives in the body
-          dismissible: false,  // its lifecycle is queue-driven, never a user dismissal
-          persistDismiss: false,
-        });
-        const row = document.createElement('span');
-        row.className = 'send-queue-row';
-        const label = document.createElement('span');
-        label.className = 'send-queue-label';
-        row.appendChild(label);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        // #775: kit-card buttons compose the element kit's chrome; .send-queue-retry is the hook.
-        btn.className = 'ow-btn ow-btn-plain send-queue-retry';
-        btn.textContent = 'Send now';
-        btn.addEventListener('click', () => {
-          // Manual retry (#830 "failed with Retry — retry re-sends the batch"): reset the backoff
-          // and drain through the ONE normal flush, which re-checks every guard (single-flight,
-          // streaming, offline, dedupe, session binding) and folds the coalesce batch exactly like
-          // an auto-drain.
-          _outboxRetryDelayMs = 0;
-          if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
-          try { _flushSendOutbox(); } catch (_) {}
-        });
-        row.appendChild(btn);
-        _outboxNotice.show();
-        _outboxNotice.setBody(row);
-        // Title-less single-line card: keep the empty head row from reserving space (the
-        // orwellChatHint precedent).
-        const head = _outboxNotice.el && _outboxNotice.el.querySelector('.on-head');
-        if (head) head.style.display = 'none';
-        _outboxStripRow = row;
-      }
-      const offline = !_outboxOnline();
-      const oneTurn = chatState._sendOutbox.every((it) => it && it.coalesce && !it.needsDedupe);
-      const label = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-label');
-      if (label) {
-        label.textContent = offline
-          ? (n + ' messages queued — offline')
-          : (oneTurn ? (n + ' messages queued — they will send as one turn')
-                     : (n + ' messages queued'));
-      }
-      const btn = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-retry');
-      if (btn) btn.disabled = offline; // no link ⇒ a manual retry is a lie; the 'online' event drains
-    } catch (_) { /* the card is best-effort chrome — never let it break the queue */ }
-  }
-
-  /** #891: capped exponential backoff retry (2s → 60s) for a queue held by offline/network failure.
-   *  Reset to the base by a confirmed delivery or the 'online' event. One timer at a time. */
-  function _armOutboxRetry() {
-    if (_outboxRetryTimer) return;
-    if (chatState._sendOutbox.length === 0) return;
-    _outboxRetryDelayMs = _outboxRetryDelayMs
-      ? Math.min(_outboxRetryDelayMs * 2, _OUTBOX_RETRY_MAX_MS)
-      : _OUTBOX_RETRY_BASE_MS;
-    _outboxRetryTimer = setTimeout(() => {
-      _outboxRetryTimer = null;
-      try { _flushSendOutbox(); } catch (_) {}
-    }, _outboxRetryDelayMs);
-  }
-
-  /** #830: fold a rapid-succession batch (all `coalesce`, all same-lane, none dedupe-pending) into
-   *  ONE turn. One combined payload (texts joined by a blank line, send order preserved), ONE
-   *  clientMsgId (the head's — the batch's single idempotency key), ONE bubble: the batch's separate
-   *  pending bubbles collapse into a single combined bubble painted through the SAME render path
-   *  every queued bubble uses, so the live view matches the one persisted user row a reload or a
-   *  peer window will show. The folded item is a normal outbox item — awaiting-confirm, persistence,
-   *  network-requeue ("retry re-sends the batch") and the adopt/confirm seams all apply unchanged. */
-  function _foldOutboxBatch(batch) {
-    const head = batch[0];
-    const folded = {
-      clientMsgId: head.clientMsgId,
-      text: batch.map((it) => it.text).join('\n\n'),
-      sessionId: batch.map((it) => it.sessionId).find(Boolean) || null,
-      ts: head.ts,
-      retries: Math.max.apply(null, batch.map((it) => it.retries || 0)),
-      needsDedupe: false,
-      coalesce: true,
-      bubbleEl: null,
-    };
-    try {
-      for (const it of batch) {
-        if (it && it.bubbleEl && it.bubbleEl.parentNode) it.bubbleEl.remove();
-      }
-    } catch (_) { /* a merge-paint hiccup must never lose the text — it lives in `folded` */ }
-    _paintOutboxBubble(folded);
-    return folded;
-  }
-
-  /**
-   * Flush the next queued send IN ORDER once the current turn has settled (called from the stream-end
-   * finally). ONE in flight at a time: it dispatches a single headless send that re-uses the queued
-   * item's already-painted bubble + its clientMsgId (idempotent / at-most-once), and the NEXT item is
-   * picked up by that send's own stream-end finally — so the queue drains strictly FIFO, one turn per
-   * settle, with no double-send. #830: a run of `coalesce` items (queued in rapid succession while a
-   * turn streamed) folds into ONE combined turn here (`_foldOutboxBatch`); a single queued item — and
-   * every offline/requeued/restored item — dispatches byte-identical to the per-item path. Guards:
-   * never while a stream is live (would race the in-flight turn), never re-entrant. A no-op when the
-   * outbox is empty (the overwhelming common case).
-   */
-  // The flush dispatcher — defaults to a headless `handleChatSubmit`. Indirected through a swappable
-  // ref so the FIFO/idempotency browser gate can spy the dispatch without a real LLM stream; in
-  // production it IS `handleChatSubmit`, so behaviour is byte-identical.
-  let _outboxDispatch = (text, opts) => handleChatSubmit(null, text, opts);
-  function _flushSendOutbox() {
-    if (chatState._flushingOutbox) return;
-    if (chatState.isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
-    if (chatState._sendOutbox.length === 0) return;
-    // TEST SEAM (#891 browser gate): lets the reload-durability harness install its dispatch spy
-    // before the boot-restore auto-drain can fire. Never set by app code.
-    if (typeof window !== 'undefined' && window.__orwellOutboxHoldDrain) return;
-    // #891 P0-2: OFFLINE — hold the queue (durable + honestly tagged), arm the backoff, and let the
-    // 'online' listener drain the moment the link returns. Never a doomed dispatch.
-    if (!_outboxOnline()) { _refreshOutboxStatusTags(); _armOutboxRetry(); return; }
-    chatState._flushingOutbox = true;
-    // #891: restored / network-requeued items verify against the server log FIRST (at-most-once
-    // across a reload — a send whose POST landed but whose confirmation was lost must never
-    // re-send). Fail-closed: an unverifiable check keeps the item queued and re-arms the backoff.
-    // Runs BEFORE the session gate below: a proven-delivered item must be releasable even while the
-    // boot is still re-selecting its session.
-    const _preflight = chatState._sendOutbox.some((it) => it && it.needsDedupe)
-      ? _dedupeOutboxAgainstServer()
-      : Promise.resolve(true);
-    _preflight.then((ok) => {
-      if (ok === false) { chatState._flushingOutbox = false; _armOutboxRetry(); return; }
-      if (chatState.isStreaming || chatState._sendOutbox.length === 0) { chatState._flushingOutbox = false; return; }
-      // #891 P1 fix (cross-session bleed — PR #1379 review, Greptile-executed repro): an item's
-      // recorded `sessionId` is BINDING — it may only dispatch while ITS session is the currently-
-      // selected one, because `_outboxDispatch` submits against current sessionModule state. The
-      // old guard only required that SOME session existed, so a restored session-A item dispatched
-      // into session B whenever B became current first after a reload. Items bound to a non-current
-      // session are HELD in the queue (kept, _flushingOutbox reset, backoff armed — never shifted);
-      // they drain when their session is selected (the sessions.js selectSession nudge) or on the
-      // retry tick. Earliest-eligible-first preserves per-session FIFO order. An item with NO
-      // recorded sessionId was queued before any session existed (pre-session send) — its semantics
-      // are current-session-at-dispatch-time: the normal send path materializes/auto-creates,
-      // exactly as the inline pre-session send it stands in for would have. A still-`needsDedupe`
-      // item (its verification fetch failed above) is never eligible.
-      const _cur = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
-      const _idx = chatState._sendOutbox.findIndex((it) =>
-        it && !it.needsDedupe && (!it.sessionId || it.sessionId === _cur));
-      if (_idx === -1) { chatState._flushingOutbox = false; _armOutboxRetry(); return; }
-      let item = _idx === 0 ? chatState._sendOutbox.shift() : chatState._sendOutbox.splice(_idx, 1)[0];
-      if (!item) { chatState._flushingOutbox = false; return; }
-      // #830: AGGREGATED drain — a rapid-succession run queued while a turn streamed sends as ONE
-      // combined turn ("aggregate what you send quickly … it sends all messages in one turn").
-      // Collect every later item that (a) opted into the coalesce lane at enqueue time, (b) has no
-      // at-most-once ambiguity (`!needsDedupe` — offline/requeued/restored items keep #891's
-      // per-item drain), and (c) targets the SAME lane as this dispatch. The collection stops at
-      // the first same-lane item that can't join, so conversation order is never shuffled; items
-      // held for ANOTHER session are skipped over (an independent lane, untouched). One item ⇒ no
-      // fold — byte-identical to the pre-#830 dispatch.
-      if (item.coalesce && !item.needsDedupe) {
-        const _batch = [item];
-        for (let i = 0; i < chatState._sendOutbox.length; ) {
-          const it = chatState._sendOutbox[i];
-          if (!it) { i++; continue; }
-          const _sameLane = !it.sessionId || it.sessionId === _cur;
-          if (!_sameLane) { i++; continue; }
-          if (it.coalesce && !it.needsDedupe) { _batch.push(chatState._sendOutbox.splice(i, 1)[0]); continue; }
-          break;
-        }
-        if (_batch.length > 1) item = _foldOutboxBatch(_batch);
-      }
-      // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
-      // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
-      // keeps the re-send at-most-once.
-      chatState._outboxAwaitingConfirm.push(item);
-      _persistOutbox();
-      _updateOutboxStrip(); // #830: the queue just shrank (dispatch and/or fold)
-      _setDeliveryState(item.bubbleEl, 'sending'); // #891 F-A7: actually sending now (dim, no queued tag)
-      // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
-      // back to letting the send paint a fresh one — the text is never lost.
-      const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
-      // #891 P1 fix (drain starvation — PR #1379 review): the drain is SELF-CONTINUING. A flush
-      // attempt that lands while this dispatch is still in flight is swallowed by the
-      // `_flushingOutbox` guard (single-flight, correct), and some dispatch paths dead-end WITHOUT
-      // ever reaching the stream-end finally that normally re-kicks the drain (an early-return
-      // handleChatSubmit — e.g. a failed session materialize / `_abortSendKeepMessage` — schedules
-      // no flush and arms no backoff). Either way, a SECOND queued item could sit stuck until some
-      // unrelated event (online, session select, an armed timer) happened to nudge the outbox. So:
-      // when the dispatch settles and the guard clears, re-invoke the flush ourselves whenever
-      // items remain. The re-run re-checks EVERY guard (single-flight, streaming, offline, dedupe,
-      // session binding) and either dispatches the next eligible item or parks on the backoff —
-      // one hop per settle, so it can never spin.
-      const _continueDrain = () => {
-        chatState._flushingOutbox = false;
-        if (chatState._sendOutbox.length > 0) {
-          setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0);
-        }
-      };
-      try {
-        Promise.resolve(
-          _outboxDispatch(item.text, {
-            queuedClientMsgId: item.clientMsgId,
-            queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
-          })
-        ).catch(() => {}).finally(_continueDrain);
-      } catch (_) {
-        _continueDrain();
-      }
-    }).catch(() => { chatState._flushingOutbox = false; _armOutboxRetry(); });
-  }
-
-  // ── #891 P0: durability wiring — boot restore + online/offline honesty. Module-level (the
-  // orwellComposerDraft.js / ws-ready precedent): chat.js is evaluated once per page. ──
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    window.addEventListener('online', () => {
-      // The link is back: reset the backoff, cancel any pending long-delay retry, retag, and drain
-      // through the normal flush (which re-checks every guard). Small defer so the browser's own
-      // connectivity settle (and any 'online'-triggered reconcile) lands first.
-      _outboxRetryDelayMs = 0;
-      if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
-      _refreshOutboxStatusTags();
-      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 200);
-    });
-    window.addEventListener('offline', () => { _refreshOutboxStatusTags(); });
-    // Boot restore: attempted on pageshow + a short retry schedule (idempotent — first attempt that
-    // finds the chat box wins), so the restored bubbles land after the boot history render instead
-    // of being wiped by it. Mirrors the composer-draft boot pattern.
-    const _kickOutboxRestore = () => {
-      for (const ms of _OUTBOX_BOOT_RETRY_MS) {
-        setTimeout(() => { try { _restoreOutboxFromStorage(); } catch (_) {} }, ms);
-      }
-    };
-    window.addEventListener('pageshow', _kickOutboxRestore, { once: true });
-    if (document.readyState === 'complete') _kickOutboxRestore();
-  }
+  // ── #985 P2-A / #891 / #830: SEND OUTBOX — the subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
+  // The enqueue / paint / persist / restore / confirm / requeue / dedupe / delivery-state / fold /
+  // flush / aggregate-strip helpers + the boot-restore durability wiring (online/offline/pageshow)
+  // now live in chatOutbox.js; chat.js calls them from handleChatSubmit (enqueue / offline-send /
+  // network-requeue / mark-failed), the stream-settle finally (_flushSendOutbox), and the adopt pass
+  // (_outboxConfirmDelivery) via the imports above — the dispatch stays the SOLE handleChatSubmit.
 
   /**
    * Abort current chat request
@@ -5090,392 +4259,18 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
   var _notifyStreamComplete = chatStream.notifyStreamComplete;
   var _insertStreamDoneToast = chatStream.insertStreamDoneToast;
 
-  /**
-   * Cross-device sync: re-render the conversation for `sessionId` from saved
-   * history WITHOUT the heavy, draft-clearing selectSession path. Used when
-   * another device adds a message to the session this device is viewing. No-op
-   * if it isn't the open session, or if this device is mid-stream/resume for it
-   * (its own live view is authoritative). Preserves the message input; only
-   * touches #chat-history, and only auto-scrolls if already near the bottom.
-   */
-  // ADR 0008: sessions that DIVERGED while a stream was in flight — reconciled when it ends.
-  // → chatState._pendingReconcile (moved to chatState.js, #1414 R3 PR0).
-  // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): a PEER's run-started arrived for the
-  // canonical session while THIS window's OWN POST stream for that same session was still in flight,
-  // so the observer's `!hasActiveStream(id)` guard suppressed the live `resumeStream` attach. The peer
-  // run is durable (chained as the current `_RUNS[canonical]`, still `has_run` within the evict grace),
-  // so we DON'T drop the invitation — we record it here and RE-ATTEMPT the attach the moment our own
-  // stream settles (the finally below). subscribe() replays the peer run's buffer (or its tail) then
-  // live-tails, so the deferred attach mirrors the peer turn in lockstep instead of waiting on a later
-  // poll/reconcile (the transient one-window-behind offset the 50× smoke caught).
-  // → chatState._pendingPeerResume (moved to chatState.js, #1414 R3 PR0).
-  // ADR 0012 (GAP 2): sessions whose NEXT softReloadHistory must FORCE the seq-ordered rebuild even if
-  // the rendered id-order looks "converged". The error path adopts the live error bubble to the
-  // persisted message's {id, seq} (so the divergence check passes) but its CONTENT is still the raw
-  // "Error 503", not the persisted friendly fallback — only a content rebuild makes the sender match
-  // the peer. The convergence short-circuit is about avoiding flicker on a NORMAL turn; on an error we
-  // accept the one rebuild to guarantee identical settled text.
-  // → chatState._forceRebuild (moved to chatState.js, #1414 R3 PR0).
-  function _historyMsgText(msg) {
-    if (typeof msg.content === 'string') return msg.content;
-    if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
-    return '';
-  }
-  function _isSkippableUserPrompt(text) {
-    const t = (text || '').trim();
-    return t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
-      t.startsWith('Your previous response was interrupted.') ||
-      t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain') ||
-      // OOBE hand-off cues are the producers reaching out — never the player's own words.
-      // sendHiddenCue() hides them live; on a history reload / cross-device load the persisted
-      // user turn must stay hidden too, or it surfaces as a "You" bubble and breaks immersion
-      // (UX audit J1-03). Match the "(Production cue …)" envelope.
-      t.toLowerCase().startsWith('(production cue');
-  }
-  function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
-
-  /**
-   * BUG 1 (ADR 0008 — render BY the authoritative seq, never by arrival order).
-   *
-   * The server assigns a monotonic `seq` per session (UNIQUE(session_id, seq)); the FE log is a
-   * replica of that total order. Every live insert (optimistic user send, stream holder, peer
-   * resume holder) is necessarily append-to-bottom because seq isn't known until the row persists —
-   * so two turns whose persistence interleaves (a peer write racing the local turn, two windows)
-   * could sit in ARRIVAL order, not seq order. Reconcile (`softReloadHistory`) rebuilds in seq order
-   * but only when DIVERGED and only when idle, leaving a visible out-of-seq window mid-stream.
-   *
-   * The structural fix: a single seq read (`_msgSeq`) + a single non-destructive reorder
-   * (`_reorderBySeq`) that the reconcile's ADOPT PASS runs on every reconcile attempt (it runs even
-   * while a stream is in flight — the `hasActiveStream` early-return is AFTER the adopt pass). A
-   * bubble that has been stamped with `data-seq` is moved into ascending-seq position WITHOUT a DOM
-   * wipe, reordering ONLY among the seq'd bubbles' own slots; bubbles with NO seq yet (a still-pending
-   * optimistic send, the LIVE streaming holder, an un-adopted orphan) and non-`.msg` nodes (tool
-   * threads) never move — so the live holder is never torn from its threads. Idempotent: a no-op when
-   * already ordered (the overwhelming common case). This makes it STRUCTURALLY impossible for an adopted
-   * bubble to remain out of seq order relative to server truth.
-   */
-  export function _msgSeq(el) {
-    if (!el || !el.dataset || el.dataset.seq == null || el.dataset.seq === '') return null;
-    const n = Number(el.dataset.seq);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  /** Insert `el` into `box` at its `data-seq` position: before the first existing `.msg` whose seq
-   * is strictly greater. No seq on `el` (a pending/optimistic send) ⇒ append to bottom (the newest
-   * local turn). Used at the live insert sites so a bubble that DOES know its seq lands ordered. */
-  export function _insertBySeq(box, el) {
-    if (!box || !el) return;
-    const s = _msgSeq(el);
-    if (s == null) { box.appendChild(el); return; }
-    const kids = box.querySelectorAll('.msg');
-    for (let i = 0; i < kids.length; i++) {
-      if (kids[i] === el) continue;
-      const ks = _msgSeq(kids[i]);
-      if (ks != null && ks > s) { box.insertBefore(el, kids[i]); return; }
-    }
-    box.appendChild(el);
-  }
-
-  /** Non-destructive in-place reorder of the SEQ'D message bubbles in `#chat-history` to ascending
-   * `data-seq`. DELIBERATELY CONSERVATIVE: it reorders ONLY the `.msg[data-seq]` bubbles among
-   * themselves, reassigning them into the very DOM SLOTS those seq'd bubbles already occupy. Everything
-   * else — no-seq bubbles (a still-pending optimistic send, the LIVE streaming holder, an un-adopted
-   * orphan) AND non-`.msg` nodes (`.agent-thread` tool groups, decision cards, notices) — stays exactly
-   * where it is, so a mid-stream reconcile can never tear the live holder away from its tool threads or
-   * disturb thread `has-top`/`has-bottom` adjacency. A persisted bubble that landed out of arrival-vs-seq
-   * order (a peer write racing the local turn, two interleaved `message_saved`s) is moved into its seq
-   * slot WITHOUT a DOM wipe. Idempotent: zero churn when already ordered. Returns the count of bubbles
-   * actually moved so callers/tests can detect a real correction. */
-  export function _reorderBySeq(box) {
-    if (!box) return 0;
-    // The slots: the current DOM positions held by seq'd bubbles. We only ever permute WITHIN these.
-    const seqd = Array.from(box.querySelectorAll('.msg')).filter(el => _msgSeq(el) != null);
-    if (seqd.length < 2) return 0;
-    const wantOrder = seqd.slice().sort((a, b) => {
-      const as = _msgSeq(a), bs = _msgSeq(b);
-      if (as !== bs) return as - bs;          // ascending seq
-      return seqd.indexOf(a) - seqd.indexOf(b); // seq tie → preserve current relative order (stable)
-    });
-    // Already ordered? (common case — bail with zero churn).
-    let same = true;
-    for (let i = 0; i < seqd.length; i++) { if (wantOrder[i] !== seqd[i]) { same = false; break; } }
-    if (same) return 0;
-    // Reorder WITHIN the seq'd slots only: drop an empty placeholder where each seq'd bubble currently
-    // sits (preserving the exact slot positions among all the OTHER, untouched nodes), detach the seq'd
-    // bubbles, then fill the placeholders in ascending-seq order. No-seq bubbles (the live streaming
-    // holder, a pending optimistic send) and non-`.msg` nodes (tool threads, cards) never move — their
-    // surrounding placeholders are swapped under them.
-    const marks = seqd.map(() => document.createComment('seq-slot'));
-    for (let i = 0; i < seqd.length; i++) box.replaceChild(marks[i], seqd[i]);
-    let moved = 0;
-    for (let i = 0; i < marks.length; i++) {
-      if (wantOrder[i] !== seqd[i]) moved += 1;   // this slot's occupant changed
-      box.replaceChild(wantOrder[i], marks[i]);
-    }
-    return moved;
-  }
-
-  /**
-   * BUG 2 (#985 P2-B): the CLEAN-EMPTY-TURN predicate — pure so it can be gated without a live stream.
-   * True iff the stream ended cleanly (a `[DONE]`, not a thrown drop), persisted NO message
-   * (`!sawSave`), produced NO other visible artifact (`!producedVisible` — image/ask_user/budget/error),
-   * had NO assistant content (`accumulated` blank), and was NOT user-cancelled. That is the
-   * "backend produced no turn" state the FE must surface with a user-controlled Retry — distinct from
-   * a network drop (thrown error ⇒ the existing `_tryAutoRecover`/`_renderStreamDropRetry` path) and
-   * from a reasoning-only turn (non-blank `accumulated`, handled by the thinking-display branch).
-   */
-  export function _isEmptyTurnNoSave({ sawDone, sawSave, producedVisible, accumulated, cancelled } = {}) {
-    return !!sawDone && !sawSave && !producedVisible && !cancelled &&
-      (accumulated == null || String(accumulated).trim() === '');
-  }
-
-  /**
-   * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
-   * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
-   * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so
-   * they must not inflate the count. Everything else visible (a real user bubble, a real AI bubble, and
-   * crucially an ORPHANED continuation/finalize bubble) counts. softReloadHistory compares this to the
-   * server's visible-message count to detect an orphan a pure id-order check is blind to. Pure (DOM in,
-   * number out) and exported so the reconcile contract is unit-testable without a live stream.
-   */
-  export function _visibleMsgCount(box) {
-    if (!box) return 0;
-    let n = 0;
-    box.querySelectorAll('.msg').forEach((el) => {
-      // A bubble explicitly hidden via inline style is an intermediate/skipped row with no
-      // server message — don't count it. (Hidden via class is rare; the live hide uses style.display.)
-      const hidden = (el.style && el.style.display === 'none');
-      if (hidden) return;
-      // #836 / "never eat a message": an UN-ADOPTED optimistic send (clientMsgId, no dbId yet) is a
-      // legitimate PENDING user bubble, NOT an orphan — its persisted row simply hasn't reached THIS
-      // /api/history snapshot (canonical-vs-per-tab adoption, an SSE reconcile racing the just-committed
-      // row, or a non-persisted/incognito turn). Excluding it from the divergence count means it never
-      // forces a destructive rebuild on its own; combined with the rebuild-time preservation in
-      // softReloadHistory it can never be ERASED. The next reload adopts it once its row appears.
-      if (_isPendingOptimisticBubble(el)) return;
-      n += 1;
-    });
-    return n;
-  }
-
-  /** #836 — a still-pending optimistic user send: carries a clientMsgId but has not yet been adopted
-   * (no dbId). Mirrors the sessions.js `wouldWipe` guard — such a bubble must SURVIVE any reconcile so
-   * "what I typed goes in the bubble, verbatim, every time" can never be violated by the rebuild. */
-  export function _isPendingOptimisticBubble(el) {
-    return !!(el && el.dataset && el.dataset.clientMsgId && !el.dataset.dbId);
-  }
-
-  /**
-   * mirror-toolturn fix: ONE persisted agent message can legitimately render as MULTIPLE `.msg`
-   * bubbles — chatRenderer.addMessage's "Agent multi-bubble reconstruction" (chatRenderer.js
-   * ~1929) re-splits a message carrying `metadata.tool_events`/`round_texts` back into one bubble
-   * PER non-empty narration round, so a re-opened multi-round tool-rich turn reads exactly as it
-   * streamed live instead of collapsing into one blob (L6c). `_visibleMsgCount(box) ===
-   * visible.length` (the OLD orphan check) never accounted for this: a 2-narration-round turn is
-   * ALWAYS 2 bubbles for 1 server message, so the check NEVER converged for a tool-rich turn —
-   * softReloadHistory retried a full destructive rebuild on every single reconcile trigger
-   * forever. Each rebuild reproduced the identical correct render (chatRenderer.addMessage is
-   * deterministic from the same metadata), so this never showed as a literal duplicate, but it
-   * silently burned a `/api/history` fetch + full DOM wipe+rebuild on every peer ping — pure churn
-   * that widens the window for an unrelated concurrent mutation to interleave. Count bubbles the
-   * SAME way addMessage does so a fully-reconciled multi-round turn actually reads "converged".
-   */
-  export function _expectedVisibleBubbleCount(visible) {
-    let n = 0;
-    for (const msg of (visible || [])) {
-      const meta = msg && msg.metadata;
-      if (meta && Array.isArray(meta.tool_events) && meta.tool_events.length) {
-        const roundTexts = Array.isArray(meta.round_texts) ? meta.round_texts : [];
-        const textRounds = roundTexts.filter((t) => (t || '').trim()).length;
-        n += Math.max(1, textRounds);
-      } else {
-        n += 1;
-      }
-    }
-    return n;
-  }
-
-  /**
-   * ADR 0008 — render-and-reconcile to the authoritative seq-ordered log.
-   *
-   * The chat conversation is a FE-replicated log; the audit (S3-RACE) proved two tabs diverge
-   * under concurrent writes because the sender was optimistic-only and a busy tab dropped the
-   * peer's events. This reconciles every tab to the server's `seq` total order WITHOUT a blanket
-   * full rebuild:
-   *   1. ADOPT PASS — stamp the canonical {id, seq} onto already-rendered bubbles (matching by db
-   *      id OR the optimistic client-temp id). Gives the sender read-your-writes with zero churn.
-   *   2. DIVERGENCE CHECK — if the rendered id order already equals the server seq order, return
-   *      (no flicker in the overwhelming common case).
-   *   3. Only when DIVERGED: defer if a stream is live (don't stomp it), else do the clean
-   *      seq-ordered rebuild — identical to a manual reload, which the audit proved converges.
-   */
-  export async function softReloadHistory(sessionId) {
-    if (!sessionId) return;
-    const isCurrent = () => !sessionModule || !sessionModule.getCurrentSessionId ||
-      sessionModule.getCurrentSessionId() === sessionId;
-    if (!isCurrent()) return;
-
-    let data;
-    try {
-      const res = await fetch(`${API_BASE}/api/history/${sessionId}`);
-      if (!res.ok) return;
-      data = await res.json();
-    } catch (_) { return; }
-    if (!isCurrent()) return;
-
-    const box = document.getElementById('chat-history');
-    if (!box) return;
-    const modelName = data.model || null;
-    // Authoritative seq-ordered log (the API orders by seq), minus the continuation/instruction
-    // prompts the live view never shows.
-    const visible = (data.history || [])
-      .filter(m => !(m.role === 'user' && _isSkippableUserPrompt(_historyMsgText(m))));
-
-    // 1) ADOPT PASS — no DOM churn.
-    const byId = new Map(), byClient = new Map();
-    box.querySelectorAll('.msg').forEach((el) => {
-      if (el.dataset.dbId) byId.set(el.dataset.dbId, el);
-      if (el.dataset.clientMsgId) byClient.set(el.dataset.clientMsgId, el);
-    });
-    for (const msg of visible) {
-      const sid = _serverMsgId(msg);
-      const cid = msg.metadata && msg.metadata.client_msg_id;
-      // #891: a server row carrying this clientMsgId PROVES delivery — release the reload-durable
-      // outbox copy (awaiting-confirm) so it can never re-send. Cheap no-op when nothing is queued.
-      if (cid) _outboxConfirmDelivery(cid);
-      const el = (sid && byId.get(sid)) || (cid && byClient.get(cid)) || null;
-      if (el) {
-        if (sid) { el.dataset.dbId = sid; byId.set(sid, el); }
-        if (msg.seq != null) el.dataset.seq = String(msg.seq);
-      }
-    }
-
-    // BUG 1 — REORDER PASS (non-destructive). Now that every matched bubble carries its authoritative
-    // `data-seq`, move any that are out of seq order back into place WITHOUT a DOM wipe. This runs on
-    // EVERY reconcile attempt — including the "converged"/early-return common case below AND while a
-    // stream is in flight (the `hasActiveStream` early-return is further down), so a bubble that was
-    // appended out of arrival-vs-seq order (a peer write racing the local turn, two interleaved
-    // `message_saved`s) is corrected the instant its seq is known, not only when a destructive rebuild
-    // finally fires. Idempotent: zero churn when already ordered. A still-pending optimistic send (no
-    // seq) keeps its place at the tail — exactly where the newest local turn belongs.
-    _reorderBySeq(box);
-
-    // 2) DIVERGENCE CHECK — rendered id order vs. server seq order.
-    // ADR 0012 (GAP 2): an error turn forces ONE content rebuild — the error bubble may already carry
-    // the persisted message's {id, seq} (so the id-order is "converged") while showing the raw error
-    // text, not the persisted fallback. Consume the one-shot flag so subsequent reloads are normal.
-    // SELF-GUARD: only honor the force when the server actually has at least as many messages as are
-    // rendered — i.e. there IS a persisted message to converge to. A hard fail that persisted NOTHING
-    // (server has fewer messages) keeps its live error bubble rather than the rebuild erasing it.
-    let _forced = chatState._forceRebuild.delete(sessionId);
-    const renderedCount = box.querySelectorAll('.msg').length;
-    if (_forced && visible.length < renderedCount) _forced = false;
-    // A multi-round tool-rich message legitimately renders as SEVERAL contiguous bubbles sharing
-    // the same data-db-id (chatRenderer.addMessage's multi-bubble reconstruction — see
-    // _expectedVisibleBubbleCount above). Collapse consecutive duplicate ids before comparing to
-    // the server's one-id-per-message order, so such a turn can actually reach "converged" instead
-    // of id-order matching by coincidence while the orphan check below never converges.
-    const renderedIdsRaw = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
-    const renderedIds = renderedIdsRaw.filter((v, i) => v !== renderedIdsRaw[i - 1]);
-    const serverIds = visible.map(_serverMsgId).filter(Boolean);
-    // F5 (dedup hardening): the id-order check alone is BLIND to a db-id-LESS ORPHAN bubble — a
-    // continuation/round bubble (multi-round agent turn) or a resume finalize-in-place bubble that
-    // never received its data-db-id. Such an orphan is invisible to `renderedIds` (which selects only
-    // `.msg[data-db-id]`), so the rendered id-order could equal the server seq-order ("converged")
-    // WHILE an extra duplicate bubble sits on screen → the dup survived every reload (issue #873 / F5).
-    // Count VISIBLE message bubbles (excluding the hidden tool-only / production-cue rows, which are
-    // display:none and have no server counterpart) and require it to equal the server's EXPECTED
-    // visible-bubble count (accounting for multi-round reconstruction, not a raw 1:1 message count).
-    // A mismatch means a genuine orphan (or a missing bubble) is present → NOT converged → rebuild to
-    // the authoritative log, which collapses the orphan with ZERO net churn on the already-correct case.
-    const orphanFree = _visibleMsgCount(box) === _expectedVisibleBubbleCount(visible);
-    const converged = orphanFree &&
-      renderedIds.length === serverIds.length &&
-      renderedIds.every((v, i) => v === serverIds[i]);
-    if (converged && !_forced) { chatState._pendingReconcile.delete(sessionId); return; }
-
-    // 3) DIVERGED (or forced) — defer past a live stream, else rebuild to the authoritative order.
-    if (hasActiveStream(sessionId)) {
-      chatState._pendingReconcile.add(sessionId);
-      if (_forced) chatState._forceRebuild.add(sessionId);   // re-arm the one-shot force for the deferred flush
-      return;
-    }
-    chatState._pendingReconcile.delete(sessionId);
-
-    // #836 / "never eat a message": before we blow away the DOM, RESCUE any still-pending optimistic
-    // user bubble (clientMsgId, no dbId) whose persisted row is ABSENT from this server snapshot — so the
-    // authoritative rebuild can NEVER erase what the player just typed. A bubble whose client_msg_id IS
-    // present in `visible` is re-rendered from the server log below (no rescue needed); only the un-adopted
-    // pending sends are carried across, then normal adoption reconciles them when their row appears.
-    const _serverClientIds = new Set(
-      visible.map(m => m.metadata && m.metadata.client_msg_id).filter(Boolean)
-    );
-    const _pendingToPreserve = Array.from(box.querySelectorAll('.msg'))
-      .filter(el => _isPendingOptimisticBubble(el) && !_serverClientIds.has(el.dataset.clientMsgId));
-
-    const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
-    const prevScrollTop = box.scrollTop;
-    box.classList.add('no-animate');
-    box.innerHTML = '';
-    for (const msg of visible) {
-      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : { _fromHistory: true };
-      chatRenderer.addMessage(msg.role, markdownModule.renderContent(_historyMsgText(msg)), modelName, meta);
-    }
-    // Re-append the rescued pending sends after the authoritative log (they are the newest turn — the row
-    // the server hasn't surfaced yet). They keep their clientMsgId so the next reload's adopt pass claims
-    // them with zero churn the moment /api/history carries their persisted row.
-    for (const el of _pendingToPreserve) box.appendChild(el);
-    box.classList.remove('no-animate');
-    if (nearBottom) {
-      if (uiModule.scrollHistoryInstant) uiModule.scrollHistoryInstant();
-      else if (uiModule.scrollHistory) uiModule.scrollHistory();
-    } else {
-      // Reader was scrolled up — keep their place (new content was appended below).
-      box.scrollTop = prevScrollTop;
-    }
-  }
-
-  /** ADR 0008: flush a reconcile deferred because a stream was in flight (called at stream end).
-   * Returns the softReloadHistory promise so callers can sequence work AFTER the rebuild settles
-   * (the GAP-1 peer-resume chains on it so the peer's user turn is adopted before its reply attaches). */
-  export function flushPendingReconcile(sessionId) {
-    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-    if (!id) return Promise.resolve();
-    // Always run once at stream end: the adopt pass alone (cheap, no churn) gives the sender
-    // read-your-writes even when nothing diverged; if it DID diverge, this does the rebuild.
-    chatState._pendingReconcile.delete(id);
-    try { return Promise.resolve(softReloadHistory(id)).catch(function () {}); } catch (_) { return Promise.resolve(); }
-  }
-
-  /**
-   * ADR 0012 (GAP 1): note a peer's run-started that we couldn't attach to LIVE because our own
-   * stream was in flight, so the stream-end finally can RE-ATTEMPT the attach. Called from
-   * sessionSync's run-started handler. Idempotent (a Set); no-op if no resume seam exists.
-   */
-  export function deferPeerResume(sessionId) {
-    if (!sessionId) return;
-    chatState._pendingPeerResume.add(sessionId);
-  }
-
-  /**
-   * ADR 0012 (GAP 1): flush a peer-resume deferred because OUR stream was in flight (called at
-   * stream end). Now that our stream has settled, attach to the canonical run so we mirror the peer's
-   * turn LIVE. resumeStream's own guards make this safe + idempotent: it no-ops if another reader is
-   * already live for the session (hasActiveStream) and replays a just-finished run's buffer within the
-   * evict grace; if the run is already gone, softReloadHistory has the settled message anyway.
-   */
-  export function flushPendingPeerResume(sessionId) {
-    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-    if (!id) return;
-    if (!chatState._pendingPeerResume.has(id)) return;
-    chatState._pendingPeerResume.delete(id);
-    // Only attach if we're still viewing this session and nothing else is already rendering it live.
-    const onIt = !sessionModule || !sessionModule.getCurrentSessionId ||
-                 sessionModule.getCurrentSessionId() === id;
-    if (!onIt) return;
-    if (hasActiveStream(id)) return;          // a newer stream took over — it owns the render
-    try { resumeStream(id); } catch (_) {}
-  }
+  // #1414 (R3 PR7): the cross-device RECONCILE / seq-order / peer-resume cluster (ADR 0008/0012)
+  // — _historyMsgText / _serverMsgId / _isSkippableUserPrompt / _msgSeq / _insertBySeq /
+  // _reorderBySeq / _isEmptyTurnNoSave / _visibleMsgCount / _isPendingOptimisticBubble /
+  // _expectedVisibleBubbleCount / softReloadHistory / flushPendingReconcile / deferPeerResume /
+  // flushPendingPeerResume — moved to chatReconcile.js (imported above, re-exported on the
+  // chatModule public API below byte-identically). Behavior-preserving: chat.js still drives the
+  // same call points (softReloadHistory at the stream-settle + adopt sites, flushPendingReconcile /
+  // flushPendingPeerResume in the stream-end finally, _isEmptyTurnNoSave in the finalize) and
+  // injects the three chat.js-internal deps the cluster reads — hasActiveStream (the SSE-reader
+  // liveness helper), resumeStream (the R2 live-resume attach), and a () => API_BASE resolver —
+  // through _setReconcileDeps, mirroring the PR2..PR6 injection pattern. The reconcile Sets stay
+  // chatState-backed (PR0), so submit / outbox / reconcile serialize on ONE instance.
 
   /**
    * R2 (refactor-roadmap / ADR 0012 §3.3): the SHARED incremental live-stream renderer that BOTH
@@ -6453,6 +5248,16 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
   // injects the three chat.js-internal deps the consumer reads — _renderLiveStream (the R2 render
   // seam), softReloadHistory (the settle reconcile), and _senderLabel (the single-source sender
   // label) — through _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern.
+  // #1414 (R3 PR7): inject the three chat.js-internal deps the reconcile cluster (chatReconcile.js)
+  // reads — hasActiveStream (the SSE-reader liveness helper) + resumeStream (the R2 live-resume attach),
+  // both hoisted function declarations that STAY here, and a () => API_BASE resolver (a chat.js-local
+  // `let`, read live so softReloadHistory's /api/history fetch never sees a stale base). Mirrors the
+  // PR2..PR6 injection pattern; module-eval, so hasActiveStream/resumeStream are hoisted.
+  _setReconcileDeps({
+    hasActiveStream: hasActiveStream,
+    resumeStream: resumeStream,
+    apiBase: () => API_BASE,
+  });
   _setWsSpliceDeps({
     renderLiveStream: _renderLiveStream,
     softReloadHistory: softReloadHistory,
@@ -6523,7 +5328,7 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
     _flushSendOutbox,   // #985 P2-A: drain the outbox FIFO at turn settle (browser gate)
     _sendOutbox: chatState._sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
     _isStreaming: () => chatState.isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
-    _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
+    _setOutboxDispatch,          // #985 P2-A: swap the flush dispatcher (browser gate; moved to chatOutbox.js, #1414 R3 PR6)
     _outboxAwaitingConfirm: chatState._outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
     _outboxFailed: chatState._outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
     _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
@@ -6535,9 +5340,7 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
     _persistOutbox,              // #891: persistence write point (browser gate)
     _dedupeOutboxAgainstServer,  // #891: pre-send at-most-once check (browser gate)
     _isNetworkSendFailure,       // #891: fetch-failure classifier (browser gate)
-    _outboxPeekStorage: () => {  // #891: read the persisted record (browser gate)
-      try { return JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) { return null; }
-    },
+    _outboxPeekStorage,          // #891: read the persisted record (browser gate; moved to chatOutbox.js, #1414 R3 PR6)
     _updateOutboxStrip,          // #830: re-project the aggregate queue strip (browser gate)
     _syncSubmitButtonState,  // #971: reconcile the composer button to the true streaming state (browser gate)
     _foregroundStreamLive,   // #971: "is a turn genuinely streaming in the foreground" predicate (browser gate)

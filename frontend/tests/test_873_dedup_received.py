@@ -47,7 +47,8 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_visible_msg_count_helper_exists_and_excludes_hidden_rows():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the orphan-aware count helper + softReloadHistory moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "export function _visibleMsgCount(box)" in js, \
         "the orphan-aware count helper must exist"
     # It must EXCLUDE display:none rows (hidden tool-only continuation / skippable production cue),
@@ -59,7 +60,8 @@ def test_visible_msg_count_helper_exists_and_excludes_hidden_rows():
 
 
 def test_divergence_check_is_orphan_aware():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the divergence check lives inside softReloadHistory, moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     # The convergence decision must fold in the visible-count guard — an id-order match is NOT enough.
     # (mirror-toolturn fix: the oracle is _expectedVisibleBubbleCount(visible), NOT a raw
     # `visible.length` — a multi-round tool-rich message legitimately renders as several bubbles
@@ -83,7 +85,8 @@ def test_resume_finalize_stamps_db_id():
 
 
 def test_zero_churn_happy_path_preserved():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: softReloadHistory's converged early-return + flicker-free rebuild moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     # The converged early-return (no rebuild) must remain — the fix must not make every reload rebuild.
     assert "if (converged && !_forced) { chatState._pendingReconcile.delete(sessionId); return; }" in js
     # The rebuild must stay flicker-free (no-animate + scroll preservation).
