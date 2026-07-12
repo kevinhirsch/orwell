@@ -87,6 +87,21 @@ describe("0123 — a houseguest floats the player a deal, resolved accept/declin
     expect(sb.engine.relationships.edge(from, PLAYER).threat).toBeGreaterThan(beforeThreat);
   });
 
+  it("a malformed/missing vote is a no-op — the offer stands and the NPC is not cooled", () => {
+    const sb = newGame("offer-malformed", 7, true);
+    const offer = driveToOffer(sb);
+    expect(offer).not.toBeNull();
+    const from = offer!.offer!.from.id;
+    const beforeThreat = sb.engine.relationships.edge(from, PLAYER).threat;
+    const beforeDeals = (sb.session.getGameState().deals ?? []).length;
+    // A garbled/stale client call with no explicit accept/decline must NOT consume the offer or cool the NPC.
+    sb.session.submitDecision({ kind: "deal-offer" } as never);
+    expect(sb.engine.relationships.edge(from, PLAYER).threat).toBe(beforeThreat); // no hidden cooling
+    expect((sb.session.getGameState().deals ?? []).length).toBe(beforeDeals);     // no deal created
+    // The offer still stands and can be answered properly afterward.
+    expect(sb.session.advanceGame().pending?.kind).toBe("deal-offer");
+  });
+
   it("with the layer OFF, no offer is ever floated (byte-identical)", () => {
     const sb = newGame("offer-off", 7, false);
     const offer = driveToOffer(sb, 200);

@@ -2825,6 +2825,7 @@ export class GameSessionAdapter implements GameSession {
       ...(this.legendTickCount > 0 ? { legendTickCount: this.legendTickCount } : {}),
       ...(this.legendCount > 0 ? { legendCount: this.legendCount } : {}),
       ...(this.legendLastActTick > 0 ? { legendLastActTick: this.legendLastActTick } : {}),
+      ...(this.lastConfessionalSweepDay > 0 ? { lastConfessionalSweepDay: this.lastConfessionalSweepDay } : {}),
       // 0099 (hidden half) — the DEDICATED secret-barter rng tick counter + the monotonic count of secrets
       // spent into the hidden economy, persisted so the isolated barter stream + the non-degradation count
       // survive a restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0099-barter save / off).
@@ -3115,6 +3116,7 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = core.legendTickCount ?? 0;
     this.legendCount = core.legendCount ?? 0;
     this.legendLastActTick = core.legendLastActTick ?? 0;
+    this.lastConfessionalSweepDay = core.lastConfessionalSweepDay ?? 0; // 0122 — restore the sweep watermark
     // 0101/#1401: restore the showrunner's production bible + its monotonic count (absent on a pre-0101
     // save / when the layer is off ⇒ []/0 — byte-identical to a pre-feature load).
     this.showrunnerNotes = core.showrunnerNotes ? cloneSession(core.showrunnerNotes) : [];
@@ -4532,6 +4534,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh season hasn't swept any in-game day yet
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
       this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
       // 0116 — carry the model-authored genesis layer off the warm: the validated tie graph (preferred
@@ -4814,6 +4817,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh/warmed season hasn't swept any in-game day yet
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
     // 0116 — a freshly-warmed cast carries no model-authored genesis yet (recordCastGenesis, if the FE
@@ -5184,6 +5188,7 @@ export class GameSessionAdapter implements GameSession {
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh season hasn't swept any in-game day yet
     this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
@@ -7615,8 +7620,13 @@ export class GameSessionAdapter implements GameSession {
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
     if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
     // 0123 — an NPC deal offer resolves through its own path (NOT the ceremony-pending machinery): it
-    // lives on `live.dealOffer`, not `live.pending`. `vote:"accept"` makes the deal; anything else declines.
-    if (req.kind === "deal-offer") return remember(this.resolveDealOffer(req.vote === "accept"));
+    // lives on `live.dealOffer`, not `live.pending`. Only an EXPLICIT `accept`/`decline` resolves it; a
+    // malformed/missing `vote` (a stale or garbled client call) is a safe NO-OP — the offer stands and no
+    // hidden cooling is applied. Never silently decline on bad input (Greptile P1).
+    if (req.kind === "deal-offer") {
+      if (req.vote === "accept" || req.vote === "decline") return remember(this.resolveDealOffer(req.vote === "accept"));
+      return remember(this.advanceView(null));
+    }
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
@@ -8759,9 +8769,11 @@ export class GameSessionAdapter implements GameSession {
   private confessionalDepthFor(npc: EntityId, allEvents: readonly GameEvent[]): ConfessionalDepth {
     const s = this.live!;
     let role: ConfessionalDepth["role"] = "none";
+    // Precedence matches the codebase's `standing()` read (hoh > nominee > veto-holder): a houseguest who is
+    // a current NOMINEE who just won the veto still reads "nominee"/exposed, not "veto-holder"/safe (CodeRabbit).
     if (s.hoh === npc) role = "hoh";
-    else if (s.vetoHolder === npc) role = "veto-holder";
     else if ((s.nominees ?? []).some((id) => id === npc)) role = "nominee";
+    else if (s.vetoHolder === npc) role = "veto-holder";
     // recentTalk — the OTHER party of the most recent conversation this houseguest witnessed.
     let recentTalk: EntityId | undefined;
     for (let i = allEvents.length - 1; i >= 0; i--) {
