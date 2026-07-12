@@ -92,6 +92,7 @@ module.exports = {
       "docs/features/0119-per-event-felt-durations.feature",
       "docs/features/0120-strategic-drive-offscreen-cadence.feature",
       "docs/features/0121-deal-depth-kinds-and-reliability-rewards.feature",
+      "docs/features/0122-deeper-daily-npc-confessionals.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

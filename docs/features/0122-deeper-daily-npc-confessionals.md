@@ -1,6 +1,6 @@
 # 0122 — Deeper, daily NPC confessionals (richer interiority, on the in-game clock)
 
-> **Status:** Spec (BDD/TDD-first). **Expands 0040** (NPC Diary Room confessionals) per the PO review
+> **Status:** ✅ Built (BDD/TDD-first; BDD-gated in `cucumber.cjs`). **Expands 0040** (NPC Diary Room confessionals) per the PO review
 > (2026-07-12). 0040 gives every NPC a *real, private, engine-grounded* read — but today it is **thin**
 > (biggest threat + most-trusted ally + a mood) and **rare** (only the 3–5 houseguests standing in a
 > ceremony confess, plus one random off-screen confessor per tick). This feature makes NPC confessionals
@@ -151,22 +151,22 @@ wall: record{ hidden:true, witnessSet:[npc] }            // player NEVER a witne
 
 ## 6. Definition of Done
 
-- [ ] **Deeper content, TRIGGERED not templated:** a confessional can voice **plan / standing / grudge /
+- [x] **Deeper content, TRIGGERED not templated:** a confessional can voice **plan / standing / grudge /
       big-conversation aftermath / adjacent move**, each **grounded** in the NPC's own edges + public state
       (a flip of the underlying truth flips the facet; nothing is invented), and each rendered **only when its
       trigger fires** — so an **HOH / nominee** (power / danger) gets a **deep** confessional while a coasting
       middle houseguest gets a **short** one, and a bare game gets none. No fixed multi-slot form.
-- [ ] **Daily frequency:** once per in-game day, **most living houseguests** record a confessional (not only
+- [x] **Daily frequency:** once per in-game day, **most living houseguests** record a confessional (not only
       ceremony-standers); a **bare game** NPC records **none** that day.
-- [ ] **Vault-sealed from everyone (unchanged):** no confessional content reaches the **player** or
+- [x] **Vault-sealed from everyone (unchanged):** no confessional content reaches the **player** or
       **admin/God Mode**; witness set excludes the player (0002); the 0001 canary stays clean on both surfaces.
-- [ ] **Feeds the soul + voice:** each confessional appends to the soul (monotonic, 0024/0007) and is
+- [x] **Feeds the soul + voice:** each confessional appends to the soul (monotonic, 0024/0007) and is
       recall-able to keep that NPC's later voice consistent (as 0040 already does).
-- [ ] **Calibration-neutral:** with `ORWELL_CONFESSIONAL_DEPTH` **off**, the confessional stream + the seeded
+- [x] **Calibration-neutral:** with `ORWELL_CONFESSIONAL_DEPTH` **off**, the confessional stream + the seeded
       competition/vote/deal spine are **byte-identical** to 0040 (juryReach / gradient / UAT unchanged); the
       daily sweep draws a **dedicated** rng and runs only when the in-game clock is live (golden fixture never
       stales — no re-record).
-- [ ] Seed-deterministic; persisted (0030); name-agnostic (roles only); added to `cucumber.cjs`;
+- [x] Seed-deterministic; persisted (0030); name-agnostic (roles only); added to `cucumber.cjs`;
       `npm test` + `npm run test:arch` green; FE `pytest -m "not browser"` green.
 
 ## 7. Dependencies & traceability
