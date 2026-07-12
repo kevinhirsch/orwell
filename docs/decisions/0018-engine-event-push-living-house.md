@@ -1,6 +1,7 @@
 # 0018 — Engine event-push / the "living house"
 
-> **Status:** **Proposed** (owner-elected, 2026-07-09). The game-design ADR that
+> **Status:** **Accepted** (owner directive, 2026-07-12). Accepted 2026-07-12 (owner directive — WS Phase-2
+> turn-on); originally owner-elected 2026-07-09. The game-design ADR that
 > [`0017`](./0017-multiplexed-websocket-session-transport.md) explicitly punted to (its §Engine hop /
 > Phase 3): whether — and on what **activity signal** — the engine may **originate** beats (NPCs act,
 > the house pushes a beat) rather than only advancing when the player takes a turn.
