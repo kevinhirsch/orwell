@@ -42,6 +42,12 @@ import { _initChatScrollEdges } from './chatScrollEdges.js';
 // singleton (PR0). Imported here only, so #1399 single-eval holds; the two on the chatModule public
 // API (_syncSubmitButtonState / _foregroundStreamLive) are re-exported below byte-identically.
 import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } from './chatSubmitButton.js';
+// #1414 (R3 PR3): chat attachment opening (image → new tab; pdf/text/code → Documents viewer;
+// anything else → raw file). Behavior-preserving: chat.js re-exports `openAttachment` on the
+// chatModule public API below (chatRenderer.js calls it via window.chatModule.openAttachment), and
+// injects the API_BASE resolver so the module reads chat.js's live value. Imported here only, so
+// #1399 single-eval holds.
+import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -74,6 +80,10 @@ import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } fro
     "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back.";
 
   let API_BASE = '';
+  // #1414 (R3 PR3): feed the extracted chatAttachments.js chat.js's live API_BASE. A closure over
+  // this `let` (set once in init) so openAttachment reads the current value — an imported binding
+  // would be read-only. Registered at module-eval (order-independent of init).
+  _setAttachmentsApiBase(() => API_BASE);
   // #1414 (R3 PR0): streaming/send/display/continue mutable state moved to the shared `chatState`
   // singleton — chatState.currentAbort, .isStreaming, ._sendInFlight, ._displayOverride,
   // ._hideUserBubble, ._pendingContinue. See chatState.js for the per-field docs.
@@ -7198,93 +7208,8 @@ import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } fro
     handleChatSubmit(null, 'Continue from where you left off.'); // headless — no composer puppeteering
   }
 
-  // Open a chat attachment in the right place: images → Gallery editor; PDFs &
-  // text/code/markdown → Documents viewer; anything else → raw file. A given
-  // upload's imported document is reused (cached by upload id) so clicking it
-  // again re-opens the same doc instead of making duplicates.
-  const _attachDocCache = new Map();  // upload id -> doc id
-  function _attachLang(name) {
-    const m = (name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
-    const ext = m ? m[1] : '';
-    const map = { md:'markdown', markdown:'markdown', js:'javascript', ts:'typescript',
-      jsx:'javascript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
-      java:'java', c:'c', cpp:'cpp', h:'c', hpp:'cpp', cs:'csharp', php:'php', html:'html',
-      htm:'html', css:'css', scss:'scss', json:'json', yaml:'yaml', yml:'yaml', sh:'bash',
-      bash:'bash', sql:'sql', csv:'csv', xml:'xml' };
-    return map[ext] || '';
-  }
-  async function openAttachment(att, isImage) {
-    if (!att || !att.id) return;
-    const id = att.id, name = att.name || '', mime = att.mime || '';
-    const url = `${API_BASE}/api/upload/${id}`;
-
-    // Game build (feature 0032): the Gallery image editor is removed — open
-    // attached images in a new tab instead.
-    if (isImage) {
-      window.open(url, '_blank');
-      return;
-    }
-
-    const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name);
-    const TEXT_EXT = /\.(txt|md|markdown|js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|html?|css|scss|sass|less|json|ya?ml|toml|ini|conf|env|sh|bash|sql|csv|tsv|xml|log|vue|svelte)$/i;
-    const isTextDoc = TEXT_EXT.test(name) || /^text\//.test(mime);
-    if (!isPdf && !isTextDoc) { window.open(url, '_blank'); return; }  // binary/unknown → raw
-
-    // Reuse the doc we already imported for this upload, if it still loads.
-    const cached = _attachDocCache.get(id);
-    if (cached) {
-      try {
-        documentModule.openPanel && documentModule.openPanel();
-        await documentModule.loadDocument(cached);
-        return;
-      } catch (_) { _attachDocCache.delete(id); }
-    }
-
-    // Need a session to attach the doc to (bare-session fallback, same as compose).
-    let sid = '';
-    try { sid = sessionModule.getCurrentSessionId() || ''; } catch (_) {}
-    if (!sid) {
-      try {
-        const _fd = new FormData();
-        _fd.append('name', name || 'Attachment');
-        _fd.append('skip_validation', 'true');
-        const r = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: _fd, credentials: 'same-origin' });
-        if (r.ok) { const d = await r.json(); if (d && d.id) { sid = d.id; if (sessionModule.loadSessions) await sessionModule.loadSessions(); } }
-      } catch (_) {}
-    }
-
-    try {
-      let doc;
-      if (isPdf) {
-        // import-pdf wants a fresh file upload — re-fetch the stored blob and post it.
-        const blob = await (await fetch(url)).blob();
-        const fd = new FormData();
-        fd.append('file', blob, name || 'document.pdf');
-        if (sid) fd.append('session_id', sid);
-        const res = await fetch(`${API_BASE}/api/documents/import-pdf`, { method: 'POST', body: fd, credentials: 'same-origin' });
-        if (!res.ok) throw new Error('import-pdf ' + res.status);
-        doc = await res.json();
-      } else {
-        const text = await (await fetch(url)).text();
-        const res = await fetch(`${API_BASE}/api/document`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sid || null, title: name.replace(/\.[^.]+$/, '') || 'Document', content: text, language: _attachLang(name) }),
-        });
-        if (!res.ok) throw new Error('document ' + res.status);
-        doc = await res.json();
-      }
-      if (doc && doc.id) {
-        _attachDocCache.set(id, doc.id);
-        documentModule.openPanel && documentModule.openPanel();
-        if (documentModule.injectFreshDoc) documentModule.injectFreshDoc(doc);
-        else await documentModule.loadDocument(doc.id);
-      }
-    } catch (e) {
-      console.error('open attachment as document failed', e);
-      import('./ui.js').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
-      window.open(url, '_blank');  // fallback so the file is still reachable
-    }
-  }
+  // #1414 (R3 PR3): openAttachment / _attachLang / the per-upload doc cache moved to
+  // chatAttachments.js (imported above, re-exported on chatModule below). Behavior-preserving.
 
   // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
   //
