@@ -145,9 +145,11 @@ import {
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
+  competitionStagingData, validateCompetitionFiction,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
+import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -681,6 +683,13 @@ export class GameSessionAdapter implements GameSession {
   private perConversationClockEnabled = PER_CONVERSATION_CLOCK_ENABLED_DEFAULT;
   private socialFatigueEnabled = SOCIAL_FATIGUE_ENABLED_DEFAULT;
   private multiNightFatigueEnabled = MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT;
+  /**
+   * Feature #1400 — generative competition design. DEFAULT OFF (its `ORWELL_GEN_COMPETITIONS` env
+   * default): when off, `competitionStagingView` returns null and `recordCompetitionFiction` refuses, so
+   * NO fiction is ever authored/stored ⇒ the deterministic 0042 library floor stands, byte-identical to
+   * the pre-feature model (the `genCompetitionNeutral` proof pins it). Flipped by a test's setter (below).
+   */
+  private genCompetitionsEnabled = genCompetitionsEnvDefault();
   /** The DEDICATED jury-house rng tick counter — jury-house draws fork off the game seed + this, NEVER the
    * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
    * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
@@ -5934,6 +5943,11 @@ export class GameSessionAdapter implements GameSession {
   /** Extension 3 — the compounding multi-night fatigue meter. Off by default. */
   setMultiNightFatigueEnabled(on: boolean): void { this.multiNightFatigueEnabled = on; }
 
+  /** #1400 — generative competition design (the model dresses the fixed roll). Off by default (env-gated). */
+  setGenCompetitionsEnabled(on: boolean): void { this.genCompetitionsEnabled = on; }
+  /** #1400 — the resolved on/off state of the generative-competition flag (for an admin/status read). */
+  genCompetitionsEnabledNow(): boolean { return this.genCompetitionsEnabled; }
+
   /**
    * 0066 Phase-2 (Extension 1) — advance the clock a SMALL step as the player lingers/plays WITHIN a beat.
    * The orchestrator's per-turn off-screen tick calls this once per player TURN (debounced for aux tool
@@ -8767,6 +8781,57 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * Feature #1400 (READ) — the Vault-free "what to hand the model" projection for the currently-staging
+   * competition. Null unless generation is enabled AND a comp has RESOLVED its roll (the model dresses a
+   * decided result — nothing to hand it before the roll commits; the structural "no outcome-adjacent text
+   * before the roll" ordering). Projects ids → names and hands the fixed drop ORDER (public — the reveal
+   * tells it round by round anyway) + the 0042 library scaffold the model riffs ON. No number ever crosses.
+   */
+  competitionStagingView(): import("../../ports/GameSession").CompetitionStagingView | null {
+    if (!this.genCompetitionsEnabled || !this.house || !this.live) return null;
+    const data = competitionStagingData(this.live);
+    if (!data) return null;
+    const lib = data.def?.narrative;
+    return {
+      comp: data.comp,
+      type: data.type,
+      week: this.week,
+      ...(data.def ? { format: data.def.format } : {}),
+      participants: data.field.map((id) => ({ id, name: this.nameOf(id) })),
+      winner: { id: data.winner, name: this.nameOf(data.winner) },
+      dropOrder: data.dropOrder.map((id) => ({ id, name: this.nameOf(id) })),
+      library: {
+        name: data.def?.name ?? "",
+        premise: lib?.premise ?? "",
+        beats: lib ? [...lib.beats] : [],
+        winReads: lib?.winReads ?? "",
+      },
+      alreadyAuthored: data.alreadyAuthored, // the FE's persistent "author exactly once per comp" guard
+    };
+  }
+
+  /**
+   * Feature #1400 (WRITE-BACK) — record the model-authored competition fiction AFTER the roll commits. The
+   * pure `validateCompetitionFiction` is the HARD gate: it accepts the fiction ONLY when every elimination
+   * it names maps to the engine's fixed drop order EXACTLY (same ids, same order) — any mismatch is
+   * REJECTED and nothing is stored, so the deterministic 0042 library floor stands and the generated
+   * fiction can never rename who goes or in what order. On success the sanitized fiction lands on the live
+   * state (PRESENTATION ONLY — the reveal tells it round by round) and durably persists WITHOUT bumping the
+   * closed-set `beatSeq` (like the 0062 zeitgeist / 0058 profile write-backs): it perturbs no seeded roll.
+   */
+  recordCompetitionFiction(
+    req: import("../../ports/GameSession").RecordCompetitionFictionReq,
+  ): import("../../ports/GameSession").RecordCompetitionFictionResult {
+    if (!this.genCompetitionsEnabled) return { accepted: false, reason: "disabled" };
+    if (!this.house || !this.live) return { accepted: false, reason: "no-game" };
+    const result = validateCompetitionFiction(this.live, req);
+    if (!result.ok) return { accepted: false, reason: result.reason };
+    this.live.competitionFiction = result.fiction;
+    this.backgroundPersist(); // durable, but NOT a board beat — presentation-only, no beatSeq bump
+    return { accepted: true };
+  }
+
+  /**
    * 0070 — called by the orchestrator after every off-screen tick to register the ids of the scenes
    * that were just recorded. TRANSIENT: the registry is replaced on each tick so only the MOST RECENT
    * batch is addressable via `getOffscreenSceneSkeletons`. The event store is the durable source of
@@ -8944,14 +9009,21 @@ export class GameSessionAdapter implements GameSession {
       if (peek) {
         // The drawn library def (0042): name + format + the Vault-free narrative scaffold — the
         // narrator dresses THIS competition. Flavor only; no stat, score, or ranking crosses.
+        // #1400: when the model authored + the engine VALIDATED fiction for THIS staged comp, surface
+        // the model-authored THEME as the comp name and its premise/winReads as the scaffold, so a fresh
+        // context (a restart) re-grounds the narrator in the authored staging instead of the library
+        // floor. PRESENTATION ONLY — the winner/format are unchanged; the per-drop fiction rides the
+        // comp-elimination beats, so the preview `beats` stay the generic library scaffold (no spoiler).
+        const f = this.live.competitionFiction;
+        const authored = f && f.comp === peek.beat && f.week === this.week ? f : undefined;
         return {
           started: true, type: peek.type, week: this.week, phase: this.phase,
           winner: this.named(peek.winner),
-          name: peek.def.name, format: peek.def.format,
+          name: authored?.theme ?? peek.def.name, format: peek.def.format,
           narrative: {
-            premise: peek.def.narrative.premise,
+            premise: authored?.premise ?? peek.def.narrative.premise,
             beats: [...peek.def.narrative.beats],
-            winReads: peek.def.narrative.winReads,
+            winReads: authored?.winReads ?? peek.def.narrative.winReads,
           },
         };
       }

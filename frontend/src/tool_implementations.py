@@ -5030,6 +5030,14 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
             orwell_offscreen_texture.kickoff_enrich(owner)
         except Exception:  # pragma: no cover - defensive: enrichment must never break an advance
             pass
+        # #1400: an advance may resolve a staged competition (its roll commits up front). Fire-and-forget
+        # the FE-driven competition-fiction author — best-effort, never blocks the advance, a silent no-op
+        # when generation is off / no comp resolved / no utility model (the deterministic 0042 floor stands).
+        try:
+            from src import orwell_gen_competitions
+            orwell_gen_competitions.kickoff_fiction(owner)
+        except Exception:  # pragma: no cover - defensive: generation must never break an advance
+            pass
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -5076,6 +5084,14 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
             raise
         await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
+        # #1400: a comp-round approach RESOLVES the staged competition (its roll commits). Fire-and-forget
+        # the competition-fiction author — best-effort, never blocks; a silent no-op unless generation is
+        # on AND a comp resolved AND a utility model resolves (else the deterministic 0042 floor stands).
+        try:
+            from src import orwell_gen_competitions
+            orwell_gen_competitions.kickoff_fiction(owner)
+        except Exception:  # pragma: no cover - defensive: generation must never break a decision
+            pass
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

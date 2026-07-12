@@ -100,6 +100,11 @@ const args = (name: string, seed: number): Record<string, unknown> => {
     // voiced prose — content-only. Point it at the real sentinel-bearing hidden event so the sweep
     // exercises the live write path; its result is a bare {ok} status that never echoes hidden content.
     case "recordOffscreenSceneTexture": return { eventId: `b42:hidden:${seed}`, content: "voiced off-screen prose" };
+    // #1400: the FE competition-fiction write-back — presentation-only flavor over the fixed roll. Valid
+    // shape so the arg-guard passes; an empty eliminations is rejected (no comp match), and the result is
+    // a bare {accepted, reason} status that never echoes hidden content. `competitionStagingView` (the
+    // read) takes no args (default {}) and carries only public names + the public drop order.
+    case "recordCompetitionFiction": return { comp: "hoh-competition", week: 1, theme: "t", premise: "p", eliminations: [] };
     case "overrideMechanic": return { mechanic: "pace", value: 1 };
     case "configure": return { temperature: 1 };
     case "manageSandbox": return { action: "save" }; // never "reset" — that would wipe the sentinels
@@ -116,6 +121,10 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       const admin = reg.resolver()("admin", user) as McpServer;
 
       await player.callTool("createCharacter", { playerName: "The Player", seed });
+      // #1400: exercise the generative-competition projections ON — so `competitionStagingView` returns
+      // the fixed drop order mid-comp and the canary proves that Vault-free public presentation carries
+      // no planted sentinel (the write-back result is a bare status; both are swept below).
+      reg.sandboxFor(user).session.setGenCompetitionsEnabled(true);
       const sentinels = plantLiveSentinels(reg, user, seed);
       const swept = new Set<string>();
 
@@ -147,7 +156,7 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         // E19: the per-beat re-sweep includes the knowledge-bearing reads (npcVoice/socialRead/
         // whereabouts/seasonRecap) — they were previously swept only at week 1, before the house
         // evolved any hidden history worth leaking.
-        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor", "finaleView", "npcVoice", "socialRead", "whereabouts", "seasonRecap"]) await sweep(player, name);
+        for (const name of ["gameStatus", "getGameState", "getMomentPrompt", "playerTagline", "socialInitiatives", "getVisibleStateFor", "finaleView", "npcVoice", "socialRead", "whereabouts", "seasonRecap", "competitionStagingView"]) await sweep(player, name);
 
         // Finale projection lock (no pre-reveal tally): while the finale stages, no winner crosses, and
         // the precomputed votes / script are never serialized — only the reveals shown so far.

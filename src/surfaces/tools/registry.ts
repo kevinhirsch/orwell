@@ -72,6 +72,10 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   // scenes and writes it back. Vault-free (public participant ids + nature only out; prose only in).
   { name: "getOffscreenSceneSkeletons", channel: "player", readsVault: false, description: "0070: the Vault-free skeletons of the off-screen scenes recorded in the most recent tick — public participant ids, room, and nature only. The texture write-back (recordOffscreenSceneTexture) addresses these by id. Returns [] before a game starts or when no off-screen scenes have been recorded this tick. Not a model lever." },
   { name: "recordOffscreenSceneTexture", channel: "player", readsVault: false, description: "FE-driven write-back (0070): enrich the prose content of an already-recorded hidden off-screen scene with model-voiced texture. Content-only — cannot create events, alter witness sets, flip the hidden flag, or carry relationship numbers. Idempotent; fail-soft (absent driver ⇒ deterministic template stands). Not a model lever." },
+  // #1400: generative competition design — the model authors each comp's theme/staging/per-round fiction
+  // OVER the engine's ALREADY-FIXED roll. Vault-free (names + the public drop ORDER + public flavor).
+  { name: "competitionStagingView", channel: "player", readsVault: false, description: "#1400 READ (FE-driven, flag-gated): the 'what to hand the model' projection for the currently-staging competition — comp/type/field/the FIXED winner/the FIXED drop order/the 0042 library scaffold — so the FE can author a theme + per-round fiction MATCHED to the already-decided outcome. Null unless generative competitions are enabled AND a comp has resolved its roll. Vault-free (names + the public drop ORDER, never a score/number). Not a model lever." },
+  { name: "recordCompetitionFiction", channel: "player", readsVault: false, description: "#1400 WRITE-BACK (FE-driven, flag-gated): record the model-authored competition fiction (theme + premise + per-round elimination fiction) AFTER the roll commits. The engine VALIDATES (hard) that every elimination named maps to the fixed drop order EXACTLY; on any mismatch it is REJECTED and the deterministic 0042 library floor stands (the model can never rename who goes or in what order). Presentation-only — never perturbs the winner/order/any seeded roll. Not a model lever." },
 ];
 
 export const ADMIN_TOOLS: readonly ToolDescriptor[] = [
@@ -184,7 +188,12 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // BE-103: `worldSnapshotView` is the read counterpart of the FE-driven `recordWorldSnapshot` write-
   // back (0062) — background flavor context, not a game-driving decision lever the GM model pulls — so
   // it stays OUT of the base prompt's lever manifest, exactly like `recordWorldSnapshot` itself.
-  "worldSnapshotView"]);
+  "worldSnapshotView",
+  // #1400: generative competition design — BOTH the staging READ and the fiction WRITE-BACK are FE-driven
+  // seams (the FE producer-LLM authors the comp fiction over the engine's fixed roll and writes it back),
+  // NOT game-driving levers the GM model pulls — so they stay OUT of the base prompt's lever manifest
+  // (the manifest↔registry drift test stays green), exactly like `recordWorldSnapshot`/`worldSnapshotView`.
+  "competitionStagingView", "recordCompetitionFiction"]);
 
 /**
  * The game-driving player levers the agent should know how to pull. This is the
