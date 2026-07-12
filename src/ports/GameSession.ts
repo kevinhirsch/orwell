@@ -1047,9 +1047,15 @@ export interface PendingDecisionView {
 }
 
 /**
- * The Vault-free projection of an in-progress finale (0037). Names + the current stage +
- * the reveals SO FAR only — NEVER a lean, a vote tally, an eviction manner, or the
- * pre-reveal winner. A juror's vote appears here only once it has been revealed in order.
+ * The Vault-free projection of a finale (0037). Names + the current stage + the reveals SO FAR
+ * only — NEVER a lean, a vote tally, an eviction manner, or the pre-reveal winner. A juror's vote
+ * appears here only once it has been revealed in order.
+ *
+ * S4-2: this projection SURVIVES the flip to `finished`. While the finale is STAGING, `winner` is
+ * null (the pre-reveal winner never crosses); once the season is OVER it carries the COMPLETED
+ * finale (every reveal, stage `reveal`) AND the crowned `winner` — the same public winner
+ * `gameStatus`/`seasonRecap` expose — so a finale-panel client agrees with every other surface
+ * post-finish instead of hanging on a null.
  */
 export interface FinaleView {
   /** Which stage the finale is in: statements | questions | vote | reveal. */
@@ -1060,6 +1066,12 @@ export interface FinaleView {
   asking: NamedRef | null;
   /** The votes revealed so far, in reveal order — each a (juror → finalist) pair by name. */
   reveals: Array<{ juror: NamedRef; votedFor: NamedRef }>;
+  /**
+   * The crowned winner (name only) — populated ONLY once the season is over (a Vault-free public
+   * fact: the same `this.live.winner` broadcast on `AdvanceView`/`seasonRecap`/`gameStatus`).
+   * `null` while the finale is still staging, so no pre-reveal winner can ever cross.
+   */
+  winner: NamedRef | null;
 }
 
 /**
@@ -2141,10 +2153,13 @@ export interface GameSession {
   markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null;
 
   /**
-   * The Vault-free projection of an in-progress finale (0037 §8.1) for a polling finale panel — the
-   * SAME projection already proven on `AdvanceView.finale`: names + the current stage + the reveals SO
-   * FAR only. `null` unless a finale is actively staging. No lean, tally, manner, or pre-reveal winner.
-   * Infra (like `gameStatus`/`playerTagline`), not a game-driving lever.
+   * The Vault-free projection of a finale (0037 §8.1) for a polling finale panel — the SAME projection
+   * already proven on `AdvanceView.finale`: names + the current stage + the reveals SO FAR only. No
+   * lean, tally, manner, or pre-reveal winner. S4-2: it SURVIVES the flip to `finished` — post-season it
+   * returns the COMPLETED finale plus the crowned `winner` (the same public winner `gameStatus`/
+   * `seasonRecap` carry), so a finale panel agrees with every surface instead of hanging on null.
+   * `null` only when no finale exists at all (never staged / no game). Infra (like `gameStatus`/
+   * `playerTagline`), not a game-driving lever.
    */
   finaleView(): FinaleView | null;
 
