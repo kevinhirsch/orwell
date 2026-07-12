@@ -63,15 +63,11 @@ CALLER_CORPUS = "\n".join(p.read_text(encoding="utf-8") for p in _CALLER_FILES)
 # is NOT silently skipped: ``test_fe_exempt_is_honest`` proves it is (a) still a real
 # write-back and (b) genuinely not-yet-wired — so the moment it IS fully wired you MUST
 # remove it, and the moment it leaves the registry the exemption is flagged stale.
-_FE_EXEMPT = {
-    # 0116 phase-2 (model-authored cast genesis). The ENGINE side is fully wired + validated
-    # (src/ports/GameSession.ts, src/adapters/mcp/McpServer.ts dispatch, registry PLAYER_TOOLS
-    # + INFRA_LEVERS, tests/unit/castGenesisBoundary.test.ts). The FE producer-LLM DRIVER that
-    # PROPOSES the 15-NPC skeleton has NOT landed yet; until it does the deterministic
-    # cast-genesis floor stands (tests/unit/castGenesisByteNeutral.test.ts). REMOVE this entry
-    # the moment the FE genesis driver + its orwell_engine wrapper are wired.
-    "recordCastGenesis",
-}
+# 0116 phase-2 (model-authored cast genesis) is now FULLY FE-wired: the
+# ``orwell_engine.record_cast_genesis`` MCP-call wrapper + the ``orwell_cast_genesis`` producer-LLM
+# DRIVER (kicked from ``orwell_prewarm.prewarm_cast`` before identity + authoring) both landed, so
+# ``recordCastGenesis`` is guarded by the real boundary gate below (no longer exempt).
+_FE_EXEMPT: set = set()
 
 
 # ── derive the write-back set from registry.ts INFRA_LEVERS ───────────────────

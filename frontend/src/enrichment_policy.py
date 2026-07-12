@@ -45,8 +45,12 @@ VALID_POLICIES = ("soft", "strict")
 DEFAULT_POLICY = "strict"
 
 #: The enrichment call classes this policy governs — every `_resolve_llm_fn` fail-soft site.
-#: (`cast-prewarm` rides the `cast-authoring` resolver; it is listed for its engine pre-seed seam.)
-CALL_CLASSES = ("cast-authoring", "cast-identity", "cast-prewarm", "zeitgeist", "offscreen-texture")
+#: (`cast-prewarm` rides the `cast-authoring` resolver; it is listed for its engine pre-seed seam.
+#: `cast-genesis` (0116) is the model-authored cast SKELETON — it too rides the cast-authoring
+#: narration resolver, and its loud pre-finalize gate reads the strict-failed latch in
+#: `orwell_cast_genesis`.)
+CALL_CLASSES = ("cast-authoring", "cast-identity", "cast-prewarm", "cast-genesis", "zeitgeist",
+                "offscreen-texture")
 
 # ── the loud failure ledger (admin-visible; in-process, bounded) ───────────────────────────
 _MAX_FAILURES_PER_USER = 50
@@ -126,7 +130,9 @@ async def preflight_unwired(owner: Optional[str]) -> list:
     except Exception:
         authoring_fn = None
     if authoring_fn is None:
-        out.extend(["cast-authoring", "cast-prewarm"])
+        # cast-genesis (0116) rides the SAME cast-authoring narration resolver — no authoring model
+        # means the cast skeleton cannot be model-authored either (its loud pre-finalize gate).
+        out.extend(["cast-authoring", "cast-prewarm", "cast-genesis"])
     try:
         utility_fn = await _ca._resolve_llm_fn(owner)
     except Exception:
