@@ -235,9 +235,12 @@ def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_pa
     }))
     preserved = mod.export_preserved_settings(str(setp))
 
-    # The model/endpoint SELECTIONS are NOT preserved (they reset to defaults on load).
+    # The model SELECTIONS are NOT preserved (they reset to defaults on load). NOTE
+    # (2026-07-12): the default-ENDPOINT designation (`default_endpoint_id`) is now carried
+    # separately by reset_frontend_store/preserved_default_designation — validated against the
+    # surviving endpoint rows — so it is deliberately absent from THIS operational-flags export.
     for reset_key in ("default_endpoint_id", "default_model", "image_endpoint_id", "image_model"):
-        assert reset_key not in preserved, f"{reset_key} must reset, not ride across a reset"
+        assert reset_key not in preserved, f"{reset_key} must not ride via the flags export"
     assert "sakana/fugu-ultra" not in json.dumps(preserved)
     # Operational flags survive; unrelated settings are dropped.
     assert preserved.get("image_gen_enabled") is True

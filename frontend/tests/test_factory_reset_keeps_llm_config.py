@@ -104,7 +104,8 @@ def test_factory_reset_keeps_keys_resets_models_wipes_the_rest(tmp_path):
     assert tables == {"model_endpoints"} and rows == [("ep1", "enc:KEEPME")]
     settings = json.loads((fe_data / "settings.json").read_text())
     # Model SELECTIONS reset to default (NOT preserved) — the stale fugu pick never rides (#860).
-    assert "default_endpoint_id" not in settings
+    # The default-ENDPOINT designation survives (2026-07-12 fix), still pointing at the kept row.
+    assert settings.get("default_endpoint_id") == "ep1"
     assert "default_model" not in settings
     assert "image_model" not in settings
     assert "sakana/fugu-ultra" not in (fe_data / "settings.json").read_text()

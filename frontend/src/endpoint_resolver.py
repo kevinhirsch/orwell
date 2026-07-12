@@ -223,6 +223,51 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
     return headers
 
 
+def _owner_scoped(query, owner: Optional[str]):
+    """Owner-scope a ModelEndpoint query the way the READ paths do (and the way
+    ``ai_interaction._resolve_model`` was already fixed): admins manage the global pool and are
+    NOT scoped; everyone else sees their own endpoints PLUS shared/null-owner rows
+    (``include_shared=True``). Without the shared/admin allowance, a configured endpoint whose
+    owner stamp doesn't match the caller — e.g. an admin-/null-owned provider, or one whose
+    owner went STALE when an OOBE reset rebuilt accounts but preserved the endpoint rows —
+    resolves to "not found", which bricks every background/utility lane (cast authoring,
+    genesis, zeitgeist …) and, under the strict 0116 enrichment policy, refuses game creation.
+    NEVER matches another user's owned row (only own + NULL-owner)."""
+    if not owner:
+        return query
+    try:
+        from src.auth_helpers import owner_filter, is_admin_user
+        if is_admin_user(owner):
+            return query
+        return owner_filter(query, ModelEndpoint, owner, include_shared=True)
+    except Exception:
+        return query
+
+
+def _sole_keyed_chat_endpoint(db, owner: Optional[str]):
+    """The single-endpoint auto-default (issue: post-OOBE-reset brick, 2026-07-12).
+
+    When the default-endpoint DESIGNATION (`default_endpoint_id`) is null or dangling, but
+    EXACTLY ONE enabled, API-keyed, non-image endpoint is visible to this owner, that endpoint
+    is the only thing resolution could ever mean — return it. With zero or 2+ candidates this
+    returns None (ambiguous — never guess between providers). Fail-soft: any error reads as
+    None and the caller's normal fallback path stands."""
+    try:
+        q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)  # noqa: E712
+        q = _owner_scoped(q, owner)
+        candidates = [
+            ep for ep in q.all()
+            if (getattr(ep, "api_key", None) or "").strip()
+            and (getattr(ep, "model_type", None) or "llm") != "image"
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+    except Exception as e:
+        logger.debug(f"single-endpoint auto-default probe failed: {e}")
+        return None
+
+
 def resolve_endpoint(
     setting_prefix: str,
     fallback_url: Optional[str] = None,
@@ -241,6 +286,13 @@ def resolve_endpoint(
 
     Returns:
         (endpoint_url, model, headers) — resolved or fallback values.
+
+    Resilience (2026-07-12, the post-OOBE-reset brick): when the whole settings chain yields
+    no endpoint id (or a dangling one) AND the caller supplied no usable fallback, the
+    single-endpoint auto-default fires — if EXACTLY ONE enabled endpoint with an API key
+    exists, resolution binds to it (with the stored ``default_model``), so a lost/never-written
+    `default_endpoint_id` can never hard-brick game creation. With multiple candidate
+    endpoints (or none keyed) nothing changes: the configured behavior is byte-identical.
     """
     try:
         from src.settings import get_user_setting, load_settings
@@ -276,20 +328,45 @@ def resolve_endpoint(
             ep_id = _stg("default_endpoint_id")
             model = _stg("default_model")
 
-    if not ep_id:
-        return fallback_url, fallback_model, fallback_headers
-
     db = SessionLocal()
     try:
-        ep = db.query(ModelEndpoint).filter(
-            ModelEndpoint.id == ep_id,
-            ModelEndpoint.is_enabled == True,
-        )
-        if owner:
-            from src.auth_helpers import owner_filter
-            ep = owner_filter(ep, ModelEndpoint, owner).first()
-        else:
-            ep = ep.first()
+        ep = None
+        auto_bound = False
+        if ep_id:
+            q = db.query(ModelEndpoint).filter(
+                ModelEndpoint.id == ep_id,
+                ModelEndpoint.is_enabled == True,
+            )
+            ep = _owner_scoped(q, owner).first()
+        if ep is None and not (fallback_url and fallback_model):
+            # The single-endpoint auto-default: the designation is null/dangling but exactly
+            # one enabled+keyed endpoint exists — resolution can only mean that one. Logged
+            # loudly so the fallback firing is always visible to the operator.
+            sole = _sole_keyed_chat_endpoint(db, owner)
+            if sole is not None:
+                if not model:
+                    model = _stg("default_model")
+                if model:
+                    # The RIGHT model, not A model (owner ruling 2026-07-12): the auto-default
+                    # binds ONLY the configured default/chained model identity — it must never
+                    # degrade to "first model in the provider list" (the arbitrary-narrator
+                    # class). No configured model ⇒ stay unresolved, loudly.
+                    ep = sole
+                    auto_bound = True
+                    logger.warning(
+                        "[resolve_endpoint] '%s' endpoint designation is %s — single-endpoint "
+                        "auto-default fired: bound to the only keyed enabled endpoint '%s' "
+                        "(configured model %r)",
+                        setting_prefix, "dangling" if ep_id else "unset",
+                        getattr(sole, "name", None) or getattr(sole, "id", "?"), model,
+                    )
+                else:
+                    logger.warning(
+                        "[resolve_endpoint] '%s' endpoint designation is %s and no default_model "
+                        "is configured — auto-default DECLINED (never binds an arbitrary "
+                        "first-listed model); resolution stays unresolved",
+                        setting_prefix, "dangling" if ep_id else "unset",
+                    )
         if not ep:
             return fallback_url, fallback_model, fallback_headers
 
@@ -302,6 +379,13 @@ def resolve_endpoint(
         # model). Treat it as unset so the picker below selects a live one
         # instead of dispatching to a disabled model that 400s.
         if model and model in _endpoint_hidden_models(ep):
+            if auto_bound:
+                # An auto-bound endpoint whose configured default the operator HID: staying
+                # unresolved (loud) beats silently swapping in an arbitrary first-listed model.
+                logger.warning(
+                    "[resolve_endpoint] auto-default declined: the configured model %r is "
+                    "hidden on endpoint '%s'", model, getattr(ep, "name", None) or ep.id)
+                return fallback_url, fallback_model, fallback_headers
             model = ""
         # If no (usable) model specified, pick the first enabled chat model.
         if not model:
@@ -333,10 +417,9 @@ def resolve_endpoint_by_id(
             ModelEndpoint.id == ep_id,
             ModelEndpoint.is_enabled == True,
         )
-        if owner:
-            from src.auth_helpers import owner_filter
-            q = owner_filter(q, ModelEndpoint, owner)
-        ep = q.first()
+        # Admin-exempt + own-or-shared scoping (see _owner_scoped): a shared/null-owner or
+        # stale-owner endpoint row must stay resolvable by its configured fallback entries.
+        ep = _owner_scoped(q, owner).first()
         if not ep:
             return None
         base = normalize_base(ep.base_url)
