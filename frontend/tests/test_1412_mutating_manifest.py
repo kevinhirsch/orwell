@@ -66,6 +66,7 @@ READ_ONLY_TOOLS = frozenset({
     "requestSelfEviction", "cancelSelfEviction", "confide",
     "preSeedCast", "preSeedNextSeason", "recordCastProfile", "recordCastIdentity",
     "recordWorldSnapshot", "recordOffscreenSceneTexture", "recordCompetitionFiction",
+    "recordCastGenesis",
 })
 
 # `manageSandbox` is the ONE admin tool in the manifest (a sandbox reset / load moves the
