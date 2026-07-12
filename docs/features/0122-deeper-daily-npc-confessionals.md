@@ -19,9 +19,13 @@ engine-true read, walled from everyone) but wired it thin and rare. This feature
 in review:
 
 - **Deeper.** A confessional today says *"{target} is my biggest threat, {ally} is the one I trust."* We add
-  five more grounded facets so it reads like a real Diary Room segment: their **plan**, their **standing**, a
-  **grudge**, the **aftermath of a big conversation**, and their reaction to an **adjacent move** (something
-  that happened to an ally / showmance / target).
+  five more grounded facets it *can* draw on: their **plan**, their **standing**, a **grudge**, the
+  **aftermath of a big conversation**, and their reaction to an **adjacent move** (something that happened to
+  an ally / showmance / target). **These are NOT a checklist** — a confessional carries **only the facets the
+  moment actually triggers**, so depth is *earned by situation*: the **HOH and the nominees** (real power, real
+  danger) naturally get the **deepest** confessionals — a plan to voice, a safe-or-exposed read — while a
+  houseguest coasting in the middle says less. Nothing happening to you ⇒ a short read (or, if truly bare,
+  none).
 - **Daily.** Instead of only ceremony-standers + one random off-screen confessor, once per **in-game day**
   (the 0066/0117–0119 clock) *most* living houseguests confess — **unless their game is bare** (nothing
   meaningful happened to them **and** they hold no clear target or ally). An active player confesses daily; a
@@ -86,6 +90,22 @@ player or admin (Vault Wall #1/#2) — and **folded into the soul** so the NPC's
 
 ## 4. Design
 
+- **Facets are TRIGGERED, not templated (the core principle).** A confessional is **not** a fixed 7-slot
+  form. Each facet has a **trigger condition**; it renders **only** when that condition is met, so a
+  confessional's depth tracks the confessor's real situation. Depth is *earned*:
+
+  | Facet | Triggered when… | So the deepest confessionals belong to… |
+  |---|---|---|
+  | target / ally (0040) | they hold any clear threat/bond read | anyone with a real read |
+  | **plan** | they hold **power or a live move** (HOH, veto-holder, or a clear target to act on) | **the HOH** |
+  | **standing** | their **public role changed their safety** (on the block, or just took/lost power) | **the nominees** (exposed) & the HOH (safe) |
+  | **grudge** | a peer wronged them (a real betrayal-shock signal), distinct from the target | anyone recently betrayed |
+  | **big-conversation aftermath** | they just had a **significant social scene** that moved a bond | anyone in a charged talk |
+  | **adjacent move** | a **relation of theirs** was in a recent public beat (ally won power, showmance nominated) | anyone whose people just moved |
+
+  A houseguest with power *and* danger *and* a fresh betrayal confesses a rich, multi-part read; a quiet
+  middle-of-the-pack houseguest with only a target confesses a short one; a bare game confesses nothing.
+
 - **Facet builders (pure, grounded).** Extend `confessionalFor` (or a sibling `deepConfessionalFacets`) to
   compute the five facets from the confessor's **own** relationship edges + **public** role/beat state only:
   - `plan` reads `target` (already computed) + the live `hoh/vetoHolder/nominees` role → a bounded phrase.
@@ -131,9 +151,11 @@ wall: record{ hidden:true, witnessSet:[npc] }            // player NEVER a witne
 
 ## 6. Definition of Done
 
-- [ ] **Deeper content:** a confessional can voice **plan / standing / grudge / big-conversation aftermath /
-      adjacent move**, each **grounded** in the NPC's own edges + public state (a flip of the underlying truth
-      flips the facet; nothing is invented), and each **optional** (a bare NPC's confessional stays short).
+- [ ] **Deeper content, TRIGGERED not templated:** a confessional can voice **plan / standing / grudge /
+      big-conversation aftermath / adjacent move**, each **grounded** in the NPC's own edges + public state
+      (a flip of the underlying truth flips the facet; nothing is invented), and each rendered **only when its
+      trigger fires** — so an **HOH / nominee** (power / danger) gets a **deep** confessional while a coasting
+      middle houseguest gets a **short** one, and a bare game gets none. No fixed multi-slot form.
 - [ ] **Daily frequency:** once per in-game day, **most living houseguests** record a confessional (not only
       ceremony-standers); a **bare game** NPC records **none** that day.
 - [ ] **Vault-sealed from everyone (unchanged):** no confessional content reaches the **player** or

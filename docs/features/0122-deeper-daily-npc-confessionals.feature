@@ -22,6 +22,12 @@ Feature: Deeper, daily NPC confessionals
     When the daily confessional sweep runs
     Then that houseguest records no confessional that day
 
+  Scenario: A confessional carries only the facets its situation triggers
+    Given the HOH and a coasting mid-pack houseguest both confess the same day
+    Then the HOH's confessional is the deeper one, carrying their plan and safe standing
+    And the coasting houseguest's confessional is short, carrying only what they actually hold
+    And neither confessional is a fixed multi-part form
+
   Scenario: A confessional voices the NPC's plan, grounded in their target
     Given a houseguest whose hidden reads mark a clear top threat
     When that houseguest confesses
