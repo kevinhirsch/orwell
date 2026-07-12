@@ -280,8 +280,9 @@ def test_game_build_uses_diegetic_sender_on_placeholder_and_continuation():
     assert "isGameBuild() ? GAME_NARRATOR" in chat
     # the placeholder/resume/reconnect sites route their model label through _senderLabel
     assert chat.count("_senderLabel(") >= 4
-    # the continuation-round streaming label is diegetic in the game build
-    assert "newRole.textContent = isGameBuild() ? GAME_NARRATOR" in chat
+    # (#829 turn-coalescing: a turn is now ONE bubble — there is no separate per-round
+    # CONTINUATION bubble with its own byline. The one bubble's sender is set once via
+    # _senderLabel (pinned above), so it stays diegetic across every round of the turn.)
     # a provider fallback stays diegetic too (no raw "(fallback)" model name reaches the player)
     assert "if (!isGameBuild()) {\n                        _rEl.textContent = _ansM + ' (fallback) ';" in chat
 
