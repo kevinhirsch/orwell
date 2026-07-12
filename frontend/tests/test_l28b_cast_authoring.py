@@ -360,3 +360,51 @@ def test_849_parser_collapses_whitespace_and_drops_a_runaway_vocation():
     assert "vocation" not in prof2
     # an empty / blank vocation is simply not forwarded
     assert "vocation" not in A.parse_authored_profile(json.dumps(dict(_FULL, vocation="   ")), "npc:7")
+
+
+# ── #1395: the idiolect VOICE fingerprint carries an OPTIONAL catchphrase set ──────────────────────
+# A complete authored voice: six dials + a prose signature + a habitual lexicon + characteristic catchphrases.
+_VOICE = {
+    "register": "plainspoken", "rhythm": "clipped", "energy": "warm", "directness": "blunt",
+    "humor": "dry", "stressTell": "goes quiet", "signature": "lands every point like it's the last word",
+    "lexicon": ["honestly", "for real"], "catchphrases": ["at the end of the day", "we move"],
+}
+
+
+def test_1395_prompt_asks_for_catchphrases_in_the_voice_idiolect():
+    system = A._SYSTEM.lower()
+    assert "catchphrases" in system
+    # framed as authentic phrasings, NOT comedy bits
+    assert "not comedy bits" in system or "authentic verbal habits" in system
+
+
+def test_1395_parser_forwards_a_wellformed_catchphrase_set_inside_the_voice():
+    prof = A.parse_authored_profile(json.dumps(dict(_FULL, voice=_VOICE)), "npc:7")
+    assert prof["voice"]["catchphrases"] == ["at the end of the day", "we move"]
+    # the core voice still folds alongside it (whole dials + lexicon)
+    assert prof["voice"]["register"] == "plainspoken"
+    assert prof["voice"]["lexicon"] == ["honestly", "for real"]
+
+
+def test_1395_parser_trims_and_caps_the_catchphrases():
+    # FE parser strips + drops empties + caps at 3 (internal-whitespace collapse is the engine's job in
+    # sanitizeAuthoredVoice, mirroring the sibling lexicon convention).
+    noisy = dict(_VOICE, catchphrases=["  we move  ", "", " it is what it is ", "no cap", "one too many"])
+    prof = A.parse_authored_profile(json.dumps(dict(_FULL, voice=noisy)), "npc:7")
+    assert prof["voice"]["catchphrases"] == ["we move", "it is what it is", "no cap"]
+
+
+def test_1395_catchphrases_are_a_bonus_never_a_gate():
+    # A voice WITHOUT catchphrases still folds whole (back-compat with the #1409 authoring path).
+    no_cats = {k: v for k, v in _VOICE.items() if k != "catchphrases"}
+    prof = A.parse_authored_profile(json.dumps(dict(_FULL, voice=no_cats)), "npc:7")
+    assert "catchphrases" not in prof["voice"]
+    assert prof["voice"]["register"] == "plainspoken"
+    # Garbage catchphrases are dropped but the core voice still lands.
+    garbage = dict(_VOICE, catchphrases=["", "   "])
+    prof2 = A.parse_authored_profile(json.dumps(dict(_FULL, voice=garbage)), "npc:7")
+    assert "catchphrases" not in prof2["voice"]
+    assert prof2["voice"]["register"] == "plainspoken"
+    # A non-list catchphrases value is ignored the same way (core voice still folds).
+    prof3 = A.parse_authored_profile(json.dumps(dict(_FULL, voice=dict(_VOICE, catchphrases="we move"))), "npc:7")
+    assert "catchphrases" not in prof3["voice"]
