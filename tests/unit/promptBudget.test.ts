@@ -42,9 +42,9 @@ const LIVE_VIEW = (() => {
 
 describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   // ── The FIXED instruction budget: BASE is injected on EVERY turn, so it is the single biggest
-  //    fixed cost and the truest target of finding 12. Measured post-trim: 44,912 chars (~11.2k tok).
+  //    fixed cost and the truest target of finding 12. Measured post-trim: 44,781 chars (~11.2k tok).
   it("BASE_GAME_MASTER_PROMPT stays under its fixed-instruction budget", () => {
-    const BUDGET = 46_000; // ~11.5k tok — ≈2.4% over the 44,912-char post-trim size
+    const BUDGET = 46_000; // ~11.5k tok — ≈2.7% over the 44,781-char post-trim size
     expect(BASE_GAME_MASTER_PROMPT.length).toBeLessThanOrEqual(BUDGET);
   });
 
@@ -66,17 +66,17 @@ describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   //    / worldContext / surfacedFacts, which vary by turn). The roster DATA dominates the in-game
   //    sizes, so a bump here can also mean a legitimately richer cast — re-baseline consciously.
   it("the assembled character-creation prompt stays under its budget", () => {
-    const BUDGET = 56_000; // ~14k tok — over the 54,523-char size (pre-game, no cast)
+    const BUDGET = 56_000; // ~14k tok — over the 54,392-char size (pre-game, no cast)
     expect(buildSystemPrompt("character-creation", PRE_GAME_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 
   it("the assembled premiere prompt stays under its budget", () => {
-    const BUDGET = 73_000; // ~18.25k tok — over the 71,293-char size (full 16-cast roster + premiere tracker)
+    const BUDGET = 73_000; // ~18.25k tok — over the 71,162-char size (full 16-cast roster + premiere tracker)
     expect(buildSystemPrompt("premiere", LIVE_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 
   it("the assembled in-game (social) prompt stays under its budget", () => {
-    const BUDGET = 67_000; // ~16.75k tok — over the 65,613-char size (full 16-cast roster)
+    const BUDGET = 67_000; // ~16.75k tok — over the 65,482-char size (full 16-cast roster)
     expect(buildSystemPrompt("social", LIVE_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 
