@@ -1,4 +1,4 @@
-import type { Soul } from "./characterFactory";
+import type { Soul, Disposition } from "./characterFactory";
 import type { InteractionType } from "./relationships";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import { TEMPERATURE_CONSTANTS, emotionalModifier, temperatureRoll } from "../domain/temperatureConstants";
@@ -85,6 +85,78 @@ export function offscreenEmotion(type: InteractionType, role: SceneRole = "initi
 const clamp01 = (v: number): number => (Number.isNaN(v) ? 0 : Math.max(0, Math.min(1, v)));
 
 /**
+ * 0124 — the DEEPER-evolution tunables (all magnitudes for the opt-in `ORWELL_SOUL_DEPTH` layer live here).
+ * Untouched unless the layer is on, so the 0041 single-scalar path stays byte-identical.
+ */
+const SOUL_DEPTH = {
+  /** The neutral resting point for the `distress`/`confidence` axes (0.5 = neither felt). */
+  axisBaseline: 0.5,
+  /** How much a negative-valence event raises `distress` (blindside valence −0.6 ⇒ +0.6·gain). */
+  distressGain: 0.6,
+  /** How much a positive-valence event raises `confidence` (comp-win valence +0.45 ⇒ +0.45·gain). */
+  confidenceGain: 0.6,
+  /** Fraction of the gap each axis reverts toward its baseline on a `calm` beat (scaled by settleScale). */
+  axisSettle: 0.25,
+  /** How much harder `distress` drags a composed read than `confidence` lifts it (so "confident AND rattled" underperforms "purely confident"). */
+  distressDrag: 1.5,
+  /** Per-event temperament-drift magnitude (a betrayal nudges the effective disposition this far toward clash). */
+  driftGain: 0.28,
+  /** Fraction the temperament drift reverts toward 0 (the true baseline) on a `calm` beat (× settleScale). */
+  driftSettle: 0.2,
+  /** Effective-disposition bands: |base+drift| past these reads clash/bond, else neutral (hysteresis). */
+  clashBand: 0.5,
+  bondBand: -0.5,
+  /** Per-disposition settle multiplier (part C): clash lingers, bond shrugs it off, neutral unchanged. */
+  settleOf: { clash: 0.6, bond: 1.4, neutral: 1.0 } as Record<Disposition, number>,
+} as const;
+
+const clampSigned = (v: number, m: number): number => (Number.isNaN(v) ? 0 : Math.max(-m, Math.min(m, v)));
+const revertToward = (v: number, target: number, frac: number): number => v + (target - v) * frac;
+
+/** 0124 — which way an event bends the temperament: + toward clash-paranoia, − toward bond-trust, 0 neutral. */
+function driftOf(event: EmotionalEvent): number {
+  switch (event) {
+    case "blindside": case "betrayed": case "nominated": return +SOUL_DEPTH.driftGain;
+    case "bond": case "survived-vote": case "comp-win":   return -SOUL_DEPTH.driftGain;
+    default: return 0; // scheme / comp-loss / calm don't bend the strategic temperament
+  }
+}
+
+/**
+ * 0124 (part A) — the composed emotional read the behavior layer uses WHEN the independent axes are present.
+ * `confidence` lifts and `distress` drags (harder, by `distressDrag`), so a houseguest who is confident AND
+ * rattled reads WORSE than one who is purely confident. Absent axes ⇒ the plain `emotionalState` (the 0041
+ * value), so with the layer off this is byte-identical. Bounded [0,1], 0.5 = calm (what 0006/0028 expect).
+ */
+export function composedEmotion(soul: Soul): number {
+  if (soul.distress === undefined || soul.confidence === undefined) return soul.emotionalState;
+  const lift = soul.confidence - SOUL_DEPTH.axisBaseline;
+  const drag = (soul.distress - SOUL_DEPTH.axisBaseline) * SOUL_DEPTH.distressDrag;
+  return clamp01(SOUL_DEPTH.axisBaseline + lift - drag);
+}
+
+/**
+ * 0124 (part B) — the EFFECTIVE disposition = the static baseline bent by the soul's accumulated
+ * `temperamentDrift`, banded back to clash/bond/neutral with hysteresis. A repeatedly-burned houseguest
+ * hardens toward paranoia; a calm stretch reverts them toward who they really are. The static CHARACTER
+ * disposition is NEVER changed (0007) — this is a pure READ over the drifting soul. No drift ⇒ the baseline.
+ */
+export function effectiveDisposition(baseline: Disposition, soul: Soul): Disposition {
+  const drift = soul.temperamentDrift ?? 0;
+  if (drift === 0) return baseline;
+  const base = baseline === "clash" ? 1 : baseline === "bond" ? -1 : 0;
+  const v = base + drift;
+  if (v >= SOUL_DEPTH.clashBand) return "clash";
+  if (v <= SOUL_DEPTH.bondBand) return "bond";
+  return "neutral";
+}
+
+/** 0124 (part C) — a houseguest's disposition-derived settle multiplier (clash lingers, bond shrugs off). */
+export function settleScaleOf(disposition: Disposition): number {
+  return SOUL_DEPTH.settleOf[disposition];
+}
+
+/**
  * Evolve a soul's `emotionalState` + `volatility` from one live event, in place. Bounded,
  * mean-reverting toward the soul's emotional baseline. A more volatile soul swings harder.
  * Appends the new level to `emotionalHistory` so the trajectory persists and never degrades
@@ -100,6 +172,7 @@ export function evolveEmotion(
   event: EmotionalEvent,
   c: TemperatureConstants = TEMPERATURE_CONSTANTS,
   rng?: RandomnessSource,
+  opts: { soulDepth?: boolean } = {},
 ): void {
   const { valence, arousal } = IMPACT[event];
   const k = c.emotional.volatilityScale;
@@ -112,8 +185,32 @@ export function evolveEmotion(
     emotionalModifier(soul.emotionalState, circumstance, temperature, c, soul.emotionalBaseline),
   );
 
-  // volatility: shocks raise it; calm/bonding settle it. Bounded.
-  soul.volatility = clamp01(soul.volatility + arousal * k);
+  // volatility: shocks raise it; calm/bonding settle it. Bounded. 0124 (part C): a disposition-derived
+  // `settleScale` slows/speeds ONLY the SETTLING (negative arousal) — a clash soul's agitation lingers, a
+  // bond soul shrugs it off; shocks (positive arousal) spike fully. Absent settleScale ⇒ ×1 (byte-identical).
+  const settleScale = arousal < 0 ? (soul.settleScale ?? 1) : 1;
+  soul.volatility = clamp01(soul.volatility + arousal * k * settleScale);
+
+  // 0124 (parts A + B): when the deeper-evolution layer is on, move the INDEPENDENT affect axes and the
+  // temperament drift. Skipped entirely (and the axis fields stay absent) unless `opts.soulDepth` — so the
+  // single-scalar 0041 path above is untouched and byte-identical when off.
+  if (opts.soulDepth) {
+    const settle = soul.settleScale ?? 1;
+    if (soul.distress === undefined) soul.distress = SOUL_DEPTH.axisBaseline;
+    if (soul.confidence === undefined) soul.confidence = SOUL_DEPTH.axisBaseline;
+    if (soul.temperamentDrift === undefined) soul.temperamentDrift = 0;
+    if (event === "calm") {
+      // a quiet stretch reverts every axis toward baseline (× settleScale — bond settles faster).
+      soul.distress = clamp01(revertToward(soul.distress, SOUL_DEPTH.axisBaseline, SOUL_DEPTH.axisSettle * settle));
+      soul.confidence = clamp01(revertToward(soul.confidence, SOUL_DEPTH.axisBaseline, SOUL_DEPTH.axisSettle * settle));
+      soul.temperamentDrift = soul.temperamentDrift * (1 - SOUL_DEPTH.driftSettle * settle);
+    } else {
+      // distress rises on negative-valence events; confidence on positive — INDEPENDENTLY (both can climb).
+      soul.distress = clamp01(soul.distress + Math.max(0, -valence) * SOUL_DEPTH.distressGain);
+      soul.confidence = clamp01(soul.confidence + Math.max(0, valence) * SOUL_DEPTH.confidenceGain);
+      soul.temperamentDrift = clampSigned(soul.temperamentDrift + driftOf(event), 1);
+    }
+  }
 
   // arc: the trajectory of where the season has taken them (monotonic, never dropped).
   soul.emotionalHistory.push(soul.emotionalState);

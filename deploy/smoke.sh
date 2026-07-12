@@ -37,7 +37,7 @@ SMOKE_DATA_DIR="$(mktemp -d /tmp/orwell-smoke-data-XXXXXX)"
 # the one true end-to-end gate actually exercises the shipped runtime (a regression reachable only
 # when a living-house layer is active would otherwise stay invisible). Matches orwell-install.sh's
 # write_config(); every layer is calibration-neutral-when-off and heavy-sim'd ON.
-SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1 ORWELL_STRATEGIC_CADENCE=1 ORWELL_CONFESSIONAL_DEPTH=1 ORWELL_DEAL_DEPTH=1 ORWELL_NPC_DEAL_OFFERS=1)
+SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1 ORWELL_STRATEGIC_CADENCE=1 ORWELL_CONFESSIONAL_DEPTH=1 ORWELL_DEAL_DEPTH=1 ORWELL_NPC_DEAL_OFFERS=1 ORWELL_SOUL_DEPTH=1)
 
 start_engine() { # optional $1 = a shared token to enforce (B67/B71)
   env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" "${SHIPPED_FLAGS[@]}" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
