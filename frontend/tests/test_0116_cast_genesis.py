@@ -282,6 +282,28 @@ def test_run_genesis_no_model_under_strict_is_loud(monkeypatch):
     assert any(f.get("callClass") == "cast-genesis" for f in fails)  # a loud ledger entry
 
 
+def test_run_genesis_ran_but_committed_nothing_under_strict_is_loud(monkeypatch):
+    # A model IS wired, but every proposal is garbage (no usable JSON) ⇒ nothing commits ⇒ the floor
+    # would stand. Under strict that is a LOUD failure + the pre-finalize latch (never a silent floor).
+    from src import enrichment_policy as ep
+    G.reset_state("u-hardfail")
+    ep.clear_failures("u-hardfail")
+    monkeypatch.setattr(ep, "is_strict", lambda: True)
+
+    async def _model(_owner):
+        async def llm(_messages):
+            return "the model rambled; no JSON at all"
+        return llm
+
+    monkeypatch.setattr(G, "_resolve_llm_fn", _model)
+    res = _run(G.run_genesis(_ROSTER, 7, "u-hardfail"))
+    assert res["accepted"] is False and res["committed"] == 0
+    assert G.strict_failed("u-hardfail") is True                       # the loud pre-finalize gate latches
+    assert any(f.get("callClass") == "cast-genesis" for f in ep.failures("u-hardfail"))
+    assert G.genesis_committed("u-hardfail", 7) is False               # nothing committed ⇒ no idempotency latch
+    G.reset_state("u-hardfail")
+
+
 def test_strict_latch_clears_on_a_successful_run(monkeypatch):
     from src import enrichment_policy as ep
     G.mark_strict_failed("u-2")
