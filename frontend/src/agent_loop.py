@@ -1988,6 +1988,31 @@ def _casting_incomplete_steer(missing: list, refused_reason: str = "") -> str:
             "detail yourself — ask the player, in character, and wait for their answer.")
 
 
+def _creation_no_model_steer(unwired: list, error: str = "") -> str:
+    """2026-07-12 (PROD-blocker observability): the production note injected when a FORCED
+    createCharacter was REFUSED `no-model-wired` (the strict 0116 enrichment preflight — no
+    language model resolves for the cast-authoring/genesis/identity/… call classes).
+
+    This is an OPERATOR configuration gap, not a casting gap and not the model stalling — so the
+    steer must make the model tell the player PLAINLY, out of character, what is broken and the
+    one-step fix, instead of narrating in-fiction stalling (the observed live failure: the player
+    saw only producers vamping while the season silently could never start). Rides the SAME
+    system-note affordance as `_casting_incomplete_steer`; Vault-free (class names only)."""
+    classes = ", ".join(str(c) for c in (unwired or [])) or "cast enrichment"
+    reason = (error or "").strip()
+    reason_clause = (f" The game's refusal: {reason}" if reason else "")
+    return ("(Production note, not part of the story.) The season could NOT start: no language "
+            "model is wired for the " + classes + " call class(es), so the cast cannot be "
+            "generated." + reason_clause + " This is an app-configuration problem only an "
+            "operator can fix — NOT a casting gap and NOT something the player can answer. Tell "
+            "the player plainly, OUT OF CHARACTER (one short paragraph, no in-fiction excuse "
+            "about production delays): the game can't begin because no AI model endpoint is "
+            "configured for cast generation; an operator must set the default provider endpoint "
+            "and chat model in Settings → Models (or via /admin/status), and once that's done "
+            "they can say they're ready and casting will finalize. Do NOT call createCharacter "
+            "again until then, and never invent a story reason that hides the real fix.")
+
+
 def _join_casting_labels(items: list) -> str:
     """Oxford-comma join for the casting gap labels (kept tiny + local to avoid a wider import)."""
     items = [i for i in items if i]
@@ -6645,6 +6670,26 @@ async def _stream_agent_loop_impl(
                             try:
                                 from src.tool_implementations import do_create_character
                                 _cres = await do_create_character("{}", owner=owner)
+                                # 2026-07-12 — the strict 0116 NO-MODEL refusal (an OPERATOR gap,
+                                # not a model stall and not a casting gap): surface it as a
+                                # production note telling the player, out of character, exactly
+                                # what is broken and the one-step fix. Without this branch the
+                                # refusal fell to the generic "did not start" nudge below and the
+                                # player saw only in-fiction stalling (the live PROD symptom).
+                                # Don't march the stall counter — re-nudging cannot fix wiring.
+                                if isinstance(_cres, dict) and _cres.get("refusalKind") == "no-model-wired":
+                                    if owner is not None:
+                                        _CASTING_STALL_LEVEL[owner] = _clv  # undo this turn's bump
+                                    logger.error(
+                                        "[orwell] forced createCharacter REFUSED (no-model-wired, "
+                                        f"classes={_cres.get('unwiredClasses')}) — surfacing the "
+                                        f"operator fix, round {round_num} user={owner}")
+                                    messages.append({"role": "system",
+                                                     "content": _creation_no_model_steer(
+                                                         _cres.get("unwiredClasses") or [],
+                                                         str(_cres.get("error") or ""))})
+                                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                    continue
                                 # Fix B: do_create_character serializes the engine view (started /
                                 # createRefused) INSIDE `output`, not as a top-level key — parse it so
                                 # a `createRefused: casting-incomplete` is never misread as success

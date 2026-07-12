@@ -146,6 +146,96 @@ def dispatch_lever(verdict, actions: dict) -> dict:
         return {"lever": lever, "applied": False, "reason": f"{type(e).__name__}: {e}"}
 
 
+# ── the model-wiring detection seam (owner directive 2026-07-12) ──────────────────────────
+#
+# The PROD-blocker class the 0079 Signals never covered: an ENRICHMENT no-model failure
+# ("no model resolved for the cast-genesis/-identity/-authoring call class" — the strict 0116
+# ledger). It is not per-turn loop telemetry, so it doesn't ride Signals; instead the failure
+# LEDGER is the signal (the same list the admin health payload surfaces as
+# `enrichment.failures`), and the assessment reports through the overseer's EXISTING channel
+# (`log_rings.record_overseer` → the "Overseer (live)" admin log). Read-only + fail-soft:
+# it diagnoses and reports; the actual resolution is the endpoint_resolver single-endpoint
+# auto-default (which the diagnosis probes), never a new lever.
+
+_ENRICH_ASSESS_DEBOUNCE_S = 120.0
+_last_enrich_assess: dict = {}  # user_key -> monotonic-ish wall time of the last assessment
+
+
+def assess_enrichment_health(user=None, *, force: bool = False) -> Optional[dict]:
+    """Notice + diagnose the enrichment no-model failure class for ``user``.
+
+    Consumes the strict-policy failure ledger (the health payload's `enrichment.failures`
+    signal); when a no-model failure is on record, probes whether the default/utility chain
+    resolves a model RIGHT NOW (the single-endpoint auto-default fires inside
+    ``endpoint_resolver.resolve_endpoint`` when the designation is missing/dangling) and
+    reports through ``log_rings.record_overseer``:
+
+      * resolvable  → an ``action``/``model-wiring`` entry naming the model that now resolves
+        (the auto-default/fallback applied the fix — the next casting/authoring attempt runs);
+      * unresolvable → an ``escalation``/``model-wiring`` entry carrying the operator's
+        ONE-STEP fix (set a default provider endpoint + model in Settings → Models).
+
+    Debounced per user (a 6-class refusal burst logs once); ``force=True`` bypasses the
+    debounce (tests / an explicit admin probe). Returns a small verdict dict
+    ``{detected, resolvable, diagnosis, model?}`` or ``None`` (no signal / debounced).
+    Fail-soft: never raises into a caller."""
+    try:
+        import time as _t
+        key = str(user) if user else "default"
+        if not force:
+            last = _last_enrich_assess.get(key)
+            if last is not None and (_t.time() - last) < _ENRICH_ASSESS_DEBOUNCE_S:
+                return None
+        _last_enrich_assess[key] = _t.time()
+
+        from src import enrichment_policy
+        no_model = [f for f in enrichment_policy.failures(user)
+                    if "no model" in str(f.get("reason", "")).lower()]
+        if not no_model:
+            return None
+
+        resolved_model = None
+        try:
+            from src.endpoint_resolver import resolve_endpoint
+            url, model, _h = resolve_endpoint("utility", owner=user)
+            if not (url and model):
+                url, model, _h = resolve_endpoint("default", owner=user)
+            if url and model:
+                resolved_model = model
+        except Exception:
+            resolved_model = None
+
+        try:
+            from src import log_rings
+        except Exception:
+            log_rings = None  # pragma: no cover - defensive
+
+        if resolved_model:
+            diagnosis = (
+                f"enrichment ledger shows {len(no_model)} no-model failure(s), but the "
+                f"default-endpoint chain now resolves '{resolved_model}' (configured default / "
+                "single-endpoint auto-default) — the next game-creation or authoring attempt "
+                "will run; no operator action needed")
+            if log_rings is not None:
+                log_rings.record_overseer("action", "model-wiring", diagnosis,
+                                          lever="hold", ok=True, user=user)
+            return {"detected": True, "resolvable": True, "model": resolved_model,
+                    "diagnosis": diagnosis}
+
+        diagnosis = (
+            f"enrichment ledger shows {len(no_model)} no-model failure(s) and NO language model "
+            "resolves for the enrichment call classes — no enabled provider endpoint with an API "
+            "key is configured. One-step fix: set a default provider endpoint + chat model in "
+            "Settings → Models, then retry game creation")
+        if log_rings is not None:
+            log_rings.record_overseer("escalation", "model-wiring", diagnosis,
+                                      lever="escalate", ok=False, user=user)
+        return {"detected": True, "resolvable": False, "diagnosis": diagnosis}
+    except Exception:
+        # The watcher must never hurt the flow that tripped it.
+        return None
+
+
 @dataclass(frozen=True)
 class Signals:
     """The Vault-free per-turn telemetry the gate and the overseer read. Structural facts only —

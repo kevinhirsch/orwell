@@ -98,6 +98,17 @@ def record_failure(user: Optional[str], call_class: str, reason: str,
             + " (strict enrichment policy: this failure is LOUD, never a silent floor)")
     except Exception:  # pragma: no cover - defensive: the ledger must never break a flow
         pass
+    # 2026-07-12 — the runtime overseer NOTICES the model-wiring failure class (the ledger IS
+    # its signal, same list the admin health payload surfaces): a recorded no-model failure
+    # triggers the overseer's assessment, which reports resolvable-now (the resolver's
+    # single-endpoint auto-default) or escalates with the operator's one-step fix through the
+    # existing overseer log channel. Debounced inside; fail-soft — never breaks the flow.
+    try:
+        if "no model" in str(reason).lower():
+            from src import overseer as _overseer
+            _overseer.assess_enrichment_health(user)
+    except Exception:  # pragma: no cover - defensive
+        pass
 
 
 def failures(user: Optional[str]) -> list:
@@ -143,10 +154,11 @@ async def preflight_unwired(owner: Optional[str]) -> list:
 
 
 def creation_refusal_message(unwired: list) -> str:
-    """The clear, player-visible game-creation refusal (strict policy, no model for a class)."""
+    """The clear, player-visible game-creation refusal (strict policy, no model for a class).
+    Operator-actionable by design: it names the unwired class(es) AND the one-step fix."""
     classes = ", ".join(str(c) for c in unwired) or "enrichment"
     return (
         f"Game creation refused (strict enrichment policy): no language model is wired for the "
-        f"{classes} call class(es), so the cast cannot be authored end-to-end. Configure a chat "
-        f"model endpoint (Settings → Models), or set enrichment_policy=soft to allow the "
-        f"deterministic floor.")
+        f"{classes} call class(es), so the cast cannot be authored end-to-end. One-step fix: set "
+        f"a default provider endpoint + chat model (Settings → Models), then retry — or set "
+        f"enrichment_policy=soft to allow the deterministic floor.")

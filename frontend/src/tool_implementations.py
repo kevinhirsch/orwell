@@ -4679,7 +4679,12 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 for _cls in _unwired:
                     _enrichment.record_failure(
                         owner, _cls, "game creation refused — no model wired for this class at creation time")
-                return {"error": _enrichment.creation_refusal_message(_unwired), "exit_code": 1}
+                # 2026-07-12: the refusal carries a STRUCTURED marker + the unwired classes so
+                # the agent loop can surface an operator-actionable production note (the player
+                # must never just see in-fiction stalling) — see _creation_no_model_steer in
+                # agent_loop.py. The error text itself already names the one-step fix.
+                return {"error": _enrichment.creation_refusal_message(_unwired), "exit_code": 1,
+                        "refusalKind": "no-model-wired", "unwiredClasses": list(_unwired)}
     except Exception as e:
         logger.warning("[enrichment] strict creation preflight failed open for %s: %s", owner, e)
     # 0116 — model-author the whole cast SKELETON BEFORE finalize (skeleton-first). recordCastGenesis is
