@@ -200,7 +200,7 @@ import {
 } from "../../engine/secretPacing";
 import { SECRET_PACING } from "../../engine/secretPacingConstants";
 import {
-  composeShowrunnerNote, emphasisForThread, showrunnerNoteToProse,
+  composeShowrunnerNote, emphasisForThread, reweightThreadOrder, showrunnerNoteToProse,
   type ShowrunnerNote, type ThreadSignal,
 } from "../../engine/showrunner";
 import { SHOWRUNNER } from "../../engine/showrunnerConstants";
@@ -455,6 +455,26 @@ const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 const SHOWRUNNER_ENABLED_DEFAULT = process.env.ORWELL_SHOWRUNNER === "1";
 
 /**
+ * 0101/#1401 Phase-2 (#1455) — whether the OUTCOME-AFFECTING showrunner REWEIGHT runs by DEFAULT. OFF
+ * unless `ORWELL_SHOWRUNNER_REWEIGHT=1`. A DEDICATED sub-flag, DISTINCT from the Phase-1 `ORWELL_SHOWRUNNER`
+ * above, because — unlike Phase-1 (which only routes an emphasized surfaced thread's belief to the player,
+ * fold-free) — the reweight RE-ORDERS which simmering thread wins the scheduler's SCARCE per-tick slot, and
+ * a thread's activate/surface/resolve transitions FOLD hidden relationship weights that feed the
+ * competition/vote spine. So it necessarily PERTURBS the seeded outcome stream and CANNOT be
+ * outcome-neutral by construction — which is exactly why it ships behind its own flag, gated by the
+ * calibration heavy-sims (juryReach / gradient / UAT run ON) rather than an on/off SHA256 identity.
+ *
+ * WITH IT UNSET (the default), `scheduleStoryThreads` never re-orders (it iterates the unchanged derive
+ * order) ⇒ the seeded `juryReach`/gradient/UAT spine is BYTE-IDENTICAL to today AND to Phase-1 (proven by
+ * `showrunnerReweight.test.ts`'s off-vs-today SHA256, on top of the still-green `showrunnerOutcomeNeutral`).
+ * The reweight IMPLIES note composition (you cannot re-weight without a note): when ON it composes notes
+ * itself, so `ORWELL_SHOWRUNNER_REWEIGHT=1` alone yields the full arc-pacing showrunner. Read once at
+ * module load (like the sibling flags), with a PROCESS-GLOBAL static override (mirroring `secretPacing` /
+ * `seededTieSurfacing`) so the calibration ON-run flips it once for every session it plays.
+ */
+const SHOWRUNNER_REWEIGHT_ENABLED_DEFAULT = process.env.ORWELL_SHOWRUNNER_REWEIGHT === "1";
+
+/**
  * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs by DEFAULT. OFF unless
  * `ORWELL_SECRET_BARTER=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`/`ORWELL_MYTH_MAKING`) so
  * calibration neutrality is provable in isolation: with it unset, `secretBarterTick` returns before
@@ -695,6 +715,13 @@ export class GameSessionAdapter implements GameSession {
   private showrunnerEnabled = SHOWRUNNER_ENABLED_DEFAULT;
   private showrunnerNotes: ShowrunnerNote[] = [];
   private showrunnerNoteCount = 0;
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the monotonic per-season count of off-screen ticks on which the reweight
+   * actually RE-ORDERED the scheduler (the producer's shortlist genuinely jumped a thread ahead of the
+   * derive order). A `SessionCoreCounts` dimension (++-only, reset only at a season boundary), so the ON
+   * calibration run can prove the layer is non-vacuous and the non-degradation checkpoint keeps it durable.
+   * Stays 0 whenever the reweight sub-flag is off ⇒ byte-shaped like a pre-Phase-2 save. */
+  private showrunnerReweightCount = 0;
   /**
    * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs. DEFAULT OFF: the
    * calibration/UAT harness never enables it, so with it unset `secretBarterTick` returns before drawing
@@ -2609,6 +2636,9 @@ export class GameSessionAdapter implements GameSession {
       // count, persisted so the season's producer notes survive a restart and only ever deepen (#4).
       ...(this.showrunnerNotes.length ? { showrunnerNotes: cloneSession(this.showrunnerNotes) } : {}),
       ...(this.showrunnerNoteCount > 0 ? { showrunnerNoteCount: this.showrunnerNoteCount } : {}),
+      // 0101/#1401 Phase-2 (#1455) — the monotonic reweight-fired count (a `SessionCoreCounts` dimension).
+      // Absent ⇒ 0 (byte-shaped like a pre-Phase-2 save / the reweight sub-flag off).
+      ...(this.showrunnerReweightCount > 0 ? { showrunnerReweightCount: this.showrunnerReweightCount } : {}),
       // 0091 — the per-season trigger-eruption count (the hard cap) + the dedicated trigger-rng tick counter,
       // persisted so the cap is never re-opened by a reload and the dedicated stream stays reproducible
       // (0007/0030). The per-trigger fired/lastFiredWeek flags ride on the byte-stable house above. Absent ⇒
@@ -2810,6 +2840,7 @@ export class GameSessionAdapter implements GameSession {
     // save / when the layer is off ⇒ []/0 — byte-identical to a pre-feature load).
     this.showrunnerNotes = core.showrunnerNotes ? cloneSession(core.showrunnerNotes) : [];
     this.showrunnerNoteCount = core.showrunnerNoteCount ?? 0;
+    this.showrunnerReweightCount = core.showrunnerReweightCount ?? 0; // Phase-2 (#1455) — absent ⇒ 0
     // 0099 (hidden half): restore the dedicated secret-barter rng counter + the spent-secret count
     // (absent on pre-0099-barter saves ⇒ 0).
     this.secretBarterTickCount = core.secretBarterTickCount ?? 0;
@@ -4929,6 +4960,7 @@ export class GameSessionAdapter implements GameSession {
   private resetShowrunner(): void {
     this.showrunnerNotes = [];
     this.showrunnerNoteCount = 0;
+    this.showrunnerReweightCount = 0; // Phase-2 (#1455) — a fresh season has re-ordered nothing yet
   }
 
   /** 0099 (hidden half) — clear the off-screen secret-barter bookkeeping (a fresh season: no secret
@@ -5451,21 +5483,33 @@ export class GameSessionAdapter implements GameSession {
 
     let activations = 0;
     let surfaces = 0;
-    // 0101/#1401 — the AI SHOWRUNNER note (if the layer is on and one was composed this beat). CRITICAL
-    // (closed-set neutrality): the scheduler's FOLD-PRODUCING transitions — dormant→active, active→
-    // resolved (both call `foldHiddenImpact`, moving the hidden relationship layer that FEEDS the
-    // competition/vote spine) and active→surfaced (surfacing makes a thread inert, changing which threads
-    // later resolve-and-fold) — MUST stay byte-identical whether the showrunner is on or off, or the note
-    // would perturb outcomes (it does not: `showrunnerOutcomeNeutral` SHA256-pins a full season). So the
-    // note NEVER re-orders this loop and NEVER changes a surface/activate roll. Its ONLY effect is on the
-    // OPEN-SET, FOLD-FREE knowledge layer — routing a surfaced emphasized thread's belief TO THE PLAYER
-    // (inside `surfaceThread`), which moves no relationship edge and no outcome. Iteration is the fixed
-    // derive order (never re-sorted); the per-thread side rng keys off the game seed + thread id + the
-    // live (week, phase), so the roll is deterministic AND advances as the game's POSITION advances (a
-    // thread gets a fresh chance each beat the house moves to), never perturbing the main house stream
-    // (0007 §4.5). Within one (week, phase) repeated ticks reuse the same roll — a thread fires at most
-    // once per beat.
-    for (const thread of this.storyThreads) {
+    // 0101/#1401 — the AI SHOWRUNNER's two effects on this loop, split by sub-flag:
+    //
+    //  • PHASE-1 (`ORWELL_SHOWRUNNER`, fold-free): the note NEVER re-orders this loop and NEVER changes a
+    //    surface/activate roll. Its ONLY Phase-1 effect is on the OPEN-SET, FOLD-FREE knowledge layer —
+    //    routing a surfaced emphasized thread's belief ALSO to the player (inside `surfaceThread`), which
+    //    moves no relationship edge and no outcome. Provably byte-identical (`showrunnerOutcomeNeutral`).
+    //
+    //  • PHASE-2 (`ORWELL_SHOWRUNNER_REWEIGHT`, #1455 — OUTCOME-AFFECTING, default OFF): the note RE-ORDERS
+    //    which thread the loop visits FIRST (`reweightedThreadOrder`), so an emphasized RIPE thread wins a
+    //    SCARCE per-tick slot (activation / surface — both capped at 1) or the season surfacing cap ahead of
+    //    a lower-priority thread that merely sits earlier in the derive order. Because the FOLD-PRODUCING
+    //    transitions (dormant→active, active→resolved, active→surfaced — all move the hidden relationship
+    //    layer that feeds the competition/vote spine) are slot-scarce, changing WHICH ripe thread wins the
+    //    slot changes which folds land this tick and thus perturbs the seeded stream. That is the sanctioned
+    //    reweight (ADR 0005: re-weight which OPEN-SET storyline surfaces) — it NEVER bypasses a cap, changes
+    //    a roll, relaxes an eligibility test (`triggerMet`/`sourceWindowClosed`), scales a fold magnitude, or
+    //    touches any CLOSED-SET decision (nomination/vote/eviction/competition). It is gated by the
+    //    calibration heavy-sims run ON, not by an on/off identity. OFF ⇒ `order` IS `this.storyThreads`.
+    //
+    // Either way the per-thread side rng keys off the game seed + thread id + the live (week, phase), so
+    // each thread's roll is deterministic and INVARIANT to iteration order (re-ordering never re-rolls a
+    // thread), advances as the game POSITION advances (§4.5), and never perturbs the main house stream
+    // (0007). Within one (week, phase) repeated ticks reuse the same roll — a thread fires at most once
+    // per beat, and the reweight order is stable within a beat (the note is fixed per beat).
+    const { order, reordered } = this.reweightedThreadOrder();
+    if (reordered) this.showrunnerReweightCount += 1; // monotonic — this tick genuinely re-prioritized a slot
+    for (const thread of order) {
       const side = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:thread-scheduler:${thread.id}:${this.week}:${this.phase}`));
       if (thread.status === "dormant") {
         // §4.4 — a dormant thread whose window has closed (source evicted, or expireAfterWeeks elapsed
@@ -5596,6 +5640,24 @@ export class GameSessionAdapter implements GameSession {
    *  knowledge; no fold, no rng, no outcome). False when the layer is off / no note / not on the shortlist. */
   private showrunnerEmphasizes(threadId: string): boolean {
     return emphasisForThread(this.currentShowrunnerNote(), threadId) > SHOWRUNNER.minEmphasis;
+  }
+
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the Phase-2 REWEIGHT ORDER for `scheduleStoryThreads`. When the reweight
+   * sub-flag is ON and the current note emphasizes ≥1 thread, return a re-prioritized VIEW of
+   * `this.storyThreads` (the pure `reweightThreadOrder` permutation: the note's top-`reweightSlots` emphases
+   * moved to the front in note order, everything else in the unchanged derive order) plus whether it
+   * actually differs from the derive order. Reweight OFF / no note / no emphasis / no change ⇒ returns
+   * `this.storyThreads` itself (identity), so the loop is byte-identical to today. NEVER mutates
+   * `this.storyThreads` (the persisted derive order + the OFF-path byte-identity depend on it) — the view
+   * is a fresh array of the SAME thread references (the loop's status mutations still land on the real
+   * objects). This ONLY changes visitation order; it can touch no cap, roll, eligibility, or magnitude. */
+  private reweightedThreadOrder(): { order: readonly StoryThread[]; reordered: boolean } {
+    if (!this.showrunnerReweightEnabled) return { order: this.storyThreads, reordered: false };
+    const perm = reweightThreadOrder(this.storyThreads.map((t) => t.id), this.currentShowrunnerNote(), SHOWRUNNER.reweightSlots);
+    const reordered = perm.some((idx, i) => idx !== i);
+    if (!reordered) return { order: this.storyThreads, reordered: false };
+    return { order: perm.map((idx) => this.storyThreads[idx]!), reordered: true };
   }
 
   /**
@@ -6539,7 +6601,10 @@ export class GameSessionAdapter implements GameSession {
    * orchestrator's bounded tick, whose own commit exports + persists the snapshot (R3/spineHardening).
    */
   showrunnerTick(): void {
-    if (!this.showrunnerEnabled || !this.house || this.storyThreads.length === 0) return;
+    // EITHER sub-flag composes a note: Phase-1 (`showrunnerEnabled`) for the fold-free to-player routing,
+    // OR Phase-2 (`showrunnerReweightEnabled`), which cannot re-order the scheduler without a note. Both
+    // off ⇒ nothing composed (byte-identical to pre-0101).
+    if ((!this.showrunnerEnabled && !this.showrunnerReweightEnabled) || !this.house || this.storyThreads.length === 0) return;
     const last = this.showrunnerNotes[this.showrunnerNotes.length - 1];
     if (last && last.week === this.week && last.phase === this.phase) return; // one note per beat
     const pos = this.seasonPosition();
@@ -6564,7 +6629,9 @@ export class GameSessionAdapter implements GameSession {
   /** The freshest producer note the scheduler should consult — or `undefined` when the layer is off / no
    *  note yet (⇒ the scheduler falls back to the unchanged derive order + baseline `surfaceProb`). */
   private currentShowrunnerNote(): ShowrunnerNote | undefined {
-    if (!this.showrunnerEnabled) return undefined;
+    // The reweight IMPLIES note composition (you cannot re-weight without a note), so either sub-flag
+    // exposes the freshest note. Both off ⇒ undefined (the scheduler falls back to the derive order).
+    if (!this.showrunnerEnabled && !this.showrunnerReweightEnabled) return undefined;
     return this.showrunnerNotes[this.showrunnerNotes.length - 1];
   }
 
@@ -6574,6 +6641,33 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether the showrunner layer is live — exposed for the orchestrator's wiring symmetry / tests. */
   showrunnerEnabledNow(): boolean { return this.showrunnerEnabled; }
+
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the PROCESS-GLOBAL override for the OUTCOME-AFFECTING reweight, mirroring
+   * `secretPacing`/`seededTieSurfacing` exactly (null ⇒ fall through to the env default). A static (not a
+   * per-instance) override so a calibration ON-run flips it ONCE for every session it plays, and so a live
+   * deploy that env-enables it needs no restart to toggle. A test resets it to `null` in `afterEach`/
+   * `afterAll` so it never leaks across files. */
+  private static showrunnerReweightOverride: boolean | null = null;
+
+  /** Set the process-global reweight override (true/false), or `null` to fall back to the env default. */
+  static setShowrunnerReweightEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.showrunnerReweightOverride = enabled;
+  }
+
+  /** The resolved reweight state: the process-global override when set, else the `ORWELL_SHOWRUNNER_REWEIGHT`
+   *  env default. Off by default ⇒ the scheduler never re-orders (byte-identical to today AND to Phase-1). */
+  private get showrunnerReweightEnabled(): boolean {
+    if (GameSessionAdapter.showrunnerReweightOverride !== null) return GameSessionAdapter.showrunnerReweightOverride;
+    return SHOWRUNNER_REWEIGHT_ENABLED_DEFAULT;
+  }
+
+  /** Whether the Phase-2 reweight is live — exposed for the orchestrator's wiring symmetry / tests. */
+  showrunnerReweightEnabledNow(): boolean { return this.showrunnerReweightEnabled; }
+
+  /** The monotonic per-season count of ticks the reweight actually re-ordered the scheduler (0 when off /
+   *  never non-trivially re-ordered) — exposed so the ON calibration run can assert non-vacuousness. */
+  showrunnerReweightCountNow(): number { return this.showrunnerReweightCount; }
 
   /** The Vault-held production bible so far (0101/#1401) — engine-only; exposed for the boundary tests
    *  and the 0048 render. NEVER call from a player/admin projection (it IS the sealed producer notes). */
