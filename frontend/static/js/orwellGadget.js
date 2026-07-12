@@ -98,6 +98,10 @@
       // premiere's "still to meet" roster could balloon the whole rail. One rule fixes every
       // consumer at once; a gadget with a genuinely short body never notices (no cap = no scroll).
       ".og-card .og-body { overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }" +
+      // WCAG 2.1.1 (Keyboard): the capped scroll body is focusable (tabindex=0, set in _build) so a
+      // keyboard/SR user can Tab to it and arrow/PageDown/Space through a long ledger below the fold.
+      // Neutral iOS-blue ring, matching the head's focus-visible rule above.
+      ".og-card .og-body:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }" +
       // The shared empty-state treatment (the quiet italic the gadgets already used).
       ".og-card .og-empty { opacity: .6; font-style: italic; }" +
       "@media (prefers-reduced-motion: reduce) { .og-card .og-chev { transition: none; } }";
@@ -237,6 +241,13 @@
 
     var body = document.createElement("div");
     body.className = "og-body";
+    // WCAG 2.1.1 (Keyboard): the capped (max-height:260px) scroll body is often filled with
+    // non-interactive content (deals ledger, "turned in" list). tabindex=0 lets a keyboard/SR user
+    // land on it and use arrows/PageDown/Space to read below the fold; role=region + a title-derived
+    // label names it in the accessibility tree.
+    body.setAttribute("tabindex", "0");
+    body.setAttribute("role", "region");
+    body.setAttribute("aria-label", this.o.title + " content");
 
     el.appendChild(head);
     el.appendChild(body);

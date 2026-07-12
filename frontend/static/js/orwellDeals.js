@@ -95,13 +95,13 @@
         #orwell-deals .odl-body { flex: 1; min-width: 0; }
         #orwell-deals .odl-who { color: var(--fg, #9cdef2); font-weight: 600; }
         #orwell-deals .odl-kind {
-          font-size: .68rem; opacity: .7; text-transform: uppercase; letter-spacing: .04em;
+          font-size: var(--fs-2xs); opacity: .7; text-transform: uppercase; letter-spacing: .04em;
         }
         #orwell-deals .odl-terms {
           opacity: .82; margin-top: .1rem; white-space: normal; overflow-wrap: anywhere;
         }
         #orwell-deals .odl-tag {
-          flex: 0 0 auto; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em;
+          flex: 0 0 auto; font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .05em;
           opacity: .65; padding-top: .1rem;
         }
         #orwell-deals .odl-broken .odl-terms { text-decoration: line-through; }

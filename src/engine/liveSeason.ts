@@ -63,7 +63,7 @@ import { nominationStrategy, nominationScore, tallyJury } from "./season";
 import { detectBlocs, blocTerm } from "./blocs";
 import type { Bloc } from "./blocs";
 import { DECISION } from "./decisionConstants";
-import type { Deal } from "../domain/deal";
+import type { Deal, DealKind } from "../domain/deal";
 import type { RelationshipDisposition } from "./relationshipConstants";
 import type { RelationshipModel } from "./relationships";
 import {
@@ -329,6 +329,16 @@ export interface LiveSeasonState {
    */
   selfEvictPending?: boolean;
   selfEvicted?: boolean;
+  /**
+   * 0123 — an NPC-initiated deal offer awaiting the player's accept/decline. Lives ALONGSIDE any ceremony
+   * `pending` but is only ever RAISED at a lull (no ceremony pending), so it never preempts a ceremony.
+   * Vault-free: who floated it, the deal `kind`, a Vault-safe `terms` paraphrase, and the week it anchors
+   * to (the deal's horizon on accept). `lastDealOfferWeek` caps offers to at most one per in-game week.
+   * Both persist with the season (0030). Absent unless the `ORWELL_NPC_DEAL_OFFERS` layer is on ⇒
+   * byte-identical when off.
+   */
+  dealOffer?: { id: string; from: EntityId; kind: DealKind; terms: string; madeWeek: number };
+  lastDealOfferWeek?: number;
   /**
    * How each evictee read the manner of their eviction toward each responsible houseguest
    * (0037): mannerByEvictee[evictee][responsible]. Recorded live at each eviction so jury

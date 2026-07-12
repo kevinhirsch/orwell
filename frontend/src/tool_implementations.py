@@ -5368,8 +5368,13 @@ async def do_make_deal(content: str, owner: Optional[str] = None) -> Dict:
     with_id = (args.get("with") or args.get("with_id") or "").strip()
     kind = (args.get("kind") or "").strip()
     terms = (args.get("terms") or "").strip()
-    if kind not in {"safety", "vote", "final-two", "target-other"}:
-        return {"error": "kind must be one of: safety, vote, final-two, target-other", "exit_code": 1}
+    # 0121 R2 — the accepted kinds track the engine's deal-depth flag: the defensive four always, plus the
+    # two active-obligation kinds (comp-throw/veto-save) when the layer is on. Off ⇒ the original four, so
+    # the validation is byte-identical (the engine also gates the active kinds, so this is defence-in-depth).
+    from src.tool_schemas import current_deal_kinds
+    _kinds = current_deal_kinds()
+    if kind not in set(_kinds):
+        return {"error": "kind must be one of: " + ", ".join(_kinds), "exit_code": 1}
     if not with_id or not terms:
         return {"error": "with (houseguest id) and terms are required", "exit_code": 1}
     try:

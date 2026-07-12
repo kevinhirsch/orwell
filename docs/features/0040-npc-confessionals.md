@@ -3,8 +3,12 @@
 > **Status:** ✅ GREEN (in `cucumber.cjs`). `src/engine/confessionals.ts` (`confessionalFor` +
 > `recordConfessional`) generates a houseguest's private read **grounded in their real relationship signals**
 > (top-threat target + strongest bond — not invented), recorded **Vault-only** (hidden, `witnessSet:[npc]`).
-> Now fired at the **live nomination ceremony** by the directly-involved houseguests (`involvedConfessionals`
-> wired into `GameSessionAdapter.commit`) **and** on the off-screen tick (`Orchestrator.defaultApply`). Proven
+> Now fired at the **week's dramatic ceremony beats** — nominations, the veto ceremony, and eviction — by the
+> directly-involved houseguests (`involvedConfessionals` via `GameSessionAdapter.recordCeremonyConfessionals`,
+> called from `commit`) **and** on the off-screen tick (one random scene initiator, `Orchestrator.defaultApply`).
+> **Expanded by 0122** (PO review 2026-07-12): deeper content (plan / standing / grudge / big-conversation
+> aftermath / adjacent moves) and a once-per-in-game-day sweep so *most* houseguests confess daily unless their
+> game is bare — flag-gated, Vault-only, calibration-safe. Proven
 > **walled from BOTH the player and the admin** (the admin surface reads no events) and seed-deterministic.
 > Confessionals **deepen the soul** (`recordConfessionalToSoul` → `SoulStore`): they accumulate without losing
 > earlier ones and a later `recall` surfaces a specific past confessional to keep the NPC's voice consistent.

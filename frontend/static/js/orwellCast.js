@@ -208,7 +208,7 @@
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
-          margin-top: .15rem; font-size: .66rem; letter-spacing: .04em; opacity: .65; text-transform: uppercase;
+          margin-top: .15rem; font-size: var(--fs-2xs); letter-spacing: .04em; opacity: .65; text-transform: uppercase;
         }
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
         /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest
@@ -389,7 +389,7 @@
         note.textContent = "Generating " + n + " portrait" + (n === 1 ? "" : "s") +
           " in the background — they'll appear here as they land.";
       } else if (data && !data.available) {
-        note.textContent = "No image model is configured — the game plays on without portraits.";
+        note.textContent = "No portrait model connected — the game plays on without portraits. An admin can connect one in Settings.";
       } else if (data && !(data.missing || []).length) {
         note.textContent = "Nothing missing — every active houseguest has a portrait.";
       } else {
@@ -629,7 +629,7 @@
               gen.total + " portrait" + (gen.total === 1 ? "" : "s") + "…";
           } else if (_lastRunFailing) {
             // M1-9: honest failure copy — no run is active and the last one landed nothing.
-            note.textContent = "Portraits aren't landing — check the image model (Settings → Models).";
+            note.textContent = "Portraits aren't landing — the portrait service may need reconnecting (Settings).";
           } else {
             note.textContent = "Generating " + missing.length + " remaining…" +
               (total != null && present != null ? " (" + present + "/" + total + " done)" : "");

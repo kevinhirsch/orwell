@@ -58,6 +58,7 @@ function bootFlags(): Record<string, boolean> {
     compIntent: strict(process.env.ORWELL_COMP_INTENT),
     voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
     timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
+    dealDepth: strict(process.env.ORWELL_DEAL_DEPTH),
   };
 }
 

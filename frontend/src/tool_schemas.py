@@ -1907,6 +1907,44 @@ def _apply_game_build_schemas() -> None:
 _apply_game_build_schemas()
 
 
+# 0121 R2 — deal kinds. The four DEFENSIVE kinds are always extractable; the two ACTIVE-obligation kinds
+# (0121) are added ONLY when the engine's deal-depth layer is on. The base `makeDeal` schema (above) keeps
+# just the defensive four so the import-frozen manifest — and the 0108 golden-path fixture — is unchanged;
+# `with_deal_depth_kinds` swaps in the extended enum at SEND time when the flag is on (a deep copy, never
+# mutating the shared base). Off (the default, and the golden driver) ⇒ the same list ⇒ byte-identical.
+BASE_DEAL_KINDS = ["safety", "vote", "final-two", "target-other"]
+ACTIVE_DEAL_KINDS = ["comp-throw", "veto-save"]
+_ACTIVE_DEAL_KIND_DESC = "comp-throw = throw a competition for them; veto-save = use the veto to save them"
+
+
+def current_deal_kinds() -> list:
+    """The deal kinds the player may currently strike — the defensive four, plus the two active-obligation
+    kinds when the engine's deal-depth layer is on (0121 R2). Read off the cached /health flag."""
+    from src.orwell_engine import engine_flag
+    return BASE_DEAL_KINDS + (ACTIVE_DEAL_KINDS if engine_flag("dealDepth") else [])
+
+
+def with_deal_depth_kinds(schemas: list) -> list:
+    """Send-time flag-gate (0121 R2): when the engine's deal-depth layer is ON, return a copy of `schemas`
+    with makeDeal's `kind` enum extended by the two active-obligation kinds. OFF (default) ⇒ the SAME list
+    object, so the golden-path fixture and every flag-off request are byte-identical."""
+    from src.orwell_engine import engine_flag
+    if not engine_flag("dealDepth"):
+        return schemas
+    import copy
+    out = []
+    for s in schemas:
+        if isinstance(s, dict) and s.get("function", {}).get("name") == "makeDeal":
+            s = copy.deepcopy(s)
+            props = s.get("function", {}).get("parameters", {}).get("properties", {})
+            kind = props.get("kind")
+            if isinstance(kind, dict) and isinstance(kind.get("enum"), list):
+                kind["enum"] = BASE_DEAL_KINDS + ACTIVE_DEAL_KINDS
+                kind["description"] = f"The deal's nature. {_ACTIVE_DEAL_KIND_DESC}."
+        out.append(s)
+    return out
+
+
 # The Big Brother game tools (Vault-free). These are PINNED whenever the engine is
 # reachable so RAG/keyword selection can never drop them — the model must always be
 # able to call createCharacter (OOBE), getGameState (state check), and the full

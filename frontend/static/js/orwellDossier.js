@@ -77,7 +77,7 @@
         #orwell-dossier .od-status { font-size: .72rem; opacity: .68; text-transform: uppercase; letter-spacing: .04em; margin-top: .1rem; }
         #orwell-dossier .od-section { margin-top: .7rem; }
         #orwell-dossier .od-h {
-          margin: 0 0 .3rem; font-size: .68rem; text-transform: uppercase; letter-spacing: .06em;
+          margin: 0 0 .3rem; font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .06em;
           opacity: .6; font-weight: 600;
         }
         #orwell-dossier .od-bio { font-size: .82rem; line-height: 1.45; opacity: .9; margin-bottom: .4rem; }
@@ -97,9 +97,9 @@
         #orwell-dossier .od-row-kept   { border-left-color: color-mix(in srgb, #2196f3 70%, var(--border, #355a66)); opacity: .85; }
         #orwell-dossier .od-row-broken { border-left-color: color-mix(in srgb, #e0564a 75%, var(--border, #355a66)); opacity: .7; }
         #orwell-dossier .od-row-body { flex: 1; min-width: 0; }
-        #orwell-dossier .od-row-kind { font-size: .68rem; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+        #orwell-dossier .od-row-kind { font-size: var(--fs-2xs); opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
         #orwell-dossier .od-row-terms { opacity: .85; margin-top: .1rem; font-size: .8rem; }
-        #orwell-dossier .od-row-tag { flex: 0 0 auto; font-size: .62rem; text-transform: uppercase; letter-spacing: .05em; opacity: .65; }
+        #orwell-dossier .od-row-tag { flex: 0 0 auto; font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: .05em; opacity: .65; }
         #orwell-dossier .od-offline { font-size: .82rem; opacity: .65; padding: .3rem 0; }
         body.theme-frosted #orwell-dossier .od-portrait,
         body.theme-frosted #orwell-dossier .od-fact,

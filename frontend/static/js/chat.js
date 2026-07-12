@@ -117,6 +117,20 @@ import { isNarrow } from './platform.js';
   // surfacing as a raw error.
   const _outboxAwaitingConfirm = [];  // dispatched, not yet server-confirmed (persisted alongside the queue)
   //
+  // ── #891 F-A7 (per-bubble delivery state): the DURABLE-FAILED bucket ──
+  // A message's lifecycle is queued → sending → delivered | failed, projected onto its user bubble
+  // (`dataset.deliveryState`, a REAL text/aria surface — never CSS-only) and — the load-bearing half
+  // — persisted so a RELOAD shows the TRUE state, not a stranded pending bubble. queued/sending are
+  // already reload-durable (the queue + awaiting-confirm records above); `delivered` releases the
+  // durable copy. The missing terminal state is `failed`: a send that exhausted its network-requeue
+  // cap (`_OUTBOX_MAX_RETRIES`) used to be DROPPED to the generic error surface, so a reload lost the
+  // "not delivered" signal entirely. Such items now live here — persisted (`state:'failed'`),
+  // repainted on reload, HELD OUT of the auto-drain, and cleared only by an explicit per-bubble Retry
+  // (which re-enters the ONE normal flush, `needsDedupe`-armed) or by a server row proving the POST
+  // did land after all (`_outboxConfirmDelivery`). Kept separate from `_sendOutbox` so the drain,
+  // backoff, and aggregation never touch a terminally-failed turn.
+  const _outboxFailed = [];
+  //
   // ── #830 (optimistic-always + aggregated unsent queue): the AGGREGATION lane ──
   // The owner's ruling: "aggregate what you send quickly … when it's time to send the payload it
   // sends all messages in one turn." Items queued WHILE A TURN WAS STREAMING (the rapid-succession
@@ -2889,10 +2903,15 @@ import { isNarrow } from './platform.js';
                   // refreshes event-driven instead of waiting out a 20–30s poll.
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
-                  // FEJS-3: the trailing 8 also move public state the panels read — debounced.
-                  // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
-                  // DRIFT-2: + the 0094/0095 mutators (confront / accuseTie).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret', 'confront', 'accuseTie'].includes(json.tool)) {
+                  // #1412 (R1b): the "is this tool game-MUTATING?" test is NO LONGER a
+                  // hand-coded array here — it consumes the shared manifest via
+                  // window.orwellIsMutatingTool (platform.js ORWELL_MUTATING_TOOLS, pinned
+                  // registry-equal by test_1412_mutating_manifest.py). A newly-wired mutating
+                  // registry tool flows into THIS HUD-refresh set with NO edit here: the
+                  // drift-guard forces it into the manifest, and this seam picks it up for
+                  // free. The helper is absent outside the game build, so the whole seam
+                  // no-ops there (exactly like orwellGameChanged itself).
+                  if (ok && window.orwellIsMutatingTool && window.orwellIsMutatingTool(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
                     let _beat;
@@ -3915,6 +3934,13 @@ import { isNarrow } from './platform.js';
           let _requeuedOffline = false;
           if (!accumulated && _userMsgEl && _isNetworkSendFailure(err)) {
             _requeuedOffline = _requeueOutboxItem(_clientMsgId, msg, _userMsgEl, streamSessionId);
+            if (!_requeuedOffline) {
+              // #891 F-A7: the network-requeue cap (_OUTBOX_MAX_RETRIES) is spent — DON'T drop to the
+              // raw "Error: …" surface (which reloads away). Mark the user bubble a DURABLE 'failed'
+              // delivery (persisted 'state:failed', repaints on reload) with an explicit per-bubble
+              // Retry, and suppress the generic error branch below.
+              _requeuedOffline = _markSendFailedById(_clientMsgId, msg, _userMsgEl, streamSessionId);
+            }
             if (_requeuedOffline) {
               // The empty reply shell (spinner holder) is noise for a turn that never left the device.
               try { if (holder && holder.parentNode) holder.remove(); } catch (_) {}
@@ -4218,7 +4244,11 @@ import { isNarrow } from './platform.js';
       // so a persisted copy of the flag would be dead weight the restore ignores.
       const items = _outboxAwaitingConfirm
         .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
-        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })));
+        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })))
+        // #891 F-A7: terminally-failed sends persist too — a reload must show 'failed' (with its
+        // Retry), never a stranded pending bubble or a vanished turn. `state:'failed'` routes the
+        // restore to the failed bucket instead of the auto-drain.
+        .concat(_outboxFailed.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'failed' })));
       if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
       sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
     } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
@@ -4252,11 +4282,34 @@ import { isNarrow } from './platform.js';
     _outboxRestoreDone = true;
     const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
     let restored = 0;
+    let restoredFailed = 0; // #891 F-A7: durable-failed items repaint but never auto-drain
     for (const it of items) {
       if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
       if (typeof it.text !== 'string' || !it.text) continue;
       if (_sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
-          _outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId)) continue;
+          _outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId) ||
+          _outboxFailed.some((x) => x.clientMsgId === it.clientMsgId)) continue;
+      // #891 F-A7: a persisted `state:'failed'` item restores into the DURABLE-FAILED bucket — its
+      // bubble repaints as 'failed' + Retry, and it is NOT re-queued for the auto-drain (retries were
+      // exhausted; only an explicit Retry, or a proven-delivered server row, moves it).
+      if (it.state === 'failed') {
+        const failedItem = {
+          clientMsgId: it.clientMsgId,
+          text: it.text,
+          sessionId: it.sessionId || null,
+          ts: it.ts || Date.now(),
+          retries: it.retries || 0,
+          needsDedupe: false,
+          coalesce: false,
+          failed: true,
+          bubbleEl: null,
+        };
+        _paintOutboxBubble(failedItem);
+        _setDeliveryState(failedItem.bubbleEl, 'failed');
+        _outboxFailed.push(failedItem);
+        restoredFailed++;
+        continue;
+      }
       const item = {
         clientMsgId: it.clientMsgId,
         text: it.text,
@@ -4275,10 +4328,10 @@ import { isNarrow } from './platform.js';
       restored++;
     }
     _persistOutbox(); // normalize (drops a corrupt/empty record)
-    if (restored) {
-      _refreshOutboxStatusTags();
-      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 250);
-    }
+    if (restored || restoredFailed) _refreshOutboxStatusTags();
+    // Only DRAINABLE (queued) restores kick the flush — a restored 'failed' item waits for its
+    // explicit Retry, never re-sending on its own.
+    if (restored) setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 250);
     return restored;
   }
 
@@ -4286,13 +4339,16 @@ import { isNarrow } from './platform.js';
    *  proven, so release the durable copy. Cheap no-op when nothing is queued (the common case). */
   function _outboxConfirmDelivery(clientMsgId) {
     if (!clientMsgId) return;
-    if (!_outboxAwaitingConfirm.length && !_sendOutbox.length) return;
+    if (!_outboxAwaitingConfirm.length && !_sendOutbox.length && !_outboxFailed.length) return;
     let hit = false;
-    for (const arr of [_outboxAwaitingConfirm, _sendOutbox]) {
+    // #891 F-A7: a proven-delivered server row can rescue even a bubble we'd marked 'failed' (its
+    // POST DID land — the reader just died before the confirm). Scan the failed bucket too and settle
+    // the bubble to 'delivered' (clears the Retry).
+    for (const arr of [_outboxAwaitingConfirm, _sendOutbox, _outboxFailed]) {
       const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
       if (i >= 0) {
         const removed = arr.splice(i, 1)[0];
-        if (removed && removed.bubbleEl) _setQueuedTag(removed.bubbleEl, null);
+        if (removed && removed.bubbleEl) _setDeliveryState(removed.bubbleEl, 'delivered');
         hit = true;
       }
     }
@@ -4405,7 +4461,7 @@ import { isNarrow } from './platform.js';
           // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
           const i = _sendOutbox.indexOf(it);
           if (i >= 0) _sendOutbox.splice(i, 1);
-          if (it.bubbleEl) _setQueuedTag(it.bubbleEl, null);
+          if (it.bubbleEl) _setDeliveryState(it.bubbleEl, 'delivered');
         }
       }
     }
@@ -4437,11 +4493,167 @@ import { isNarrow } from './platform.js';
     } catch (_) {}
   }
 
-  /** #891: sweep every queued bubble's status to the live connectivity truth. */
+  /** #891: sweep every queued bubble's status to the live connectivity truth. Routes through
+   *  `_setDeliveryState` so `dataset.deliveryState` stays in lockstep with the visible `.queued-tag`
+   *  ('queued' | 'queued — offline'). Terminally-failed bubbles are NOT swept — connectivity doesn't
+   *  un-fail them; only an explicit Retry does. */
   function _refreshOutboxStatusTags() {
     const mode = _outboxOnline() ? 'queued' : 'offline';
-    for (const it of _sendOutbox) { if (it) _setQueuedTag(it.bubbleEl, mode); }
+    for (const it of _sendOutbox) { if (it) _setDeliveryState(it.bubbleEl, mode); }
     _updateOutboxStrip(); // #830: keep the aggregate affordance in lockstep with the per-bubble tags
+  }
+
+  // ── #891 F-A7: per-bubble delivery state (queued → sending → delivered | failed) ──
+  /** Project a message's delivery lifecycle onto its user bubble. `state`:
+   *    'queued'    — held in the outbox, link up            → `.msg-pending` + `.queued-tag` 'queued'
+   *    'offline'   — held, this device has no link          → `.queued-tag` 'queued — offline' + accent
+   *    'sending'   — dispatched, awaiting server confirm     → `.msg-pending` (dim = in-progress), no tag
+   *    'delivered' — a server row proved it landed / settled → all transient markers cleared
+   *    'failed'    — terminal (retries exhausted)            → `.msg-unsent` + a REAL 'Not delivered' +
+   *                                                            Retry affordance
+   *    null        — clear every marker (settled)
+   *  The state is ALSO stamped on `dataset.deliveryState` — a machine-readable, a11y-adjacent projection
+   *  that (for 'failed') is reconstructed on reload from the persisted outbox record, so a reload shows
+   *  the TRUE state. Reuses the existing message-state CSS vocabulary (`.msg-pending` / `.queued-tag` /
+   *  `.msg-unsent`); it adds no new stylesheet rules. */
+  function _setDeliveryState(bubbleEl, state) {
+    if (!bubbleEl) return;
+    try {
+      if (!state || state === 'delivered') {
+        _setQueuedTag(bubbleEl, null);
+        _clearDeliveryRetry(bubbleEl);
+        bubbleEl.classList.remove('msg-pending', 'msg-unsent');
+        delete bubbleEl.dataset.unsent;
+        if (state === 'delivered') bubbleEl.dataset.deliveryState = 'delivered';
+        else delete bubbleEl.dataset.deliveryState;
+        return;
+      }
+      if (state === 'queued' || state === 'offline') {
+        _clearDeliveryRetry(bubbleEl);
+        bubbleEl.classList.remove('msg-unsent');
+        delete bubbleEl.dataset.unsent;
+        bubbleEl.classList.add('msg-pending');
+        _setQueuedTag(bubbleEl, state); // real `.queued-tag` text node (the existing a11y contract)
+        bubbleEl.dataset.deliveryState = state;
+        return;
+      }
+      if (state === 'sending') {
+        _clearDeliveryRetry(bubbleEl);
+        bubbleEl.classList.remove('msg-unsent');
+        delete bubbleEl.dataset.unsent;
+        bubbleEl.classList.add('msg-pending'); // dim = "in progress" (the existing vocabulary)
+        _setQueuedTag(bubbleEl, null);         // the 'queued' text would be a lie once it's dispatched
+        bubbleEl.dataset.deliveryState = 'sending';
+        return;
+      }
+      if (state === 'failed') {
+        _setQueuedTag(bubbleEl, null);
+        bubbleEl.classList.remove('msg-pending');
+        bubbleEl.classList.add('msg-unsent');
+        bubbleEl.dataset.unsent = '1';
+        bubbleEl.dataset.deliveryState = 'failed';
+        _attachDeliveryRetry(bubbleEl, bubbleEl.dataset.clientMsgId || null);
+        return;
+      }
+    } catch (_) { /* delivery-state chrome is best-effort — never let it break the send/queue */ }
+  }
+
+  /** #891 F-A7: remove the per-bubble failed-delivery Retry affordance (if present). */
+  function _clearDeliveryRetry(bubbleEl) {
+    try {
+      const n = bubbleEl.querySelector('.msg-delivery-retry');
+      if (n) n.remove();
+    } catch (_) {}
+  }
+
+  /** #891 F-A7: attach a REAL "Not delivered" label + Retry button to a failed user bubble (WCAG
+   *  4.1.3 — the meaning lives in text nodes, never CSS-only). The button re-enters the ONE normal
+   *  flush via `_retryFailedSend`; it reuses the existing `.continue-btn` style (no new CSS). */
+  function _attachDeliveryRetry(bubbleEl, clientMsgId) {
+    try {
+      const host = bubbleEl.querySelector('.body') || bubbleEl;
+      if (!host || host.querySelector('.msg-delivery-retry')) return;
+      const note = document.createElement('div');
+      note.className = 'msg-delivery-retry';
+      note.setAttribute('role', 'status');
+      note.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:4px;opacity:0.9;font-style:italic;';
+      const label = document.createElement('span');
+      label.textContent = 'Not delivered.';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'continue-btn';
+      btn.textContent = 'Retry';
+      btn.addEventListener('click', () => {
+        _clearDeliveryRetry(bubbleEl);
+        _retryFailedSend(clientMsgId || bubbleEl.dataset.clientMsgId || null);
+      });
+      note.appendChild(label);
+      note.appendChild(btn);
+      host.appendChild(note);
+    } catch (_) {}
+  }
+
+  /** #891 F-A7: move a terminally-failed send into the durable-failed bucket, paint its bubble
+   *  'failed' + Retry, and persist ('state:failed') so a reload shows the true state. Idempotent per
+   *  clientMsgId. `_markSendFailedById` is the caller-facing entry when only the id/text/bubble are in
+   *  hand (the stream catch-hook, after the network-requeue cap is hit). */
+  function _markSendFailed(item) {
+    if (!item || !item.clientMsgId) return false;
+    for (const arr of [_sendOutbox, _outboxAwaitingConfirm]) {
+      const i = arr.indexOf(item);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    if (!_outboxFailed.some((it) => it && it.clientMsgId === item.clientMsgId)) {
+      item.failed = true;
+      item.coalesce = false;
+      _outboxFailed.push(item);
+    }
+    if (item.bubbleEl) _setDeliveryState(item.bubbleEl, 'failed');
+    _persistOutbox();
+    _updateOutboxStrip();
+    return true;
+  }
+
+  function _markSendFailedById(clientMsgId, text, bubbleEl, sessionId) {
+    if (!clientMsgId || typeof text !== 'string' || !text) return false;
+    // Reclaim any live copy so it can't also drain; otherwise build the record fresh (the capped
+    // requeue already spliced it out of every bucket).
+    let item = null;
+    for (const arr of [_sendOutbox, _outboxAwaitingConfirm, _outboxFailed]) {
+      const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
+      if (i >= 0) { item = arr.splice(i, 1)[0]; break; }
+    }
+    if (!item) {
+      item = {
+        clientMsgId, text,
+        sessionId: sessionId ||
+          (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
+        ts: Date.now(), retries: _OUTBOX_MAX_RETRIES + 1, bubbleEl: null,
+      };
+    }
+    if (bubbleEl && !item.bubbleEl) item.bubbleEl = bubbleEl;
+    const ok = _markSendFailed(item);
+    return ok;
+  }
+
+  /** #891 F-A7: the user tapped Retry on a failed bubble — re-enter the ONE normal flush. The send is
+   *  `needsDedupe`-armed (its earlier POST may have partially landed) and unshifted to the FRONT (it
+   *  is the oldest turn), exactly like a network requeue. Fresh retry budget (the user chose this). */
+  function _retryFailedSend(clientMsgId) {
+    if (!clientMsgId) return false;
+    const i = _outboxFailed.findIndex((it) => it && it.clientMsgId === clientMsgId);
+    if (i < 0) return false;
+    const item = _outboxFailed.splice(i, 1)[0];
+    item.failed = false;
+    item.retries = 0;              // user-initiated — a fresh attempt, not a continuation of the cap
+    item.needsDedupe = true;       // its earlier POST may have reached the server — verify first
+    item.coalesce = false;         // its own at-most-once unit, never folded
+    if (item.bubbleEl) _setDeliveryState(item.bubbleEl, _outboxOnline() ? 'queued' : 'offline');
+    _sendOutbox.unshift(item);
+    _persistOutbox();
+    _armOutboxRetry();
+    try { _flushSendOutbox(); } catch (_) {}
+    return true;
   }
 
   // ── #830: the AGGREGATED unsent-queue affordance ──
@@ -4648,7 +4860,7 @@ import { isNarrow } from './platform.js';
       _outboxAwaitingConfirm.push(item);
       _persistOutbox();
       _updateOutboxStrip(); // #830: the queue just shrank (dispatch and/or fold)
-      _setQueuedTag(item.bubbleEl, null); // actually sending now — the queued status would be a lie
+      _setDeliveryState(item.bubbleEl, 'sending'); // #891 F-A7: actually sending now (dim, no queued tag)
       // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
       // back to letting the send paint a fresh one — the text is never lost.
       const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
@@ -7294,8 +7506,12 @@ import { isNarrow } from './platform.js';
     _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
     _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
     _outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
+    _outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
     _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
     _outboxConfirmDelivery,      // #891: server-row-observed delivery confirm (browser gate)
+    _setDeliveryState,           // #891 F-A7: per-bubble delivery-state projection (browser gate)
+    _markSendFailedById,         // #891 F-A7: mark a send terminally failed + durable (browser gate)
+    _retryFailedSend,            // #891 F-A7: user-tapped Retry on a failed bubble (browser gate)
     _requeueOutboxItem,          // #891: network-failure requeue into the durable queue (browser gate)
     _persistOutbox,              // #891: persistence write point (browser gate)
     _dedupeOutboxAgainstServer,  // #891: pre-send at-most-once check (browser gate)

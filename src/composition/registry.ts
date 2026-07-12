@@ -16,7 +16,7 @@ import { SEEDED_TIE_SURFACING } from "../engine/seededRelationshipConstants";
 import {
   PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
 } from "../engine/diversity";
-import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
+import { diffuseGossip, makeSocialGraph, GOSSIP, spreadReliableReputation } from "../engine/gossip";
 import { recallWitnessedMoments } from "../engine/memoryCallback";
 import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
@@ -271,6 +271,40 @@ function buildUserSandbox(user = "default"): UserSandbox {
       rounds: GOSSIP.rounds,
       transmitProb: GOSSIP.transmitProb,
       decay: GOSSIP.decay,
+    });
+  });
+  // 0121 R1 — the diffusing "keeps their word" REPUTATION reward. When a deal is KEPT (the deal-depth layer
+  // gates the callback), the honorer's partner (`other`) spreads a Vault-free reputation NPC→NPC along the
+  // affinity graph (0038); each third party who HEARS it leans slightly toward the honorer as a safer deal
+  // partner — the positive `GOSSIP_HEARD.reliable` receipt fold, subjects=[honorer]. The dedicated seeded
+  // rng keeps the diffusion's draws off the main season/vote stream (only the intended edge fold lands);
+  // the whole seam is unreachable with the flag off ⇒ byte-identical to the calibration spine.
+  session.setDealReputationSink((honorer, other) => {
+    const core = session.snapshot();
+    if (!core.house) return;
+    const evicted = new Set(core.live?.evictionOrder ?? []);
+    const npcIds: EntityId[] = core.house.npcs.map((n) => n.id).filter((id) => !evicted.has(id));
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < npcIds.length; i++) {
+      for (let j = i + 1; j < npcIds.length; j++) {
+        if (engine.relationships.edge(npcIds[i]!, npcIds[j]!).affinity > GOSSIP.affinityEdge) {
+          edges.push([npcIds[i]!, npcIds[j]!] as const);
+        }
+      }
+    }
+    const rng = new SeededRandom(hashSeed(`${core.seed ?? user}:deal-reputation:${honorer}:${core.week}:${engine.events.count()}`));
+    // Diffuse the Vault-free "keeps their word" belief NPC→NPC and lean every third party who hears it
+    // toward the honorer (the pure `spreadReliableReputation`; single subject, dedicated rng — no main-stream
+    // re-phase). Only reachable under the deal-depth flag, so off ⇒ never called ⇒ byte-identical.
+    spreadReliableReputation({
+      knowledge: engine.knowledge,
+      rel: engine.relationships,
+      graph: makeSocialGraph(edges),
+      rng,
+      honorer,
+      other,
+      content: `${session.publicName(honorer)} keeps their word`,
+      candidates: npcIds,
     });
   });
   //  (b) TO the player (rare): seed the paraphrase onto an NPC confidant, then surface it `told-by:<npc>`

@@ -367,6 +367,20 @@ export class BbWorld extends World {
   confSandboxA?: import("../../src/composition/registry").UserSandbox;
   confSandboxB?: import("../../src/composition/registry").UserSandbox;
 
+  // NPC-initiated deal offers (0123) scratch state.
+  dofSandbox?: import("../../src/composition/registry").UserSandbox;
+  dofOffer?: import("../../src/ports/GameSession").PendingDecisionView | null;
+  dofFrom?: EntityId;
+  dofBeforeThreat?: number;
+  dofBeforeDeals?: number;
+
+  // Deeper, daily NPC confessionals (0122) scratch state.
+  ddcSandbox?: import("../../src/composition/registry").UserSandbox;
+  ddcSweptBefore?: number;
+  ddcLivingNpcs?: number;
+  ddcBareIsSkipped?: boolean;
+  ddcDepth?: import("../../src/engine/confessionals").ConfessionalDepth;
+
   // Reactive confessionals (0089) scratch state.
   rcRegistry?: import("../../src/composition/registry").GameSessionRegistry;
   rcRegistryB?: import("../../src/composition/registry").GameSessionRegistry;
