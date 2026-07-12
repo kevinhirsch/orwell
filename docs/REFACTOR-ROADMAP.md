@@ -144,20 +144,71 @@ Three independent, low-risk fixes to the FE↔engine sync spine (audit A-S5 / A-
   element + a retry control, no GM-voiced error.
 
 ## R7 — Polish bundle **[POST-LAUNCH · Wave 4]**
-Contained, independent, mostly one-file (full list + evidence in `AUDIT-LOG.md`):
-- **F-S2-B** gate the inherited deep-research poller off in the game build + quiet the finished-stream
-  `stream_status` probe (console-404 noise).
-- **F-S1-D** coalesce the ~10 uncoordinated `/state` pollers behind one shared poller; gate the
-  prewarm-cast fast-poll to a mounted cast window (pre-game over-polling).
-- **S4-2** have `finaleView`/`recap` return the final result post-finish (not null), so every surface
-  agrees (`/status` already fixed).
-- **F-S1-H** gate `theme.js`'s pre-auth prefs fetch on `/login` (the 401 noise) — touches shared
-  `theme.js`, so sequence carefully.
-- **S2-1** structural "Enter the house" affordance when casting `finalizable`. · **F-S1-E** model-picker
-  tap target (desktop-AAA). · **F-S4-A** confirm the 112 showmance entries map to a sparse set (L40). ·
-  **F-S1-I/J** strip leftover workspace DOM copy / identify the username dot.
-- **F-S1-K (audit tooling)** harden the capture instruments (ancestor-descendant overlap exclusion,
-  sibling-concat copy-smell, MutationObserver, tightened `LEAK_RE`) — for future runs, not the product.
+Contained, independent, mostly one-file (full list + evidence in `AUDIT-LOG.md`). **Issue #1418 pass
+(2026-07-12, FE-safe-subset delegate):** the non-fenced FE subset was executed; the fenced/engine-
+adjacent items are handed off. Status per sub-item below.
+
+- ✅ **F-S1-H — DONE (#1418).** `theme.js`'s two cross-device prefs fetches (`GET /api/prefs/theme`,
+  `GET /api/prefs/custom-themes`) fired pre-auth on `/login` (login_bg.js imports theme.js for the
+  bundled perlin-flow wallpaper) → two 401 console lines per load. `_initWithSync` now early-returns on
+  `/login` (`_onLoginPage()`) before both fetches; `initThemeUI()` still runs, so boot is otherwise
+  unchanged and the login palette (localStorage-driven) is unaffected. **Verified:** a headless `/login`
+  load + dynamic `theme.js` import fires **0** `/api/prefs/*` requests and **0** 4xx (was 401×1–2). FE
+  suite 5032 passed; boot/browser smoke EXIT 0.
+- ✅ **F-S2-B — DONE / already-resolved, VERIFIED (#1418).** Both console-404 sources are already fixed
+  upstream: the inherited deep-research poller is game-build-gated (`chat.js checkPendingResearch` →
+  early-return on `data-game-build`, #1035/F-8), and the finished-stream `stream_status` probe no longer
+  404s — the route returns `{"status":"idle"}` (200) instead of 404 (`chat_routes.py` M1-8/audit A8). No
+  edit needed; `boot_smoke`/`browser_smoke` are console-clean in the game build. (The deep-research
+  poller lives in the FENCED `chat.js`; it was already fixed, so no fenced edit was required.)
+- ✅ **F-S4-A — DONE / VERIFIED (#1418, no change).** The L40 "everyone romanced everyone" saturation is
+  already fixed sparsely: `src/engine/seededRelationships.ts` seeds ≤ `DEFAULT_SHOWMANCE_BUDGET` (2)
+  showmances/season, each slot only ~50% loaded (`SEED_LOAD_PROB = 0.5`) over DISTINCT houseguests — so
+  0–2 per season, never a dense set. (Engine-fenced; read-only verification only.)
+- ◻️ **F-S1-D — PARTIAL (#1418).** The **prewarm-cast fast-poll IS already gated to the mounted cast
+  window** (verified): `orwellCast.js scheduleNextPoll()` returns early unless `_open`, and the
+  `FAST_POLL_MS` cadence only applies to the open-panel roster poll (`_timer` re-arms only while `_open`;
+  closing clears it). The 20s gate poll is fixed-cadence, not fast. **DEFERRED:** the "~10 uncoordinated
+  `/state` pollers behind one shared poller" is a genuine ~15-file refactor (each panel has its own
+  `getJSON`/`jget`/`jgetSafe`), several with **source-pinned tests on the literal `/api/orwell/state`
+  string** (`test_c21_roster.py`, `test_c28_presence.py`, `test_m3_1_room_strip.py`) — churny and
+  regression-prone, matching this file's own "Refactor (shared poller), not a leaf patch" classification.
+  Do it as a dedicated coalescing pass (a short-TTL shared `/state` dedupe cache all panels route through
+  while keeping the literal URL for the pinned tests).
+- ✅ **F-S1-J — IDENTIFIED / already-resolved (#1418).** The "username-field dot" was the **Remember-me
+  checkbox** that used to overlay the username input (unlabelled 14×14 glyph); **S1-A already relocated it
+  to a labelled `.remember-row`** (login.html) — the username field now has only its `<label>` and no
+  overlaying glyph. No residual dot to label.
+- ⏸️ **F-S1-I — DEFERRED (#1418).** Stripping the inherited-workspace DOM from the template is the
+  **deep code-level prune that `game-trim.css` explicitly defers** ("a deeper code-level prune is a
+  separate pass, to be verified against a running instance"). The *visible* landing copy is already
+  game-build-gated (index.html welcome-tip arrays swap to BB copy under `data-game-build`); the remaining
+  workspace copy is hidden-not-rendered modals/tools. Out of scope for a low-risk polish pass — pair it
+  with the game-trim deep prune.
+- ✅ **F-S1-E — DONE (#1418, post-#736 style.css unfenced).** `.model-picker-btn` was `height: 21px`
+  (below the WCAG 2.5.8 AA 24px target-size floor). Desktop base bumped to `height: 24px` (the glyph —
+  11px label + 10px chevron — is unchanged and stays centred; only the hit/hover box grows 3px), and a
+  coarse-pointer block `@media (hover: none) and (pointer: coarse) { .model-picker-btn { min-height: 44px;
+  height: auto; } }` lifts it to the 44px touch floor, mirroring the `.copy-btn` / kit touch-target idiom
+  (no width limit — so it also covers a wide touch device, where the picker *is* shown; on ≤768px the
+  picker is `display:none` by design). **Verified (headless before→after, origin/main vs branch): desktop
+  picker height 21px → 24px; touch 44px; composer textarea + send x/y/w unchanged (≤1px).** FE non-browser
+  suite 5048 passed; `browser_smoke` EXIT 0.
+- ⏸️ **F-S1-K — DEFERRED / FLAG (#1418).** The two homes are both off-limits or risky: `LEAK_RE` lives in
+  the **fenced `scripts/browser_smoke.py`**, and the ancestor-descendant overlap classifier
+  (`frontend/src/visual_geometry.py`) is now a **CI-gated harness** for 0113/0114
+  (`visual_regression.py` / `theme_consistency.py`, with pinned `test_0113_*`/`test_0114_*`) — the
+  requested "ancestor-descendant overlap exclusion" is in fact **already implemented** there (the
+  `covered` classifier excludes ancestors/descendants). Not a safe polish-tooling edit.
+- ➡️ **S4-2 — HAND OFF (engine-read).** `finaleView`/`recap` return a null winner post-finish because the
+  winner is projected from `this.live.winner` in `src/adapters/engine/GameSessionAdapter.ts` (engine
+  side); making the endgame projections carry it is an engine-read change, not a pure FE surface patch —
+  the task's one flagged engine-adjacency. (`/status` already carries `finished+winner`; the FE recovers
+  via the retrospective, so it stays non-blocking.)
+- ➡️ **S2-1 — HAND OFF (casting-finalize framing).** A structural "Enter the house" affordance that
+  finalizes casting when the engine status is `finalizable` is intrinsically tied to the fenced
+  casting-finalize path (`createCharacter` finalize / `chat_helpers.py apply_game_framing`) — when in
+  doubt, hand off.
 
 ---
 
