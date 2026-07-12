@@ -87,10 +87,12 @@ def test_frozen_segment_class_is_used():
 # ── 3. the agent_step round boundary REUSES one bubble (no per-round mount) ────────────────
 
 def test_agent_step_commits_and_flags_coalesced():
-    # Slice the agent_step HANDLER (not the delta-gate mention) and prove it commits the
-    # segment + sets the flag, rather than creating a new bubble.
+    # Slice the agent_step HANDLER (not the delta-gate mention) and bound it to the NEXT handler
+    # boundary (`} else if (json.type ===`) rather than a brittle fixed offset — so the commit +
+    # flag assertions are scoped to THIS handler only.
     idx = CHAT.index("else if (json.type === 'agent_step')")
-    block = CHAT[idx: idx + 3200]
+    end = CHAT.index("} else if (json.type ===", idx + 40)
+    block = CHAT[idx:end]
     assert "_commitRoundSegment();" in block, "agent_step must commit the round segment."
     assert "_turnCoalesced = true;" in block, "agent_step must mark the turn coalesced."
 
@@ -150,3 +152,62 @@ def test_reply_render_uses_process_with_thinking_scrub():
     # leaks out of the public reply. (Reasoning-out-of-body by construction.)
     body = _commit_body()
     assert "processWithThinking" in body
+
+
+def test_round_emptiness_check_is_scoped_to_the_reasoning_BODY():
+    # A round that OPENED a `.thinking-section` accordion but produced only header chrome
+    # ("Thinking…"/"View thinking process") + the timer — no real reasoning body — must still
+    # DROP, not freeze as a near-empty "Thinking" segment. So the emptiness check reads the
+    # reasoning BODY (`.thinking-content-inner`/`.live-think-inner`), never the whole section.
+    body = _commit_body()
+    assert ".thinking-content-inner" in body or ".live-think-inner" in body, (
+        "the emptiness check must read the reasoning BODY, not the whole `.thinking-section`."
+    )
+    assert "seg.querySelector('.thinking-section').textContent" not in body, (
+        "measuring the whole `.thinking-section` counts header chrome — always non-empty."
+    )
+
+
+# ── 6. OOC/producer classification is PER-SEGMENT in a coalesced turn (Greptile P1) ────────
+
+def test_ooc_classification_targets_the_segment_not_the_shared_holder():
+    body = _commit_body()
+    # Each round's OOC/producer treatment is carried by ITS OWN frozen segment (classified via
+    # applyOocClass(seg, …)) — NOT the shared roundHolder. Classifying the shared holder is the
+    # bug: a LATER non-OOC round's applyOocClass(roundHolder, non-OOC) strips the class and an
+    # EARLIER OOC segment settles as ordinary narration.
+    assert "applyOocClass(seg," in body, (
+        "the committed round must classify its OWN segment, not the shared holder."
+    )
+    assert "applyOocClass(roundHolder" not in body, (
+        "the coalesced commit must NOT classify the shared holder (the class-stripping bug)."
+    )
+    # The shared holder's OOC classes are CLEARED each commit — the live `_renderStream` toggled
+    # them on the holder while the round streamed; they must not persist to strip a sibling segment.
+    assert "roundHolder.classList.remove('msg-ooc', 'msg-ooc-producer')" in body
+
+
+def test_segment_scoped_ooc_producer_css_exists():
+    # The wrap-scoped `.msg-ooc-producer .body` / `.role::after` rules can't reach a segment, so
+    # the per-segment producer treatment needs its own CSS on `.stream-content`/`.round-seg`.
+    css = (FE / "static" / "style.css").read_text(encoding="utf-8")
+    assert ".round-seg.msg-ooc-producer" in css, (
+        "a coalesced OOC round is classified on its segment — that segment needs producer CSS."
+    )
+
+
+# ── 7. sources/findings survive an EMPTY final round (Greptile source-drop) ────────────────
+
+def test_sources_survive_an_empty_final_round():
+    # The coalesced finalize attaches web_sources/research_sources + findings to the ONE turn
+    # bubble body UNCONDITIONALLY and AFTER the final-segment commit — so a tail round that
+    # rendered no prose (its segment dropped) cannot take the turn's sources/findings with it.
+    idx = CHAT.index("if (_turnCoalesced) {")
+    block = CHAT[idx:]
+    block = block[: block.index("} else {")]  # the coalesced branch only
+    commit_idx = block.index("_commitRoundSegment();")
+    src_idx = block.index("_buildSourcesBox(_sourcesData")
+    assert commit_idx < src_idx, "sources must attach AFTER the final-segment commit."
+    # they ride the turn bubble body (`_cf`), not the (possibly dropped) final segment
+    assert "_cf.insertBefore(" in block
+    assert "chatRenderer.buildFindingsBox(_findingsData)" in block

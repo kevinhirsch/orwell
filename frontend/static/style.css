@@ -2797,6 +2797,39 @@ body.bg-pattern-perlin-flow {
     }
     .ooc-producer-aside > :first-child:not(::before) { margin-top: 0; }
 
+    /* #829 turn-coalescing — per-SEGMENT producer aside. A coalesced turn stacks each round as
+       its own segment (the live `.stream-content`, frozen to `.round-seg`) inside ONE bubble, so
+       an OOC/producer round is classified on ITS segment (not the shared bubble — a later
+       non-OOC round would otherwise strip the treatment off the whole bubble). The wrap-scoped
+       `.msg-ooc-producer .body` / `.role::after` rules can't reach a segment, so mirror the same
+       quiet, dashed, badged "to production" look at the segment level. Theme-token driven. */
+    .msg .body .stream-content.msg-ooc-producer,
+    .msg .body .round-seg.msg-ooc-producer {
+      border: 1px dashed color-mix(in srgb, var(--fg) 28%, transparent);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      font-style: italic;
+      color: color-mix(in srgb, var(--fg) 78%, transparent);
+      opacity: 0.92;
+    }
+    .msg .body .stream-content.msg-ooc-producer::before,
+    .msg .body .round-seg.msg-ooc-producer::before {
+      content: 'production';
+      display: inline-block;
+      margin-bottom: 4px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 0.72em;
+      font-style: normal;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: color-mix(in srgb, var(--fg) 62%, transparent);
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    }
+
     /* The ONE reusable chat-bar hint surface (orwellChatHint.js). It spans the same
        width as the chat input bar (the 0 8px horizontal margin mirrors the bar's own
        inset) and shares its visual language — fully theme-token driven (derives from

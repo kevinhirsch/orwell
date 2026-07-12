@@ -190,7 +190,11 @@ def test_first_visible_bubble_gets_timestamp_when_round0_is_hidden_toolcall():
                 proc.kill()
 
     assert not result.get("error"), result.get("error")
-    assert result["visibleBubbles"] >= 1
+    # #829 coalescing: this turn (round 0 a hidden tool-call, round 1 the first narration) renders
+    # as EXACTLY one visible bubble — the whole point of coalescing.
+    assert result["visibleBubbles"] == 1, (
+        f"expected exactly ONE visible bubble (coalesced turn), got {result['visibleBubbles']}"
+    )
     assert result["firstHasTimestamp"], (
         "#834: the first VISIBLE bubble must carry a .role-timestamp even when round 0 "
         "was a hidden tool-call."

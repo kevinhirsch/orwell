@@ -1825,18 +1825,33 @@ import { isNarrow } from './platform.js';
         const _cBody = roundHolder.querySelector('.body');
         if (!_cBody) return;
         const seg = _cBody.querySelector('.stream-content');
+        // #829 OOC per-segment fix (Greptile P1): the live `_renderStream` toggled
+        // `msg-ooc`/`msg-ooc-producer` on the SHARED holder while this round streamed. In a
+        // coalesced turn that is wrong — a LATER non-OOC round's holder-level classification
+        // would strip the class off the shared bubble and an EARLIER OOC segment would settle as
+        // ordinary narration. So CLEAR it from the holder here and carry each round's OOC state on
+        // ITS OWN segment (classified below). Single-round turns never call this, so their
+        // holder-level classification (test #828) is untouched.
+        roundHolder.classList.remove('msg-ooc', 'msg-ooc-producer');
         if (!seg) return;
         const dtRaw = stripToolBlocks(roundReplyText);
         const hasReply = !!dtRaw.trim();
         const thinkSection = seg.querySelector('.thinking-section');
-        const hasReasoning = !!(thinkSection && thinkSection.textContent.trim());
+        // Scope the emptiness check to the reasoning BODY, not the whole `.thinking-section` (its
+        // header chrome — "Thinking…"/"View thinking process" + the live timer — is ~always
+        // non-empty, so a round that opened an accordion but produced trivial/empty reasoning must
+        // still drop, not freeze as a near-empty "Thinking" segment). (CodeRabbit)
+        const _thinkInner = thinkSection && thinkSection.querySelector('.thinking-content-inner, .live-think-inner');
+        const hasReasoning = !!(_thinkInner && _thinkInner.textContent.trim());
         if (!hasReply && !hasReasoning) {
           seg.remove();  // empty round → no lingering holder; the turn bubble persists
           return;
         }
         if (hasReply) {
-          // Same OOC-classify + reply-only render the tool_start/reload finalizers apply.
-          const dt = chatRenderer.applyOocClass(roundHolder, dtRaw.trim(), 'assistant').text;
+          // Classify THIS round's own SEGMENT (not the shared holder) with the same detector the
+          // reload/live paths use, so the frozen segment keeps its OOC/producer treatment even
+          // after later rounds render into the same bubble. Reply rendered reply-only (F8).
+          const dt = chatRenderer.applyOocClass(seg, dtRaw.trim(), 'assistant').text;
           const html = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
           const liveReply = seg.querySelector('.live-reply-content');
           if (liveReply) {
@@ -3529,8 +3544,11 @@ import { isNarrow } from './platform.js';
               && _cf && _cf.querySelector('.round-seg, .stream-content, .thinking-section')) {
             roundHolder.style.display = '';
           }
-          // Sources / findings attach to the ONE bubble (the same data the non-coalesced finalize
-          // renders on the final round); RAG is handled uniformly further below for both paths.
+          // Sources / findings attach to the ONE turn bubble (`_cf`), UNCONDITIONALLY and AFTER
+          // the final-segment commit — so they SURVIVE an empty final round (a tail round that
+          // called a tool and rendered no prose still drops its own segment, but the turn's
+          // web_sources/research_sources/findings must NOT be lost with it). They ride the bubble,
+          // not the dropped final segment. RAG is handled uniformly further below for both paths.
           if (_cf && _sourcesData) {
             const _cfWasExpanded = _sourcesExpanded || !!_cf.querySelector('.sources-content.expanded');
             const _cfSrc = document.createElement('div');
