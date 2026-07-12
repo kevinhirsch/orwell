@@ -8143,6 +8143,10 @@ export class GameSessionAdapter implements GameSession {
     const { broken } = this.deals.reconcile(action, {
       rel: this.rel,
       rng: this.beatRng(),
+      // 0121: the deal-depth layer — a kept deal compounds via the LOYALTY STREAK (consecutive kept deals
+      // with the same partner scale the honored fold, bounded). OFF ⇒ the plain 0039/0109 honored fold,
+      // byte-identical. (The diffusing "keeps their word" reputation reward is wired in a follow-up.)
+      dealDepth: this.dealDepthEnabled,
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
@@ -8191,8 +8195,20 @@ export class GameSessionAdapter implements GameSession {
               alternatives: s.active.filter((h) => h !== s.hoh),
             }]
           : [];
-      case "veto-ceremony":
-        return s.hoh && s.replacement ? [{ actor: s.hoh, kind: "replace", targets: [s.replacement] }] : [];
+      case "veto-ceremony": {
+        const actions: BindingAction[] = [];
+        if (s.hoh && s.replacement) actions.push({ actor: s.hoh, kind: "replace", targets: [s.replacement] });
+        // 0121: the veto DECISION as a positive-obligation action — a `veto-save` promise resolves here.
+        // `nominees` is who was originally on the block (the replacement is EXCLUDED — it was not up when
+        // the veto could have saved anyone); `saved` is who the veto actually pulled down. Gated on the
+        // deal-depth layer (off ⇒ no veto-save deals exist ⇒ this would be a no-op anyway — byte-identical).
+        if (this.dealDepthEnabled && s.vetoHolder) {
+          const saved = s.saved ? [s.saved] : [];
+          const onBlock = [...(s.nominees ?? []).filter((n) => n !== s.replacement), ...saved];
+          actions.push({ actor: s.vetoHolder, kind: "veto-use", targets: [], saved, nominees: onBlock });
+        }
+        return actions;
+      }
       case "eviction": {
         const e = s.eviction;
         const evictee = ev.participants[0];

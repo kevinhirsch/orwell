@@ -102,11 +102,18 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
       (`makeDeal` refuses them) and every existing fold is exactly 0039/0109; the domain change is additive
       (new branches fire only for the new kinds) — 0039/0109 unit suites unchanged, juryReach band unchanged.
 - [x] **[Part 1] Name-agnostic tests** (roles only); BDD-gated in `cucumber.cjs`; `test:arch` green.
-- [ ] **[Part 2] Live wiring:** a resolved comp emits a `compete` action per competitor; the veto ceremony
-      emits a `veto-use` action — so the new kinds auto-resolve in a real game (gated).
-- [ ] **[Part 2] Keeping is a felt reward:** a kept deal seeds a diffusing "reliable" reputation, a streak of
-      kept deals compounds the bond, and a proven-reliable partner protects the player — all hidden, no number.
-- [ ] **[Part 2] FE extraction** of the new kinds; deploy opt-in (`ORWELL_DEAL_DEPTH=1`) wired; `npm test` green.
+- [x] **[Part 2a] veto-save live wiring:** the veto ceremony emits a `veto-use` binding action (actor =
+      veto-holder, `saved` = who was pulled down, `nominees` = who was originally on the block, replacement
+      excluded), so a `veto-save` promise auto-resolves in a real game — gated on the flag (`bindingActionsFor`).
+- [x] **[Part 2a] Loyalty streak (reward 3):** consecutive kept deals with the same partner compound the
+      honored fold (bounded `DEAL_STREAK`); a break resets the streak; off ⇒ the plain honored fold
+      (byte-identical). *(`dealDepth.test.ts`.)*
+- [ ] **[Part 2b] comp-throw live wiring:** a resolved comp emits a `compete` action per competitor (needs
+      the transient comp-intent threaded to the crown beat).
+- [ ] **[Part 2b] Reputation that spreads (reward 1) + reliable-ally protection (reward 2):** a kept deal
+      seeds a diffusing "keeps their word" reputation (gossip) that raises NPC deal-willingness; a proven
+      partner protects the player — all hidden, no number.
+- [ ] **[Part 2b] FE extraction** of the new kinds; deploy opt-in (`ORWELL_DEAL_DEPTH=1`) wired; `npm test` green.
 
 ## 6. Dependencies & traceability
 

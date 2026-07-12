@@ -89,6 +89,50 @@ describe("0121 — veto-save: a promise to use the veto to save you", () => {
   });
 });
 
+describe("0121 — the loyalty streak: consecutive kept deals compound (deal-depth reward)", () => {
+  const keepOnce = (ledger: DealLedger, s: ReconcileSink, rel: RelationshipModel, tag: string): number => {
+    const before = rel.edge(PROTECT, PROMISOR).reliability;
+    ledger.make([PROMISOR, PROTECT], "comp-throw", `throw ${tag}`);
+    ledger.reconcile({ actor: PROMISOR, kind: "compete", targets: [], outcome: "threw" }, s);
+    return rel.edge(PROTECT, PROMISOR).reliability - before;
+  };
+
+  it("a second kept deal with the same partner builds MORE reliability than the first (compounds)", () => {
+    const rel = new RelationshipModel(0.5);
+    const s: ReconcileSink = { rel, rng: new SeededRandom(7), dealDepth: true };
+    const ledger = new DealLedger();
+    const gain1 = keepOnce(ledger, s, rel, "1");
+    const gain2 = keepOnce(ledger, s, rel, "2");
+    expect(gain2).toBeGreaterThan(gain1); // the "we've never broken faith" bonus
+  });
+
+  it("with the deal-depth layer OFF, consecutive kept deals build the SAME amount (byte-identical fold)", () => {
+    const rel = new RelationshipModel(0.5);
+    const s: ReconcileSink = { rel, rng: new SeededRandom(7) }; // dealDepth unset
+    const ledger = new DealLedger();
+    const gain1 = keepOnce(ledger, s, rel, "1");
+    const gain2 = keepOnce(ledger, s, rel, "2");
+    expect(gain2).toBeCloseTo(gain1, 10); // no streak — identical honored fold
+  });
+
+  it("a broken deal resets the streak (loyalty must be rebuilt)", () => {
+    const rel = new RelationshipModel(0.5);
+    const s: ReconcileSink = {
+      rel, rng: new SeededRandom(7), dealDepth: true,
+      juryDemerit: () => {}, reveal: () => "e",
+    };
+    const ledger = new DealLedger();
+    keepOnce(ledger, s, rel, "1");
+    const gain2 = keepOnce(ledger, s, rel, "2"); // streak = 2, a compounded gain
+    // Now BREAK a deal with the same partner — resets the streak.
+    const broken = ledger.make([PROMISOR, PROTECT], "comp-throw", "then betray");
+    ledger.reconcile({ actor: PROMISOR, kind: "compete", targets: [], outcome: "won" }, s);
+    expect(broken.status).toBe("broken");
+    const gainAfterReset = keepOnce(ledger, s, rel, "3"); // streak back to 1
+    expect(gainAfterReset).toBeLessThan(gain2); // the compounding was lost — trust has to be rebuilt
+  });
+});
+
 describe("0121 — the verdict is engine-decided, never prose", () => {
   it("the same action yields the same verdict regardless of the terms wording", () => {
     const plain = new DealLedger();

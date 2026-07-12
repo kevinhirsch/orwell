@@ -2,7 +2,8 @@ import type { EntityId } from "../domain/ids";
 import { PLAYER } from "../domain/ids";
 import type { RandomnessSource } from "../ports/RandomnessSource";
 import type { RelationshipModel } from "./relationships";
-import { DEAL_IMPACTS, DEAL_DURATION } from "./relationshipConstants";
+import { DEAL_IMPACTS, DEAL_DURATION, DEAL_STREAK, scaleImpact } from "./relationshipConstants";
+import type { EdgeSignals } from "./relationshipConstants";
 import {
   type BindingAction,
   type Deal,
@@ -79,6 +80,15 @@ export interface ReconcileSink {
   reveal?: (wronged: EntityId, breaker: EntityId, deal: Deal, actionKind: BindingAction["kind"]) => string | undefined;
   /** Whether the wronged party witnesses/learns this break (default: true for a public ceremony break). */
   witnessed?: (wronged: EntityId, breaker: EntityId, deal: Deal, actionKind: BindingAction["kind"]) => boolean;
+  /**
+   * 0121 — the deal-depth layer (`ORWELL_DEAL_DEPTH`). When true, keeping a deal compounds via the
+   * LOYALTY STREAK (consecutive kept deals with the same partner scale the honored fold, bounded) and a
+   * kept deal seeds a "reliable" reputation via `reputation`. OFF (the default / the calibration harness)
+   * ⇒ the plain `DEAL_IMPACTS.honored` and no reputation ⇒ byte-identical.
+   */
+  dealDepth?: boolean;
+  /** 0121 — seed a hidden "keeps their word" reputation for the honorer (diffuses via gossip). */
+  reputation?: (honorer: EntityId, other: EntityId, deal: Deal) => void;
 }
 
 export interface Reconciliation {
@@ -89,6 +99,10 @@ export interface Reconciliation {
 export class DealLedger {
   private deals: Deal[] = [];
   private seq = 0;
+  /** 0121 — consecutive kept-deal count per `honorer->other` pair (the loyalty streak). In-memory: the
+   *  reliability it builds is persisted in the relationship edges; only the streak multiplier resets on a
+   *  restart, which merely starts the next streak fresh (no persisted detail is lost). */
+  private streaks = new Map<string, number>();
 
   /** Make a new OPEN deal between two parties. `id`/`madeEventId` are assigned/threaded by the caller.
    *  `madeWeek` (E43) anchors the week-scoped horizon of `safety`/`vote` promises. `duration` (0109) is
@@ -203,12 +217,25 @@ export class DealLedger {
     return resolved;
   }
 
-  /** The kept-promise fold (E43/E54): the protected party registers the demonstrated loyalty. */
+  /** The kept-promise fold (E43/E54): the protected party registers the demonstrated loyalty. 0121: with
+   *  the deal-depth layer on, a LOYALTY STREAK (consecutive kept deals, same pair) compounds the fold
+   *  (bounded), and the kept deal seeds a diffusing "reliable" reputation. Off ⇒ the plain honored fold. */
   private applyHonor(deal: Deal, honorer: EntityId, sink: ReconcileSink): void {
     const other = deal.parties.find((p) => p !== honorer);
-    if (other && sink.rel && sink.rng) {
-      sink.rel.applyImpactDirected(other, honorer, DEAL_IMPACTS.honored, sink.rng);
+    if (!other) return;
+    if (sink.rel && sink.rng) {
+      let impact: Partial<EdgeSignals> = DEAL_IMPACTS.honored;
+      if (sink.dealDepth) {
+        const key = `${honorer}->${other}`;
+        const streak = (this.streaks.get(key) ?? 0) + 1;
+        this.streaks.set(key, streak);
+        const mult = Math.min(DEAL_STREAK.maxMult, 1 + DEAL_STREAK.step * (streak - 1));
+        impact = scaleImpact(DEAL_IMPACTS.honored, mult);
+      }
+      sink.rel.applyImpactDirected(other, honorer, impact, sink.rng);
     }
+    // 0121: a kept deal seeds a hidden "keeps their word" reputation that diffuses NPC→NPC (gossip).
+    if (sink.dealDepth) sink.reputation?.(honorer, other, deal);
   }
 
   /** The betrayal-shock fold + jury demerit + (if witnessed) the reveal event. */
@@ -225,6 +252,8 @@ export class DealLedger {
     if (sink.rel && sink.rng) {
       sink.rel.applyDirected(wronged, breaker, "betrayal", sink.rng, breakSeverityScale(deal, sink.currentWeek));
     }
+    // 0121: a betrayal resets the breaker's loyalty streak with the wronged party (you broke faith).
+    if (sink.dealDepth) this.streaks.delete(`${breaker}->${wronged}`);
     // 0014: a discrete jury-management demerit (weighs that juror's later lean against the breaker).
     sink.juryDemerit?.(wronged, breaker, deal);
     // 0002: the wronged party learns it as a witnessed event when they see/learn the break. `actionKind`
