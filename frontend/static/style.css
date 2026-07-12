@@ -2091,7 +2091,10 @@ body.bg-pattern-perlin-flow {
       font-weight: 600; letter-spacing: .03em;
     }
     .og-card.og-collapsible .og-head { cursor: pointer; user-select: none; -webkit-user-select: none; }
-    .og-card .og-head:focus-visible { outline: 2px solid var(--accent, #e06c75); outline-offset: 2px; border-radius: 4px; }
+    /* #729/#770: the .og-head focus ring is owned by the runtime kit (orwellGadget.js — the neutral
+       system-blue --ow-ios-blue ring). The stale accent-red (--accent) declaration that used to sit
+       here was inert (overridden by the injected rule) and contradicted the neutral-ring rule, so it
+       was removed to prevent a latent regression. */
     .og-card .og-icon { flex: 0 0 auto; display: inline-flex; }
     .og-card .og-title {
       flex: 1 1 auto; min-width: 0;

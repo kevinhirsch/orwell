@@ -389,7 +389,7 @@
         note.textContent = "Generating " + n + " portrait" + (n === 1 ? "" : "s") +
           " in the background — they'll appear here as they land.";
       } else if (data && !data.available) {
-        note.textContent = "No image model is configured — the game plays on without portraits.";
+        note.textContent = "No portrait model connected — the game plays on without portraits. An admin can connect one in Settings.";
       } else if (data && !(data.missing || []).length) {
         note.textContent = "Nothing missing — every active houseguest has a portrait.";
       } else {
@@ -629,7 +629,7 @@
               gen.total + " portrait" + (gen.total === 1 ? "" : "s") + "…";
           } else if (_lastRunFailing) {
             // M1-9: honest failure copy — no run is active and the last one landed nothing.
-            note.textContent = "Portraits aren't landing — check the image model (Settings → Models).";
+            note.textContent = "Portraits aren't landing — the portrait service may need reconnecting (Settings).";
           } else {
             note.textContent = "Generating " + missing.length + " remaining…" +
               (total != null && present != null ? " (" + present + "/" + total + " done)" : "");

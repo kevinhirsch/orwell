@@ -272,7 +272,7 @@
         const d = r.ok ? await r.json() : null;
         st.busy = false;
         if (d && d.generated > 0) { st.candidates = d.candidates; st.selected = null; msg("Pick your favorite — or generate 3 more."); ensureOpen(); }
-        else { msg((d && d.reason) || "Couldn't generate options — check the image model in Settings."); }
+        else { msg((d && d.reason) || "Couldn't generate options — the photo service may be offline (check Settings)."); }
       } catch (e) {
         if (window.OrwellReport) window.OrwellReport.fail("headshot", "studio", e);
         st.busy = false; msg("The photo service is offline right now.");
