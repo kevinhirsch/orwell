@@ -408,6 +408,12 @@
     // the session identity. Seed synchronously from the last-known value (instant, correct for the
     // common single-account browser) then confirm via /api/auth/status — on a DIFFERENT user we
     // re-key and refresh the namespace-sensitive panels through the single dispatcher.
+    //
+    // R5/#1416: the per-user localStorage helper (window.orwellUserKey) keys under data-user when
+    // present, and under a STABLE "local" namespace when it is absent/empty (the AUTH_ENABLED=false
+    // single-user posture). That fallback lives INSIDE the helper — this boot deliberately leaves
+    // data-user EMPTY in no-auth mode, so surfaces that read data-user DIRECTLY (e.g. the per-tab
+    // send-outbox in chat.js) keep their existing empty-user value and behavior.
     try {
       var seed = '';
       try { seed = sessionStorage.getItem('orwell-current-user') || ''; } catch(_){}
@@ -2725,6 +2731,7 @@
 <script defer src="/static/js/sessionSync.js?v=20260608"></script>  <!-- cross-device live sync -->
 <script defer src="/static/js/orwellLayoutSync.js?v=20260620"></script>  <!-- 0064 Part F: cross-device window/HUD layout sync -->
 <script defer src="/static/js/orwellSyncedState.js?v=20260710"></script>  <!-- DWE #643: kit-agnostic synced-UI-state substrate over the layout-sync seam -->
+<script src="/static/js/orwellUserKey.js"></script>  <!-- R5/#1416: the SINGLE per-user client-storage key derivation (window.orwellUserKey). Keys under data-user when present; under a stable "local" namespace (never the shared "" one) when absent — the AUTH_ENABLED=false single-user posture. Loaded BEFORE every panel that keys localStorage per user. -->
 <script src="/static/js/orwellReport.js"></script>  <!-- BB failure ring (G11): fail-open catches report here — absence becomes observable. Plain script, BEFORE the panels -->
 <script src="/static/js/orwellSessionGuard.js"></script>  <!-- A6: the "New Chat hazard" guard — window._orwellConfirmLeaveGame() gates every session-detach entry point (logo/New Chat/rail +) behind a live-game confirm. Loaded early so app.js's deferred handlers can call it. -->
 <script src="/static/js/orwellChatGate.js"></script>  <!-- P1 OOBE: the "secure your cast photo first" HARD GATE — locks chat send pre-game until an image is secured (fails open) -->

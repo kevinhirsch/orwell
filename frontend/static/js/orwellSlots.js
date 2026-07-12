@@ -104,20 +104,27 @@
   // bottom-center) — used by the OOBE cast-photo box so it is a centered, draggable
   // dialog without a per-window !important position hack fighting the slot math.
   const slots = { "top-right": [], "top-left": [], "top-center": [], "bottom-center": [], "bottom-right": [] };
-  let _user = "";
-  try { _user = (document.body && document.body.dataset.user) || ""; } catch (_) {}
 
-  function offsetKey(key) { return "orwell-slot-offset:" + key + ":" + _user; }
+  // Per-user key, fail-closed (R5/#1416): derived FRESH per call via window.orwellUserKey — the old
+  // module-load `_user` cache read dataset.user before the boot script's auth confirm could set it,
+  // so it also fixes a latent stale-empty-namespace bug. null ⇒ the slot offset is not persisted.
+  function offsetKey(key) {
+    return (window.orwellUserKey && window.orwellUserKey("orwell-slot-offset:" + key)) || null;
+  }
 
   function loadOffset(key) {
+    const k = offsetKey(key);
+    if (!k) return null;
     try {
-      const o = JSON.parse(localStorage.getItem(offsetKey(key)) || "null");
+      const o = JSON.parse(localStorage.getItem(k) || "null");
       if (o && Number.isFinite(o.dx) && Number.isFinite(o.dy)) return o;
     } catch (_) {}
     return null;
   }
   function saveOffset(key, dx, dy) {
-    try { localStorage.setItem(offsetKey(key), JSON.stringify({ dx, dy })); } catch (_) {}
+    const k = offsetKey(key);
+    if (!k) return;
+    try { localStorage.setItem(k, JSON.stringify({ dx, dy })); } catch (_) {}
   }
 
   function visible(el) {
@@ -301,7 +308,10 @@
         // quiet until the final clamped position is applied (F2).
         _restacking = true;
         try {
-          try { localStorage.removeItem(offsetKey(o.key)); } catch (_) {}
+          // R5/#1416: offsetKey(o.key) is null when there is no data-user — guard so the null key
+          // never reaches Web Storage (which would coerce it into a shared "null" namespace).
+          const k = offsetKey(o.key);
+          if (k) { try { localStorage.removeItem(k); } catch (_) {} }
           restackSlot(slotName);
           const base = el.getBoundingClientRect();
           saveOffset(o.key, rect.left - base.left, rect.top - base.top);

@@ -110,14 +110,19 @@
   // source of truth; localStorage is the per-device offline/seed fallback. The synthetic
   // window id is "gadget:<id>" (the rail order uses "gadget-rail", popups use "popup:…").
   function syncId(id) { return "gadget:" + id; }
+  // Per-user key, fail-closed (R5/#1416): null when there is no data-user identity, so the
+  // localStorage read/write below is SKIPPED rather than collapsing into a shared "" namespace.
   function collapseKey(id) {
-    return "orwell-gadget-collapsed:" + id + ":" + ((document.body && document.body.dataset.user) || "");
+    return (window.orwellUserKey && window.orwellUserKey("orwell-gadget-collapsed:" + id)) || null;
   }
   function loadCollapsed(id) {
-    try { return localStorage.getItem(collapseKey(id)) === "1"; } catch (_) { return false; }
+    var k = collapseKey(id);
+    if (!k) return false;
+    try { return localStorage.getItem(k) === "1"; } catch (_) { return false; }
   }
   function saveCollapsed(id, on, applyingRemote) {
-    try { localStorage.setItem(collapseKey(id), on ? "1" : ""); } catch (_) {}
+    var k = collapseKey(id);
+    if (k) { try { localStorage.setItem(k, on ? "1" : ""); } catch (_) {} }
     // Emit through the SAME capture event the window kit + the rail order use — no parallel
     // sync. Suppressed while APPLYING a remote change (no echo loop). orwellLayoutSync
     // debounces a PATCH /api/orwell/layout; absent module ⇒ localStorage-only, fail-open.
