@@ -44,14 +44,16 @@ def _fe_callable_tools() -> set[str]:
 
 
 def _chatjs_gamechanged_tools() -> set[str]:
-    """The tool names in chat.js's `[...].includes(json.tool)` game-mutating list(s)."""
-    with open(os.path.join(FRONTEND, "static", "js", "chat.js"), encoding="utf-8") as f:
+    """The game-mutating tools the chat.js g15 seam refreshes on. Since #1412 (R1b) the seam consumes
+    the shared manifest (`window.orwellIsMutatingTool`) instead of a hand-coded `.includes(json.tool)`
+    array, so the authoritative set is `platform.js` `ORWELL_MUTATING_TOOLS` (pinned registry-equal by
+    test_1412_mutating_manifest.py). This gate still proves every one of them is FE-callable."""
+    with open(os.path.join(FRONTEND, "static", "js", "platform.js"), encoding="utf-8") as f:
         js = f.read()
-    names: set[str] = set()
-    for arr in re.findall(r"\[([^\]]*)\]\.includes\(json\.tool\)", js):
-        names |= set(re.findall(r"'([A-Za-z]+)'", arr))
-        names |= set(re.findall(r'"([A-Za-z]+)"', arr))
-    return names
+    m = re.search(r"ORWELL_MUTATING_TOOLS\s*=\s*Object\.freeze\(\[(.*?)\]\)", js, re.S)
+    assert m, "platform.js must export const ORWELL_MUTATING_TOOLS = Object.freeze([ ... ])"
+    body = re.sub(r"//[^\n]*", "", m.group(1))  # strip // comments so words can't masquerade
+    return set(re.findall(r"'([A-Za-z][A-Za-z0-9]*)'", body))
 
 
 def test_chatjs_gamechanged_list_tools_are_all_fe_callable():
