@@ -289,8 +289,9 @@ def test_kit_has_a_docked_render_mode():
     assert "ow-docked" in js                          # the docked CSS class
     # docked = mounts into the rail body, opts out of slot + chip
     assert 'getElementById(\'gadget-rail-body\')' in js or 'getElementById("gadget-rail-body")' in js
-    # the per-window docked flag persists, mirroring castPin's key pattern
-    assert "-docked:" in js
+    # the per-window docked flag persists, mirroring castPin's key pattern — R5/#1416b routes the
+    # per-user derivation through the shared fail-closed helper (base 'orwell-<id>-docked').
+    assert "window.orwellUserKey('orwell-' + id + '-docked')" in js
     # docked windows DON'T register a slot or a dock chip (the early return in open)
     assert "if (this._docked) {" in js
 

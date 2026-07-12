@@ -105,10 +105,19 @@ html {
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
   }
-  /* Any fixed top banner (engine status) sits below the status bar. */
+  /* F1: any fixed top banner sits below the status bar. The engine-status banner is now the
+     OrwellNotice kit's top-banner host (#orwell-notice-banner) — the old #orwell-engine-banner
+     id is legacy. The kit host also honors --safe-top in its own CSS (env() = 0 in a tab); this
+     is the standalone reinforcement so the reserved inset is correct either way. */
   .orwell-banner,
-  #orwell-engine-banner {
+  #orwell-engine-banner,
+  #orwell-notice-banner {
     top: var(--safe-top) !important;
+  }
+  /* The top-right corner-toast host clears the status bar / sensor housing too. */
+  #orwell-notice-toast {
+    top: calc(16px + var(--safe-top)) !important;
+    right: calc(16px + var(--safe-right)) !important;
   }
 }
 

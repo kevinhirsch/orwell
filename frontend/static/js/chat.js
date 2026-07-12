@@ -24,6 +24,93 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 const searchModule = null, documentModule = null, emailInbox = null, createResearchSynapse = null;
 import { createStreamRenderer } from './streamingRenderer.js';
 import { isNarrow } from './platform.js';
+// #1414 (R3 PR0): chat.js's cross-cluster module-level mutable state (streaming flags, the send
+// outbox, the reconcile sets, background-stream maps, single-flight guards) lives on ONE shared
+// singleton so the modules chat.js will be decomposed into can mutate the SAME instance (an ES
+// imported binding is read-only; a shared object's fields are not). Behavior-preserving: chat.js
+// still owns all the logic and just references `chatState.X` where it used to reference `X`.
+import { chatState } from './chatState.js';
+// #1414 (R3 PR1): the #738 scroll-edge mask + recede-on-scroll banner — the first leaf
+// extraction from this god-object. Behavior-preserving: chat.js still calls
+// _initChatScrollEdges() from init() exactly as before, the logic just lives in its own
+// module now. Imported here only (never app.js / an html shell) so #1399 single-eval holds.
+import { _initChatScrollEdges } from './chatScrollEdges.js';
+// #1414 (R3 PR2): the composer submit-button state machine (#971 button reconciler / #986).
+// Behavior-preserving: chat.js calls these three exactly as before — updateSubmitButton() to paint
+// the Stop/Send face, and _foregroundStreamLive()/_syncSubmitButtonState() to reconcile it to the
+// true streaming state. They read/write the shared streaming single-flight state via the chatState
+// singleton (PR0). Imported here only, so #1399 single-eval holds; the two on the chatModule public
+// API (_syncSubmitButtonState / _foregroundStreamLive) are re-exported below byte-identically.
+import { updateSubmitButton, _foregroundStreamLive, _syncSubmitButtonState } from './chatSubmitButton.js';
+// #1414 (R3 PR3): chat attachment opening (image → new tab; pdf/text/code → Documents viewer;
+// anything else → raw file). Behavior-preserving: chat.js re-exports `openAttachment` on the
+// chatModule public API below (chatRenderer.js calls it via window.chatModule.openAttachment), and
+// injects the API_BASE resolver so the module reads chat.js's live value. Imported here only, so
+// #1399 single-eval holds.
+import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
+// #1414 (R3 PR4): the WebSocket Phase-1 chat live-splice cluster (ADR 0017). Behavior-preserving:
+// the splice was already isolated behind _wsRegisterChat; chat.js still drives the same call points
+// (_wsChatActive/_wsPinRound in handleChatSubmit's up-frame reroute, _wsResetRound on refusal, and
+// the boot registration below), and injects the three chat.js-internal deps the consumer reads
+// (_renderLiveStream — the R2 render seam; softReloadHistory — reconcile; _senderLabel — the single-
+// source sender label) via _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern. None of these
+// are on the chatModule public API. Imported here only, so #1399 single-eval holds.
+import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _setWsSpliceDeps } from './chatWsSplice.js';
+// #1414 (R3 PR5): the per-message actions cluster — edit / resend / regenerate / variant-nav /
+// fork / delete / rewrite / continue. Behavior-preserving: the 8 action functions are called
+// cross-file by chatRenderer.js via window.chatModule.<fn> (the per-message footer buttons), so
+// chat.js re-exports them on the chatModule public API below byte-identically; _attachVariantNav is
+// imported because the stream-finalize path here still calls it. Re-entrancy: editUserMessage /
+// resendUserMessage / regenerateFrom / continueFrom RE-ENTER the send via handleChatSubmit, which
+// STAYS in chat.js (the turn orchestrator + stream loop) — so chat.js injects the three chat.js-
+// internal deps the cluster needs (handleChatSubmit; a () => API_BASE resolver; a
+// setPendingRegenAttachments hand-off whose backing `let` handleChatSubmit reads/clears) via
+// _setMessageActionsDeps, mirroring the PR2/PR3/PR4 injection pattern. Imported here only, so #1399
+// single-eval holds.
+import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMessage, editAIMessage, rewriteWith, continueFrom, _attachVariantNav, _setMessageActionsDeps } from './chatMessageActions.js';
+// #1414 (R3 PR6): the SEND-OUTBOX subsystem (#985 P2-A / #891 / #830) — the reload-durable,
+// session-bound, self-continuing queue for sends made while a turn streams / while offline.
+// Behavior-preserving: the three queues + two single-flight guards live on the chatState singleton
+// (PR0); chat.js still calls the moved helpers from handleChatSubmit (enqueue / offline / requeue /
+// mark-failed), the stream-settle finally (flush), and the adopt pass (confirm), and re-exports the
+// browser-gate surface on chatModule below byte-identically. Two chat.js-internal deps are injected
+// (below, at module-eval): the SOLE production dispatch (a headless handleChatSubmit) through
+// _setOutboxDispatch, and a () => API_BASE resolver through _setOutboxDeps. Imported here only, so
+// #1399 single-eval holds; sessions.js's selectSession drain-nudge rides the chatModule re-export.
+import {
+  _enqueueSend, _flushSendOutbox, _restoreOutboxFromStorage, _outboxConfirmDelivery,
+  _requeueOutboxItem, _isNetworkSendFailure, _dedupeOutboxAgainstServer, _setDeliveryState,
+  _markSendFailedById, _retryFailedSend, _persistOutbox, _updateOutboxStrip, _outboxOnline,
+  _armOutboxRetry, _setQueuedTag, _outboxPeekStorage, _setOutboxDispatch, _setOutboxDeps,
+} from './chatOutbox.js';
+// #1414 (R3 PR7): the cross-device RECONCILE / seq-order / peer-resume cluster (ADR 0008/0012) —
+// softReloadHistory (the render-and-reconcile total-order rebuild) + the seq helpers + the
+// orphan-aware bubble count + the deferred peer-resume seam. Behavior-preserving: chat.js still drives
+// the same call points (softReloadHistory at the stream-settle + adopt sites, flushPendingReconcile /
+// flushPendingPeerResume in the stream-end finally, _isEmptyTurnNoSave in the finalize) and re-exports
+// the browser-gate surface on chatModule below byte-identically (softReloadHistory /
+// flushPendingReconcile / deferPeerResume / flushPendingPeerResume / isSkippableUserPrompt / _msgSeq /
+// _insertBySeq / _reorderBySeq / _isEmptyTurnNoSave / _visibleMsgCount / _expectedVisibleBubbleCount).
+// Three chat.js-internal deps are injected (below, at module-eval) via _setReconcileDeps: hasActiveStream
+// (the SSE-reader liveness helper), resumeStream (the R2 live-resume attach) — both STAY here — and a
+// () => API_BASE resolver. Imported here only, so #1399 single-eval holds; sessions.js /sessionSync.js
+// reach the cluster through the chatModule re-export, unchanged.
+import {
+  softReloadHistory, flushPendingReconcile, deferPeerResume, flushPendingPeerResume,
+  _isSkippableUserPrompt, _isEmptyTurnNoSave, _msgSeq, _insertBySeq, _reorderBySeq,
+  _visibleMsgCount, _expectedVisibleBubbleCount, _setReconcileDeps,
+} from './chatReconcile.js';
+// #1414 (R3 PR8): the SEVERABLE stream-presentation helpers (PARTIAL by design — the ~1,660-line
+// SSE `while(true)` dispatch STAYS in handleChatSubmit; it cannot be lifted without rewriting the
+// turn orchestrator's ~30 in-place-reassigned per-turn locals into `ctx.X`, the exact "gamble the
+// live stream" the roadmap forbids — see chatStreamLoop.js's header + the #1414 PR8 report). Only
+// the pure, closure-free, non-pinned helpers move: _ensureStreamLayout (the `.stream-content`
+// render target), _toolLabels + _thinkingLabel (the tool-aware spinner label), _showThinkingSpinner
+// (the transient dots bubble). They touch NO chat.js-internal state (deps: ui/spinner/document), so
+// there is NO _setStreamLoopDeps to wire. `_thinkingLabel` now takes `lastToolName` as an argument
+// (chat.js passes its `_lastToolName` local). None are on chatModule / called cross-file, so no
+// re-export. Imported here only, so #1399 single-eval holds.
+import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner } from './chatStreamLoop.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -56,98 +143,33 @@ import { isNarrow } from './platform.js';
     "Big Brother cuts to a brief technical interlude… hang tight, we'll be right back.";
 
   let API_BASE = '';
-  let currentAbort = null;
-  let isStreaming = false;
-  let _sendInFlight = false;   // covers the window from click → streaming start
-  let _displayOverride = null; // Override visible user bubble text (hides injected prompts)
-  let _hideUserBubble = false; // Skip user bubble entirely (e.g. continue after stop)
-  let _pendingContinue = null; // Stores the stopped AI element to merge with new response
+  // #1414 (R3 PR3): feed the extracted chatAttachments.js chat.js's live API_BASE. A closure over
+  // this `let` (set once in init) so openAttachment reads the current value — an imported binding
+  // would be read-only. Registered at module-eval (order-independent of init).
+  _setAttachmentsApiBase(() => API_BASE);
+  // #1414 (R3 PR6): register the outbox's two chat.js-internal deps at module-eval. The SOLE
+  // production dispatch is a headless handleChatSubmit (byte-identical to the pre-PR6 default) —
+  // routed through the same _setOutboxDispatch seam the browser gate uses to install a stub, so
+  // production and test share one entry point (last writer wins). API_BASE is read live via the
+  // resolver (the _setAttachmentsApiBase precedent). handleChatSubmit is a hoisted declaration, so
+  // capturing it here (it is only INVOKED at flush time) is safe.
+  _setOutboxDeps({ apiBase: () => API_BASE });
+  _setOutboxDispatch((text, opts) => handleChatSubmit(null, text, opts));
+  // #1414 (R3 PR0): streaming/send/display/continue mutable state moved to the shared `chatState`
+  // singleton — chatState.currentAbort, .isStreaming, ._sendInFlight, ._displayOverride,
+  // ._hideUserBubble, ._pendingContinue. See chatState.js for the per-field docs.
   // ── Auto-recovery: when a turn's stream silently dies (connection drop) or
   // goes quiet while the connection is alive, re-engage the model with a
   // completion handshake instead of leaving it hung. Capped so it can't loop.
-  let _autoNudges = 0;             // handshakes fired for the CURRENT user turn
-  let _autoContinuePending = false; // marks the next submit as an auto-continue (don't reset the counter)
+  // chatState._autoNudges (handshakes fired for the CURRENT user turn) + chatState._autoContinuePending
+  // (next submit is an auto-continue — don't reset the counter). Moved to chatState.js, #1414 R3 PR0.
   const _AUTO_NUDGE_CAP = 3;
 
-  // ── #985 P2-A: the SEND OUTBOX ──────────────────────────────────────────────
-  // A message the player sends WHILE a turn is streaming must NOT be silently dropped (the old
-  // `isStreaming → Stop` branch aborted the reply and `return`ed before the new text was ever read).
-  // The owner's ruling was "Queue it": enqueue the new message into this in-memory FIFO, paint its
-  // optimistic bubble immediately (composes with #992 render-by-seq — a pending bubble carries a
-  // clientMsgId, NO dbId/seq, so it floats to the tail until its seq lands), clear the composer (the
-  // text is now safely captured here, not lost), and flush the queue IN ORDER the moment the current
-  // turn settles — one in flight at a time, mirroring the engine's server-side `_framed` serialization.
-  // Idempotent + multibrowser-safe: each item is keyed by its `clientMsgId`, which the existing
-  // optimistic-adopt path reconciles by, so a flush is at-most-once and reconciles cleanly across
-  // windows (sends target the canonical session per #990, render by seq per #992, mirror per #991).
-  // Items: { clientMsgId, text, bubbleEl }. STOP is reserved for the explicit Stop button / an EMPTY
-  // composer — "stop the current reply" and "send a new message" are no longer collapsed onto one
-  // silent action.
-  const _sendOutbox = [];
-  let _flushingOutbox = false;     // re-entrancy guard so only one flush send is dispatched at a time
-
-  // ── #891 P0 (messaging resilience): the RELOAD-DURABLE half of the outbox + honest offline status ──
-  // The #985 outbox above was in-memory only — a hard reload while a send sat QUEUED lost it (the
-  // explicitly-deferred half; audit row INT-3). Now every queued item is persisted the instant it
-  // enters the queue and stays persisted until a SERVER row carrying its clientMsgId is observed:
-  //
-  //     enqueue → persist { clientMsgId, text, sessionId, ts } (sessionStorage, per-tab)
-  //     dispatch → item moves to _outboxAwaitingConfirm (STILL persisted — a reload mid-flight restores it)
-  //     server row with the clientMsgId observed (adopt pass / pre-send dedupe) → confirmed, released
-  //
-  // STORAGE CHOICE — sessionStorage, deliberately (vs IndexedDB/localStorage): the payload contract is
-  // tiny (a handful of {id, text} strings — no blobs, no attachments), so IndexedDB's async machinery
-  // buys nothing; and the outbox is PER-TAB by design (ADR 0008/0012 — a drained send flows through
-  // THIS tab's normal canonical-session send path; localStorage is shared across tabs, so two tabs
-  // restoring one queue would double-send the same message). sessionStorage is the tab-scoped store
-  // that survives a reload — the exact durability owed — and follows the composer-draft precedent
-  // (orwellComposerDraft.js, G17). Known boundary: closing the TAB discards its queue (a per-tab queue
-  // has no other tab allowed to drain it); that residual is #891's cross-tab/service-worker tier.
-  //
-  // AT-MOST-ONCE across a reload: restored (and network-requeued) items carry `needsDedupe` — before
-  // re-dispatch, ONE /api/history fetch drops any item whose client_msg_id the server already has
-  // (the server stamps it on the persisted user row, chat_helpers.add_user_message). Fail-closed: if
-  // the check cannot run, the item stays queued and the backoff retries — never an unverified re-send.
-  //
-  // HONEST STATUS (#891 P0-2): a queued bubble carries a real-text-node `.queued-tag` ('queued' /
-  // 'queued — offline' — same a11y reasoning as `.unsent-tag`), the drain gates on navigator.onLine,
-  // and the 'online' event + a capped exponential backoff auto-drain the queue. A send attempted
-  // while OFFLINE goes straight to the outbox (no doomed POST), and a send that dies at the network
-  // layer before any byte arrived is classified (`_isNetworkSendFailure`) and re-queued instead of
-  // surfacing as a raw error.
-  const _outboxAwaitingConfirm = [];  // dispatched, not yet server-confirmed (persisted alongside the queue)
-  //
-  // ── #830 (optimistic-always + aggregated unsent queue): the AGGREGATION lane ──
-  // The owner's ruling: "aggregate what you send quickly … when it's time to send the payload it
-  // sends all messages in one turn." Items queued WHILE A TURN WAS STREAMING (the rapid-succession
-  // case — the player keeps talking while the model replies) carry `coalesce: true`; at drain time
-  // a same-lane run of such items FOLDS into ONE combined turn (`_foldOutboxBatch`): one payload
-  // (texts joined by a blank line), ONE clientMsgId (the head's), ONE bubble (the batch's separate
-  // pending bubbles collapse into a single combined bubble via the same render path), ONE server
-  // row. A single queued item dispatches byte-identical to the pre-#830 path (no fold, no marker).
-  // DELIBERATELY NOT aggregated: OFFLINE-queued, network-requeued and reload-RESTORED items — each
-  // is its own at-most-once idempotency unit (its POST may already have reached the server, so the
-  // per-item `needsDedupe` verification and per-item drain of #891/#1379 must stand; folding items
-  // with divergent delivery states could double- or half-send a batch). Aggregation therefore
-  // requires `coalesce && !needsDedupe`, and never crosses a same-lane item that can't join (order
-  // within a conversation is preserved). When ≥2 items sit queued, an aggregated status strip
-  // (`#send-queue-strip`, role="status" — real text, WCAG 4.1.3) shows the count + a manual
-  // "Send now" retry that resets the backoff and drains through the ONE normal flush.
-  let _outboxRestoreDone = false;     // boot restore runs once per page
-  let _outboxRetryTimer = null;
-  let _outboxRetryDelayMs = 0;        // 0 → next arm starts at the base delay
-  const _OUTBOX_RETRY_BASE_MS = 2000;
-  const _OUTBOX_RETRY_MAX_MS = 60000;
-  const _OUTBOX_MAX_RETRIES = 4;      // per-item network-requeue cap — beyond it the normal error surface speaks
-  const _OUTBOX_BOOT_RETRY_MS = [600, 1400, 2600, 4200]; // restore attempts (idempotent) past the boot renders
-  function _outboxKey() {
-    // E71 pattern (same as the composer draft): scoped per user so one account's queue never
-    // bleeds into another's. Read lazily — body/data-user exist by the time any send runs.
-    return 'orwell-send-outbox:' + ((document.body && document.body.dataset.user) || '');
-  }
-  function _outboxOnline() {
-    return typeof navigator === 'undefined' || navigator.onLine !== false;
-  }
+  // ── #985 P2-A / #891 / #830: the SEND OUTBOX subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
+  // Its state — the three queues (chatState._sendOutbox / ._outboxAwaitingConfirm / ._outboxFailed)
+  // and the two single-flight guards (chatState._flushingOutbox / ._outboxRestoreDone) — lives on the
+  // chatState singleton (PR0); the _outboxKey / _outboxOnline helpers and the _OUTBOX_* backoff
+  // constants moved with the subsystem. The helpers are imported above and re-exported on chatModule.
 
   // shortModel and modelColor are now in chatRenderer.js
   var _shortModel = chatRenderer.shortModel;
@@ -209,8 +231,8 @@ import { isNarrow } from './platform.js';
     }
     if (tsSpan) roleEl.appendChild(tsSpan);
   }
-  // Per-session research tracking (supports concurrent research across sessions)
-  const _researchingStreamIds = new Set();
+  // Per-session research tracking (supports concurrent research across sessions).
+  // The id set is chatState._researchingStreamIds (moved to chatState.js, #1414 R3 PR0).
   let _researchTimerEl = null, _researchTimerInterval = null;
   let _researchStartTime = 0, _researchAvgDuration = null;
   let _researchSynapse = null;
@@ -238,10 +260,10 @@ import { isNarrow } from './platform.js';
   let currentHolder = null; // Track current message holder
   let currentSpinner = null; // Track current spinner for stop cleanup
 
-  // Background streaming support
-  const _backgroundStreams = new Map(); // sessionId -> { status, accumulated, sourcesHtml, abortCtrl, query, metrics }
-  const _resumingStreams = new Set();   // sessionId -> a resumeStream() reader is live (re-attach lock)
-  let _streamSessionId = null; // Session ID for the currently active reader loop
+  // Background streaming support. Moved to chatState.js (#1414 R3 PR0):
+  //   chatState._backgroundStreams  Map sessionId -> { status, accumulated, sourcesHtml, abortCtrl, query, metrics }
+  //   chatState._resumingStreams    Set sessionId -> a resumeStream() reader is live (re-attach lock)
+  //   chatState._streamSessionId    session id for the currently active reader loop
   let _lastReaderActivity = 0; // Timestamp of last reader.read() success — used to detect frozen streams
   let _webLockRelease = null;  // Function to release the Web Lock held during streaming
   let _forcePlanOff = false;   // One-shot: suppress plan_mode for the next send (Approve & Run)
@@ -276,8 +298,8 @@ import { isNarrow } from './platform.js';
 
   /** Check if an SSE reader is still actively connected for a session. */
   function hasActiveStream(sessionId) {
-    return _streamSessionId === sessionId || _backgroundStreams.has(sessionId) ||
-           _resumingStreams.has(sessionId);
+    return chatState._streamSessionId === sessionId || chatState._backgroundStreams.has(sessionId) ||
+           chatState._resumingStreams.has(sessionId);
   }
 
   /** ADR 0012 §2.2: stamp a live bubble's role-timestamp from the SERVER-minted ISO time (carried on
@@ -354,46 +376,6 @@ import { isNarrow } from './platform.js';
     return probes[item.endpoint_id] || null;
   }
 
-  // ── #738 item #9 · Chat transcript scroll-edge mask + recede-on-scroll banner ──
-  // Toggle the CSS state classes that drive the transcript's top/bottom fade mask
-  // (.edge-top / .edge-bottom on #chat-history) and the receding title banner
-  // (.chat-scrolled on #chat-container). The handler is passive + rAF-coalesced; it
-  // reads only the scroller's already-computed scroll metrics (no getBoundingClientRect,
-  // no forced layout) and writes classes at most once per frame. A childList-ONLY
-  // observer keeps the BOTTOM edge honest when new messages arrive while the reader is
-  // scrolled up (no scroll event fires then) — childList only, so streaming token
-  // appends (characterData inside an existing bubble) never storm it. Reduced-motion is
-  // handled entirely in CSS. Additive: this does NOT touch the streaming buffers
-  // (roundReplyText / roundReasoningText) or the live-stream render path.
-  var _scrollEdgeRaf = 0;
-  function _applyChatScrollEdges() {
-    _scrollEdgeRaf = 0;
-    var box = document.getElementById('chat-history');
-    if (!box) return;
-    var container = document.getElementById('chat-container');
-    var top = box.scrollTop;
-    var maxScroll = box.scrollHeight - box.clientHeight;
-    var scrollable = maxScroll > 4;
-    box.classList.toggle('edge-top', scrollable && top > 2);
-    box.classList.toggle('edge-bottom', scrollable && (maxScroll - top) > 2);
-    if (container) container.classList.toggle('chat-scrolled', top > 24);
-  }
-  function _scheduleChatScrollEdges() {
-    if (_scrollEdgeRaf) return;
-    _scrollEdgeRaf = (window.requestAnimationFrame || function (fn) { return setTimeout(fn, 16); })(_applyChatScrollEdges);
-  }
-  function _initChatScrollEdges() {
-    var box = document.getElementById('chat-history');
-    if (!box || box._scrollEdgesWired) return;
-    box._scrollEdgesWired = true;
-    box.addEventListener('scroll', _scheduleChatScrollEdges, { passive: true });
-    try {
-      var mo = new MutationObserver(_scheduleChatScrollEdges);
-      mo.observe(box, { childList: true });
-    } catch (_) {}
-    _scheduleChatScrollEdges();
-  }
-
   /**
    * Initialize with dependencies
    */
@@ -401,7 +383,7 @@ import { isNarrow } from './platform.js';
     API_BASE = apiBase;
     // #738 item #9: transcript scroll-edge mask + recede-on-scroll banner (glass polish).
     try { _initChatScrollEdges(); } catch (_) {}
-    initSlashCommands({ apiBase, isStreaming: () => isStreaming });
+    initSlashCommands({ apiBase, isStreaming: () => chatState.isStreaming });
     if (emailInbox) emailInbox.init(documentModule);
     // L9 (composer): the Agent|Chat mode toggle is meaningless in the game build —
     // play is always hybrid (OOC chat + in-character role-play + the engine tools
@@ -432,108 +414,10 @@ import { isNarrow } from './platform.js';
   var hideWelcomeScreen = chatRenderer.hideWelcomeScreen;
   var showWelcomeScreen = chatRenderer.showWelcomeScreen;
 
-  /**
-   * Update submit button state
-   */
-  function updateSubmitButton(state, submitBtn) {
-    if (!submitBtn) return;
-
-    if (state === 'streaming') {
-      // Clear any pending transitions from + → arrow swap
-      submitBtn.classList.remove('anim-spin', 'anim-spin-swap', 'anim-land', 'mic-mode', 'newchat-mode', 'newchat-expanded', 'recording');
-      // Ensure arrow icon is showing before launch
-      var icons = window._orwellBtnIcons;
-      if (icons) submitBtn.innerHTML = icons.send;
-      void submitBtn.offsetWidth;
-      // Arrow launches up, then stop icon lands in
-      submitBtn.classList.add('anim-launch');
-      const _stopSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
-      // Wait for the launch keyframe to finish (0.3s) before swapping the
-      // arrow out for the stop icon — otherwise the swap happens mid-flight
-      // and the user sees nothing fly out.
-      setTimeout(() => {
-        submitBtn.innerHTML = _stopSvg;
-        submitBtn.classList.remove('anim-launch');
-        void submitBtn.offsetWidth;
-        submitBtn.classList.add('anim-land');
-        submitBtn.addEventListener('animationend', () => submitBtn.classList.remove('anim-land'), { once: true });
-      }, 300);
-      submitBtn.title = 'Stop generation';
-      submitBtn.dataset.mode = 'streaming';
-      submitBtn.dataset.phase = 'processing';
-      isStreaming = true;
-    } else if (state === 'idle') {
-      submitBtn.dataset.mode = '';
-      delete submitBtn.dataset.phase;
-      submitBtn.classList.remove('recording');
-      isStreaming = false;
-      // Defer to global updater which handles mic/newchat/send modes
-      if (window._updateSendBtnIcon) {
-        setTimeout(window._updateSendBtnIcon, 50);
-      } else {
-        var icons = window._orwellBtnIcons;
-        submitBtn.innerHTML = icons ? icons.send : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
-        submitBtn.title = 'Send message';
-        submitBtn.classList.remove('mic-mode', 'newchat-mode');
-      }
-    }
-  }
-
-  // #971 — RECONCILE the composer button to the TRUE streaming state. The button is a state machine
-  // (Stop while streaming → Send/upload-file when idle, the latter via _updateSendBtnIcon's mic/
-  // newchat/send modes). It DESYNCS when a stream settles on a path that never calls
-  // updateSubmitButton('idle') — the chief offender is a BACKGROUNDED stream finishing (the
-  // `_isBgFinally` branch skips the idle reset), which strands `isStreaming = true` +
-  // `dataset.mode = 'streaming'`; the global `_updateSendBtnIcon` then early-returns on that stale
-  // 'streaming' mode and NEVER recovers, so the button is stuck on Stop even though nothing is
-  // streaming in the foreground. (The Enter/keydown SEND path is unaffected — it reads the live text,
-  // not the button — which is why "Enter still sends" while the button lies.)
-  //
-  // `_foregroundStreamLive()` is the single source of truth for "a turn is genuinely streaming into the
-  // session the user is looking at RIGHT NOW": isStreaming + a live reader (currentAbort) + we are on
-  // the streaming session and it is NOT detached to the background. Compose with #993: a non-empty
-  // composer while that is true should still read as SEND (the queue enqueues — it is NOT a Stop), so
-  // the button only shows Stop for a live foreground stream with an EMPTY composer; otherwise the
-  // global updater paints send/upload/mic from the composer/attachment state.
-  function _foregroundStreamLive() {
-    if (!isStreaming || !currentAbort) return false;
-    try {
-      const cur = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
-      if (cur != null && _streamSessionId != null && cur !== _streamSessionId) return false;
-      if (_streamSessionId != null && _backgroundStreams.has(_streamSessionId)) return false;
-    } catch (_) {}
-    return true;
-  }
-  function _syncSubmitButtonState() {
-    const submitBtn = document.querySelector('.send-btn') || document.getElementById('submit');
-    if (!submitBtn) return;
-    const live = _foregroundStreamLive();
-    if (live) {
-      // A turn is genuinely streaming in the foreground. The button shows Stop ONLY when the composer
-      // is empty; with text it stays a Send affordance (#993 enqueues — never a silent Stop-and-drop).
-      const _mi = uiModule.el('message');
-      const hasText = !!(_mi && (_mi.value || '').trim().length > 0);
-      if (!hasText) {
-        if (submitBtn.dataset.mode !== 'streaming') updateSubmitButton('streaming', submitBtn);
-      } else if (submitBtn.dataset.mode === 'streaming') {
-        // Text was typed while a foreground stream runs: drop the Stop face, show Send, but DON'T flip
-        // the live `isStreaming` flag — clear only the button mode so _updateSendBtnIcon can repaint.
-        submitBtn.dataset.mode = '';
-        if (window._updateSendBtnIcon) window._updateSendBtnIcon();
-      }
-      return;
-    }
-    // Not streaming in the foreground. If the button is stuck on the Stop face (a backgrounded/settled
-    // stream left it there), clear the stale flag+mode and let the global updater repaint send/upload/
-    // mic from the live composer/attachment state.
-    if (isStreaming) isStreaming = false;
-    if (submitBtn.dataset.mode === 'streaming') {
-      submitBtn.dataset.mode = '';
-      delete submitBtn.dataset.phase;
-      submitBtn.classList.remove('recording', 'anim-launch', 'anim-land');
-    }
-    if (window._updateSendBtnIcon) window._updateSendBtnIcon();
-  }
+  // #1414 (R3 PR2): the submit-button state machine — updateSubmitButton / _foregroundStreamLive /
+  // _syncSubmitButtonState — moved VERBATIM to chatSubmitButton.js (imported at the top of this file).
+  // chat.js still calls them exactly as before and re-exports the two public-API ones (#971 gate) in
+  // the chatModule object below.
 
   // -----------------------------------------------------------------------
   // Slash commands — now in slashCommands.js
@@ -564,9 +448,9 @@ import { isNarrow } from './platform.js';
     let _queuedClientMsgId = null;
     let _queuedBubbleEl = null;
     if (_headless && overrideOpts) {
-      if (overrideOpts.hideUserBubble) _hideUserBubble = true;
-      if ('pendingContinue' in overrideOpts) _pendingContinue = overrideOpts.pendingContinue;
-      if (overrideOpts.autoContinue) _autoContinuePending = true;
+      if (overrideOpts.hideUserBubble) chatState._hideUserBubble = true;
+      if ('pendingContinue' in overrideOpts) chatState._pendingContinue = overrideOpts.pendingContinue;
+      if (overrideOpts.autoContinue) chatState._autoContinuePending = true;
       if (overrideOpts.queuedClientMsgId) _queuedClientMsgId = overrideOpts.queuedClientMsgId;
       if (overrideOpts.queuedBubbleEl) _queuedBubbleEl = overrideOpts.queuedBubbleEl;
     }
@@ -600,7 +484,7 @@ import { isNarrow } from './platform.js';
     // queues; an EMPTY composer (or the explicit Stop button) still falls through to the Stop branch,
     // and a slash command runs through its own dispatcher below (never queued as chat). The compare/
     // group routing above has already returned, so this is the plain-chat send path only.
-    if (isStreaming && !_headless) {
+    if (chatState.isStreaming && !_headless) {
       const _qInput = uiModule.el('message');
       const _qText = _qInput ? (_qInput.value || '') : '';
       const _qTrim = _qText.trim();
@@ -612,12 +496,12 @@ import { isNarrow } from './platform.js';
     }
 
     // If currently streaming, stop it (a headless/programmatic send never toggles Stop — it sends).
-    if (isStreaming && !_headless) {
+    if (chatState.isStreaming && !_headless) {
       // Cancel server-side research if in progress
       const _cancelSid = sessionModule.getCurrentSessionId();
-      if (_cancelSid && _researchingStreamIds.has(_cancelSid)) {
+      if (_cancelSid && chatState._researchingStreamIds.has(_cancelSid)) {
         fetch(`${API_BASE}/api/research/cancel/${_cancelSid}`, { method: 'POST' }).catch(e => console.warn('Research cancel failed:', e));
-        _researchingStreamIds.delete(_cancelSid);
+        chatState._researchingStreamIds.delete(_cancelSid);
         _clearResearchTimer();
       }
       abortCurrentRequest(true);  // explicit user Stop → also cancel the detached server run
@@ -698,8 +582,8 @@ import { isNarrow } from './platform.js';
         const _stoppedHolder = currentHolder; // capture before it gets cleared
         continueBtn.addEventListener('click', () => {
           stoppedIndicator.remove();
-          _hideUserBubble = true;
-          _pendingContinue = _stoppedHolder;
+          chatState._hideUserBubble = true;
+          chatState._pendingContinue = _stoppedHolder;
           const cutoff = stoppedContent;
           // Headless send (no composer puppeteering) — the _hideUserBubble/_pendingContinue flags set
           // above flow through; the continuation merges into the existing bubble.
@@ -749,15 +633,15 @@ import { isNarrow } from './platform.js';
     } catch (_) { /* gate unavailable → never block the chat */ }
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
-    if (_sendInFlight) return;
-    _sendInFlight = true;
+    if (chatState._sendInFlight) return;
+    chatState._sendInFlight = true;
     // Instant visual feedback so the user sees their click was accepted
     // even before the streaming button state kicks in below.
     const _earlyMessageInput = uiModule.el('message');
     if (_earlyMessageInput) _earlyMessageInput.disabled = true;
     if (submitBtn) submitBtn.classList.add('send-pending');
     const _releaseSendFlag = () => {
-      _sendInFlight = false;
+      chatState._sendInFlight = false;
       if (_earlyMessageInput) _earlyMessageInput.disabled = false;
       if (submitBtn) submitBtn.classList.remove('send-pending');
     };
@@ -830,7 +714,7 @@ import { isNarrow } from './platform.js';
     // is always visible; if materialization fails the bubble is marked unsent and the composer text
     // is RESTORED (never wiped into nothing). The later render block (post-attachment-upload) adopts
     // this element instead of painting a second bubble. Headless / skip-bubble sends never get one.
-    const _wantOptimisticBubble = !_headless && !_hideUserBubble;
+    const _wantOptimisticBubble = !_headless && !chatState._hideUserBubble;
     // ADR 0008: a client-temp id for the optimistic user bubble. The server stamps it on the
     // persisted user message, so on reconcile the sender ADOPTS this bubble to the canonical
     // {id, seq} (temp -> canonical) instead of fetching history and rendering a duplicate.
@@ -852,7 +736,7 @@ import { isNarrow } from './platform.js';
       _userMsgEl = _queuedBubbleEl;
       _userMsgEl.dataset.clientMsgId = _clientMsgId;
     } else if (_wantOptimisticBubble) {
-      _userMsgEl = addMessage('user', _displayOverride || msg, null,
+      _userMsgEl = addMessage('user', chatState._displayOverride || msg, null,
         _earlyAttachInfo ? { attachments: _earlyAttachInfo } : null);
       if (_userMsgEl) {
         _userMsgEl.dataset.clientMsgId = _clientMsgId;
@@ -973,11 +857,11 @@ import { isNarrow } from './platform.js';
     if (messageInput) messageInput.disabled = false;
     updateSubmitButton('streaming', submitBtn);
     if (submitBtn) submitBtn.classList.remove('send-pending');
-    _sendInFlight = false;
+    chatState._sendInFlight = false;
 
     // Capture session ID for background stream detection
     const streamSessionId = sessionModule.getCurrentSessionId();
-    _streamSessionId = streamSessionId;
+    chatState._streamSessionId = streamSessionId;
     const streamQuery = msg;
     _lastReaderActivity = Date.now();
 
@@ -1050,20 +934,20 @@ import { isNarrow } from './platform.js';
         const lineRefs = sels.map(s =>
           s.startLine === s.endLine ? `L${s.startLine}` : `L${s.startLine}-${s.endLine}`
         );
-        _displayOverride = `[Doc edit: ${lineRefs.join(', ')}] ${msg}`;
+        chatState._displayOverride = `[Doc edit: ${lineRefs.join(', ')}] ${msg}`;
       }
 
-      const userDisplay = _displayOverride || msg;
-      _displayOverride = null;
-      const skipBubble = _hideUserBubble;
-      _hideUserBubble = false;
+      const userDisplay = chatState._displayOverride || msg;
+      chatState._displayOverride = null;
+      const skipBubble = chatState._hideUserBubble;
+      chatState._hideUserBubble = false;
       // Auto-recovery counter: carries across a turn's auto-continues, but resets
       // when the user genuinely sends a new message (so each task gets a fresh cap).
       // A real user turn (visible bubble) ALWAYS resets the budget — even if a
       // prior auto-continue's deferred click never cleared the pending flag — so a
       // stuck flag can't silently eat the next turn's recovery budget.
-      if (!skipBubble) { _autoNudges = 0; _autoContinuePending = false; }
-      else if (_autoContinuePending) { _autoContinuePending = false; }
+      if (!skipBubble) { chatState._autoNudges = 0; chatState._autoContinuePending = false; }
+      else if (chatState._autoContinuePending) { chatState._autoContinuePending = false; }
       const _pendingAttachInfo = fileHandlerModule.getPendingCount() ? fileHandlerModule.getPendingInfo() : null;
       // Pre-read importable file contents before upload clears pending files
       const IMPORTABLE_EXT = /\.(txt|py|js|ts|html|htm|css|md|json|csv|yml|yaml|sh|sql|rs|go|java|c|cpp|h|rb|php|xml|jsx|tsx|log|toml|ini|conf|env|vue|svelte|scss|sass|less)$/i;
@@ -1320,7 +1204,7 @@ import { isNarrow } from './platform.js';
 
       const abortCtrl = new AbortController();
       abortCtrl._reason = '';
-      currentAbort = abortCtrl;
+      chatState.currentAbort = abortCtrl;
 
       const _tState = Storage.loadToggleState();
       const _isAgent = (_tState.mode || 'chat') === 'agent';
@@ -1402,12 +1286,12 @@ import { isNarrow } from './platform.js';
         if (endpointUrlForProbe && modelName) {
           processingProbeTimer = setTimeout(async () => {
             processingProbeTimer = null;
-            if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
+            if (accumulated || !spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted)) return;
             processingProbeAbort = new AbortController();
             try {
               spinner.updateMessage('Checking model endpoint');
               const status = await _probeCurrentEndpointStatus(endpointUrlForProbe, processingProbeAbort.signal);
-              if (accumulated || !spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted)) return;
+              if (accumulated || !spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted)) return;
               if (!status) {
                 spinner.updateMessage(_waitLabel('still', 'Still waiting for model'));
               } else if (status.alive) {
@@ -1424,7 +1308,7 @@ import { isNarrow } from './platform.js';
                 spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
                 const _tick = setInterval(() => {
                   _countdown--;
-                  if (!spinner || !spinner.element || (currentAbort && currentAbort.signal.aborted) || accumulated) {
+                  if (!spinner || !spinner.element || (chatState.currentAbort && chatState.currentAbort.signal.aborted) || accumulated) {
                     clearInterval(_tick);
                     return;
                   }
@@ -1432,9 +1316,9 @@ import { isNarrow } from './platform.js';
                     spinner.updateMessage(`Endpoint offline — cancelling in ${_countdown}s`);
                   } else {
                     clearInterval(_tick);
-                    if (currentAbort && !currentAbort.signal.aborted) {
-                      currentAbort._reason = 'offline';
-                      currentAbort.abort();
+                    if (chatState.currentAbort && !chatState.currentAbort.signal.aborted) {
+                      chatState.currentAbort._reason = 'offline';
+                      chatState.currentAbort.abort();
                     }
                   }
                 }, 1000);
@@ -1491,8 +1375,8 @@ import { isNarrow } from './platform.js';
         const _bodyDiv = holder.querySelector('.body');
         let _sc = _bodyDiv && _bodyDiv.querySelector('.stream-content');
         if (_bodyDiv && !_sc) { _sc = document.createElement('div'); _sc.className = 'stream-content'; _bodyDiv.appendChild(_sc); }
-        _wsRound = { holder: holder, contentDiv: _sc, state: {}, reply: '', reasoning: '',
-                     sessionId: streamSessionId, clientMsgId: _clientMsgId, _spinner: spinner };
+        _wsPinRound({ holder: holder, contentDiv: _sc, state: {}, reply: '', reasoning: '',
+                     sessionId: streamSessionId, clientMsgId: _clientMsgId, _spinner: spinner });
         try {
           await window.OrwellWs.sendTurn({
             message: _finalMsgWithInject,
@@ -1512,7 +1396,7 @@ import { isNarrow } from './platform.js';
           _wsResetRound();
           if (clearResponseTimeout) clearResponseTimeout();
           try { if (spinner) spinner.destroy(); } catch (_) {}
-          if (_streamSessionId === streamSessionId) _streamSessionId = null;
+          if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;
           try { if (holder) holder.remove(); } catch (_) {}
           try { await softReloadHistory(streamSessionId); } catch (_) {}
           return;
@@ -1592,20 +1476,23 @@ import { isNarrow } from './platform.js';
       // Streaming TTS: synthesize sentence-by-sentence during streaming (assigns the hoisted flag).
       streamingTTS = !!(window.aiTTSManager && window.aiTTSManager.autoPlay && window.aiTTSManager.available);
       if (streamingTTS) window.aiTTSManager.streamingStart();
-      // Multi-bubble agent tracking
-      let roundHolder = holder;       // Current AI text bubble (changes per round)
-      // #834: has a VISIBLE turn-header bubble (role + timestamp, not a continuation) been shown
-      // yet? The initial `holder` carries the header, but it is hidden at agent_step when the round
-      // produced no narration (a pure hidden tool-call round, e.g. getGameState). When that header
-      // is hidden, the next continuation bubble must be PROMOTED to the turn header (role +
-      // timestamp, NOT a continuation) so the received message still shows a timestamp.
-      let turnHeaderShown = true;     // the initial holder starts as the visible header
+      // #829 turn-coalescing: ALL agent-loop rounds of one player turn render into the ONE `holder`
+      // bubble as stacked frozen segments (the "growing bubble"). `roundHolder` therefore stays ===
+      // `holder` for the whole turn — it is kept as an alias so the per-round render/finalize sites
+      // read uniformly. (Pre-#829 this was reassigned to a fresh per-round bubble; that per-round
+      // mount/hide/jump — plus the #834 turn-header-promotion it needed — is gone with one bubble.)
+      let roundHolder = holder;       // The one turn bubble (alias of holder; never reassigned)
       let roundText = '';             // Text accumulated for current round (MERGED reply+reasoning)
       // F8: per-round channel-split buffers. The BODY renders roundReplyText (reasoning-free by
       // construction); the live "Thinking" accordion renders roundReasoningText. These MUST be
       // reset wherever roundText is reset (agent_step / teacher_takeover) — see those sites.
       let roundReplyText = '';        // deltas with json.thinking falsy (the public reply)
       let roundReasoningText = '';    // deltas with json.thinking truthy (reasoning → accordion)
+      // #829 turn-coalescing: has this turn spanned 2+ agent-loop rounds (i.e. did an
+      // agent_step fire)? When true, ALL rounds render into the ONE `holder` bubble as
+      // stacked frozen segments (the "growing bubble") — the stream-end finalize then
+      // commits only the LAST round's segment instead of re-rendering the whole body.
+      let _turnCoalesced = false;
       let currentToolBubble = null;   // Current tool execution bubble
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -1616,18 +1503,8 @@ import { isNarrow } from './platform.js';
       // _keepResearchOn removed — clarification state now persisted server-side via DB mode
       // Insert sources box as a stable DOM node that won't be replaced during streaming.
       // Returns the content container to use for innerHTML updates.
-      function _ensureStreamLayout(body) {
-        if (!body) return body;
-        // Sources are deferred to final render — don't insert during streaming
-        // Ensure a stable content div exists for text content
-        var contentDiv = body.querySelector('.stream-content');
-        if (!contentDiv) {
-          contentDiv = document.createElement('div');
-          contentDiv.className = 'stream-content';
-          body.appendChild(contentDiv);
-        }
-        return contentDiv;
-      }
+      // _ensureStreamLayout moved to ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top;
+      // called below (in _renderStream + the delta/tool handlers) exactly as before.
       const esc = uiModule.esc;
       // Remove thinking spinner helper
       _removeThinkingSpinner = () => {
@@ -1638,9 +1515,11 @@ import { isNarrow } from './platform.js';
         }
       };
 
-      // Tool-aware thinking spinner
+      // Tool-aware thinking spinner: `_lastToolName` tracks the latest tool the model invoked and
+      // STAYS here (the tool handlers reassign it). The label map (_toolLabels), the label lookup
+      // (_thinkingLabel), the search icon, and the spinner mount (_showThinkingSpinner) all moved to
+      // ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top; called below unchanged.
       let _lastToolName = '';
-      const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
       // C14 (immersion): the Big Brother engine tools render as quiet production
       // beats — a label, never raw camelCase names or JSON payloads in the player's
       // transcript. Applies wherever these names appear (they exist only in the game).
@@ -1653,62 +1532,18 @@ import { isNarrow } from './platform.js';
       // _orwellToolBeats now lives in ./orwellToolBeats.js (single source of truth,
       // imported at module top, shared with the history-reload path in
       // chatRenderer.js so the live + reload renders cannot drift).
-      const _toolLabels = {
-        'web_search': _searchIcon + 'Searching',
-        'bash': 'Running',
-        'python': 'Running',
-        'create_document': 'Writing',
-        'update_document': 'Writing',
-        'read_document': 'Reading',
-        'edit_file': 'Editing',
-        'read_file': 'Reading',
-        'write_file': 'Writing',
-        'list_files': 'Browsing',
-        'image_gen': 'Generating',
-        'generate_image': 'Generating',
-        'manage_memory': 'Remembering',
-        'save_memory': 'Remembering',
-        'search_memory': 'Recalling',
-        'manage_session': 'Organizing',
-        'deep_research': 'Researching',
-        'list_models': 'Browsing',
-        'ui_control': 'Adjusting',
-      };
-      function _thinkingLabel() {
-        if (!_lastToolName) {
-          return 'Thinking';
-        }
-        // Check exact match first, then prefix match
-        const lower = _lastToolName.toLowerCase();
-        if (_toolLabels[lower]) return _toolLabels[lower];
-        for (const [key, label] of Object.entries(_toolLabels)) {
-          if (lower.includes(key) || key.includes(lower)) return label;
-        }
-        return 'Thinking';
-      }
-
-      function _showThinkingSpinner(label) {
-        if (document.querySelector('.agent-thinking-dots')) return;
-        const _thinkMsg = document.createElement('div');
-        _thinkMsg.className = 'msg msg-ai agent-thinking-dots';
-        const _thinkBody = document.createElement('div');
-        _thinkBody.className = 'body';
-        const _ts = spinnerModule.create(label || 'Thinking', 'right', 'wave');
-        _thinkBody.appendChild(_ts.createElement());
-        _ts.start(120);
-        _thinkMsg._spinner = _ts;
-        _thinkMsg.appendChild(_thinkBody);
-        document.getElementById('chat-history').appendChild(_thinkMsg);
-        uiModule.scrollHistory();
-      }
+      // _toolLabels, _thinkingLabel, and _showThinkingSpinner moved to ./chatStreamLoop.js
+      // (#1414 R3 PR8) — imported at module top. `_toolLabels` is used by the tool_start handler
+      // below (`_toolLabels[json.tool.toLowerCase()]`); `_thinkingLabel(_lastToolName)` +
+      // `_showThinkingSpinner` are driven by `_scheduleThinkingSpinner` below.
 
       // Auto-show thinking spinner after text stops streaming
       let _textPauseTimer = null;
       function _scheduleThinkingSpinner() {
         if (_textPauseTimer) clearTimeout(_textPauseTimer);
         _textPauseTimer = setTimeout(() => {
-          if (!document.querySelector('.agent-thinking-dots') && isStreaming) {
-            _showThinkingSpinner(_thinkingLabel());
+          if (!document.querySelector('.agent-thinking-dots') && chatState.isStreaming) {
+            _showThinkingSpinner(_thinkingLabel(_lastToolName));
           }
         }, 400);
       }
@@ -1793,6 +1628,74 @@ import { isNarrow } from './platform.js';
         uiModule.scrollHistory();
       };
 
+      // #829 turn-coalescing (coalesceRounds / oneBubblePerTurn — the "growing bubble"):
+      // FREEZE the CURRENT agent-loop round's reply + reasoning as a permanent segment INSIDE
+      // the one turn bubble, so the next round appends a fresh `.stream-content` segment BELOW
+      // it (the bubble GROWS) instead of minting a per-round `.msg-continuation` bubble. The
+      // reply is rendered reply-ONLY (roundReplyText, F8) through the SAME processWithThinking
+      // chain the reload/tool_start paths use; the round's reasoning stays in its own
+      // `.thinking-section` accordion (built inside this same `.stream-content`) and is NEVER
+      // spliced into the reply body — the reply/reasoning channel split holds per round. An
+      // empty round (no reply, no reasoning) drops its segment so no hidden per-round holder
+      // lingers; the turn bubble itself always persists (no mount/hide/jump).
+      const _commitRoundSegment = () => {
+        if (!roundHolder) return;
+        const _cBody = roundHolder.querySelector('.body');
+        if (!_cBody) return;
+        const seg = _cBody.querySelector('.stream-content');
+        // #829 OOC per-segment fix (Greptile P1): the live `_renderStream` toggled
+        // `msg-ooc`/`msg-ooc-producer` on the SHARED holder while this round streamed. In a
+        // coalesced turn that is wrong — a LATER non-OOC round's holder-level classification
+        // would strip the class off the shared bubble and an EARLIER OOC segment would settle as
+        // ordinary narration. So CLEAR it from the holder here and carry each round's OOC state on
+        // ITS OWN segment (classified below). Single-round turns never call this, so their
+        // holder-level classification (test #828) is untouched.
+        roundHolder.classList.remove('msg-ooc', 'msg-ooc-producer');
+        if (!seg) return;
+        const dtRaw = stripToolBlocks(roundReplyText);
+        const hasReply = !!dtRaw.trim();
+        const thinkSection = seg.querySelector('.thinking-section');
+        // Scope the emptiness check to the reasoning BODY, not the whole `.thinking-section` (its
+        // header chrome — "Thinking…"/"View thinking process" + the live timer — is ~always
+        // non-empty, so a round that opened an accordion but produced trivial/empty reasoning must
+        // still drop, not freeze as a near-empty "Thinking" segment). (CodeRabbit)
+        const _thinkInner = thinkSection && thinkSection.querySelector('.thinking-content-inner, .live-think-inner');
+        const hasReasoning = !!(_thinkInner && _thinkInner.textContent.trim());
+        if (!hasReply && !hasReasoning) {
+          seg.remove();  // empty round → no lingering holder; the turn bubble persists
+          return;
+        }
+        if (hasReply) {
+          // Classify THIS round's own SEGMENT (not the shared holder) with the same detector the
+          // reload/live paths use, so the frozen segment keeps its OOC/producer treatment even
+          // after later rounds render into the same bubble. Reply rendered reply-only (F8).
+          const dt = chatRenderer.applyOocClass(seg, dtRaw.trim(), 'assistant').text;
+          const html = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
+          const liveReply = seg.querySelector('.live-reply-content');
+          if (liveReply) {
+            // Reasoning accordion above stays put; render ONLY into the reply container.
+            liveReply.innerHTML = html;
+            liveReply.classList.remove('live-reply-content');
+          } else if (thinkSection) {
+            // Accordion present but no dedicated reply container — append the reply AFTER it so
+            // the reasoning is preserved (never overwritten into the reply body).
+            let rc = seg.querySelector('.round-reply');
+            if (!rc) { rc = document.createElement('div'); rc.className = 'round-reply'; seg.appendChild(rc); }
+            rc.innerHTML = html;
+          } else {
+            seg.innerHTML = html;  // plain reply-only segment (no reasoning this round)
+          }
+          if (window.hljs) seg.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+        }
+        seg.style.minHeight = '';
+        // Freeze: drop the `.stream-content` class so the next round's _ensureStreamLayout mints
+        // a FRESH sibling segment below this one (the bubble grows, nothing re-mounts).
+        seg.classList.remove('stream-content');
+        seg.classList.add('round-seg');
+        seg._streamRenderer = null;
+        seg._streamRendererOoc = undefined;
+      };
+
       let _nextIsError = false;
       let _streamSawDone = false;
       // BUG 2 (#985 P2-B): did the server persist ANY message this turn? A clean empty turn (the final
@@ -1832,13 +1735,13 @@ import { isNarrow } from './platform.js';
             const _isBg = (sessionModule.getCurrentSessionId() !== streamSessionId);
 
             // On first transition to background, store state in map
-            if (_isBg && !_backgroundStreams.has(streamSessionId)) {
-              _backgroundStreams.set(streamSessionId, {
+            if (_isBg && !chatState._backgroundStreams.has(streamSessionId)) {
+              chatState._backgroundStreams.set(streamSessionId, {
                 status: 'running',
                 accumulated: accumulated,
                 sourcesHtml: _sourcesHtml,
                 findingsData: null,
-                abortCtrl: currentAbort,
+                abortCtrl: chatState.currentAbort,
                 query: streamQuery,
                 metrics: null,
               });
@@ -1850,7 +1753,7 @@ import { isNarrow } from './platform.js';
             if (data === '[DONE]') {
               _streamSawDone = true;
               // Always update background map if entry exists (even if user switched back)
-              var bgDone = _backgroundStreams.get(streamSessionId);
+              var bgDone = chatState._backgroundStreams.get(streamSessionId);
               if (bgDone) {
                 bgDone.status = 'completed';
                 bgDone.accumulated = accumulated;
@@ -1987,7 +1890,7 @@ import { isNarrow } from './platform.js';
 
                 // Update background map if running in background
                 if (_isBg) {
-                  var bgEntry = _backgroundStreams.get(streamSessionId);
+                  var bgEntry = chatState._backgroundStreams.get(streamSessionId);
                   if (bgEntry) bgEntry.accumulated = accumulated;
                   continue; // Skip all DOM writes
                 }
@@ -2251,7 +2154,7 @@ import { isNarrow } from './platform.js';
                 }
               } else if (json.type === 'research_progress') {
                 if (_isBg) continue; // Skip DOM updates in background
-                _researchingStreamIds.add(streamSessionId);
+                chatState._researchingStreamIds.add(streamSessionId);
                 // Highlight research button while running
                 var _rToggle = document.getElementById('research-toggle-btn');
                 if (_rToggle) _rToggle.classList.add('research-running');
@@ -2327,7 +2230,7 @@ import { isNarrow } from './platform.js';
                   // Store sources HTML in background map
                   if (json.data && json.data.length > 0) {
                     _sourcesHtml = _buildSourcesBox(json.data, 'research');
-                    var bgE = _backgroundStreams.get(streamSessionId);
+                    var bgE = chatState._backgroundStreams.get(streamSessionId);
                     if (bgE) bgE.sourcesHtml = _sourcesHtml;
                   }
                   // Clear researching indicator for this background session
@@ -2348,7 +2251,7 @@ import { isNarrow } from './platform.js';
                 }
               } else if (json.type === 'research_findings') {
                 if (_isBg) {
-                  var bgEf = _backgroundStreams.get(streamSessionId);
+                  var bgEf = chatState._backgroundStreams.get(streamSessionId);
                   if (bgEf) bgEf.findingsData = json.data;
                   continue;
                 }
@@ -2361,7 +2264,7 @@ import { isNarrow } from './platform.js';
                 if (sessionModule && sessionModule.clearResearching) {
                   sessionModule.clearResearching(streamSessionId);
                 }
-                _researchingStreamIds.delete(streamSessionId);
+                chatState._researchingStreamIds.delete(streamSessionId);
                 // Small delay then reload session history which includes the full report
                 setTimeout(async () => {
                   // Don't yank the user back to this chat if they've navigated
@@ -2378,7 +2281,7 @@ import { isNarrow } from './platform.js';
                 if (_isBg) {
                   if (json.data && json.data.length > 0) {
                     _sourcesHtml = _buildSourcesBox(json.data, 'web');
-                    var bgE2 = _backgroundStreams.get(streamSessionId);
+                    var bgE2 = chatState._backgroundStreams.get(streamSessionId);
                     if (bgE2) bgE2.sourcesHtml = _sourcesHtml;
                   }
                   continue;
@@ -2484,8 +2387,8 @@ import { isNarrow } from './platform.js';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();
-                    _hideUserBubble = true;
-                    _pendingContinue = _holder;
+                    chatState._hideUserBubble = true;
+                    chatState._pendingContinue = _holder;
                     handleChatSubmit(null, 'You hit the step limit before finishing — the task is not complete. Continue from exactly where you left off and keep going until it is done. Do NOT repeat work already done.');
                   });
                   note.appendChild(contBtn);
@@ -2515,8 +2418,8 @@ import { isNarrow } from './platform.js';
                   const _holder = currentHolder;
                   contBtn.addEventListener('click', () => {
                     note.remove();
-                    _hideUserBubble = true;
-                    _pendingContinue = _holder;
+                    chatState._hideUserBubble = true;
+                    chatState._pendingContinue = _holder;
                     handleChatSubmit(null, 'Your previous response was cut off before it finished. Continue from exactly where you left off — do NOT repeat what you already wrote.');
                   });
                   note.appendChild(contBtn);
@@ -2614,7 +2517,7 @@ import { isNarrow } from './platform.js';
                   holder._actualModel = metrics.model || holder._actualModel || holder._requestedModel;
                 }
                 if (_isBg) {
-                  var bgM = _backgroundStreams.get(streamSessionId);
+                  var bgM = chatState._backgroundStreams.get(streamSessionId);
                   if (bgM) bgM.metrics = json.data;
                   continue;
                 }
@@ -2889,10 +2792,15 @@ import { isNarrow } from './platform.js';
                   // refreshes event-driven instead of waiting out a 20–30s poll.
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
-                  // FEJS-3: the trailing 8 also move public state the panels read — debounced.
-                  // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
-                  // DRIFT-2: + the 0094/0095 mutators (confront / accuseTie).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret', 'confront', 'accuseTie'].includes(json.tool)) {
+                  // #1412 (R1b): the "is this tool game-MUTATING?" test is NO LONGER a
+                  // hand-coded array here — it consumes the shared manifest via
+                  // window.orwellIsMutatingTool (platform.js ORWELL_MUTATING_TOOLS, pinned
+                  // registry-equal by test_1412_mutating_manifest.py). A newly-wired mutating
+                  // registry tool flows into THIS HUD-refresh set with NO edit here: the
+                  // drift-guard forces it into the manifest, and this seam picks it up for
+                  // free. The helper is absent outside the game build, so the whole seam
+                  // no-ops there (exactly like orwellGameChanged itself).
+                  if (ok && window.orwellIsMutatingTool && window.orwellIsMutatingTool(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
                     let _beat;
@@ -3034,7 +2942,7 @@ import { isNarrow } from './platform.js';
               } else if (json.type === 'doc_stream_open') {
                 if (_isBg) {
                   // Store for replay when user returns to this session
-                  var bgDocOpen = _backgroundStreams.get(streamSessionId);
+                  var bgDocOpen = chatState._backgroundStreams.get(streamSessionId);
                   if (bgDocOpen) {
                     bgDocOpen._docTitle = json.title || '';
                     bgDocOpen._docLang = json.language || '';
@@ -3048,7 +2956,7 @@ import { isNarrow } from './platform.js';
 
               } else if (json.type === 'doc_stream_delta') {
                 if (_isBg) {
-                  var bgDocDelta = _backgroundStreams.get(streamSessionId);
+                  var bgDocDelta = chatState._backgroundStreams.get(streamSessionId);
                   if (bgDocDelta) bgDocDelta._docContent = json.content || '';
                   continue;
                 }
@@ -3243,80 +3151,48 @@ import { isNarrow } from './platform.js';
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 _renderStream();
-                // L6c (supersedes L6b): a NEW agent round is starting. Hide the previous bubble
-                // ONLY if it rendered no visible narration (a pure tool-only round); a round that
-                // produced real narration (the interviewer's line, a scene beat) PERSISTS. The old
-                // rule hid every intermediate round, losing a multi-line interview ("4 answers go
-                // away"). `roundReplyText` still holds the closing round here (reset is later, ~2706).
-                if (roundHolder && !stripToolBlocks(roundReplyText).trim()) {
-                  roundHolder.style.display = 'none';
-                  // #834: this round's bubble is being hidden. If it was the turn's only visible
-                  // header (no later visible bubble has taken over yet), the turn currently has NO
-                  // visible header — flag it so the NEXT bubble is promoted to header + timestamp.
-                  if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;
-                }
-                // Mark thread as connected to bubble below
+                // #829 turn-coalescing (coalesceRounds / oneBubblePerTurn — one "growing bubble"):
+                // a NEW agent-loop round is starting, but ALL rounds of ONE player turn render into
+                // ONE bubble that GROWS. FREEZE this round's reply/reasoning as a segment INSIDE the
+                // SAME `roundHolder` bubble and let the next round append a fresh `.stream-content`
+                // segment BELOW it — instead of minting a per-round `.msg-continuation` bubble (the
+                // pre-#829 path: the per-round mount/hide/jump the reverted #822 also exhibited).
+                // Reasoning stays in the segment's `.thinking-section` accordion and is NEVER spliced
+                // into the reply body, so the F8 reply/reasoning channel split holds per round.
+                _commitRoundSegment();
+                _turnCoalesced = true;
+                // Mark the tool thread as connected (the rail sits below the growing bubble).
                 const _activeThread = document.querySelector('.agent-thread.streaming');
                 if (_activeThread) {
                   _activeThread.classList.add('has-bottom');
                 }
-                // --- New round: create fresh AI bubble with spinner ---
+                // Reuse the SAME turn bubble — roundHolder / currentHolder / holder all STAY put (no
+                // new `.msg-ai` mount). Its role+timestamp header, set at stream start, is the turn
+                // header for the whole turn (with ONE bubble there is no #834 promotion to do). If a
+                // pure-tool round hid the bubble (tool_start empty-branch), un-hide it — it is the one
+                // growing bubble.
+                if (roundHolder && roundHolder.style.display === 'none') roundHolder.style.display = '';
                 currentToolBubble = null;
                 roundFinalized = false;
                 isThinking = false;
                 _docFenceOpened = false;
                 _docFenceContentStart = -1;
-                const box = document.getElementById('chat-history');
-                const newWrap = document.createElement('div');
-                // #834: when no visible turn-header exists yet (round 0 was a hidden tool-call), this
-                // bubble is the FIRST VISIBLE one — promote it to the header (role + timestamp, NOT a
-                // continuation) so the received message carries a timestamp. Otherwise it's a normal
-                // continuation. Mirrors the reload path's first-visible logic in chatRenderer.js.
-                const _isTurnHeader = !turnHeaderShown;
-                newWrap.className = 'msg msg-ai streaming' + (_isTurnHeader ? '' : ' msg-continuation');
-                // Add model name label
-                const newRole = document.createElement('div');
-                newRole.className = 'role';
-                const metaS = sessionModule.getSessions().find(s => s.id === streamSessionId);
-                const _roundRequested = holder?._requestedModel || metaS?.model;
-                const _roundActual = holder?._actualModel || _roundRequested;
-                // C14/immersion: a continuation round in the game build is still the show —
-                // never the raw model name as the sender.
-                newRole.textContent = isGameBuild() ? GAME_NARRATOR : (_modelRouteLabel(_roundRequested, _roundActual) || '');
-                _applyModelColor(newRole, _roundActual);
-                // #834: a promoted header bubble carries the timestamp (matches the initial holder +
-                // the reload path). roleTimestamp() with no arg falls back to "now" — correct for a
-                // live turn. Continuation rounds keep no per-round timestamp (unchanged).
-                if (_isTurnHeader) {
-                  newRole.appendChild(chatRenderer.roleTimestamp());
-                  turnHeaderShown = true;
-                }
-                newWrap.appendChild(newRole);
-                const newBody = document.createElement('div');
-                newBody.className = 'body';
-                newWrap.appendChild(newBody);
-                box.appendChild(newWrap);
-                roundHolder = newWrap;
-                // F5/mirror-toolturn dedup fix: `currentHolder` MUST track the round holder in lockstep
-                // (like roundText/roundReplyText/roundReasoningText above). It was left pinned at the
-                // FIRST round's bubble (set once at stream start, chat.js ~1169), so on a multi-round
-                // tool-rich turn the `message_saved` handler (~2375) stamped `data-db-id` onto round 1's
-                // bubble instead of the LAST round's — the round that actually corresponds to what the
-                // server persisted. softReloadHistory's adopt pass (~4256) then matched the WRONG bubble
-                // by id, and every earlier-round bubble (never stamped) survived as a permanent
-                // dup/orphan the reconcile's id-order check couldn't see (only its separate
-                // `_visibleMsgCount` orphan guard could, and only on a later trigger) — the
-                // "duplicating messages" symptom on a tool-rich turn (mirror_toolturn_parity.mjs).
-                currentHolder = newWrap;
+                // Fresh thinking-accordion refs so the NEXT round builds its OWN accordion; the
+                // committed segment kept the previous round's accordion frozen in place.
+                _liveThinkSection = null; _liveThinkContent = null; _liveThinkInner = null;
+                _liveThinkHeader = null; _liveThinkSpinnerSlot = null; _liveThinkTimerEl = null;
+                _liveThinkToggle = null; _liveThinkDomId = null;
                 roundText = '';
                 roundReplyText = '';        // F8: keep the split buffers in lockstep with roundText
                 roundReasoningText = '';
-                // Destroy any previous spinner before creating new one
+                // Destroy any previous spinner before creating a new one — appended to the SAME body
+                // while the next round's first text is awaited (a fresh `.stream-content` mints on the
+                // first delta, below the frozen segment).
                 if (spinner && spinner.element) spinner.destroy();
-                // Show spinner while waiting for text (skip for research — has its own progress)
-                if (!_researchingStreamIds.has(streamSessionId)) {
+                const _coalBody = roundHolder.querySelector('.body');
+                if (_coalBody && !chatState._researchingStreamIds.has(streamSessionId)) {
                   spinner = spinnerModule.create(_inProgressLabel('Generating response'), 'right', 'wave');
-                  newBody.appendChild(spinner.createElement());
+                  _coalBody.appendChild(spinner.createElement());
                   spinner.start();
                 }
                 if (streamingTTS) window.aiTTSManager._streamSentencesSent = 0;
@@ -3420,7 +3296,7 @@ import { isNarrow } from './platform.js';
       holder.classList.remove('streaming');
       if (roundHolder && roundHolder !== holder) roundHolder.classList.remove('streaming');
 
-      const _isBgFinal = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgFinal = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
       if (!_isBgFinal) {
         finalMeta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
         const _finalActualModel = metrics?.model || holder._actualModel || finalMeta?.model;
@@ -3472,6 +3348,33 @@ import { isNarrow } from './platform.js';
         const _streamContent = roundHolder.querySelector('.stream-content');
         if (_streamContent) _streamContent.style.minHeight = '';
 
+        if (_turnCoalesced) {
+          // #829 turn-coalescing: the whole turn is ONE growing bubble of stacked frozen segments
+          // (each committed at its agent_step). COMMIT ONLY the FINAL round's segment — the legacy
+          // finalize below re-renders the whole `.body`, which would CLOBBER the earlier rounds'
+          // frozen segments. Reasoning stays in each segment's own `.thinking-section` accordion.
+          _commitRoundSegment();
+          const _cf = roundHolder.querySelector('.body');
+          // A trailing pure-tool round hides nothing (its empty segment is just dropped); if a
+          // pure-tool round HAD hidden the bubble but earlier rounds left content, re-show the one
+          // bubble so its accumulated narration stays visible.
+          if (roundHolder.style.display === 'none'
+              && _cf && _cf.querySelector('.round-seg, .stream-content, .thinking-section')) {
+            roundHolder.style.display = '';
+          }
+          // Sources / findings attach to the ONE turn bubble (`_cf`), UNCONDITIONALLY and AFTER
+          // the final-segment commit — so they SURVIVE an empty final round (a tail round that
+          // called a tool and rendered no prose still drops its own segment, but the turn's
+          // web_sources/research_sources/findings must NOT be lost with it). They ride the bubble,
+          // not the dropped final segment. RAG is handled uniformly further below for both paths.
+          if (_cf && _sourcesData) {
+            const _cfWasExpanded = _sourcesExpanded || !!_cf.querySelector('.sources-content.expanded');
+            const _cfSrc = document.createElement('div');
+            _cfSrc.innerHTML = _buildSourcesBox(_sourcesData, _sourcesType, _cfWasExpanded);
+            _cf.insertBefore(_cfSrc.firstChild || _cfSrc, _cf.firstChild);
+          }
+          if (_cf && _findingsData) _cf.insertAdjacentHTML('beforeend', chatRenderer.buildFindingsBox(_findingsData));
+        } else {
         // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM.
         // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion
         // already, so no extraction is needed (the old garbled-<think>/prefix dance is gone).
@@ -3543,6 +3446,7 @@ import { isNarrow } from './platform.js';
             }
           }
         }
+        }  // #829: end of the !_turnCoalesced legacy finalize branch
 
 
         if (window.hljs) {
@@ -3614,7 +3518,7 @@ import { isNarrow } from './platform.js';
             try { if (window._setPlanMode) window._setPlanMode(false); } catch (_) {}
             // Show a clean bubble ("Approved the plan."); the full instruction goes to the model via the
             // headless override (no composer puppeteering).
-            _displayOverride = 'Approved the plan.';
+            chatState._displayOverride = 'Approved the plan.';
             handleChatSubmit(null, 'Approved — execute the plan. The full approved checklist is pinned '
               + 'for you under "## ACTIVE PLAN"; do NOT go looking for it in tasks, notes, or '
               + 'memory. Work through it in order, and after each step call the update_plan tool '
@@ -3642,7 +3546,7 @@ import { isNarrow } from './platform.js';
           footerTarget.appendChild(_approveWrap);
         }
         // Add "View Report" link for completed research
-        if (_researchingStreamIds.has(streamSessionId)) {
+        if (chatState._researchingStreamIds.has(streamSessionId)) {
           _appendViewReportLink(footerTarget, streamSessionId);
         }
         // FEDEEP-2: the copy-cache and every TTS read-aloud path below consume the MERGED stream
@@ -3691,9 +3595,9 @@ import { isNarrow } from './platform.js';
         _attachVariantNav(footerTarget);
 
         // Merge with previous stopped message if this was a continue
-        if (_pendingContinue) {
-          const prevEl = _pendingContinue;
-          _pendingContinue = null;
+        if (chatState._pendingContinue) {
+          const prevEl = chatState._pendingContinue;
+          chatState._pendingContinue = null;
           const prevBody = prevEl.querySelector('.body');
           const newBody = footerTarget.querySelector('.body');
           if (prevBody && newBody && prevEl.parentNode) {
@@ -3736,7 +3640,7 @@ import { isNarrow } from './platform.js';
         // message sat unanswered with no way forward. Render the SAME user-controlled Retry the
         // network-drop path builds (distinct copy: "no response" rather than "connection dropped"). Guard
         // against the user-cancel path (handled by the abort branch) and the continue/auto-recover path.
-        const _turnWasCancelled = !!(currentAbort && currentAbort.signal && currentAbort.signal.aborted);
+        const _turnWasCancelled = !!(chatState.currentAbort && chatState.currentAbort.signal && chatState.currentAbort.signal.aborted);
         // Guard: only when the holder is still IN the DOM. A continue-merge above can remove `holder`
         // (folding it into the prior bubble); rendering Retry into a detached node would be invisible.
         if (holder && holder.parentNode &&
@@ -3761,12 +3665,12 @@ import { isNarrow } from './platform.js';
       _removeThinkingSpinner();
       document.querySelectorAll('.agent-thread.streaming').forEach(t => t.classList.remove('streaming'));
       // Check if this stream was running in background
-      const _isBgCatch = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgCatch = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
 
       if (_isBgCatch) {
         // Error happened while backgrounded — update map, don't touch DOM
         console.error('Background stream error:', err);
-        var bgErr = _backgroundStreams.get(streamSessionId);
+        var bgErr = chatState._backgroundStreams.get(streamSessionId);
         if (bgErr && bgErr.status === 'completed') {
           // [DONE] was already processed — this error is benign (e.g. reader.read() after close)
           // Don't override the completed status; just ensure the completed dot stays
@@ -3783,8 +3687,8 @@ import { isNarrow } from './platform.js';
         // Stop streaming TTS on any error/abort
         if (streamingTTS && window.aiTTSManager) window.aiTTSManager.stop();
 
-        if (currentAbort && currentAbort.signal.aborted) {
-          const abortReason = currentAbort._reason || '';
+        if (chatState.currentAbort && chatState.currentAbort.signal.aborted) {
+          const abortReason = chatState.currentAbort._reason || '';
           // Timeout-triggered aborts should remain visible instead of disappearing.
           if (timedOut || abortReason === 'timeout') {
             const timeoutMsg = _isAgent
@@ -3801,7 +3705,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${timeoutMsg}]</span>`;
               holder.querySelector('.body').appendChild(timeoutNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3817,7 +3721,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${offlineMsg}]</span>`;
               holder.querySelector('.body').appendChild(offlineNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3833,7 +3737,7 @@ import { isNarrow } from './platform.js';
                 `<span style="color: var(--color-error);">[${recoveryMsg}]</span>`;
               holder.querySelector('.body').appendChild(recoveryNote);
             }
-            currentAbort = null;
+            chatState.currentAbort = null;
             return;
           }
 
@@ -3869,8 +3773,8 @@ import { isNarrow } from './platform.js';
             continueBtn.textContent = '\u25B8';
             continueBtn.addEventListener('click', () => {
               stoppedIndicator.remove();
-              _hideUserBubble = true;
-              _pendingContinue = holder;
+              chatState._hideUserBubble = true;
+              chatState._pendingContinue = holder;
               const cutoff = accumulated;
               handleChatSubmit(null, 'Your previous response was interrupted. It ended with:\n\n' + cutoff.slice(-500) + '\n\nDo NOT repeat what you already said. Continue exactly from where you were cut off.');
             });
@@ -3889,7 +3793,7 @@ import { isNarrow } from './platform.js';
           }
 
           // Now clear the abort controller
-          currentAbort = null;
+          chatState.currentAbort = null;
         } else {
           console.error(err);
           // Stream died with a tool node still spinning. Its per-node tickers
@@ -3915,6 +3819,13 @@ import { isNarrow } from './platform.js';
           let _requeuedOffline = false;
           if (!accumulated && _userMsgEl && _isNetworkSendFailure(err)) {
             _requeuedOffline = _requeueOutboxItem(_clientMsgId, msg, _userMsgEl, streamSessionId);
+            if (!_requeuedOffline) {
+              // #891 F-A7: the network-requeue cap (_OUTBOX_MAX_RETRIES) is spent — DON'T drop to the
+              // raw "Error: …" surface (which reloads away). Mark the user bubble a DURABLE 'failed'
+              // delivery (persisted 'state:failed', repaints on reload) with an explicit per-bubble
+              // Retry, and suppress the generic error branch below.
+              _requeuedOffline = _markSendFailedById(_clientMsgId, msg, _userMsgEl, streamSessionId);
+            }
             if (_requeuedOffline) {
               // The empty reply shell (spinner holder) is noise for a turn that never left the device.
               try { if (holder && holder.parentNode) holder.remove(); } catch (_) {}
@@ -3986,7 +3897,7 @@ import { isNarrow } from './platform.js';
       // (the two-tabs-streaming-concurrently residual the ADR-0008 live verification found). Guarded to
       // `=== streamSessionId` so a newer stream's session isn't cleared by a late-settling old finally;
       // a backgrounded stream stays covered by _backgroundStreams in hasActiveStream.
-      if (_streamSessionId === streamSessionId) _streamSessionId = null;
+      if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;
       // ADR 0008: read-your-writes. The turn has persisted, so reconcile the sender's optimistic
       // bubbles to the authoritative {id, seq} log (the adopt pass is cheap + flicker-free; it only
       // rebuilds if a PEER also wrote during this turn). Was: the sender never re-fetched, so its DOM
@@ -4001,7 +3912,7 @@ import { isNarrow } from './platform.js';
       // assistant message to converge to) so a hard fail that persisted NOTHING keeps its live error
       // feedback — we don't need the client to have observed the message_saved event (which a same-chunk
       // error→[DONE] can skip past the break).
-      if (_streamHadError) _forceRebuild.add(streamSessionId);
+      if (_streamHadError) chatState._forceRebuild.add(streamSessionId);
       // ADR 0012 (GAP 1): a PEER's run-started arrived for this session while THIS stream was in
       // flight, so the observer's `!hasActiveStream` guard deferred the live attach. Our stream has
       // now settled (_streamSessionId cleared above ⇒ hasActiveStream is false), so RE-ATTEMPT the
@@ -4030,14 +3941,14 @@ import { isNarrow } from './platform.js';
         try { setTimeout(() => { try { sessionModule.selectSession(_adoptCanonicalAfterStream, { keepSidebar: true }); } catch (_) {} }, 0); } catch (_) {}
       }
       // Always clean up research tracking regardless of background state
-      _researchingStreamIds.delete(streamSessionId);
-      if (_researchingStreamIds.size === 0) {
+      chatState._researchingStreamIds.delete(streamSessionId);
+      if (chatState._researchingStreamIds.size === 0) {
         var _rToggleCleanup = document.getElementById('research-toggle-btn');
         if (_rToggleCleanup) _rToggleCleanup.classList.remove('research-running');
       }
 
       // Only reset UI state if still on the stream's session and was never backgrounded
-      const _isBgFinally = (sessionModule.getCurrentSessionId() !== streamSessionId) || _backgroundStreams.has(streamSessionId);
+      const _isBgFinally = (sessionModule.getCurrentSessionId() !== streamSessionId) || chatState._backgroundStreams.has(streamSessionId);
 
       if (!_isBgFinally) {
         // Reset button to idle state
@@ -4066,9 +3977,9 @@ import { isNarrow } from './platform.js';
         currentAccumulated = '';
         currentHolder = null;
         currentSpinner = null;
-        _researchingStreamIds.delete(streamSessionId);
+        chatState._researchingStreamIds.delete(streamSessionId);
         // Clear research-running highlight if no more active research
-        if (_researchingStreamIds.size === 0) {
+        if (chatState._researchingStreamIds.size === 0) {
           var _rToggle2 = document.getElementById('research-toggle-btn');
           if (_rToggle2) _rToggle2.classList.remove('research-running');
         }
@@ -4108,7 +4019,7 @@ import { isNarrow } from './platform.js';
       }
 
       // Research clarification timeout — if user doesn't reply within 5 min, show timeout
-      if (holder && holder._roleSuffix === 'Research' && !_researchingStreamIds.has(streamSessionId)) {
+      if (holder && holder._roleSuffix === 'Research' && !chatState._researchingStreamIds.has(streamSessionId)) {
         var _timeoutSessionId = streamSessionId;
         var _timeoutTimer = setTimeout(async function() {
           // Check if research_pending is still active (user hasn't replied)
@@ -4144,568 +4055,12 @@ import { isNarrow } from './platform.js';
     }
   }
 
-  // ── #985 P2-A: SEND OUTBOX — enqueue + flush ────────────────────────────────
-  /**
-   * Enqueue a Send made WHILE a turn is streaming. Paints the optimistic bubble NOW (pending shape:
-   * clientMsgId, no dbId/seq → floats to the tail per #992), captures the text in the FIFO, clears the
-   * composer (the words are safely held in the queue, never lost), and routes the freshness seam — so
-   * nothing is dropped and the queue flushes in order when the current turn settles. Mirrors the
-   * optimistic-bubble + composer-clear contract of the normal send path so a queued send is
-   * indistinguishable from an in-line one once it reconciles.
-   */
-  function _enqueueSend(text) {
-    const clientMsgId = 'c-' + ((window.crypto && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : (Date.now() + '-' + Math.random().toString(36).slice(2)));
-    const item = {
-      clientMsgId,
-      text,
-      sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
-      ts: Date.now(),
-      retries: 0,
-      needsDedupe: false,
-      // #830: an item queued WHILE A TURN STREAMS is the rapid-succession case — it aggregates
-      // with its same-lane siblings into ONE combined turn at drain time (_foldOutboxBatch). An
-      // OFFLINE-queued item keeps #891's per-item at-most-once drain — the offline branch (~L801)
-      // also routes here, and a device that dropped its link mid-stream must NOT fold (each offline
-      // item is its own idempotency unit whose eventual POST may land independently), so coalesce
-      // additionally requires a live link.
-      coalesce: isStreaming === true && _outboxOnline(),
-      bubbleEl: null,
-    };
-    // Paint the optimistic bubble immediately (pending: clientMsgId, NO dbId/seq).
-    _paintOutboxBubble(item);
-    _sendOutbox.push(item);
-    _refreshOutboxStatusTags(); // honest status the moment it queues: 'queued' / 'queued — offline'
-    _persistOutbox();           // #891 P0-1: reload-durable from the instant it enters the queue
-    // Clear the composer — the text is now held in the outbox (+ bubble), so it is safe (and expected:
-    // the player is free to compose the next message). Mirror the normal-send composer reset.
-    try {
-      const mi = uiModule.el('message');
-      if (mi) {
-        mi.value = '';
-        mi.style.height = '';
-        mi.dispatchEvent(new Event('input'));
-      }
-      if (window._orwellComposerDraftClear) window._orwellComposerDraftClear();
-    } catch (_) {}
-  }
-
-  /** #891: paint (or re-paint after a reload) a queued item's optimistic pending bubble. */
-  function _paintOutboxBubble(item) {
-    try {
-      const bubbleEl = chatRenderer.addMessage('user', item.text, null, null);
-      if (bubbleEl) {
-        bubbleEl.dataset.clientMsgId = item.clientMsgId;
-        bubbleEl.classList.add('msg-pending');
-      }
-      item.bubbleEl = bubbleEl || null;
-      if (uiModule.setAutoScroll) uiModule.setAutoScroll(true);
-      if (uiModule.scrollHistory) uiModule.scrollHistory();
-    } catch (_) {
-      // A paint failure must not strand the text — it's still captured in the queue.
-      item.bubbleEl = null;
-    }
-  }
-
-  // ── #891 P0-1: outbox persistence (sessionStorage — per-tab; see the design note at the top) ──
-  /** Serialize queue + awaiting-confirm. An item leaves storage ONLY on server-confirmed delivery
-   *  (or the dedupe pass proving its row already exists) — never merely because it was dispatched. */
-  function _persistOutbox() {
-    try {
-      // #830: `coalesce` is deliberately NOT persisted — a restored item is its own at-most-once
-      // unit and re-enters the queue outside the aggregation lane (the restore forces it false),
-      // so a persisted copy of the flag would be dead weight the restore ignores.
-      const items = _outboxAwaitingConfirm
-        .map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'inflight' }))
-        .concat(_sendOutbox.map((it) => ({ clientMsgId: it.clientMsgId, text: it.text, sessionId: it.sessionId || null, ts: it.ts || Date.now(), retries: it.retries || 0, state: 'queued' })));
-      if (!items.length) { sessionStorage.removeItem(_outboxKey()); return; }
-      sessionStorage.setItem(_outboxKey(), JSON.stringify({ v: 1, items }));
-    } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
-  }
-
-  /** #891: restore the persisted queue after a reload — repaint pending bubbles, mark every restored
-   *  item `needsDedupe` (at-most-once: the pre-send history check drops already-delivered rows), and
-   *  kick the drain. Idempotent (runs once per page); scheduled past the boot renders so the bubbles
-   *  land after the history paint. Returns the number of items restored (test seam). */
-  function _restoreOutboxFromStorage() {
-    if (_outboxRestoreDone) return 0;
-    if (!document.getElementById('chat-history')) return 0; // too early — a later boot attempt retries
-    // #830 hardening, retained as DEFENSE-IN-DEPTH. chat.js USED to be evaluated TWICE on this
-    // page (app.js imports './chat.js' bare while index.html ALSO script-tagged 'chat.js?v=…' —
-    // two URLs ⇒ two module instances, each with its own queue state but SHARING one sessionStorage
-    // record). #1399 removed the versioned <script> tag, so chat.js now evaluates ONCE and this
-    // guard is trivially satisfied — but it is kept so that if a second load path ever regresses,
-    // only the instance registered as window.chatModule restores: a shadow instance restoring the
-    // same record repaints duplicate pending bubbles and — once its own dedupe pass verifies clean
-    // — dispatches a SECOND time (a real double-send). Fail-open when no handle exists (stripped
-    // test DOMs).
-    try {
-      if (window.chatModule && window.chatModule._restoreOutboxFromStorage &&
-          window.chatModule._restoreOutboxFromStorage !== _restoreOutboxFromStorage) {
-        _outboxRestoreDone = true; // this shadow instance never restores (nor re-attempts)
-        return 0;
-      }
-    } catch (_) { /* fail-open */ }
-    let rec = null;
-    try { rec = JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) {}
-    _outboxRestoreDone = true;
-    const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
-    let restored = 0;
-    for (const it of items) {
-      if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
-      if (typeof it.text !== 'string' || !it.text) continue;
-      if (_sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
-          _outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId)) continue;
-      const item = {
-        clientMsgId: it.clientMsgId,
-        text: it.text,
-        sessionId: it.sessionId || null,
-        ts: it.ts || Date.now(),
-        retries: it.retries || 0,
-        needsDedupe: true, // EVERY restored item verifies against the server log before re-sending
-        // #830: a RESTORED item is its own at-most-once idempotency unit (its POST may already
-        // have reached the server), so it re-enters the queue OUTSIDE the aggregation lane —
-        // per-item drain, per-item dedupe, never folded (matches the design note at the top).
-        coalesce: false,
-        bubbleEl: null,
-      };
-      _paintOutboxBubble(item);
-      _sendOutbox.push(item);
-      restored++;
-    }
-    _persistOutbox(); // normalize (drops a corrupt/empty record)
-    if (restored) {
-      _refreshOutboxStatusTags();
-      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 250);
-    }
-    return restored;
-  }
-
-  /** #891: a server row carrying this clientMsgId was OBSERVED (adopt pass / dedupe) — delivery is
-   *  proven, so release the durable copy. Cheap no-op when nothing is queued (the common case). */
-  function _outboxConfirmDelivery(clientMsgId) {
-    if (!clientMsgId) return;
-    if (!_outboxAwaitingConfirm.length && !_sendOutbox.length) return;
-    let hit = false;
-    for (const arr of [_outboxAwaitingConfirm, _sendOutbox]) {
-      const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
-      if (i >= 0) {
-        const removed = arr.splice(i, 1)[0];
-        if (removed && removed.bubbleEl) _setQueuedTag(removed.bubbleEl, null);
-        hit = true;
-      }
-    }
-    if (hit) {
-      _outboxRetryDelayMs = 0; // a confirmed delivery proves the link — reset the backoff
-      _persistOutbox();
-      _updateOutboxStrip(); // #830: the aggregate count just shrank
-    }
-  }
-
-  /** #891 P0-2: re-queue a send that died at the network layer (or dead-ended) back into the durable
-   *  outbox — front of the queue (it is the OLDEST turn), `needsDedupe` armed (the POST may still have
-   *  reached the server), bubble kept with an honest queued tag. Idempotent per clientMsgId; capped at
-   *  _OUTBOX_MAX_RETRIES so a non-network failure misclassified once can't retry silently forever. */
-  function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId) {
-    if (!clientMsgId || typeof text !== 'string' || !text) return false;
-    const ai = _outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
-    let item = ai >= 0 ? _outboxAwaitingConfirm.splice(ai, 1)[0] : null;
-    if (_sendOutbox.some((it) => it && it.clientMsgId === clientMsgId)) {
-      _persistOutbox(); // already queued — idempotent (the awaiting copy, if any, was just folded out)
-      return true;
-    }
-    if (!item) {
-      // #891 P1 fix (cross-session bleed): bind the fresh item to the session the failed send was
-      // ACTUALLY targeting (the caller passes the turn's streamSessionId) — not whatever session is
-      // current at catch-time (the user may have switched mid-turn). Fallback: current, then null.
-      item = {
-        clientMsgId, text,
-        sessionId: sessionId ||
-          (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null,
-        ts: Date.now(), retries: 0, bubbleEl: null,
-      };
-    }
-    item.retries = (item.retries || 0) + 1;
-    if (item.retries > _OUTBOX_MAX_RETRIES) {
-      _persistOutbox(); // out of retries — hand the turn back to the normal error surface
-      return false;
-    }
-    item.needsDedupe = true;
-    // #830: a network-requeued item (like a restored one) is its own at-most-once unit — it never
-    // re-joins the aggregation lane, even when the failed dispatch was itself a folded batch (the
-    // batch already IS one item here; it must not fold AGAIN with newer streaming sends).
-    item.coalesce = false;
-    if (bubbleEl) item.bubbleEl = bubbleEl;
-    if (item.bubbleEl) {
-      item.bubbleEl.classList.add('msg-pending');
-      item.bubbleEl.classList.remove('msg-unsent');
-      delete item.bubbleEl.dataset.unsent;
-    }
-    _sendOutbox.unshift(item);
-    _refreshOutboxStatusTags();
-    _persistOutbox();
-    _armOutboxRetry();
-    return true;
-  }
-
-  /** #891: classify a send failure as NETWORK-layer (device offline / fetch never reached the server).
-   *  Deliberately NARROWER than _isRecoverableStreamErr — only the browser's fetch-network messages
-   *  qualify, so a client-side TypeError from a coding bug can't masquerade as "offline" and loop. */
-  function _isNetworkSendFailure(err) {
-    if (!_outboxOnline()) return true;
-    const m = ((err && err.message) || '').toLowerCase();
-    return /failed to fetch|networkerror|network request failed|load failed|err_internet|err_network|err_connection/.test(m);
-  }
-
-  /** #891: at-most-once across a reload — before dispatching any `needsDedupe` item, verify it against
-   *  the server log and drop any item whose client_msg_id the server already persisted. FAIL-CLOSED:
-   *  returns false (drain deferred, backoff armed) when any needed verification is unavailable — never
-   *  an unverified re-send. A 404 session (never materialized / since deleted) verifies trivially clean.
-   *
-   *  #891 P1 fix (cross-session bleed — PR #1379 review): each item is verified against ITS OWN
-   *  recorded session's history, NEVER the currently-selected session's. The old code preferred the
-   *  current session id, so a restored session-A item was "verified" against session B's log whenever
-   *  B was current after the reload — vacuously clean, then dispatched into B by the old drain gate.
-   *  Items are grouped by their recorded sessionId (one fetch per distinct session, normally one). An
-   *  item with NO recorded sessionId was queued before any session existed — there is no server log it
-   *  could have written into, so it verifies trivially clean (current-session-at-queue-time semantics,
-   *  documented at the drain's eligibility check). */
-  async function _dedupeOutboxAgainstServer() {
-    const flagged = _sendOutbox.filter((it) => it && it.needsDedupe);
-    if (!flagged.length) return true;
-    const bySid = new Map();
-    for (const it of flagged) {
-      if (!it.sessionId) { it.needsDedupe = false; continue; }
-      if (!bySid.has(it.sessionId)) bySid.set(it.sessionId, []);
-      bySid.get(it.sessionId).push(it);
-    }
-    let allVerified = true;
-    for (const [sid, items] of bySid) {
-      let seen = null;
-      try {
-        // Bounded: a hung verification fetch must not wedge the drain (the flush holds
-        // _flushingOutbox across this await). On timeout it rejects → fail-closed → backoff.
-        const _dedupeOpts = (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
-          ? { signal: AbortSignal.timeout(15000) } : {};
-        const res = await fetch(`${API_BASE}/api/history/${sid}`, _dedupeOpts);
-        if (res.status === 404) { items.forEach((it) => { it.needsDedupe = false; }); continue; }
-        if (res.ok) {
-          const data = await res.json();
-          seen = new Set((data.history || [])
-            .map((m) => m && m.metadata && m.metadata.client_msg_id)
-            .filter(Boolean));
-        }
-      } catch (_) { /* network hiccup — fail closed for this session's items */ }
-      if (!seen) { allVerified = false; continue; }
-      for (const it of items) {
-        it.needsDedupe = false;
-        if (seen.has(it.clientMsgId)) {
-          // Already delivered — drop the queued copy; the adopt pass claims its bubble when the
-          // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
-          const i = _sendOutbox.indexOf(it);
-          if (i >= 0) _sendOutbox.splice(i, 1);
-          if (it.bubbleEl) _setQueuedTag(it.bubbleEl, null);
-        }
-      }
-    }
-    _persistOutbox();
-    _updateOutboxStrip(); // #830: proven-delivered drops may have shrunk the aggregate count
-    return allVerified;
-  }
-
-  // ── #891 P0-2: honest queued/offline status on the message bubble ──
-  /** Set/clear the `.queued-tag` status on a queued bubble. mode: 'queued' | 'offline' | null. The tag
-   *  is a REAL text node (the .unsent-tag a11y precedent — WCAG 4.1.3), never CSS generated content. */
-  function _setQueuedTag(bubbleEl, mode) {
-    if (!bubbleEl) return;
-    try {
-      const role = bubbleEl.querySelector('.role');
-      let tag = role && role.querySelector('.queued-tag');
-      if (!mode) {
-        if (tag) tag.remove();
-        bubbleEl.classList.remove('msg-queued-offline');
-        return;
-      }
-      if (!tag && role) {
-        tag = document.createElement('span');
-        tag.className = 'queued-tag';
-        role.appendChild(tag);
-      }
-      if (tag) tag.textContent = mode === 'offline' ? 'queued — offline' : 'queued';
-      bubbleEl.classList.toggle('msg-queued-offline', mode === 'offline');
-    } catch (_) {}
-  }
-
-  /** #891: sweep every queued bubble's status to the live connectivity truth. */
-  function _refreshOutboxStatusTags() {
-    const mode = _outboxOnline() ? 'queued' : 'offline';
-    for (const it of _sendOutbox) { if (it) _setQueuedTag(it.bubbleEl, mode); }
-    _updateOutboxStrip(); // #830: keep the aggregate affordance in lockstep with the per-bubble tags
-  }
-
-  // ── #830: the AGGREGATED unsent-queue affordance ──
-  // When ≥2 sends sit queued, the scattered per-bubble tags gain one aggregate status card above
-  // the composer: the count, whether the batch will send as ONE turn (the coalesce lane), the
-  // offline truth, and a manual "Send now" retry. The card COMPOSES window.OrwellNoticeKit — the
-  // ONE stacked above-composer zone (ruling 642; the anti-fragmentation gate in
-  // test_on_notice_kit.py forbids hand-rolled anchors) — kind 'continue' (a quiet ambient notice),
-  // role 'status' + real text nodes (WCAG 4.1.3, the .unsent-tag precedent). It is a PROJECTION of
-  // the #891 outbox: no queue state of its own, and its retry routes through the ONE normal flush
-  // (every guard re-checked; never a second send path).
-  let _outboxNotice = null;   // the kit notice handle (created lazily at ≥2 queued items)
-  let _outboxStripRow = null; // the body row (label + retry button) inside the kit card
-
-  /** #830: project the outbox onto the aggregate card. Visible only at ≥2 queued items (a single
-   *  item's per-bubble tag already tells the whole story); closed the moment the queue drains. */
-  function _updateOutboxStrip() {
-    try {
-      const n = _sendOutbox.length;
-      if (n < 2) {
-        if (_outboxNotice) {
-          try { _outboxNotice.hide(); } catch (_) {}
-          _outboxNotice = null;
-          _outboxStripRow = null;
-        }
-        return;
-      }
-      if (!window.OrwellNoticeKit) return; // fail-open: the per-bubble queued tags still speak
-      if (!_outboxNotice || !(_outboxNotice.isShown && _outboxNotice.isShown())) {
-        // Belt: a just-hidden card may still be animating out under the same id — clear it so the
-        // zone never briefly holds two.
-        const leftover = document.getElementById('send-queue-strip');
-        if (leftover && leftover.isConnected) { try { leftover.remove(); } catch (_) {} }
-        _outboxNotice = window.OrwellNoticeKit.create({
-          id: 'send-queue-strip',
-          kind: 'continue',    // a quiet ambient above-composer notice (polite live region)
-          role: 'status',      // WCAG 4.1.3 — announced without focus
-          title: '',           // single-line affordance: the row lives in the body
-          dismissible: false,  // its lifecycle is queue-driven, never a user dismissal
-          persistDismiss: false,
-        });
-        const row = document.createElement('span');
-        row.className = 'send-queue-row';
-        const label = document.createElement('span');
-        label.className = 'send-queue-label';
-        row.appendChild(label);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        // #775: kit-card buttons compose the element kit's chrome; .send-queue-retry is the hook.
-        btn.className = 'ow-btn ow-btn-plain send-queue-retry';
-        btn.textContent = 'Send now';
-        btn.addEventListener('click', () => {
-          // Manual retry (#830 "failed with Retry — retry re-sends the batch"): reset the backoff
-          // and drain through the ONE normal flush, which re-checks every guard (single-flight,
-          // streaming, offline, dedupe, session binding) and folds the coalesce batch exactly like
-          // an auto-drain.
-          _outboxRetryDelayMs = 0;
-          if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
-          try { _flushSendOutbox(); } catch (_) {}
-        });
-        row.appendChild(btn);
-        _outboxNotice.show();
-        _outboxNotice.setBody(row);
-        // Title-less single-line card: keep the empty head row from reserving space (the
-        // orwellChatHint precedent).
-        const head = _outboxNotice.el && _outboxNotice.el.querySelector('.on-head');
-        if (head) head.style.display = 'none';
-        _outboxStripRow = row;
-      }
-      const offline = !_outboxOnline();
-      const oneTurn = _sendOutbox.every((it) => it && it.coalesce && !it.needsDedupe);
-      const label = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-label');
-      if (label) {
-        label.textContent = offline
-          ? (n + ' messages queued — offline')
-          : (oneTurn ? (n + ' messages queued — they will send as one turn')
-                     : (n + ' messages queued'));
-      }
-      const btn = _outboxStripRow && _outboxStripRow.querySelector('.send-queue-retry');
-      if (btn) btn.disabled = offline; // no link ⇒ a manual retry is a lie; the 'online' event drains
-    } catch (_) { /* the card is best-effort chrome — never let it break the queue */ }
-  }
-
-  /** #891: capped exponential backoff retry (2s → 60s) for a queue held by offline/network failure.
-   *  Reset to the base by a confirmed delivery or the 'online' event. One timer at a time. */
-  function _armOutboxRetry() {
-    if (_outboxRetryTimer) return;
-    if (_sendOutbox.length === 0) return;
-    _outboxRetryDelayMs = _outboxRetryDelayMs
-      ? Math.min(_outboxRetryDelayMs * 2, _OUTBOX_RETRY_MAX_MS)
-      : _OUTBOX_RETRY_BASE_MS;
-    _outboxRetryTimer = setTimeout(() => {
-      _outboxRetryTimer = null;
-      try { _flushSendOutbox(); } catch (_) {}
-    }, _outboxRetryDelayMs);
-  }
-
-  /** #830: fold a rapid-succession batch (all `coalesce`, all same-lane, none dedupe-pending) into
-   *  ONE turn. One combined payload (texts joined by a blank line, send order preserved), ONE
-   *  clientMsgId (the head's — the batch's single idempotency key), ONE bubble: the batch's separate
-   *  pending bubbles collapse into a single combined bubble painted through the SAME render path
-   *  every queued bubble uses, so the live view matches the one persisted user row a reload or a
-   *  peer window will show. The folded item is a normal outbox item — awaiting-confirm, persistence,
-   *  network-requeue ("retry re-sends the batch") and the adopt/confirm seams all apply unchanged. */
-  function _foldOutboxBatch(batch) {
-    const head = batch[0];
-    const folded = {
-      clientMsgId: head.clientMsgId,
-      text: batch.map((it) => it.text).join('\n\n'),
-      sessionId: batch.map((it) => it.sessionId).find(Boolean) || null,
-      ts: head.ts,
-      retries: Math.max.apply(null, batch.map((it) => it.retries || 0)),
-      needsDedupe: false,
-      coalesce: true,
-      bubbleEl: null,
-    };
-    try {
-      for (const it of batch) {
-        if (it && it.bubbleEl && it.bubbleEl.parentNode) it.bubbleEl.remove();
-      }
-    } catch (_) { /* a merge-paint hiccup must never lose the text — it lives in `folded` */ }
-    _paintOutboxBubble(folded);
-    return folded;
-  }
-
-  /**
-   * Flush the next queued send IN ORDER once the current turn has settled (called from the stream-end
-   * finally). ONE in flight at a time: it dispatches a single headless send that re-uses the queued
-   * item's already-painted bubble + its clientMsgId (idempotent / at-most-once), and the NEXT item is
-   * picked up by that send's own stream-end finally — so the queue drains strictly FIFO, one turn per
-   * settle, with no double-send. #830: a run of `coalesce` items (queued in rapid succession while a
-   * turn streamed) folds into ONE combined turn here (`_foldOutboxBatch`); a single queued item — and
-   * every offline/requeued/restored item — dispatches byte-identical to the per-item path. Guards:
-   * never while a stream is live (would race the in-flight turn), never re-entrant. A no-op when the
-   * outbox is empty (the overwhelming common case).
-   */
-  // The flush dispatcher — defaults to a headless `handleChatSubmit`. Indirected through a swappable
-  // ref so the FIFO/idempotency browser gate can spy the dispatch without a real LLM stream; in
-  // production it IS `handleChatSubmit`, so behaviour is byte-identical.
-  let _outboxDispatch = (text, opts) => handleChatSubmit(null, text, opts);
-  function _flushSendOutbox() {
-    if (_flushingOutbox) return;
-    if (isStreaming) return;            // a turn is in flight — its finally will re-attempt the flush
-    if (_sendOutbox.length === 0) return;
-    // TEST SEAM (#891 browser gate): lets the reload-durability harness install its dispatch spy
-    // before the boot-restore auto-drain can fire. Never set by app code.
-    if (typeof window !== 'undefined' && window.__orwellOutboxHoldDrain) return;
-    // #891 P0-2: OFFLINE — hold the queue (durable + honestly tagged), arm the backoff, and let the
-    // 'online' listener drain the moment the link returns. Never a doomed dispatch.
-    if (!_outboxOnline()) { _refreshOutboxStatusTags(); _armOutboxRetry(); return; }
-    _flushingOutbox = true;
-    // #891: restored / network-requeued items verify against the server log FIRST (at-most-once
-    // across a reload — a send whose POST landed but whose confirmation was lost must never
-    // re-send). Fail-closed: an unverifiable check keeps the item queued and re-arms the backoff.
-    // Runs BEFORE the session gate below: a proven-delivered item must be releasable even while the
-    // boot is still re-selecting its session.
-    const _preflight = _sendOutbox.some((it) => it && it.needsDedupe)
-      ? _dedupeOutboxAgainstServer()
-      : Promise.resolve(true);
-    _preflight.then((ok) => {
-      if (ok === false) { _flushingOutbox = false; _armOutboxRetry(); return; }
-      if (isStreaming || _sendOutbox.length === 0) { _flushingOutbox = false; return; }
-      // #891 P1 fix (cross-session bleed — PR #1379 review, Greptile-executed repro): an item's
-      // recorded `sessionId` is BINDING — it may only dispatch while ITS session is the currently-
-      // selected one, because `_outboxDispatch` submits against current sessionModule state. The
-      // old guard only required that SOME session existed, so a restored session-A item dispatched
-      // into session B whenever B became current first after a reload. Items bound to a non-current
-      // session are HELD in the queue (kept, _flushingOutbox reset, backoff armed — never shifted);
-      // they drain when their session is selected (the sessions.js selectSession nudge) or on the
-      // retry tick. Earliest-eligible-first preserves per-session FIFO order. An item with NO
-      // recorded sessionId was queued before any session existed (pre-session send) — its semantics
-      // are current-session-at-dispatch-time: the normal send path materializes/auto-creates,
-      // exactly as the inline pre-session send it stands in for would have. A still-`needsDedupe`
-      // item (its verification fetch failed above) is never eligible.
-      const _cur = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
-      const _idx = _sendOutbox.findIndex((it) =>
-        it && !it.needsDedupe && (!it.sessionId || it.sessionId === _cur));
-      if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }
-      let item = _idx === 0 ? _sendOutbox.shift() : _sendOutbox.splice(_idx, 1)[0];
-      if (!item) { _flushingOutbox = false; return; }
-      // #830: AGGREGATED drain — a rapid-succession run queued while a turn streamed sends as ONE
-      // combined turn ("aggregate what you send quickly … it sends all messages in one turn").
-      // Collect every later item that (a) opted into the coalesce lane at enqueue time, (b) has no
-      // at-most-once ambiguity (`!needsDedupe` — offline/requeued/restored items keep #891's
-      // per-item drain), and (c) targets the SAME lane as this dispatch. The collection stops at
-      // the first same-lane item that can't join, so conversation order is never shuffled; items
-      // held for ANOTHER session are skipped over (an independent lane, untouched). One item ⇒ no
-      // fold — byte-identical to the pre-#830 dispatch.
-      if (item.coalesce && !item.needsDedupe) {
-        const _batch = [item];
-        for (let i = 0; i < _sendOutbox.length; ) {
-          const it = _sendOutbox[i];
-          if (!it) { i++; continue; }
-          const _sameLane = !it.sessionId || it.sessionId === _cur;
-          if (!_sameLane) { i++; continue; }
-          if (it.coalesce && !it.needsDedupe) { _batch.push(_sendOutbox.splice(i, 1)[0]); continue; }
-          break;
-        }
-        if (_batch.length > 1) item = _foldOutboxBatch(_batch);
-      }
-      // #891: the item stays in the PERSISTED record (awaiting-confirm) until a server row carrying
-      // its clientMsgId is observed — a reload mid-flight restores it, and the pre-send dedupe above
-      // keeps the re-send at-most-once.
-      _outboxAwaitingConfirm.push(item);
-      _persistOutbox();
-      _updateOutboxStrip(); // #830: the queue just shrank (dispatch and/or fold)
-      _setQueuedTag(item.bubbleEl, null); // actually sending now — the queued status would be a lie
-      // If the queued bubble was somehow removed from the DOM (a destructive reload before flush), fall
-      // back to letting the send paint a fresh one — the text is never lost.
-      const bubbleAttached = item.bubbleEl && item.bubbleEl.isConnected;
-      // #891 P1 fix (drain starvation — PR #1379 review): the drain is SELF-CONTINUING. A flush
-      // attempt that lands while this dispatch is still in flight is swallowed by the
-      // `_flushingOutbox` guard (single-flight, correct), and some dispatch paths dead-end WITHOUT
-      // ever reaching the stream-end finally that normally re-kicks the drain (an early-return
-      // handleChatSubmit — e.g. a failed session materialize / `_abortSendKeepMessage` — schedules
-      // no flush and arms no backoff). Either way, a SECOND queued item could sit stuck until some
-      // unrelated event (online, session select, an armed timer) happened to nudge the outbox. So:
-      // when the dispatch settles and the guard clears, re-invoke the flush ourselves whenever
-      // items remain. The re-run re-checks EVERY guard (single-flight, streaming, offline, dedupe,
-      // session binding) and either dispatches the next eligible item or parks on the backoff —
-      // one hop per settle, so it can never spin.
-      const _continueDrain = () => {
-        _flushingOutbox = false;
-        if (_sendOutbox.length > 0) {
-          setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0);
-        }
-      };
-      try {
-        Promise.resolve(
-          _outboxDispatch(item.text, {
-            queuedClientMsgId: item.clientMsgId,
-            queuedBubbleEl: bubbleAttached ? item.bubbleEl : null,
-          })
-        ).catch(() => {}).finally(_continueDrain);
-      } catch (_) {
-        _continueDrain();
-      }
-    }).catch(() => { _flushingOutbox = false; _armOutboxRetry(); });
-  }
-
-  // ── #891 P0: durability wiring — boot restore + online/offline honesty. Module-level (the
-  // orwellComposerDraft.js / ws-ready precedent): chat.js is evaluated once per page. ──
-  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-    window.addEventListener('online', () => {
-      // The link is back: reset the backoff, cancel any pending long-delay retry, retag, and drain
-      // through the normal flush (which re-checks every guard). Small defer so the browser's own
-      // connectivity settle (and any 'online'-triggered reconcile) lands first.
-      _outboxRetryDelayMs = 0;
-      if (_outboxRetryTimer) { clearTimeout(_outboxRetryTimer); _outboxRetryTimer = null; }
-      _refreshOutboxStatusTags();
-      setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 200);
-    });
-    window.addEventListener('offline', () => { _refreshOutboxStatusTags(); });
-    // Boot restore: attempted on pageshow + a short retry schedule (idempotent — first attempt that
-    // finds the chat box wins), so the restored bubbles land after the boot history render instead
-    // of being wiped by it. Mirrors the composer-draft boot pattern.
-    const _kickOutboxRestore = () => {
-      for (const ms of _OUTBOX_BOOT_RETRY_MS) {
-        setTimeout(() => { try { _restoreOutboxFromStorage(); } catch (_) {} }, ms);
-      }
-    };
-    window.addEventListener('pageshow', _kickOutboxRestore, { once: true });
-    if (document.readyState === 'complete') _kickOutboxRestore();
-  }
+  // ── #985 P2-A / #891 / #830: SEND OUTBOX — the subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
+  // The enqueue / paint / persist / restore / confirm / requeue / dedupe / delivery-state / fold /
+  // flush / aggregate-strip helpers + the boot-restore durability wiring (online/offline/pageshow)
+  // now live in chatOutbox.js; chat.js calls them from handleChatSubmit (enqueue / offline-send /
+  // network-requeue / mark-failed), the stream-settle finally (_flushSendOutbox), and the adopt pass
+  // (_outboxConfirmDelivery) via the imports above — the dispatch stays the SOLE handleChatSubmit.
 
   /**
    * Abort current chat request
@@ -4716,13 +4071,13 @@ import { isNarrow } from './platform.js';
   // the server run — otherwise closing the tab would kill the background task,
   // defeating the whole point. Only the Stop button cancels the server run.
   export function abortCurrentRequest(stopServer = false) {
-    if (currentAbort) {
-      currentAbort.abort();
+    if (chatState.currentAbort) {
+      chatState.currentAbort.abort();
       // Don't set to null here - let catch block handle it
     }
     if (stopServer) {
       try {
-        const _sid = _streamSessionId
+        const _sid = chatState._streamSessionId
           || (window.sessionModule && window.sessionModule.getCurrentSessionId && window.sessionModule.getCurrentSessionId());
         if (_sid) {
           fetch(`/api/chat/stop/${encodeURIComponent(_sid)}`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
@@ -4760,8 +4115,8 @@ import { isNarrow } from './platform.js';
     }
     // PARTIAL TEXT: a mid-stream cut. Continuing is genuinely useful, so auto-continue ONCE — but via a
     // HEADLESS send (no composer write, no synthetic click, no stop/send race). Gated by the cap.
-    if (_autoNudges >= _AUTO_NUDGE_CAP) return false;
-    _autoNudges++;
+    if (chatState._autoNudges >= _AUTO_NUDGE_CAP) return false;
+    chatState._autoNudges++;
     if (holder) {
       // FEDEEP-2: same raw-copy scrub as the natural-completion/user-stop paths.
       holder.dataset.raw = markdownModule.scrubMachineryForPersistence(accumulated);
@@ -4871,18 +4226,18 @@ import { isNarrow } from './platform.js';
    * Called when user switches sessions mid-stream.
    */
   export function detachCurrentStream(sessionId) {
-    if (!isStreaming || !currentAbort) {
+    if (!chatState.isStreaming || !chatState.currentAbort) {
       // Not streaming — fall through to abort
       abortCurrentRequest();
       return;
     }
     // Store background stream state
-    _backgroundStreams.set(sessionId, {
+    chatState._backgroundStreams.set(sessionId, {
       status: 'running',
       accumulated: currentAccumulated,
       sourcesHtml: '',
       findingsData: null,
-      abortCtrl: currentAbort,
+      abortCtrl: chatState.currentAbort,
       query: currentHolder ? (currentHolder._researchQuery || '') : '',
       metrics: null,
     });
@@ -4891,8 +4246,8 @@ import { isNarrow } from './platform.js';
       sessionModule.markStreaming(sessionId);
     }
     // Clear local state WITHOUT aborting the fetch
-    currentAbort = null;
-    isStreaming = false;
+    chatState.currentAbort = null;
+    chatState.isStreaming = false;
     currentHolder = null;
     currentAccumulated = '';
     // Reset submit button so the new chat is ready to send
@@ -4904,392 +4259,18 @@ import { isNarrow } from './platform.js';
   var _notifyStreamComplete = chatStream.notifyStreamComplete;
   var _insertStreamDoneToast = chatStream.insertStreamDoneToast;
 
-  /**
-   * Cross-device sync: re-render the conversation for `sessionId` from saved
-   * history WITHOUT the heavy, draft-clearing selectSession path. Used when
-   * another device adds a message to the session this device is viewing. No-op
-   * if it isn't the open session, or if this device is mid-stream/resume for it
-   * (its own live view is authoritative). Preserves the message input; only
-   * touches #chat-history, and only auto-scrolls if already near the bottom.
-   */
-  // ADR 0008: sessions that DIVERGED while a stream was in flight — reconciled when it ends.
-  const _pendingReconcile = new Set();
-  // ADR 0012 (GAP 1 — the ±1 cross-tab live-attach lag): a PEER's run-started arrived for the
-  // canonical session while THIS window's OWN POST stream for that same session was still in flight,
-  // so the observer's `!hasActiveStream(id)` guard suppressed the live `resumeStream` attach. The peer
-  // run is durable (chained as the current `_RUNS[canonical]`, still `has_run` within the evict grace),
-  // so we DON'T drop the invitation — we record it here and RE-ATTEMPT the attach the moment our own
-  // stream settles (the finally below). subscribe() replays the peer run's buffer (or its tail) then
-  // live-tails, so the deferred attach mirrors the peer turn in lockstep instead of waiting on a later
-  // poll/reconcile (the transient one-window-behind offset the 50× smoke caught).
-  const _pendingPeerResume = new Set();
-  // ADR 0012 (GAP 2): sessions whose NEXT softReloadHistory must FORCE the seq-ordered rebuild even if
-  // the rendered id-order looks "converged". The error path adopts the live error bubble to the
-  // persisted message's {id, seq} (so the divergence check passes) but its CONTENT is still the raw
-  // "Error 503", not the persisted friendly fallback — only a content rebuild makes the sender match
-  // the peer. The convergence short-circuit is about avoiding flicker on a NORMAL turn; on an error we
-  // accept the one rebuild to guarantee identical settled text.
-  const _forceRebuild = new Set();
-  function _historyMsgText(msg) {
-    if (typeof msg.content === 'string') return msg.content;
-    if (Array.isArray(msg.content)) return msg.content.filter(p => p.type === 'text').map(p => p.text).join('\n').trim();
-    return '';
-  }
-  function _isSkippableUserPrompt(text) {
-    const t = (text || '').trim();
-    return t === 'Continue where you left off' || t.startsWith('Your message was cut off.') ||
-      t.startsWith('Your previous response was interrupted.') ||
-      t.includes('[Instruction: Rewrite') || t.includes('[Instruction: Explain') ||
-      // OOBE hand-off cues are the producers reaching out — never the player's own words.
-      // sendHiddenCue() hides them live; on a history reload / cross-device load the persisted
-      // user turn must stay hidden too, or it surfaces as a "You" bubble and breaks immersion
-      // (UX audit J1-03). Match the "(Production cue …)" envelope.
-      t.toLowerCase().startsWith('(production cue');
-  }
-  function _serverMsgId(msg) { return msg.id || (msg.metadata && msg.metadata._db_id) || null; }
-
-  /**
-   * BUG 1 (ADR 0008 — render BY the authoritative seq, never by arrival order).
-   *
-   * The server assigns a monotonic `seq` per session (UNIQUE(session_id, seq)); the FE log is a
-   * replica of that total order. Every live insert (optimistic user send, stream holder, peer
-   * resume holder) is necessarily append-to-bottom because seq isn't known until the row persists —
-   * so two turns whose persistence interleaves (a peer write racing the local turn, two windows)
-   * could sit in ARRIVAL order, not seq order. Reconcile (`softReloadHistory`) rebuilds in seq order
-   * but only when DIVERGED and only when idle, leaving a visible out-of-seq window mid-stream.
-   *
-   * The structural fix: a single seq read (`_msgSeq`) + a single non-destructive reorder
-   * (`_reorderBySeq`) that the reconcile's ADOPT PASS runs on every reconcile attempt (it runs even
-   * while a stream is in flight — the `hasActiveStream` early-return is AFTER the adopt pass). A
-   * bubble that has been stamped with `data-seq` is moved into ascending-seq position WITHOUT a DOM
-   * wipe, reordering ONLY among the seq'd bubbles' own slots; bubbles with NO seq yet (a still-pending
-   * optimistic send, the LIVE streaming holder, an un-adopted orphan) and non-`.msg` nodes (tool
-   * threads) never move — so the live holder is never torn from its threads. Idempotent: a no-op when
-   * already ordered (the overwhelming common case). This makes it STRUCTURALLY impossible for an adopted
-   * bubble to remain out of seq order relative to server truth.
-   */
-  export function _msgSeq(el) {
-    if (!el || !el.dataset || el.dataset.seq == null || el.dataset.seq === '') return null;
-    const n = Number(el.dataset.seq);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  /** Insert `el` into `box` at its `data-seq` position: before the first existing `.msg` whose seq
-   * is strictly greater. No seq on `el` (a pending/optimistic send) ⇒ append to bottom (the newest
-   * local turn). Used at the live insert sites so a bubble that DOES know its seq lands ordered. */
-  export function _insertBySeq(box, el) {
-    if (!box || !el) return;
-    const s = _msgSeq(el);
-    if (s == null) { box.appendChild(el); return; }
-    const kids = box.querySelectorAll('.msg');
-    for (let i = 0; i < kids.length; i++) {
-      if (kids[i] === el) continue;
-      const ks = _msgSeq(kids[i]);
-      if (ks != null && ks > s) { box.insertBefore(el, kids[i]); return; }
-    }
-    box.appendChild(el);
-  }
-
-  /** Non-destructive in-place reorder of the SEQ'D message bubbles in `#chat-history` to ascending
-   * `data-seq`. DELIBERATELY CONSERVATIVE: it reorders ONLY the `.msg[data-seq]` bubbles among
-   * themselves, reassigning them into the very DOM SLOTS those seq'd bubbles already occupy. Everything
-   * else — no-seq bubbles (a still-pending optimistic send, the LIVE streaming holder, an un-adopted
-   * orphan) AND non-`.msg` nodes (`.agent-thread` tool groups, decision cards, notices) — stays exactly
-   * where it is, so a mid-stream reconcile can never tear the live holder away from its tool threads or
-   * disturb thread `has-top`/`has-bottom` adjacency. A persisted bubble that landed out of arrival-vs-seq
-   * order (a peer write racing the local turn, two interleaved `message_saved`s) is moved into its seq
-   * slot WITHOUT a DOM wipe. Idempotent: zero churn when already ordered. Returns the count of bubbles
-   * actually moved so callers/tests can detect a real correction. */
-  export function _reorderBySeq(box) {
-    if (!box) return 0;
-    // The slots: the current DOM positions held by seq'd bubbles. We only ever permute WITHIN these.
-    const seqd = Array.from(box.querySelectorAll('.msg')).filter(el => _msgSeq(el) != null);
-    if (seqd.length < 2) return 0;
-    const wantOrder = seqd.slice().sort((a, b) => {
-      const as = _msgSeq(a), bs = _msgSeq(b);
-      if (as !== bs) return as - bs;          // ascending seq
-      return seqd.indexOf(a) - seqd.indexOf(b); // seq tie → preserve current relative order (stable)
-    });
-    // Already ordered? (common case — bail with zero churn).
-    let same = true;
-    for (let i = 0; i < seqd.length; i++) { if (wantOrder[i] !== seqd[i]) { same = false; break; } }
-    if (same) return 0;
-    // Reorder WITHIN the seq'd slots only: drop an empty placeholder where each seq'd bubble currently
-    // sits (preserving the exact slot positions among all the OTHER, untouched nodes), detach the seq'd
-    // bubbles, then fill the placeholders in ascending-seq order. No-seq bubbles (the live streaming
-    // holder, a pending optimistic send) and non-`.msg` nodes (tool threads, cards) never move — their
-    // surrounding placeholders are swapped under them.
-    const marks = seqd.map(() => document.createComment('seq-slot'));
-    for (let i = 0; i < seqd.length; i++) box.replaceChild(marks[i], seqd[i]);
-    let moved = 0;
-    for (let i = 0; i < marks.length; i++) {
-      if (wantOrder[i] !== seqd[i]) moved += 1;   // this slot's occupant changed
-      box.replaceChild(wantOrder[i], marks[i]);
-    }
-    return moved;
-  }
-
-  /**
-   * BUG 2 (#985 P2-B): the CLEAN-EMPTY-TURN predicate — pure so it can be gated without a live stream.
-   * True iff the stream ended cleanly (a `[DONE]`, not a thrown drop), persisted NO message
-   * (`!sawSave`), produced NO other visible artifact (`!producedVisible` — image/ask_user/budget/error),
-   * had NO assistant content (`accumulated` blank), and was NOT user-cancelled. That is the
-   * "backend produced no turn" state the FE must surface with a user-controlled Retry — distinct from
-   * a network drop (thrown error ⇒ the existing `_tryAutoRecover`/`_renderStreamDropRetry` path) and
-   * from a reasoning-only turn (non-blank `accumulated`, handled by the thinking-display branch).
-   */
-  export function _isEmptyTurnNoSave({ sawDone, sawSave, producedVisible, accumulated, cancelled } = {}) {
-    return !!sawDone && !sawSave && !producedVisible && !cancelled &&
-      (accumulated == null || String(accumulated).trim() === '');
-  }
-
-  /**
-   * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
-   * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
-   * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so
-   * they must not inflate the count. Everything else visible (a real user bubble, a real AI bubble, and
-   * crucially an ORPHANED continuation/finalize bubble) counts. softReloadHistory compares this to the
-   * server's visible-message count to detect an orphan a pure id-order check is blind to. Pure (DOM in,
-   * number out) and exported so the reconcile contract is unit-testable without a live stream.
-   */
-  export function _visibleMsgCount(box) {
-    if (!box) return 0;
-    let n = 0;
-    box.querySelectorAll('.msg').forEach((el) => {
-      // A bubble explicitly hidden via inline style is an intermediate/skipped row with no
-      // server message — don't count it. (Hidden via class is rare; the live hide uses style.display.)
-      const hidden = (el.style && el.style.display === 'none');
-      if (hidden) return;
-      // #836 / "never eat a message": an UN-ADOPTED optimistic send (clientMsgId, no dbId yet) is a
-      // legitimate PENDING user bubble, NOT an orphan — its persisted row simply hasn't reached THIS
-      // /api/history snapshot (canonical-vs-per-tab adoption, an SSE reconcile racing the just-committed
-      // row, or a non-persisted/incognito turn). Excluding it from the divergence count means it never
-      // forces a destructive rebuild on its own; combined with the rebuild-time preservation in
-      // softReloadHistory it can never be ERASED. The next reload adopts it once its row appears.
-      if (_isPendingOptimisticBubble(el)) return;
-      n += 1;
-    });
-    return n;
-  }
-
-  /** #836 — a still-pending optimistic user send: carries a clientMsgId but has not yet been adopted
-   * (no dbId). Mirrors the sessions.js `wouldWipe` guard — such a bubble must SURVIVE any reconcile so
-   * "what I typed goes in the bubble, verbatim, every time" can never be violated by the rebuild. */
-  export function _isPendingOptimisticBubble(el) {
-    return !!(el && el.dataset && el.dataset.clientMsgId && !el.dataset.dbId);
-  }
-
-  /**
-   * mirror-toolturn fix: ONE persisted agent message can legitimately render as MULTIPLE `.msg`
-   * bubbles — chatRenderer.addMessage's "Agent multi-bubble reconstruction" (chatRenderer.js
-   * ~1929) re-splits a message carrying `metadata.tool_events`/`round_texts` back into one bubble
-   * PER non-empty narration round, so a re-opened multi-round tool-rich turn reads exactly as it
-   * streamed live instead of collapsing into one blob (L6c). `_visibleMsgCount(box) ===
-   * visible.length` (the OLD orphan check) never accounted for this: a 2-narration-round turn is
-   * ALWAYS 2 bubbles for 1 server message, so the check NEVER converged for a tool-rich turn —
-   * softReloadHistory retried a full destructive rebuild on every single reconcile trigger
-   * forever. Each rebuild reproduced the identical correct render (chatRenderer.addMessage is
-   * deterministic from the same metadata), so this never showed as a literal duplicate, but it
-   * silently burned a `/api/history` fetch + full DOM wipe+rebuild on every peer ping — pure churn
-   * that widens the window for an unrelated concurrent mutation to interleave. Count bubbles the
-   * SAME way addMessage does so a fully-reconciled multi-round turn actually reads "converged".
-   */
-  export function _expectedVisibleBubbleCount(visible) {
-    let n = 0;
-    for (const msg of (visible || [])) {
-      const meta = msg && msg.metadata;
-      if (meta && Array.isArray(meta.tool_events) && meta.tool_events.length) {
-        const roundTexts = Array.isArray(meta.round_texts) ? meta.round_texts : [];
-        const textRounds = roundTexts.filter((t) => (t || '').trim()).length;
-        n += Math.max(1, textRounds);
-      } else {
-        n += 1;
-      }
-    }
-    return n;
-  }
-
-  /**
-   * ADR 0008 — render-and-reconcile to the authoritative seq-ordered log.
-   *
-   * The chat conversation is a FE-replicated log; the audit (S3-RACE) proved two tabs diverge
-   * under concurrent writes because the sender was optimistic-only and a busy tab dropped the
-   * peer's events. This reconciles every tab to the server's `seq` total order WITHOUT a blanket
-   * full rebuild:
-   *   1. ADOPT PASS — stamp the canonical {id, seq} onto already-rendered bubbles (matching by db
-   *      id OR the optimistic client-temp id). Gives the sender read-your-writes with zero churn.
-   *   2. DIVERGENCE CHECK — if the rendered id order already equals the server seq order, return
-   *      (no flicker in the overwhelming common case).
-   *   3. Only when DIVERGED: defer if a stream is live (don't stomp it), else do the clean
-   *      seq-ordered rebuild — identical to a manual reload, which the audit proved converges.
-   */
-  export async function softReloadHistory(sessionId) {
-    if (!sessionId) return;
-    const isCurrent = () => !sessionModule || !sessionModule.getCurrentSessionId ||
-      sessionModule.getCurrentSessionId() === sessionId;
-    if (!isCurrent()) return;
-
-    let data;
-    try {
-      const res = await fetch(`${API_BASE}/api/history/${sessionId}`);
-      if (!res.ok) return;
-      data = await res.json();
-    } catch (_) { return; }
-    if (!isCurrent()) return;
-
-    const box = document.getElementById('chat-history');
-    if (!box) return;
-    const modelName = data.model || null;
-    // Authoritative seq-ordered log (the API orders by seq), minus the continuation/instruction
-    // prompts the live view never shows.
-    const visible = (data.history || [])
-      .filter(m => !(m.role === 'user' && _isSkippableUserPrompt(_historyMsgText(m))));
-
-    // 1) ADOPT PASS — no DOM churn.
-    const byId = new Map(), byClient = new Map();
-    box.querySelectorAll('.msg').forEach((el) => {
-      if (el.dataset.dbId) byId.set(el.dataset.dbId, el);
-      if (el.dataset.clientMsgId) byClient.set(el.dataset.clientMsgId, el);
-    });
-    for (const msg of visible) {
-      const sid = _serverMsgId(msg);
-      const cid = msg.metadata && msg.metadata.client_msg_id;
-      // #891: a server row carrying this clientMsgId PROVES delivery — release the reload-durable
-      // outbox copy (awaiting-confirm) so it can never re-send. Cheap no-op when nothing is queued.
-      if (cid) _outboxConfirmDelivery(cid);
-      const el = (sid && byId.get(sid)) || (cid && byClient.get(cid)) || null;
-      if (el) {
-        if (sid) { el.dataset.dbId = sid; byId.set(sid, el); }
-        if (msg.seq != null) el.dataset.seq = String(msg.seq);
-      }
-    }
-
-    // BUG 1 — REORDER PASS (non-destructive). Now that every matched bubble carries its authoritative
-    // `data-seq`, move any that are out of seq order back into place WITHOUT a DOM wipe. This runs on
-    // EVERY reconcile attempt — including the "converged"/early-return common case below AND while a
-    // stream is in flight (the `hasActiveStream` early-return is further down), so a bubble that was
-    // appended out of arrival-vs-seq order (a peer write racing the local turn, two interleaved
-    // `message_saved`s) is corrected the instant its seq is known, not only when a destructive rebuild
-    // finally fires. Idempotent: zero churn when already ordered. A still-pending optimistic send (no
-    // seq) keeps its place at the tail — exactly where the newest local turn belongs.
-    _reorderBySeq(box);
-
-    // 2) DIVERGENCE CHECK — rendered id order vs. server seq order.
-    // ADR 0012 (GAP 2): an error turn forces ONE content rebuild — the error bubble may already carry
-    // the persisted message's {id, seq} (so the id-order is "converged") while showing the raw error
-    // text, not the persisted fallback. Consume the one-shot flag so subsequent reloads are normal.
-    // SELF-GUARD: only honor the force when the server actually has at least as many messages as are
-    // rendered — i.e. there IS a persisted message to converge to. A hard fail that persisted NOTHING
-    // (server has fewer messages) keeps its live error bubble rather than the rebuild erasing it.
-    let _forced = _forceRebuild.delete(sessionId);
-    const renderedCount = box.querySelectorAll('.msg').length;
-    if (_forced && visible.length < renderedCount) _forced = false;
-    // A multi-round tool-rich message legitimately renders as SEVERAL contiguous bubbles sharing
-    // the same data-db-id (chatRenderer.addMessage's multi-bubble reconstruction — see
-    // _expectedVisibleBubbleCount above). Collapse consecutive duplicate ids before comparing to
-    // the server's one-id-per-message order, so such a turn can actually reach "converged" instead
-    // of id-order matching by coincidence while the orphan check below never converges.
-    const renderedIdsRaw = Array.from(box.querySelectorAll('.msg[data-db-id]')).map((el) => el.dataset.dbId);
-    const renderedIds = renderedIdsRaw.filter((v, i) => v !== renderedIdsRaw[i - 1]);
-    const serverIds = visible.map(_serverMsgId).filter(Boolean);
-    // F5 (dedup hardening): the id-order check alone is BLIND to a db-id-LESS ORPHAN bubble — a
-    // continuation/round bubble (multi-round agent turn) or a resume finalize-in-place bubble that
-    // never received its data-db-id. Such an orphan is invisible to `renderedIds` (which selects only
-    // `.msg[data-db-id]`), so the rendered id-order could equal the server seq-order ("converged")
-    // WHILE an extra duplicate bubble sits on screen → the dup survived every reload (issue #873 / F5).
-    // Count VISIBLE message bubbles (excluding the hidden tool-only / production-cue rows, which are
-    // display:none and have no server counterpart) and require it to equal the server's EXPECTED
-    // visible-bubble count (accounting for multi-round reconstruction, not a raw 1:1 message count).
-    // A mismatch means a genuine orphan (or a missing bubble) is present → NOT converged → rebuild to
-    // the authoritative log, which collapses the orphan with ZERO net churn on the already-correct case.
-    const orphanFree = _visibleMsgCount(box) === _expectedVisibleBubbleCount(visible);
-    const converged = orphanFree &&
-      renderedIds.length === serverIds.length &&
-      renderedIds.every((v, i) => v === serverIds[i]);
-    if (converged && !_forced) { _pendingReconcile.delete(sessionId); return; }
-
-    // 3) DIVERGED (or forced) — defer past a live stream, else rebuild to the authoritative order.
-    if (hasActiveStream(sessionId)) {
-      _pendingReconcile.add(sessionId);
-      if (_forced) _forceRebuild.add(sessionId);   // re-arm the one-shot force for the deferred flush
-      return;
-    }
-    _pendingReconcile.delete(sessionId);
-
-    // #836 / "never eat a message": before we blow away the DOM, RESCUE any still-pending optimistic
-    // user bubble (clientMsgId, no dbId) whose persisted row is ABSENT from this server snapshot — so the
-    // authoritative rebuild can NEVER erase what the player just typed. A bubble whose client_msg_id IS
-    // present in `visible` is re-rendered from the server log below (no rescue needed); only the un-adopted
-    // pending sends are carried across, then normal adoption reconciles them when their row appears.
-    const _serverClientIds = new Set(
-      visible.map(m => m.metadata && m.metadata.client_msg_id).filter(Boolean)
-    );
-    const _pendingToPreserve = Array.from(box.querySelectorAll('.msg'))
-      .filter(el => _isPendingOptimisticBubble(el) && !_serverClientIds.has(el.dataset.clientMsgId));
-
-    const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 120;
-    const prevScrollTop = box.scrollTop;
-    box.classList.add('no-animate');
-    box.innerHTML = '';
-    for (const msg of visible) {
-      const meta = msg.metadata ? { ...msg.metadata, _fromHistory: true } : { _fromHistory: true };
-      chatRenderer.addMessage(msg.role, markdownModule.renderContent(_historyMsgText(msg)), modelName, meta);
-    }
-    // Re-append the rescued pending sends after the authoritative log (they are the newest turn — the row
-    // the server hasn't surfaced yet). They keep their clientMsgId so the next reload's adopt pass claims
-    // them with zero churn the moment /api/history carries their persisted row.
-    for (const el of _pendingToPreserve) box.appendChild(el);
-    box.classList.remove('no-animate');
-    if (nearBottom) {
-      if (uiModule.scrollHistoryInstant) uiModule.scrollHistoryInstant();
-      else if (uiModule.scrollHistory) uiModule.scrollHistory();
-    } else {
-      // Reader was scrolled up — keep their place (new content was appended below).
-      box.scrollTop = prevScrollTop;
-    }
-  }
-
-  /** ADR 0008: flush a reconcile deferred because a stream was in flight (called at stream end).
-   * Returns the softReloadHistory promise so callers can sequence work AFTER the rebuild settles
-   * (the GAP-1 peer-resume chains on it so the peer's user turn is adopted before its reply attaches). */
-  export function flushPendingReconcile(sessionId) {
-    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-    if (!id) return Promise.resolve();
-    // Always run once at stream end: the adopt pass alone (cheap, no churn) gives the sender
-    // read-your-writes even when nothing diverged; if it DID diverge, this does the rebuild.
-    _pendingReconcile.delete(id);
-    try { return Promise.resolve(softReloadHistory(id)).catch(function () {}); } catch (_) { return Promise.resolve(); }
-  }
-
-  /**
-   * ADR 0012 (GAP 1): note a peer's run-started that we couldn't attach to LIVE because our own
-   * stream was in flight, so the stream-end finally can RE-ATTEMPT the attach. Called from
-   * sessionSync's run-started handler. Idempotent (a Set); no-op if no resume seam exists.
-   */
-  export function deferPeerResume(sessionId) {
-    if (!sessionId) return;
-    _pendingPeerResume.add(sessionId);
-  }
-
-  /**
-   * ADR 0012 (GAP 1): flush a peer-resume deferred because OUR stream was in flight (called at
-   * stream end). Now that our stream has settled, attach to the canonical run so we mirror the peer's
-   * turn LIVE. resumeStream's own guards make this safe + idempotent: it no-ops if another reader is
-   * already live for the session (hasActiveStream) and replays a just-finished run's buffer within the
-   * evict grace; if the run is already gone, softReloadHistory has the settled message anyway.
-   */
-  export function flushPendingPeerResume(sessionId) {
-    const id = sessionId || (sessionModule && sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-    if (!id) return;
-    if (!_pendingPeerResume.has(id)) return;
-    _pendingPeerResume.delete(id);
-    // Only attach if we're still viewing this session and nothing else is already rendering it live.
-    const onIt = !sessionModule || !sessionModule.getCurrentSessionId ||
-                 sessionModule.getCurrentSessionId() === id;
-    if (!onIt) return;
-    if (hasActiveStream(id)) return;          // a newer stream took over — it owns the render
-    try { resumeStream(id); } catch (_) {}
-  }
+  // #1414 (R3 PR7): the cross-device RECONCILE / seq-order / peer-resume cluster (ADR 0008/0012)
+  // — _historyMsgText / _serverMsgId / _isSkippableUserPrompt / _msgSeq / _insertBySeq /
+  // _reorderBySeq / _isEmptyTurnNoSave / _visibleMsgCount / _isPendingOptimisticBubble /
+  // _expectedVisibleBubbleCount / softReloadHistory / flushPendingReconcile / deferPeerResume /
+  // flushPendingPeerResume — moved to chatReconcile.js (imported above, re-exported on the
+  // chatModule public API below byte-identically). Behavior-preserving: chat.js still drives the
+  // same call points (softReloadHistory at the stream-settle + adopt sites, flushPendingReconcile /
+  // flushPendingPeerResume in the stream-end finally, _isEmptyTurnNoSave in the finalize) and
+  // injects the three chat.js-internal deps the cluster reads — hasActiveStream (the SSE-reader
+  // liveness helper), resumeStream (the R2 live-resume attach), and a () => API_BASE resolver —
+  // through _setReconcileDeps, mirroring the PR2..PR6 injection pattern. The reconcile Sets stay
+  // chatState-backed (PR0), so submit / outbox / reconcile serialize on ONE instance.
 
   /**
    * R2 (refactor-roadmap / ADR 0012 §3.3): the SHARED incremental live-stream renderer that BOTH
@@ -5399,7 +4380,7 @@ import { isNarrow } from './platform.js';
     // for a same-tab POST stream and spawn its own spinner+poll on re-entry. Set BEFORE the first
     // paint below, so a `softReloadHistory` reconcile that races this attach sees `hasActiveStream`
     // and DEFERS past it (never rebuilds the DOM out from under the live holder mid-paint).
-    _resumingStreams.add(sessionId);
+    chatState._resumingStreams.add(sessionId);
 
     const holder = document.createElement('div');
     holder.className = 'msg msg-ai';
@@ -5451,7 +4432,7 @@ import { isNarrow } from './platform.js';
 
     const cleanup = () => {
       try { spinner.destroy(); } catch (_) {}
-      _resumingStreams.delete(sessionId);
+      chatState._resumingStreams.delete(sessionId);
     };
 
     // Canonical combined source: reasoning wrapped in a CLOSED <think> block (so it renders
@@ -5630,17 +4611,17 @@ import { isNarrow } from './platform.js';
    * Called after history loads on session switch.
    */
   export function checkBackgroundStream(sessionId) {
-    if (!sessionId || !_backgroundStreams.has(sessionId)) return;
-    var entry = _backgroundStreams.get(sessionId);
+    if (!sessionId || !chatState._backgroundStreams.has(sessionId)) return;
+    var entry = chatState._backgroundStreams.get(sessionId);
 
     if (entry.status === 'completed') {
       // Response is already saved to DB and will appear in history — just clean up
-      _backgroundStreams.delete(sessionId);
+      chatState._backgroundStreams.delete(sessionId);
       return;
     }
 
     if (entry.status === 'error') {
-      _backgroundStreams.delete(sessionId);
+      chatState._backgroundStreams.delete(sessionId);
       var box = document.getElementById('chat-history');
       if (box) {
         var errHolder = document.createElement('div');
@@ -5690,7 +4671,7 @@ import { isNarrow } from './platform.js';
           return;
         }
         // Update doc content while polling
-        var curPoll = _backgroundStreams.get(sessionId);
+        var curPoll = chatState._backgroundStreams.get(sessionId);
         if (curPoll && curPoll._docContent && documentModule) {
           documentModule.streamDocDelta(curPoll._docContent);
         }
@@ -5698,7 +4679,7 @@ import { isNarrow } from './platform.js';
           clearInterval(pollId);
           spinner.destroy();
           if (holder.parentNode) holder.remove(); // Remove entire holder, not just spinner
-          _backgroundStreams.delete(sessionId);
+          chatState._backgroundStreams.delete(sessionId);
           // Reload session to show the completed response — but only if the user
           // is still on it; don't yank them back from a new chat they opened.
           if (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === sessionId) {
@@ -5881,7 +4862,7 @@ import { isNarrow } from './platform.js';
       // the tab was hidden/backgrounded (the `_isBgFinally` path never reset it). Cheap + idempotent;
       // runs even when not streaming, so the stuck-Stop case recovers the moment the user looks back.
       try { _syncSubmitButtonState(); } catch (_) {}
-      if (!isStreaming) return;
+      if (!chatState.isStreaming) return;
 
       // Stream claims to be running — check if reader is actually alive
       const staleSince = Date.now() - _lastReaderActivity;
@@ -5893,18 +4874,18 @@ import { isNarrow } from './platform.js';
 
       setTimeout(() => {
         // Re-check — maybe the reader woke up during the grace period
-        if (!isStreaming) return;
+        if (!chatState.isStreaming) return;
         const stillStale = Date.now() - _lastReaderActivity;
         if (stillStale < 5000) return; // Came back to life
 
         console.warn('[tab-recovery] Stream confirmed dead. Aborting and reloading session.');
 
         // Abort the frozen stream, but preserve the visible bubble.
-        if (currentAbort) {
-          currentAbort._reason = 'recovery';
-          currentAbort.abort();
+        if (chatState.currentAbort) {
+          chatState.currentAbort._reason = 'recovery';
+          chatState.currentAbort.abort();
         }
-        isStreaming = false;
+        chatState.isStreaming = false;
 
         // Release Web Lock
         if (_webLockRelease) {
@@ -5969,436 +4950,15 @@ import { isNarrow } from './platform.js';
   /**
    * Edit a user message: show an input, truncate to before it, resubmit the edited text.
    */
-  export async function editUserMessage(userMsgElement) {
-    const box = document.getElementById('chat-history');
-    const allMsgs = Array.from(box.querySelectorAll('.msg'));
-    const msgIndex = allMsgs.indexOf(userMsgElement);
-    if (msgIndex < 0) return;
-
-    const bodyEl = userMsgElement.querySelector('.body');
-    const currentText = bodyEl ? bodyEl.textContent.trim().replace(/\s*\[\d+ attachment\(s\)\]$/, '') : '';
-
-    // Replace body with an editable textarea
-    const editor = document.createElement('textarea');
-    editor.className = 'edit-textarea';
-    editor.value = currentText;
-    editor.rows = Math.max(2, currentText.split('\n').length);
-
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'display:flex; gap:6px; margin-top:4px;';
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'edit-save-btn';
-    saveBtn.textContent = 'Send';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'edit-cancel-btn';
-    cancelBtn.textContent = 'Cancel';
-    btnRow.appendChild(saveBtn);
-    btnRow.appendChild(cancelBtn);
-
-    const originalHTML = bodyEl.innerHTML;
-    bodyEl.innerHTML = '';
-    bodyEl.appendChild(editor);
-    bodyEl.appendChild(btnRow);
-    editor.focus();
-
-    cancelBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      bodyEl.innerHTML = originalHTML;
-    });
-
-    saveBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const newText = editor.value.trim();
-      if (!newText) return;
-
-      const sessionId = sessionModule.getCurrentSessionId();
-      if (!sessionId) return;
-
-      const keepCount = msgIndex;
-      try {
-        await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keep_count: keepCount })
-        });
-
-        // Remove DOM elements from msgIndex onward
-        for (let i = allMsgs.length - 1; i >= msgIndex; i--) {
-          allMsgs[i].remove();
-        }
-
-        // Submit the edited text (headless — no composer puppeteering)
-        handleChatSubmit(null, newText);
-      } catch (err) {
-        console.error('Edit failed:', err);
-        if (uiModule) uiModule.showError('Edit failed: ' + err.message);
-        bodyEl.innerHTML = originalHTML;
-      }
-    });
-
-    // Also submit on Enter (without shift)
-    editor.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        saveBtn.click();
-      }
-    });
-  }
-
-  /**
-   * Resend a user message — truncates history to that point and resubmits.
-   */
-  export async function resendUserMessage(userMsgElement) {
-    const box = document.getElementById('chat-history');
-    const allMsgs = Array.from(box.querySelectorAll('.msg'));
-    const msgIndex = allMsgs.indexOf(userMsgElement);
-    if (msgIndex < 0) return;
-
-    // Prefer dataset.raw (stripped original user text) over .body.textContent
-    // — the latter slurps the rendered "View image description" collapsible
-    // content too, which would then be sent back as the user's question and
-    // the AI would reply to that gibberish instead of the actual prompt.
-    const bodyEl = userMsgElement.querySelector('.body');
-    let text = (userMsgElement.dataset.raw || (bodyEl ? bodyEl.textContent : '') || '').trim();
-    text = text.replace(/\s*\[\d+ attachment\(s\)\]$/, '');
-
-    // Collect file_ids attached to this user message so the resend re-carries
-    // the photos / docs (and the chat handler picks up the user-edited OCR
-    // text cached server-side under those file ids).
-    const _attachEls = userMsgElement.querySelectorAll('[data-file-id]');
-    let _ids = Array.from(_attachEls).map(el => el.dataset.fileId).filter(Boolean);
-    if (!_ids.length) {
-      const _imgs = userMsgElement.querySelectorAll('.attach-image-preview img, .attach-card img');
-      for (const _im of _imgs) {
-        const _m = (_im.getAttribute('src') || '').match(/\/api\/upload\/([A-Za-z0-9_\-]+)/);
-        if (_m && _m[1] && !_ids.includes(_m[1])) _ids.push(_m[1]);
-      }
-    }
-
-    // Rescue: legacy bubbles may have stored the filename as the message
-    // content (artifact of earlier broken resends). Don't re-send that as
-    // the user prompt if we still have the file attached. Loosen the regex
-    // to cover real-world camera/screenshot names with spaces, parens,
-    // multi-dots: "Screen Shot 2026-05-28 at 4.05.32 PM.png", "IMG (1).JPG".
-    if (text && _ids.length && /^[^\n\r]{1,200}\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i.test(text)) {
-      text = '';
-    }
-    // Empty text + no attachments → tell the user instead of silently bailing.
-    // The common case is a regen during a pre-upload race where the bubble
-    // never had an `[data-file-id]` to scrape.
-    if (!text && !_ids.length) {
-      if (uiModule?.showError) uiModule.showError('Nothing to resend — message has no text and no attachments yet (try again after the upload finishes).');
-      return;
-    }
-
-    const sessionId = sessionModule.getCurrentSessionId();
-    if (!sessionId) return;
-
-    // Truncate backend to keep everything before this user message
-    const keepCount = msgIndex;
-    try {
-      await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_count: keepCount })
-      });
-
-      // Drop the AI replies after the user message but KEEP the user bubble
-      // itself (so its photo stays visible). Then suppress the new user
-      // bubble that send would otherwise add — same pattern as regenerate.
-      let sibling = userMsgElement.nextSibling;
-      while (sibling) {
-        const next = sibling.nextSibling;
-        sibling.remove();
-        sibling = next;
-      }
-      _hideUserBubble = true;
-      _pendingRegenAttachments = _ids;
-
-      // Resubmit (headless — no composer puppeteering)
-      handleChatSubmit(null, text);
-    } catch (err) {
-      console.error('Resend failed:', err);
-      if (uiModule) uiModule.showError('Resend failed: ' + err.message);
-    }
-  }
-
-  export async function regenerateFrom(aiMsgElement) {
-    const box = document.getElementById('chat-history');
-    const allMsgs = Array.from(box.querySelectorAll('.msg'));
-    const aiIndex = allMsgs.indexOf(aiMsgElement);
-    if (aiIndex < 0) return;
-
-    // Find the preceding user message
-    let userIndex = -1;
-    let userText = '';
-    let userMsgEl = null;
-    for (let i = aiIndex - 1; i >= 0; i--) {
-      if (allMsgs[i].classList.contains('msg-user')) {
-        userIndex = i;
-        userMsgEl = allMsgs[i];
-        // Prefer dataset.raw (set by addMessage with the stripped, original
-        // user text) over the rendered body's textContent — the latter
-        // pulls in the "View image description" collapsible content too,
-        // duplicating the OCR text on regen.
-        const bodyEl = userMsgEl.querySelector('.body');
-        userText = (userMsgEl.dataset.raw || (bodyEl ? bodyEl.textContent : '') || '').trim();
-        userText = userText.replace(/\s*\[\d+ attachment\(s\)\]$/, '');
-        break;
-      }
-    }
-
-    if (userIndex < 0) {
-      if (uiModule) uiModule.showError('Could not find the user message to regenerate');
-      return;
-    }
-
-    // Collect any file_ids attached to the original user message so the
-    // regenerated send re-uses them. Without this the AI is regenerated on
-    // text alone — photos (and the user-edited OCR text cached server-side
-    // under that file_id) would be silently dropped.
-    const _attachEls = userMsgEl ? userMsgEl.querySelectorAll('[data-file-id]') : [];
-    let _regenIds = Array.from(_attachEls).map(el => el.dataset.fileId).filter(Boolean);
-    // Fallback for bubbles rendered before the data-file-id stamp landed:
-    // sniff the file id straight out of any `.attach-image-preview img`
-    // src URLs (matches /api/upload/<id>). Otherwise an older bubble would
-    // regen with zero attachments and the photo would be lost from the
-    // resulting message even though the file still exists on disk.
-    if (!_regenIds.length && userMsgEl) {
-      const _imgs = userMsgEl.querySelectorAll('.attach-image-preview img, .attach-card img');
-      for (const _im of _imgs) {
-        const _m = (_im.getAttribute('src') || '').match(/\/api\/upload\/([A-Za-z0-9_\-]+)/);
-        if (_m && _m[1] && !_regenIds.includes(_m[1])) _regenIds.push(_m[1]);
-      }
-    }
-    _pendingRegenAttachments = _regenIds;
-
-    // Rescue: earlier-version regens (before the dataset.raw fix) stored the
-    // photo's filename as the user-message content. On a follow-up regen,
-    // that filename would be sent back as the literal user prompt, so the
-    // AI thinks the question is "blue_night_preview.jpg" and replies "that's
-    // an image file". If userText is just a bare image filename and we have
-    // attachments, drop it so the OCR text (or the image bytes for vision
-    // models) is what the model actually sees.
-    if (userText && _pendingRegenAttachments.length &&
-        /^[^\n\r]{1,200}\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i.test(userText.trim())) {
-      userText = '';
-    }
-
-    // A photo-only message has empty user text — regen must still proceed,
-    // because the attachments themselves are the message. Bail only if there
-    // is no text AND no attachments to send.
-    if (!userText && !_pendingRegenAttachments.length) {
-      if (uiModule) uiModule.showError('Nothing to regenerate — the user message has no text and no attachments');
-      return;
-    }
-
-    const sessionId = sessionModule.getCurrentSessionId();
-    if (!sessionId) return;
-
-    // Save current response as a variant
-    const oldRaw = aiMsgElement.dataset.raw || aiMsgElement.querySelector('.body')?.textContent || '';
-    const oldHtml = aiMsgElement.querySelector('.body')?.innerHTML || '';
-    let variants = [];
-    try { variants = JSON.parse(aiMsgElement.dataset.variants || '[]'); } catch(_) {}
-    if (variants.length === 0) {
-      // First regen — save the original as variant 0
-      variants.push({ raw: oldRaw, html: oldHtml, label: 'original' });
-    }
-
-    const keepCount = userIndex;
-
-    try {
-      await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_count: keepCount })
-      });
-
-      for (let i = allMsgs.length - 1; i > aiIndex; i--) {
-        allMsgs[i].remove();
-      }
-
-      // Remove the AI message from DOM — it will be replaced by the new streaming response
-      // But first, stash the variants data so we can transfer it to the new element
-      _pendingVariants = variants;
-      _pendingVariantLabel = 'regen';
-      aiMsgElement.remove();
-
-      _hideUserBubble = true;
-      handleChatSubmit(null, userText); // headless regen — no composer puppeteering
-
-    } catch (err) {
-      console.error('Regenerate failed:', err);
-      if (uiModule) uiModule.showError('Regenerate failed: ' + err.message);
-    }
-  }
-
-  // Pending variants from a regeneration — transferred to new streaming element
-  let _pendingVariants = null;
-  let _pendingVariantLabel = null;
-  // File-ids carried over from the original user message during a regen, so
-  // photos / OCR overrides survive into the new send. Consumed once.
+  // #1414 (R3 PR5): the per-message actions cluster — editUserMessage / resendUserMessage /
+  // regenerateFrom / _attachVariantNav / _renderVariantNav / _switchVariant / _variantTagText /
+  // forkFrom (and, below, deleteMessage / editAIMessage / rewriteWith / continueFrom) moved to
+  // chatMessageActions.js (imported above, re-exported on the chatModule public API below).
+  // Behavior-preserving. `_pendingRegenAttachments` STAYS here because handleChatSubmit reads and
+  // clears it on the very next send (the regen/resend file-id hand-off); the moved regen/resend
+  // writers set it through the injected setPendingRegenAttachments (see _setMessageActionsDeps at
+  // module-eval below). `_pendingVariants` / `_pendingVariantLabel` moved with the cluster.
   let _pendingRegenAttachments = null;
-
-  /**
-   * Called after streaming completes to attach variant navigation if this was a regen.
-   */
-  function _attachVariantNav(msgElement) {
-    if (!_pendingVariants) return;
-    const variants = _pendingVariants;
-    _pendingVariants = null;
-
-    // Add the new response as the latest variant
-    const newRaw = msgElement.dataset.raw || msgElement.querySelector('.body')?.textContent || '';
-    const newHtml = msgElement.querySelector('.body')?.innerHTML || '';
-    const varLabel = _pendingVariantLabel || 'regen';
-    _pendingVariantLabel = null;
-    variants.push({ raw: newRaw, html: newHtml, label: varLabel });
-
-    msgElement.dataset.variants = JSON.stringify(variants);
-    msgElement.dataset.variantIndex = String(variants.length - 1);
-
-    _renderVariantNav(msgElement, variants, variants.length - 1);
-
-    // Persist variants to server
-    const sid = sessionModule.getCurrentSessionId();
-    if (sid) {
-      fetch(`${API_BASE}/api/session/${sid}/update-last-meta`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: { variants: variants, variantIndex: variants.length - 1 } })
-      }).catch(e => console.warn('update-last-meta (variants) failed:', e));
-    }
-  }
-
-  const _VARIANT_ICONS = { regen: '\u21BB', shorter: '\u2702', simpler: '?', original: '\u25CB' };
-  function _variantTagText(label) {
-    return _VARIANT_ICONS[label] || _VARIANT_ICONS['original'];
-  }
-
-  function _renderVariantNav(msgElement, variants, currentIdx) {
-    // Remove existing nav if any
-    const old = msgElement.querySelector('.variant-nav');
-    if (old) old.remove();
-
-    if (variants.length < 2) return;
-
-    const nav = document.createElement('span');
-    nav.className = 'variant-nav';
-    nav.addEventListener('click', (e) => e.stopPropagation());
-
-    // Label showing what this variant is
-    // Divider
-    const divider = document.createElement('span');
-    divider.className = 'variant-divider';
-    divider.textContent = '|';
-    nav.appendChild(divider);
-
-    // Label
-    const curVariant = variants[currentIdx];
-    const tagLabel = document.createElement('span');
-    tagLabel.className = 'variant-tag' + (curVariant?.label === 'shorter' ? ' variant-tag-scissors' : '');
-    tagLabel.textContent = _variantTagText(curVariant?.label);
-    nav.appendChild(tagLabel);
-
-    // < button
-    const prevBtn = document.createElement('button');
-    prevBtn.className = 'variant-btn';
-    prevBtn.textContent = '<';
-    prevBtn.disabled = currentIdx === 0;
-    prevBtn.addEventListener('click', (e) => { e.stopPropagation(); _switchVariant(msgElement, variants, currentIdx - 1); });
-    nav.appendChild(prevBtn);
-
-    // Clickable number for current index (click left number = go left, right = go right)
-    const numLeft = document.createElement('button');
-    numLeft.className = 'variant-num';
-    numLeft.textContent = String(currentIdx + 1);
-    numLeft.disabled = currentIdx === 0;
-    numLeft.addEventListener('click', (e) => { e.stopPropagation(); _switchVariant(msgElement, variants, currentIdx - 1); });
-    nav.appendChild(numLeft);
-
-    const slash = document.createElement('span');
-    slash.className = 'variant-slash';
-    slash.textContent = '/';
-    nav.appendChild(slash);
-
-    const numRight = document.createElement('button');
-    numRight.className = 'variant-num';
-    numRight.textContent = String(variants.length);
-    numRight.disabled = currentIdx === variants.length - 1;
-    numRight.addEventListener('click', (e) => { e.stopPropagation(); _switchVariant(msgElement, variants, currentIdx + 1); });
-    nav.appendChild(numRight);
-
-    // > button
-    const nextBtn = document.createElement('button');
-    nextBtn.className = 'variant-btn';
-    nextBtn.textContent = '>';
-    nextBtn.disabled = currentIdx === variants.length - 1;
-    nextBtn.addEventListener('click', (e) => { e.stopPropagation(); _switchVariant(msgElement, variants, currentIdx + 1); });
-    nav.appendChild(nextBtn);
-
-    // Insert into the .role header
-    const roleEl = msgElement.querySelector('.role');
-    if (roleEl) {
-      roleEl.appendChild(nav);
-    } else {
-      msgElement.appendChild(nav);
-    }
-  }
-
-  function _switchVariant(msgElement, variants, newIdx) {
-    if (newIdx < 0 || newIdx >= variants.length) return;
-    const v = variants[newIdx];
-    const body = msgElement.querySelector('.body');
-    if (body) body.innerHTML = v.html;
-    msgElement.dataset.raw = v.raw;
-    msgElement.dataset.variantIndex = String(newIdx);
-    if (window.hljs) {
-      msgElement.querySelectorAll('pre code').forEach(block => window.hljs.highlightElement(block));
-    }
-    _renderVariantNav(msgElement, variants, newIdx);
-
-    // Persist selected variant to server
-    const sid = sessionModule.getCurrentSessionId();
-    if (sid) {
-      fetch(`${API_BASE}/api/session/${sid}/update-last-meta`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metadata: { variantIndex: newIdx } })
-      }).catch(e => console.warn('update-last-meta (variantIndex) failed:', e));
-    }
-  }
-
-  export async function forkFrom(aiMsgElement) {
-    const box = document.getElementById('chat-history');
-    const allMsgs = Array.from(box.querySelectorAll('.msg'));
-    const aiIndex = allMsgs.indexOf(aiMsgElement);
-    if (aiIndex < 0) return;
-
-    const sessionId = sessionModule.getCurrentSessionId();
-    if (!sessionId) return;
-
-    const keepCount = aiIndex + 1;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/session/${sessionId}/fork`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_count: keepCount }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-
-      await sessionModule.loadSessions();
-      await sessionModule.selectSession(data.id);
-      if (uiModule) uiModule.showToast(`Forked → ${data.name}`);
-    } catch (err) {
-      console.error('Fork failed:', err);
-      if (uiModule) uiModule.showError('Fork failed: ' + err.message);
-    }
-  }
 
   /**
    * Check for pending/completed research after page refresh or session switch.
@@ -6512,7 +5072,7 @@ import { isNarrow } from './platform.js';
       }
 
       updateSpinnerFromProgress(data.progress);
-      _researchingStreamIds.add(sessionId);
+      chatState._researchingStreamIds.add(sessionId);
       if (sessionModule && sessionModule.markResearching) sessionModule.markResearching(sessionId);
 
       // Restore research timer from started_at
@@ -6561,8 +5121,8 @@ import { isNarrow } from './platform.js';
           spinner.destroy();
           _clearResearchTimer();
           if (holder.parentNode) holder.remove();
-          _researchingStreamIds.delete(sessionId);
-          if (_researchingStreamIds.size === 0) {
+          chatState._researchingStreamIds.delete(sessionId);
+          if (chatState._researchingStreamIds.size === 0) {
             var _rToggleP = document.getElementById('research-toggle-btn');
             if (_rToggleP) _rToggleP.classList.remove('research-running');
           }
@@ -6574,7 +5134,7 @@ import { isNarrow } from './platform.js';
             clearInterval(pollInterval);
             spinner.destroy();
             _clearResearchTimer();
-            _researchingStreamIds.delete(sessionId);
+            chatState._researchingStreamIds.delete(sessionId);
             if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
             return;
           }
@@ -6590,7 +5150,7 @@ import { isNarrow } from './platform.js';
             clearInterval(pollInterval);
             spinner.destroy();
             _clearResearchTimer();
-            _researchingStreamIds.delete(sessionId);
+            chatState._researchingStreamIds.delete(sessionId);
             if (sessionModule && sessionModule.clearResearching) sessionModule.clearResearching(sessionId);
 
             if (pollData.status === 'done') {
@@ -6629,12 +5189,12 @@ import { isNarrow } from './platform.js';
 
   /** Set a display override for the next user message bubble */
   export function setDisplayOverride(text) {
-    _displayOverride = text;
+    chatState._displayOverride = text;
   }
 
   /** Hide the user bubble for the next submit (e.g. continue after stop) */
   export function setHideUserBubble() {
-    _hideUserBubble = true;
+    chatState._hideUserBubble = true;
   }
 
   /**
@@ -6662,7 +5222,7 @@ import { isNarrow } from './platform.js';
       return true;
     } catch (_) {
       // Never leave the hide-bubble flag armed for a real next turn if the cue blew up.
-      _hideUserBubble = false;
+      chatState._hideUserBubble = false;
       try { box.value = ''; } catch (__) {}
       return false;
     }
@@ -6670,573 +5230,49 @@ import { isNarrow } from './platform.js';
 
   /** Set the AI element to merge with the next streamed response (continue after stop) */
   export function setPendingContinue(el) {
-    _pendingContinue = el;
+    chatState._pendingContinue = el;
   }
 
-  /**
-   * Delete an AI message and its preceding user message from the conversation.
-   */
-  export async function deleteMessage(msgElement) {
-    const box = document.getElementById('chat-history');
-    const allMsgs = Array.from(box.querySelectorAll('.msg'));
-    const clickedIndex = allMsgs.indexOf(msgElement);
-    if (clickedIndex < 0) return;
+  // #1414 (R3 PR5): deleteMessage / editAIMessage / rewriteWith / continueFrom moved to
+  // chatMessageActions.js (imported above, re-exported on the chatModule public API below).
+  // Behavior-preserving; continueFrom re-enters the send via the injected handleChatSubmit.
 
-    // No early-out on a missing session: an output shown before any model was
-    // selected (issue #1428) has no session/persisted rows, but its "x" must
-    // still remove it. We only need the session id for the server-side delete
-    // below; without one we fall back to removing the DOM.
-    const sessionId = sessionModule.getCurrentSessionId();
+  // #1414 (R3 PR3): openAttachment / _attachLang / the per-upload doc cache moved to
+  // chatAttachments.js (imported above, re-exported on chatModule below). Behavior-preserving.
 
-    const clickedIsUser = msgElement.classList.contains('msg-user');
-
-    // Find the user+AI pair
-    let userIndex = -1;
-    let aiIndex = -1;
-    if (clickedIsUser) {
-      userIndex = clickedIndex;
-      // Find the following AI message
-      for (let i = clickedIndex + 1; i < allMsgs.length; i++) {
-        if (allMsgs[i].classList.contains('msg-ai') && !allMsgs[i].classList.contains('msg-continuation')) {
-          aiIndex = i;
-          break;
-        }
-        if (allMsgs[i].classList.contains('msg-user')) break; // next user msg, no AI response
-      }
-    } else {
-      // If clicked on a continuation, walk back to the main AI message
-      let mainAiIndex = clickedIndex;
-      if (allMsgs[mainAiIndex].classList.contains('msg-continuation')) {
-        for (let i = mainAiIndex - 1; i >= 0; i--) {
-          if (allMsgs[i].classList.contains('msg-ai') && !allMsgs[i].classList.contains('msg-continuation')) {
-            mainAiIndex = i;
-            break;
-          }
-        }
-      }
-      aiIndex = mainAiIndex;
-      // Find the preceding user message
-      for (let i = aiIndex - 1; i >= 0; i--) {
-        if (allMsgs[i].classList.contains('msg-user')) {
-          userIndex = i;
-          break;
-        }
-      }
-    }
-
-    // Collect DB message IDs and DOM elements to remove
-    const msgIds = [];
-    const domToRemove = [];
-
-    // Add the user message if found
-    if (userIndex >= 0) {
-      domToRemove.push(allMsgs[userIndex]);
-      const uid = allMsgs[userIndex].dataset.dbId;
-      if (uid) msgIds.push(uid);
-    }
-
-    // Add the AI message if found
-    if (aiIndex >= 0) {
-      domToRemove.push(allMsgs[aiIndex]);
-      const aid = allMsgs[aiIndex].dataset.dbId;
-      if (aid) msgIds.push(aid);
-
-      const aiEl = allMsgs[aiIndex];
-      // Also remove agent-thread elements BETWEEN user and AI
-      if (userIndex >= 0) {
-        let between = allMsgs[userIndex].nextElementSibling;
-        while (between && between !== aiEl) {
-          domToRemove.push(between);
-          between = between.nextElementSibling;
-        }
-      }
-      // Walk forward from the AI element to remove continuations and tool bubbles
-      let sibling = aiEl.nextElementSibling;
-      while (sibling) {
-        if (sibling.classList.contains('msg-user') ||
-            (sibling.classList.contains('msg-ai') && !sibling.classList.contains('msg-continuation'))) {
-          break;
-        }
-        domToRemove.push(sibling);
-        sibling = sibling.nextElementSibling;
-      }
-    }
-
-    if (!msgIds.length || !sessionId) {
-      // No persisted rows to delete (no DB IDs, or no session at all — e.g. an
-      // error output shown before a model was selected, #1428). Just remove the
-      // DOM so the "x" works regardless.
-      domToRemove.forEach(el => el.remove());
-      if (uiModule) uiModule.showToast('Message deleted');
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/api/session/${sessionId}/delete-messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ msg_ids: msgIds })
-      });
-      if (!res.ok) throw new Error('Server error ' + res.status);
-      domToRemove.forEach(el => el.remove());
-      if (uiModule) uiModule.showToast('Message deleted');
-    } catch (err) {
-      console.error('Delete failed:', err);
-      if (uiModule) uiModule.showError('Delete failed: ' + err.message);
-    }
-  }
-
-  /**
-   * Edit an AI message inline. Makes the body contentEditable, saves to DB on confirm.
-   */
-  export async function editAIMessage(msgElement) {
-    const body = msgElement.querySelector('.body');
-    if (!body) return;
-
-    const isEditing = body.contentEditable === 'true' || body.contentEditable === 'plaintext-only';
-    if (isEditing) return; // already editing
-
-    const originalRaw = msgElement.dataset.raw || body.textContent || '';
-
-    // Create editable textarea overlay
-    const textarea = document.createElement('textarea');
-    textarea.className = 'msg-edit-textarea';
-    textarea.value = originalRaw;
-    textarea.style.width = '100%';
-    textarea.style.minHeight = Math.max(100, body.offsetHeight) + 'px';
-    body.style.display = 'none';
-    body.parentNode.insertBefore(textarea, body.nextSibling);
-    textarea.focus();
-
-    // Add save/cancel bar
-    const bar = document.createElement('div');
-    bar.className = 'msg-edit-bar';
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'msg-edit-save';
-    saveBtn.textContent = 'Save';
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'msg-edit-cancel';
-    cancelBtn.textContent = 'Cancel';
-    bar.appendChild(saveBtn);
-    bar.appendChild(cancelBtn);
-    textarea.parentNode.insertBefore(bar, textarea.nextSibling);
-
-    function cleanup() {
-      textarea.remove();
-      bar.remove();
-      body.style.display = '';
-    }
-
-    cancelBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      cleanup();
-    });
-
-    saveBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const newContent = textarea.value;
-      if (newContent === originalRaw) { cleanup(); return; }
-
-      const msgId = msgElement.dataset.dbId;
-      if (!msgId) { if (uiModule) uiModule.showError('Cannot edit: message ID not found'); cleanup(); return; }
-
-      const sessionId = sessionModule.getCurrentSessionId();
-      if (!sessionId) { cleanup(); return; }
-
-      try {
-        const res = await fetch(`${API_BASE}/api/session/${sessionId}/edit-message`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ msg_id: msgId, content: newContent }),
-        });
-        if (!res.ok) throw new Error('Server error ' + res.status);
-
-        // Re-render body with markdown
-        body.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(newContent));
-        msgElement.dataset.raw = newContent;
-
-        // Add edited indicator if not already present
-        if (!msgElement.querySelector('.edited-indicator')) {
-          const indicator = document.createElement('div');
-          indicator.className = 'edited-indicator';
-          indicator.textContent = '[Message edited]';
-          body.parentNode.insertBefore(indicator, body.nextSibling);
-        }
-
-        cleanup();
-        if (uiModule) uiModule.showToast('Message edited');
-      } catch (err) {
-        console.error('Edit failed:', err);
-        if (uiModule) uiModule.showError('Edit failed: ' + err.message);
-      }
-    });
-  }
-
-  /**
-   * Rewrite the AI's last response with a specific instruction.
-   * Uses the lightweight /api/rewrite endpoint — no tools, no agent loop.
-   * Just rewrites the text of the last AI bubble.
-   */
-  export async function rewriteWith(aiMsgElement, instruction) {
-    const sessionId = sessionModule.getCurrentSessionId();
-    if (!sessionId) return;
-
-    // Get the original text from the AI bubble
-    const oldRaw = aiMsgElement.dataset.raw || aiMsgElement.querySelector('.body')?.textContent || '';
-    const oldHtml = aiMsgElement.querySelector('.body')?.innerHTML || '';
-
-    if (!oldRaw.trim()) {
-      if (uiModule) uiModule.showError('No text to rewrite');
-      return;
-    }
-
-    // Save current response as a variant
-    let variants = [];
-    try { variants = JSON.parse(aiMsgElement.dataset.variants || '[]'); } catch(_) {}
-    if (variants.length === 0) {
-      variants.push({ raw: oldRaw, html: oldHtml, label: 'original' });
-    }
-
-    // Determine label from instruction
-    let varLabel = 'rewrite';
-    if (instruction.includes('shorter')) varLabel = 'shorter';
-    else if (instruction.includes('simpler')) varLabel = 'simpler';
-
-    // Clear the bubble and show a whirlpool spinner while we wait for the
-    // rewrite (replaces the old "Rewriting..." text).
-    const bodyEl = aiMsgElement.querySelector('.body');
-    let _rwSpin = null;
-    if (bodyEl) {
-      bodyEl.innerHTML = '';
-      _rwSpin = spinnerModule.createWhirlpool(18);
-      _rwSpin.element.style.margin = '4px 0';
-      bodyEl.appendChild(_rwSpin.element);
-    }
-    // Stop + detach the spinner (called once real content starts rendering, and
-    // on the failure path so it never spins forever).
-    const _killRwSpin = () => { if (_rwSpin) { try { _rwSpin.destroy(); } catch (_) {} _rwSpin = null; } };
-
-    try {
-      const res = await fetch(`${API_BASE}/api/rewrite`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          original_text: oldRaw,
-          instruction: instruction,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let newText = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
-          if (payload === '[DONE]') continue;
-          try {
-            const data = JSON.parse(payload);
-            // The endpoint streams `event: error\ndata: {error,status}` on
-            // failure — surface it instead of silently hanging on "Rewriting…".
-            if (data.error) {
-              throw new Error(data.error || ('HTTP ' + (data.status || 500)));
-            }
-            // Reasoning tokens (vLLM --reasoning-parser: Qwen3 / DeepSeek-R1)
-            // arrive as separate {delta, thinking:true} chunks. They are NOT
-            // the rewrite — fold them away so they don't pollute the result.
-            if (data.thinking) continue;
-            if (data.delta) {
-              newText += data.delta;
-              _killRwSpin();
-              if (bodyEl) {
-                bodyEl.innerHTML = markdownModule.processWithThinking(
-                  markdownModule.squashOutsideCode(newText)
-                );
-              }
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message) throw e;  // re-throw real errors
-            /* ignore JSON parse noise */
-          }
-        }
-      }
-
-      // Strip any thinking markup from the answer. A reasoning model may emit
-      // an inline <think>…</think> block, a bare </think> (no opener), or — when
-      // its reasoning came via reasoning_content — a stray leading <think> that
-      // never closes (so it would otherwise hide the whole answer). Peel all of
-      // those off so what's left is just the rewritten text.
-      const _stripThink = (t) => {
-        t = markdownModule.normalizeThinkingMarkup(t || '');
-        t = t.replace(/<(?:think(?:ing)?|thought)(?:\s+[^>]*)?>[\s\S]*?<\/(?:think(?:ing)?|thought)>/gi, '');   // complete blocks
-        if (/<\/(?:think(?:ing)?|thought)>/i.test(t)) t = t.replace(/^[\s\S]*?<\/(?:think(?:ing)?|thought)>/i, '');  // reasoning w/o opener
-        return t.replace(/<\/?(?:think(?:ing)?|thought)(?:\s+[^>]*)?>/gi, '').trim();        // any orphan tag
-      };
-      newText = _stripThink(newText);
-
-      // Nothing left after stripping (or an empty stream) → real failure, not a
-      // blank bubble.
-      if (!newText.trim()) {
-        throw new Error('model returned no rewritten text');
-      }
-
-      // Update the element's raw text
-      if (newText) {
-        aiMsgElement.dataset.raw = newText;
-        // Final render with proper markdown
-        if (bodyEl) {
-          bodyEl.innerHTML = markdownModule.processWithThinking(
-            markdownModule.squashOutsideCode(newText)
-          );
-        }
-
-        // Save the new response as a variant
-        variants.push({ raw: newText, html: bodyEl ? bodyEl.innerHTML : '', label: varLabel });
-        aiMsgElement.dataset.variants = JSON.stringify(variants);
-        aiMsgElement.dataset.variantIndex = String(variants.length - 1);
-
-        // Persist variant metadata to server
-        try {
-          await fetch(`${API_BASE}/api/session/${sessionId}/update-last-meta`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ metadata: { variants: variants, variantIndex: variants.length - 1 } }),
-          });
-        } catch (_) {}
-
-        // Re-render variant navigation
-        _renderVariantNav(aiMsgElement, variants, variants.length - 1);
-      }
-
-      if (uiModule) uiModule.scrollHistory();
-
-    } catch (err) {
-      console.error('Rewrite failed:', err);
-      _killRwSpin();
-      // Restore original content on failure
-      if (bodyEl) bodyEl.innerHTML = oldHtml;
-      if (uiModule) uiModule.showError('Rewrite failed: ' + err.message);
-    }
-  }
-
-  /**
-   * Continue the AI's response from where it left off.
-   */
-  export async function continueFrom(aiMsgElement) {
-    const sessionId = sessionModule.getCurrentSessionId();
-    if (!sessionId) return;
-
-    handleChatSubmit(null, 'Continue from where you left off.'); // headless — no composer puppeteering
-  }
-
-  // Open a chat attachment in the right place: images → Gallery editor; PDFs &
-  // text/code/markdown → Documents viewer; anything else → raw file. A given
-  // upload's imported document is reused (cached by upload id) so clicking it
-  // again re-opens the same doc instead of making duplicates.
-  const _attachDocCache = new Map();  // upload id -> doc id
-  function _attachLang(name) {
-    const m = (name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
-    const ext = m ? m[1] : '';
-    const map = { md:'markdown', markdown:'markdown', js:'javascript', ts:'typescript',
-      jsx:'javascript', tsx:'typescript', py:'python', rb:'ruby', go:'go', rs:'rust',
-      java:'java', c:'c', cpp:'cpp', h:'c', hpp:'cpp', cs:'csharp', php:'php', html:'html',
-      htm:'html', css:'css', scss:'scss', json:'json', yaml:'yaml', yml:'yaml', sh:'bash',
-      bash:'bash', sql:'sql', csv:'csv', xml:'xml' };
-    return map[ext] || '';
-  }
-  async function openAttachment(att, isImage) {
-    if (!att || !att.id) return;
-    const id = att.id, name = att.name || '', mime = att.mime || '';
-    const url = `${API_BASE}/api/upload/${id}`;
-
-    // Game build (feature 0032): the Gallery image editor is removed — open
-    // attached images in a new tab instead.
-    if (isImage) {
-      window.open(url, '_blank');
-      return;
-    }
-
-    const isPdf = mime === 'application/pdf' || /\.pdf$/i.test(name);
-    const TEXT_EXT = /\.(txt|md|markdown|js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|hpp|cs|php|html?|css|scss|sass|less|json|ya?ml|toml|ini|conf|env|sh|bash|sql|csv|tsv|xml|log|vue|svelte)$/i;
-    const isTextDoc = TEXT_EXT.test(name) || /^text\//.test(mime);
-    if (!isPdf && !isTextDoc) { window.open(url, '_blank'); return; }  // binary/unknown → raw
-
-    // Reuse the doc we already imported for this upload, if it still loads.
-    const cached = _attachDocCache.get(id);
-    if (cached) {
-      try {
-        documentModule.openPanel && documentModule.openPanel();
-        await documentModule.loadDocument(cached);
-        return;
-      } catch (_) { _attachDocCache.delete(id); }
-    }
-
-    // Need a session to attach the doc to (bare-session fallback, same as compose).
-    let sid = '';
-    try { sid = sessionModule.getCurrentSessionId() || ''; } catch (_) {}
-    if (!sid) {
-      try {
-        const _fd = new FormData();
-        _fd.append('name', name || 'Attachment');
-        _fd.append('skip_validation', 'true');
-        const r = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: _fd, credentials: 'same-origin' });
-        if (r.ok) { const d = await r.json(); if (d && d.id) { sid = d.id; if (sessionModule.loadSessions) await sessionModule.loadSessions(); } }
-      } catch (_) {}
-    }
-
-    try {
-      let doc;
-      if (isPdf) {
-        // import-pdf wants a fresh file upload — re-fetch the stored blob and post it.
-        const blob = await (await fetch(url)).blob();
-        const fd = new FormData();
-        fd.append('file', blob, name || 'document.pdf');
-        if (sid) fd.append('session_id', sid);
-        const res = await fetch(`${API_BASE}/api/documents/import-pdf`, { method: 'POST', body: fd, credentials: 'same-origin' });
-        if (!res.ok) throw new Error('import-pdf ' + res.status);
-        doc = await res.json();
-      } else {
-        const text = await (await fetch(url)).text();
-        const res = await fetch(`${API_BASE}/api/document`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sid || null, title: name.replace(/\.[^.]+$/, '') || 'Document', content: text, language: _attachLang(name) }),
-        });
-        if (!res.ok) throw new Error('document ' + res.status);
-        doc = await res.json();
-      }
-      if (doc && doc.id) {
-        _attachDocCache.set(id, doc.id);
-        documentModule.openPanel && documentModule.openPanel();
-        if (documentModule.injectFreshDoc) documentModule.injectFreshDoc(doc);
-        else await documentModule.loadDocument(doc.id);
-      }
-    } catch (e) {
-      console.error('open attachment as document failed', e);
-      import('./ui.js').then(m => m.showError && m.showError('Could not open attachment')).catch(() => {});
-      window.open(url, '_blank');  // fallback so the file is still reachable
-    }
-  }
-
-  // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
-  //
-  // When OrwellWs is live, the player's turn goes UP as a `turn` frame (the reroute in
-  // handleChatSubmit) and the reply comes back as `chat` `event` frames — the SAME
-  // replay-then-tail broadcast both the sender and a peer window receive. We render
-  // those frames through the SAME shared incremental renderer the SSE path uses
-  // (`_renderLiveStream` → `createStreamRenderer`, ADR 0015) — NOT a second engine —
-  // and we keep the reasoning split VERBATIM (§3.4): a delta with `d.thinking` truthy
-  // lands in the reasoning accordion, never the public reply body.  This is the exact
-  // `roundReplyText`/`roundReasoningText` contract, socket-side.
-  //
-  // Dormant when the flag is off (`isActive()` false): the fetch/SSE path stays
-  // byte-identical, so F1–F5, g15, and the reasoning-scrub gate are untouched. Full
-  // live finalize/dedup runs after the server route (claude/ws-phase1-server) lands.
-  function _wsChatActive() {
-    try { return !!(window.OrwellWs && window.OrwellWs.isActive && window.OrwellWs.isActive()); }
-    catch (_) { return false; }
-  }
-
-  // The live WS round render target. When the sender fires a turn we pin its
-  // already-created streaming holder here (below) so the inbound consumer renders into
-  // it — the sender's own turn. A peer/observer window has no pinned holder and mounts
-  // its own live bubble, exactly as resumeStream does for the SSE mirror.
-  let _wsRound = null;   // { holder, contentDiv, state, reply, reasoning, sessionId, clientMsgId, _spinner }
-  // Is the CURRENT run tool-rich (multi-round)? A rich run's narration spans N rounds that history
-  // reconstructs as N bubbles (chatRenderer "Agent multi-bubble reconstruction"), so its ONE live WS
-  // holder must never be adopted at settle — it would keep round 1..N merged in a single bubble
-  // beside (or in place of) the reconstruction, the mirror-toolturn divergence. Same contract as the
-  // SSE observer's rich resume (resumeStream rich=true: discard the live holder, reload). Reset per
-  // run at `done` (frames arrive in run order, `done` last).
-  let _wsRichRun = false;
-  const _wsLiveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
-  function _wsResetRound() { _wsRound = null; _wsRichRun = false; }
-
-  function _wsEnsureRound() {
-    if (_wsRound && _wsRound.holder && _wsRound.holder.isConnected) return _wsRound;
-    const box = document.getElementById('chat-history');
-    if (!box) return null;
-    const holder = document.createElement('div');
-    holder.className = 'msg msg-ai';
-    const roleLabel = _senderLabel(_shortModel(sessionModule.getCurrentModel && sessionModule.getCurrentModel()));
-    const roleTs = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    holder.innerHTML = '<div class="role">' + uiModule.esc(roleLabel) +
-      ' <span class="role-timestamp">' + roleTs + '</span></div>' +
-      '<div class="body"><div class="stream-content"></div></div>';
-    box.appendChild(holder);
-    _wsRound = { holder: holder, contentDiv: holder.querySelector('.stream-content'),
-                 state: {}, reply: '', reasoning: '',
-                 sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null };
-    uiModule.scrollHistory();
-    return _wsRound;
-  }
-
-  // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
-  function _onWsChatFrame(frame) {
-    const d = (frame && frame.d) || {};
-    // A tool/agent-round marker ⇒ this run is RICH (multi-round). The WS splice renders the whole
-    // run into one holder (it has no per-round bubble machinery), so flag it — the `done` branch
-    // discards the merged holder and lets softReloadHistory rebuild the N-bubble reconstruction.
-    if (d.type === 'agent_step' || d.type === 'tool_start' || d.type === 'tool_output' || d.type === 'tool_progress') {
-      _wsRichRun = true;
-      return;
-    }
-    if (typeof d.delta === 'string') {
-      const round = _wsEnsureRound();
-      if (!round) return;
-      if (round._spinner) { try { round._spinner.destroy(); } catch (_) {} round._spinner = null; }
-      // The reasoning CHANNEL SPLIT is sacred (§3.4): thinking → the accordion, the
-      // clean reply → the body. `_renderLiveStream` places reasoning in a default-
-      // collapsed `.thinking-section` and the reply in `.live-reply-content` — reasoning
-      // can NEVER paint in the public reply container, by construction.
-      if (d.thinking) round.reasoning += d.delta;
-      else            round.reply += d.delta;
-      _renderLiveStream(round.contentDiv, round.reply, round.reasoning, _wsLiveRender, round.state, round.holder);
-      return;
-    }
-    if (d.type === 'message_saved') {
-      // Stamp the server db id so the settle reconcile adopts THIS bubble with zero
-      // churn (mirrors resumeStream's savedDbId — no db-id-less duplicate).
-      if (_wsRound && _wsRound.holder && d.id != null) _wsRound.holder.dataset.dbId = String(d.id);
-      return;
-    }
-    if (d.done) {
-      // Terminal sentinel (maps `[DONE]`, §3.2). Release the live holder and run the
-      // settle reconcile from history — the SAME idempotent, seq-aware softReloadHistory
-      // the SSE path settles through; it adopts the streamed bubble by {id, seq}.
-      const round = _wsRound;
-      const rich = _wsRichRun;
-      const sid = (round && round.sessionId) ||
-                  (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) ||
-                  (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
-      if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) {} }
-      // A RICH (multi-round) run's live holder holds rounds 1..N MERGED — never adoptable (history
-      // reconstructs the turn as N bubbles). Discard it; the reload below rebuilds the real shape.
-      // Mirrors the SSE observer's rich resume contract (mirror-toolturn parity, #1087).
-      if (rich && round && round.holder) { try { round.holder.remove(); } catch (_) {} }
-      _wsResetRound();
-      if (sid && _streamSessionId === sid) _streamSessionId = null; // release the active-stream lock
-      if (sid) { try { softReloadHistory(sid); } catch (_) {} }
-      return;
-    }
-  }
-
-  function _wsRegisterChat() {
-    try { if (window.OrwellWs && window.OrwellWs.onFrame) window.OrwellWs.onFrame('chat', _onWsChatFrame); }
-    catch (_) {}
-  }
+  // #1414 (R3 PR4): the WebSocket Phase-1 chat live-splice cluster (ADR 0017 §3) —
+  // _wsChatActive / _wsResetRound / _wsPinRound / _wsEnsureRound / _onWsChatFrame /
+  // _wsRegisterChat — moved to chatWsSplice.js (imported above). Behavior-preserving: chat.js
+  // still drives the same call points (the up-frame reroute in handleChatSubmit pins the holder
+  // via _wsPinRound and falls soft via _wsResetRound; the boot registration stays below), and
+  // injects the three chat.js-internal deps the consumer reads — _renderLiveStream (the R2 render
+  // seam), softReloadHistory (the settle reconcile), and _senderLabel (the single-source sender
+  // label) — through _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern.
+  // #1414 (R3 PR7): inject the three chat.js-internal deps the reconcile cluster (chatReconcile.js)
+  // reads — hasActiveStream (the SSE-reader liveness helper) + resumeStream (the R2 live-resume attach),
+  // both hoisted function declarations that STAY here, and a () => API_BASE resolver (a chat.js-local
+  // `let`, read live so softReloadHistory's /api/history fetch never sees a stale base). Mirrors the
+  // PR2..PR6 injection pattern; module-eval, so hasActiveStream/resumeStream are hoisted.
+  _setReconcileDeps({
+    hasActiveStream: hasActiveStream,
+    resumeStream: resumeStream,
+    apiBase: () => API_BASE,
+  });
+  _setWsSpliceDeps({
+    renderLiveStream: _renderLiveStream,
+    softReloadHistory: softReloadHistory,
+    senderLabel: _senderLabel,
+  });
+  // #1414 (R3 PR5): inject the three chat.js-internal deps the message-actions cluster
+  // (chatMessageActions.js) needs — handleChatSubmit (the headless send + stream loop, which STAYS
+  // here), a () => API_BASE resolver (a chat.js-local `let`), and the setPendingRegenAttachments
+  // hand-off (whose backing `let _pendingRegenAttachments` handleChatSubmit reads/clears on the next
+  // send). Mirrors the PR2/PR3/PR4 injection pattern; module-eval, so handleChatSubmit is hoisted.
+  _setMessageActionsDeps({
+    handleChatSubmit: handleChatSubmit,
+    apiBase: () => API_BASE,
+    setPendingRegenAttachments: (v) => { _pendingRegenAttachments = v; },
+  });
   if (typeof window !== 'undefined') {
     if (window.OrwellWs) _wsRegisterChat();
     else window.addEventListener('orwell:ws-ready', _wsRegisterChat, { once: true });
@@ -7290,19 +5326,21 @@ import { isNarrow } from './platform.js';
     _renderStreamDropRetry, // BUG 2: the user-controlled Retry control (browser gate)
     _enqueueSend,       // #985 P2-A: enqueue a send-while-streaming into the outbox (browser gate)
     _flushSendOutbox,   // #985 P2-A: drain the outbox FIFO at turn settle (browser gate)
-    _sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
-    _isStreaming: () => isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
-    _setOutboxDispatch: (fn) => { _outboxDispatch = fn; }, // #985 P2-A: swap the flush dispatcher (browser gate)
-    _outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
+    _sendOutbox: chatState._sendOutbox,        // #985 P2-A: the in-memory FIFO (inspected by the browser gate)
+    _isStreaming: () => chatState.isStreaming, // #985 P2-A: read the live streaming flag in the browser gate
+    _setOutboxDispatch,          // #985 P2-A: swap the flush dispatcher (browser gate; moved to chatOutbox.js, #1414 R3 PR6)
+    _outboxAwaitingConfirm: chatState._outboxAwaitingConfirm,      // #891: dispatched-but-unconfirmed durable items (browser gate)
+    _outboxFailed: chatState._outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
     _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
     _outboxConfirmDelivery,      // #891: server-row-observed delivery confirm (browser gate)
+    _setDeliveryState,           // #891 F-A7: per-bubble delivery-state projection (browser gate)
+    _markSendFailedById,         // #891 F-A7: mark a send terminally failed + durable (browser gate)
+    _retryFailedSend,            // #891 F-A7: user-tapped Retry on a failed bubble (browser gate)
     _requeueOutboxItem,          // #891: network-failure requeue into the durable queue (browser gate)
     _persistOutbox,              // #891: persistence write point (browser gate)
     _dedupeOutboxAgainstServer,  // #891: pre-send at-most-once check (browser gate)
     _isNetworkSendFailure,       // #891: fetch-failure classifier (browser gate)
-    _outboxPeekStorage: () => {  // #891: read the persisted record (browser gate)
-      try { return JSON.parse(sessionStorage.getItem(_outboxKey()) || 'null'); } catch (_) { return null; }
-    },
+    _outboxPeekStorage,          // #891: read the persisted record (browser gate; moved to chatOutbox.js, #1414 R3 PR6)
     _updateOutboxStrip,          // #830: re-project the aggregate queue strip (browser gate)
     _syncSubmitButtonState,  // #971: reconcile the composer button to the true streaming state (browser gate)
     _foregroundStreamLive,   // #971: "is a turn genuinely streaming in the foreground" predicate (browser gate)
@@ -7312,9 +5350,9 @@ import { isNarrow } from './platform.js';
     // never called by app code. `sid` (the streaming session id) lets a test simulate a foreground vs.
     // backgrounded/settled run.
     _setStreamStateForTest: ({ streaming, hasAbort, sid } = {}) => {
-      isStreaming = !!streaming;
-      currentAbort = hasAbort ? (currentAbort || new AbortController()) : null;
-      if (sid !== undefined) _streamSessionId = sid;
+      chatState.isStreaming = !!streaming;
+      chatState.currentAbort = hasAbort ? (chatState.currentAbort || new AbortController()) : null;
+      if (sid !== undefined) chatState._streamSessionId = sid;
     },
   };
 

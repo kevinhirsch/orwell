@@ -327,6 +327,17 @@ export const DEAL_IMPACTS = {
 } as const;
 
 /**
+ * 0121 — the LOYALTY-STREAK reward (deal-depth layer, `ORWELL_DEAL_DEPTH`). Consecutive kept deals with the
+ * SAME partner compound the honored fold: a "we've never broken faith" bond builds faster the longer you
+ * both hold the line. The multiplier is BOUNDED (never a runaway) and the WHOLE reward is off unless the
+ * deal-depth flag is on (off ⇒ the plain `DEAL_IMPACTS.honored`, byte-identical). A break resets the streak.
+ */
+export const DEAL_STREAK = {
+  step: 0.25,    // each consecutive kept deal adds this much to the honored-fold multiplier
+  maxMult: 2.0,  // capped — the reward compounds but never dominates
+} as const;
+
+/**
  * Deal-DURATION betrayal scaling (feature 0109 — the single tunable home for "when do you turn?").
  * A break's seeded betrayal-shock (BETRAYAL_SHOCK, applied by `DealLedger.applyBreak`) is multiplied
  * by a bounded scale derived from how much NEGOTIATED life the deal had left — NEVER inlined at the
@@ -349,6 +360,21 @@ export const DEAL_DURATION = {
   perWeekRemaining: 0.2,
   maxScale: 1.6,
   vagueSoften: 0.6,
+} as const;
+
+/**
+ * 0121 R1 — the explicit "keeps their word" deal-willingness lean (deal-depth layer, `ORWELL_DEAL_DEPTH`).
+ * A kept deal diffuses a hidden `reliable:<honorer>` belief NPC→NPC (0038 gossip); a houseguest who HOLDS it
+ * reads the honorer as a more-appealing partner. `dealLean` is the bounded, positive nudge added to the NPC
+ * deal-formation WILLINGNESS read (`GameSessionAdapter.mintNpcDeal`) when a candidate credits the other as
+ * reliable — a HIDDEN magnitude (mandate #2/#3): the player never sees a number, only that reliable players
+ * get offered deals. This is the deal consequence (distinct from the affinity-only social whisper in
+ * `GOSSIP_HEARD.reliable`, so the two never double-count). The KIND of pact stays keyed to the BARE mutual
+ * trust — reputation buys the OPPORTUNITY, not a bigger promise. Off unless the deal-depth flag is on ⇒ no
+ * lean ⇒ byte-identical.
+ */
+export const DEAL_REPUTATION = {
+  dealLean: 0.12,
 } as const;
 
 /**

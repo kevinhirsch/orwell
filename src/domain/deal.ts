@@ -10,8 +10,30 @@ import type { EntityId } from "./ids";
  * math, no Vault — it only answers "does this action implicate / honor / break this deal?".
  */
 
-/** The concrete _Big Brother_ deal kinds (no general contract DSL — model only what the game has). */
-export type DealKind = "safety" | "vote" | "final-two" | "target-other";
+/**
+ * The concrete _Big Brother_ deal kinds (no general contract DSL — model only what the game has).
+ * The first four are DEFENSIVE (negative-obligation) promises — "don't move against me". The last two
+ * (0121) are ACTIVE (positive-obligation) promises — "do this FOR me" — where a break is a FAILURE TO ACT.
+ */
+export type DealKind = "safety" | "vote" | "final-two" | "target-other" | "comp-throw" | "veto-save";
+
+/** 0121 — the ACTIVE-obligation kinds: a break is a failure to act (throw the comp / use the veto to save). */
+const POSITIVE_KINDS: ReadonlySet<DealKind> = new Set<DealKind>(["comp-throw", "veto-save"]);
+export function isPositiveObligation(kind: DealKind): boolean { return POSITIVE_KINDS.has(kind); }
+
+/**
+ * 0121 R1 — the diffusing "keeps their word" REPUTATION belief's lineage id. A kept deal seeds a hidden
+ * `reliable:<honorer>` belief about the honorer that spreads NPC→NPC through the 0038 gossip layer (the
+ * positive mirror of the betrayal rumor). The `factId` is preserved verbatim across every retelling hop
+ * (unlike a belief's drifting `subject`), so ANY holder's belief resolves back to WHICH houseguest is
+ * credited as reliable — one home for the format the seed side (the registry reputation sink) and the read
+ * side (the NPC deal-willingness lean in `mintNpcDeal`) both depend on. Pure data, no state.
+ */
+export const RELIABLE_FACT_PREFIX = "reliable:";
+export function reliableFactId(honorer: EntityId): string { return `${RELIABLE_FACT_PREFIX}${honorer}`; }
+export function reliableHonorerFrom(factId: string): EntityId | undefined {
+  return factId.startsWith(RELIABLE_FACT_PREFIX) ? (factId.slice(RELIABLE_FACT_PREFIX.length) as EntityId) : undefined;
+}
 
 export type DealStatus = "open" | "kept" | "broken";
 
@@ -70,15 +92,16 @@ export interface Deal {
   sealedBallot?: boolean;
 }
 
-/** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. */
+/** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. The active
+ *  kinds (0121) resolve within their week — at that week's comp / veto ceremony. */
 export function horizonOf(kind: DealKind): "week" | "season" {
-  return kind === "safety" || kind === "vote" ? "week" : "season";
+  return kind === "safety" || kind === "vote" || kind === "comp-throw" || kind === "veto-save" ? "week" : "season";
 }
 
 /** A binding action through the live decision seam (0034/0005) the engine reconciles deals against. */
 export interface BindingAction {
   actor: EntityId;
-  kind: "nominate" | "replace" | "veto-use" | "vote-evict";
+  kind: "nominate" | "replace" | "veto-use" | "vote-evict" | "compete";
   /** Who the action moves AGAINST (nominees, replacement, eviction target) — NOT a veto save. */
   targets: readonly EntityId[];
   /**
@@ -87,6 +110,18 @@ export interface BindingAction {
    * a vote between two strangers proves nothing about a promise to a third party.
    */
   alternatives?: readonly EntityId[];
+  /**
+   * 0121 — the actor's OWN outcome in a `compete` action (comp-throw adjudication): `threw` keeps a
+   * throw-promise; `competed`/`won` breaks it (they tried when they swore to tank). Absent on non-compete.
+   */
+  outcome?: "threw" | "competed" | "won";
+  /** 0121 — a `veto-use` action's SAVED set (who the veto pulled off the block) — veto-save adjudication. */
+  saved?: readonly EntityId[];
+  /**
+   * 0121 — the nominees on the block at a `veto-use` — a veto-save obligation only TRIGGERS when the
+   * protected party is actually up (no duty to save someone who isn't nominated). Absent ⇒ no trigger.
+   */
+  nominees?: readonly EntityId[];
 }
 
 /** Adverse actions move against their target; using the veto SAVES, so it is never a betrayal. */
@@ -98,14 +133,35 @@ const ADVERSE = new Set(["nominate", "replace", "vote-evict"]);
  */
 export function conditionFor(kind: DealKind, parties: [EntityId, EntityId]): DealCondition {
   const [a, b] = parties;
-  if (kind === "target-other") return { protect: b, promisors: [a] };
+  // One-way bindings: `target-other` + the 0121 active kinds bind only the promisor (`a`) toward `b`.
+  if (kind === "target-other" || kind === "comp-throw" || kind === "veto-save") return { protect: b, promisors: [a] };
   // safety / vote / final-two are mutual: neither party may move against the other.
   return { protect: b, promisors: [a, b] };
+}
+
+/**
+ * 0121 — evaluate an ACTIVE-obligation deal (comp-throw / veto-save) against an action: `broken` (the
+ * promisor failed to act), `kept` (they came through), or `null` (this action doesn't trigger the duty).
+ * Pure — decided from the structured action, never prose.
+ */
+function positiveVerdict(deal: Deal, action: BindingAction): "kept" | "broken" | null {
+  if (!deal.condition.promisors.includes(action.actor)) return null;
+  if (deal.kind === "comp-throw") {
+    if (action.kind !== "compete") return null; // the duty resolves at the promisor's OWN comp turn
+    return action.outcome === "threw" ? "kept" : "broken"; // competed / won ⇒ they didn't tank as sworn
+  }
+  if (deal.kind === "veto-save") {
+    if (action.kind !== "veto-use") return null;
+    if (!(action.nominees ?? []).includes(deal.condition.protect)) return null; // no duty unless they're on the block
+    return (action.saved ?? []).includes(deal.condition.protect) ? "kept" : "broken";
+  }
+  return null;
 }
 
 /** Does this action involve a party of the deal taking an adverse swing whose target is a party? */
 export function actionImplicates(deal: Deal, action: BindingAction): boolean {
   if (deal.status !== "open") return false;
+  if (isPositiveObligation(deal.kind)) return positiveVerdict(deal, action) !== null;
   if (!ADVERSE.has(action.kind)) return false;
   const isParty = deal.parties.includes(action.actor);
   const hitsParty = action.targets.some((t) => deal.parties.includes(t) && t !== action.actor);
@@ -118,6 +174,7 @@ export function actionImplicates(deal: Deal, action: BindingAction): boolean {
  */
 export function actionBreaks(deal: Deal, action: BindingAction): boolean {
   if (deal.status !== "open") return false;
+  if (isPositiveObligation(deal.kind)) return positiveVerdict(deal, action) === "broken";
   if (!ADVERSE.has(action.kind)) return false;
   const c = deal.condition;
   if (!c.promisors.includes(action.actor)) return false;
@@ -133,6 +190,8 @@ export function actionBreaks(deal: Deal, action: BindingAction): boolean {
 /** The party wronged by a break (the one moved against); undefined when the action doesn't break it. */
 export function wrongedParty(deal: Deal, action: BindingAction): EntityId | undefined {
   if (!actionBreaks(deal, action)) return undefined;
+  // For an active-obligation break the wronged party is the one who was promised the act (protect).
+  if (isPositiveObligation(deal.kind)) return deal.condition.protect;
   return deal.parties.find((p) => p !== action.actor);
 }
 
@@ -144,6 +203,7 @@ export function wrongedParty(deal: Deal, action: BindingAction): EntityId | unde
  */
 export function actionHonors(deal: Deal, action: BindingAction): boolean {
   if (deal.status !== "open") return false;
+  if (isPositiveObligation(deal.kind)) return positiveVerdict(deal, action) === "kept";
   if (!ADVERSE.has(action.kind)) return false;
   if (!deal.condition.promisors.includes(action.actor)) return false;
   const other = deal.parties.find((p) => p !== action.actor);

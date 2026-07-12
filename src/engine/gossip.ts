@@ -89,6 +89,12 @@ export const GOSSIP_HEARD: Record<string, Partial<EdgeSignals>> = {
   gossip: { trust: -0.04 },                     // "talking about everyone behind their backs"
   conflict: { affinity: -0.03 },                // "at each other's throats" — messy to be near
   betrayal: { trust: -0.06, threat: +0.07 },    // "about to turn on someone" — dangerous to trust
+  // 0121 R1 — the POSITIVE mirror: hearing someone "keeps their word" makes them a bit more LIKED (a small,
+  // bounded AFFINITY-only whisper toward the subject — a faint social/jury warmth). AFFINITY-ONLY is
+  // deliberate: the deal consequence lives in the explicit deal-willingness lean (`mintNpcDeal`), so the
+  // whisper must NOT touch trust or it would double-count into the deal-trust read. The only warming
+  // GOSSIP_HEARD entry; only ever seeded by the deal-depth reputation reward (gated ⇒ off = never used).
+  reliable: { affinity: +0.03 },  // "keeps their word" — a proven partner (affinity-only whisper)
 };
 
 /** The vague gloss a scene's nature gets when it becomes a rumor — NEVER the verbatim scene. */
@@ -268,11 +274,18 @@ export function diffuseGossip(deps: {
    * jury draw stream is byte-identical off vs on (the drift already rides a per-hop FORK of the parent).
    */
   voiceOf?: (id: EntityId) => VoiceProfile | undefined;
+  /**
+   * 0121 R1 — an explicit lineage id to seed the belief under (instead of minting a fresh `fact:<origin>:…`).
+   * ABSENT (every existing caller) ⇒ mint as before, drawing `rng.int(1_000_000)` — byte-identical. PRESENT
+   * ⇒ use it verbatim AND skip that mint draw; used only by the reliability-reputation reward, which runs on
+   * its OWN dedicated side-rng (never a shared/seeded stream), so skipping the draw perturbs nothing.
+   */
+  factId?: string;
 }): { factId: string; original: string } {
   const { knowledge, graph, rng, origin, fact, rounds, rel, sceneType } = deps;
   const transmitProb = deps.transmitProb ?? GOSSIP.transmitProb;
   const decay = deps.decay ?? 0.7;
-  const factId = `fact:${origin}:${rng.int(1_000_000)}`;
+  const factId = deps.factId ?? `fact:${origin}:${rng.int(1_000_000)}`;
   const original = fact.content;
 
   knowledge.seedBelief(
@@ -375,3 +388,52 @@ export function diffuseGossip(deps: {
 }
 
 type KnowledgeFactLike = { hops?: number; confidence?: number; content: string };
+
+/**
+ * 0121 R1 — the "keeps their word" REPUTATION reward. A kept deal diffuses a Vault-free reputation about the
+ * `honorer` NPC→NPC (seeded on the deal partner `other`, spread along the affinity `graph`) under a STABLE
+ * `reliable:<honorer>` lineage (`factId`), so any holder's belief resolves back to who is credited — the read
+ * side (`mintNpcDeal`'s deal-willingness lean) depends on that. Every THIRD PARTY who comes to hold it then
+ * gets a small AFFINITY-ONLY whisper toward the honorer (`GOSSIP_HEARD.reliable`) — a faint "reliable people
+ * are more liked" warmth, NOT a deal signal (the deal consequence is the explicit lean in `mintNpcDeal`, so
+ * the whisper stays off the deal-trust read to avoid double-counting). The deal partner `other` is EXCLUDED
+ * (they already earned the direct honored fold) and the honorer is the subject (never folds toward themself).
+ *
+ * A single-subject reputation, so it does NOT use `diffuseGossip`'s two-subject scene receipt fold — the
+ * whisper is applied here directly, bounded, on the SAME injected rng (dedicated by the caller ⇒ the main
+ * season/vote stream is never re-phased). Off (the caller only invokes it under the deal-depth flag) ⇒ never
+ * runs ⇒ byte-identical. Pure but for the injected `knowledge`/`rel`/`rng` it mutates; no wall-clock, no I/O.
+ */
+export function spreadReliableReputation(deps: {
+  knowledge: KnowledgeService;
+  rel: RelationshipModel;
+  graph: SocialGraph;
+  rng: RandomnessSource;
+  honorer: EntityId;
+  other: EntityId;
+  content: string;
+  candidates: readonly EntityId[];
+  /** 0121 R1 — the stable `reliable:<honorer>` lineage id to seed under (so a holder's belief is resolvable
+   *  back to the honorer). Absent ⇒ `diffuseGossip` mints an anonymous id (used only by the pure-helper tests). */
+  factId?: string;
+  rounds?: number;
+  transmitProb?: number;
+  decay?: number;
+}): { factId: string; leaned: EntityId[] } {
+  const { knowledge, rel, graph, rng, honorer, other, content, candidates } = deps;
+  const { factId } = diffuseGossip({
+    knowledge, graph, rng, origin: other, fact: { content }, factId: deps.factId,
+    rounds: deps.rounds ?? GOSSIP.rounds,
+    transmitProb: deps.transmitProb ?? GOSSIP.transmitProb,
+    decay: deps.decay ?? GOSSIP.decay,
+  });
+  const leaned: EntityId[] = [];
+  for (const npc of candidates) {
+    if (npc === honorer || npc === other) continue;
+    if (knowledge.knownTo(npc).some((k) => k.factId === factId)) {
+      rel.applyImpactDirected(npc, honorer, GOSSIP_HEARD.reliable, rng);
+      leaned.push(npc);
+    }
+  }
+  return { factId, leaned };
+}

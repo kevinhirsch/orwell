@@ -176,6 +176,10 @@
       // ── the scrolling body ──────────────────────────────────────────────────────
       ".ow-sheet-body { flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch;" +
       "  padding: 0 .9rem calc(.9rem + env(safe-area-inset-bottom, 0px)); }" +
+      // WCAG 2.1.1 (Keyboard): the scroll body is focusable (tabindex=0, set in _build) so a
+      // keyboard/SR user can Tab to it and arrow/PageDown/Space through content below the fold.
+      // Neutral iOS-blue ring, consistent with the window kit.
+      ".ow-sheet-body:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }" +
       // ── ANCHORED (non-modal action-sheet) placement ─────────────────────────────
       // A NON-MODAL sheet pinned above the composer (the decision migration). No scrim, no inert
       // background, no full-height detents — it's a deliberate action panel anchored to the
@@ -294,6 +298,14 @@
 
     var body = document.createElement("div");
     body.className = "ow-sheet-body";
+    // WCAG 2.1.1 (Keyboard): the sheet body scrolls (overflow:auto, detent-capped max-height), so
+    // non-interactive content below the fold is unreachable without a pointer. tabindex=0 lets a
+    // keyboard/SR user land on it (native arrow/PageDown/Space scroll) and — since _trapFocus's
+    // query already matches [tabindex] — folds it into the sheet's focus trap. role=region + a
+    // title-derived label names it in the accessibility tree.
+    body.setAttribute("tabindex", "0");
+    body.setAttribute("role", "region");
+    body.setAttribute("aria-label", this.o.title ? this.o.title + " content" : "panel content");
     if (this.o.content instanceof Node) body.appendChild(this.o.content);
     else if (typeof this.o.content === "string") body.innerHTML = this.o.content;
 

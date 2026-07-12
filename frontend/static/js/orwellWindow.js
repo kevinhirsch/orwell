@@ -321,6 +321,10 @@ function ensureCss() {
        window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
        as the fallback for engines without dvh. */
     .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); max-height: min(70dvh, 560px); }
+    /* WCAG 2.1.1 (Keyboard): the scroll body is focusable (tabindex=0, set in _build) so a
+       keyboard/SR user can Tab to it and use arrows/PageDown/Space to read non-interactive
+       content below the fold. Ring matches the kit's neutral iOS-blue focus ring (titlebar). */
+    .ow-body:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }
     /* ── A7 [ruling #19] — the Windows-7 fly-out family ───────────────────────
        The animation CONTRACT exposes DISTINCT minimize vs. close keyframes, both
        DRIVEN (not pure transitions) so the CSS itself names the two motions; the
@@ -610,15 +614,21 @@ const SHEET_DISMISS_FRACTION = 0.4;
 // the dock (chip rendered, panel hidden, no open animation — no flash, no
 // raise, no focus steal).
 function parkedKey(id) {
-  return 'orwell-win-parked:' + id + ':' + ((document.body && document.body.dataset.user) || '');
+  // R5/#1416b: per-user via the shared fail-closed helper — 'orwell-win-parked:<id>:<user>' when
+  // there is an identity (or ':local' under an explicit no-auth signal), else null so the caller
+  // SKIPS persistence rather than sharing a namespace across users.
+  return (window.orwellUserKey && window.orwellUserKey('orwell-win-parked:' + id)) || null;
 }
 function loadParked(id) {
-  try { return localStorage.getItem(parkedKey(id)) === '1'; } catch (_) { return false; }
+  var k = parkedKey(id);
+  try { return !!k && localStorage.getItem(k) === '1'; } catch (_) { return false; }
 }
 function saveParked(id, on) {
+  var k = parkedKey(id);
+  if (!k) return;                       // no identity ⇒ skip (never a shared-namespace write)
   try {
-    if (on) localStorage.setItem(parkedKey(id), '1');
-    else localStorage.removeItem(parkedKey(id));
+    if (on) localStorage.setItem(k, '1');
+    else localStorage.removeItem(k);
   } catch (_) {}
 }
 
@@ -627,18 +637,23 @@ function saveParked(id, on) {
 // key pattern so docked-vs-floating survives a reload exactly like the rail's
 // other persisted layout. Default is floating unless `defaultDocked` flips it.
 function dockedKey(id) {
-  return 'orwell-' + id + '-docked:' + ((document.body && document.body.dataset.user) || '');
+  // R5/#1416b: per-user via the shared fail-closed helper — 'orwell-<id>-docked:<user>' (or
+  // ':local' under an explicit no-auth signal), else null so the caller SKIPS persistence.
+  return (window.orwellUserKey && window.orwellUserKey('orwell-' + id + '-docked')) || null;
 }
 function loadDocked(id, dflt) {
+  const k = dockedKey(id);
   try {
-    const v = localStorage.getItem(dockedKey(id));
+    const v = k && localStorage.getItem(k);
     if (v === '1') return true;
     if (v === '0') return false;
   } catch (_) {}
   return !!dflt;
 }
 function saveDocked(id, on) {
-  try { localStorage.setItem(dockedKey(id), on ? '1' : '0'); } catch (_) {}
+  const k = dockedKey(id);
+  if (!k) return;                       // no identity ⇒ skip (never a shared-namespace write)
+  try { localStorage.setItem(k, on ? '1' : '0'); } catch (_) {}
 }
 
 // ── 0064 Part F: cross-device layout sync ──────────────────────────────────
@@ -889,6 +904,14 @@ export class OrwellWindow {
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';
+    // WCAG 2.1.1 (Keyboard): .ow-body is overflow:auto with a max-height, so when its content is
+    // non-interactive (Memory Wall, Retrospective, Deals…) a keyboard-only / SR user has no way to
+    // scroll below the fold. tabindex=0 lets Tab land on it (native arrow/PageDown/Space scroll)
+    // and — since _trapFocus's query already matches [tabindex] — folds it into the focus trap.
+    // role=region + a title-derived label names it in the accessibility tree.
+    body.setAttribute('tabindex', '0');
+    body.setAttribute('role', 'region');
+    body.setAttribute('aria-label', this.o.title ? this.o.title + ' content' : 'panel content');
     if (this.o.content instanceof Node) body.appendChild(this.o.content);
     else if (typeof this.o.content === 'string') body.innerHTML = this.o.content;
     // #893: the sheet grabber — the iOS pill above the titlebar (44px hit region in
@@ -1069,7 +1092,10 @@ export class OrwellWindow {
     const dirs = { ArrowLeft: [-STEP, 0], ArrowRight: [STEP, 0], ArrowUp: [0, -STEP], ArrowDown: [0, STEP] };
     if (e.key === 'Home' && this._slot && this.o.slotKey) {
       e.preventDefault();
-      try { localStorage.removeItem('orwell-slot-offset:' + this.o.slotKey + ':' + ((document.body && document.body.dataset.user) || '')); } catch (_) {}
+      // R5/#1416b: per-user via the shared fail-closed helper; null-guarded so a missing identity
+      // skips the removeItem rather than coercing a null key into a shared 'null' namespace.
+      const k = window.orwellUserKey && window.orwellUserKey('orwell-slot-offset:' + this.o.slotKey);
+      if (k) { try { localStorage.removeItem(k); } catch (_) {} }
       this._slot.restack();
       return;
     }

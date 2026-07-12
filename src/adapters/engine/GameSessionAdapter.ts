@@ -12,6 +12,7 @@ import type {
   PreSeedNextSeasonReq, PreSeedNextSeasonView,
   RecordCastProfileReq, RecordCastProfileResult, FinaleFastForwardView,
   RecordCastIdentityReq, RecordCastIdentityResult, ProposedCastIdentityFacets,
+  RecordCastGenesisReq, RecordCastGenesisResult, GenesisViolationDTO,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
   PremiereIntrosView, FirstImpressionView, MarkHouseguestMetOpts,
   StateDeltaView, DeltaEventView,
@@ -47,10 +48,13 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
+import { isPositiveObligation } from "../../domain/deal";
+import type { DealKind } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
-import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
-import type { ConfessionalContext } from "../../engine/confessionals";
+import { confessionalFor, involvedConfessionals, isBareGame, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
+import type { ConfessionalContext, ConfessionalDepth } from "../../engine/confessionals";
+import { CONFESSIONAL } from "../../engine/confessionalConstants";
 import { buildPullQuoteReel } from "../../engine/pullQuoteReel";
 import { rankApproaches, applyApproachCooldown } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
@@ -171,15 +175,16 @@ function isUsableTagline(s: string): boolean {
 }
 import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearance } from "../../engine/portraitPrompts";
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
-import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
+import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace, VOL_OF } from "../../engine/characterFactory";
+import type { Disposition } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
-import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
+import { evolveEmotion, arcNote, offscreenEmotion, composedEmotion, effectiveDisposition, settleScaleOf } from "../../engine/emotionalArc";
 import { strategicDriveWeight } from "../../engine/offscreen";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
 import {
-  CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
+  CEREMONY_IMPACTS, DEAL_REPUTATION, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { notorietyBias, recognitionFor } from "../../engine/notoriety";
@@ -228,7 +233,9 @@ import {
   preGameTieToRetrospectiveProse, showmanceToRetrospectiveProse,
   tieExposureOf, tieNatureProse, exposedTies, nextTieExposure,
 } from "../../engine/seededRelationships";
-import type { SeededRelationships } from "../../engine/seededRelationships";
+import type { SeededRelationships, PreGameTie } from "../../engine/seededRelationships";
+import { validateCastGenesis, generateSeasonBrief } from "../../engine/castGenesis";
+import type { CastGenesisProposal, SeasonBrief, GenesisContext } from "../../engine/castGenesis";
 import { surfaceSeededTies } from "../../engine/seededTieSurfacing";
 import type { SurfacedTie } from "../../engine/seededTieSurfacing";
 import { overhearTieReveal } from "../../engine/tieReveal";
@@ -402,6 +409,12 @@ interface PrewarmCast {
   privateOrientations: Record<EntityId, Orientation>;
   groundedSkinTones: Record<EntityId, string>;
   portraitStyleAnchor: string;
+  // 0116 — model-authored cast genesis: present once `recordCastGenesis` authored the warmed skeleton.
+  // The validated tie graph rides here so createCharacter's adopt path can prefer it over the floor draw;
+  // the seeded brief + provenance persist with the warm. Absent ⇒ the deterministic floor cast (byte-neutral).
+  genesisTies?: PreGameTie[];
+  seasonBrief?: SeasonBrief;
+  genesisAuthored?: boolean;
 }
 
 /**
@@ -457,6 +470,43 @@ const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
  * `setStrategicCadenceEnabled`. When on, sharper/more-strategic houseguests scheme a touch more often.
  */
 const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
+
+/**
+ * 0121 — whether the DEAL-DEPTH layer runs by DEFAULT (the active-obligation kinds `comp-throw`/`veto-save`
+ * + the reliability rewards). OFF unless `ORWELL_DEAL_DEPTH=1`. A DEDICATED flag (sibling to
+ * `ORWELL_STRATEGIC_CADENCE`/`ORWELL_CAMPAIGNS`) so calibration neutrality is provable in isolation: unset ⇒
+ * the new kinds can't be made and every deal fold is exactly 0039/0109 ⇒ byte-identical. NOT yet in the
+ * deploy — the live-loop reconciliation of the new kinds + the reward folds land before it opts in.
+ */
+const DEAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_DEAL_DEPTH === "1";
+
+/**
+ * 0122 — whether the DEEPER, DAILY confessional layer runs by DEFAULT (the five triggered facets +
+ * the once-per-in-game-day sweep where most living NPCs confess unless their game is bare). OFF unless
+ * `ORWELL_CONFESSIONAL_DEPTH=1`. A DEDICATED flag (sibling to `ORWELL_DEAL_DEPTH`/`ORWELL_STRATEGIC_CADENCE`)
+ * so calibration neutrality is provable in isolation: unset ⇒ no daily sweep runs, no depth context is
+ * passed, and every confessional is exactly 0040/0089/0090 ⇒ byte-identical. The sweep additionally gates
+ * on `perConversationClockLive()` (pinned off in the golden driver), so the golden fixture never stales.
+ */
+const CONFESSIONAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_CONFESSIONAL_DEPTH === "1";
+
+/**
+ * 0123 — whether the NPC-initiated deal-OFFER layer runs by DEFAULT (a motivated houseguest floats the
+ * player a deal at a lull; accept → a real deal, decline → a cooling). OFF unless `ORWELL_NPC_DEAL_OFFERS=1`.
+ * A DEDICATED flag (sibling to `ORWELL_DEAL_DEPTH`/`ORWELL_CONFESSIONAL_DEPTH`) so calibration neutrality is
+ * provable in isolation: unset ⇒ no offer is generated, no pending is raised, nothing folds ⇒ byte-identical.
+ */
+const NPC_DEAL_OFFERS_ENABLED_DEFAULT = process.env.ORWELL_NPC_DEAL_OFFERS === "1";
+
+/**
+ * 0124 — whether the DEEPER character-evolution layer runs by DEFAULT (independent distress/confidence
+ * axes + strategic-temperament drift + disposition-tuned reactivity). OFF unless `ORWELL_SOUL_DEPTH=1`.
+ * A DEDICATED flag (sibling to `ORWELL_CONFESSIONAL_DEPTH`/`ORWELL_DEAL_DEPTH`) so calibration neutrality
+ * is provable in isolation: unset ⇒ `evolveEmotion` moves only the single 0041 scalar, the behavior reads
+ * use the plain `emotionalState`/static disposition, and NPC volatility is the legacy random draw ⇒
+ * byte-identical (the seeded `juryReach`/golden spine untouched).
+ */
+const SOUL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_SOUL_DEPTH === "1";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -842,6 +892,24 @@ export class GameSessionAdapter implements GameSession {
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
   /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
+  /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
+  private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
+  /** 0121 R1 — seed a diffusing "keeps their word" reputation when a deal is kept (registry-wired; it holds
+   *  the KnowledgeService `reconcileDeals` does not). Unset (standalone) ⇒ no reputation ⇒ byte-identical. */
+  private dealReputationSink?: (honorer: EntityId, other: EntityId) => void;
+  /** 0121 R1 — the Vault-free reliability-reputation READER (registry-wired from the KnowledgeService): for a
+   *  holder, the set of honorer ids they believe "keep their word" (the diffusing `reliable:<honorer>` belief
+   *  lineage). A knowledge-layer read, NEVER a Vault read. Unset (a bare adapter) ⇒ no reputation is read ⇒ no
+   *  deal-willingness lean, so `mintNpcDeal` is byte-identical. */
+  private reliabilityReader?: (holder: EntityId) => ReadonlySet<EntityId>;
+  /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
+  private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
+  /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
+  private npcDealOffersEnabled = NPC_DEAL_OFFERS_ENABLED_DEFAULT;
+  /** 0124 — deeper character evolution (multi-axis affect + temperament drift + tuned reactivity); off ⇒ 0041 exactly. */
+  private soulDepthEnabled = SOUL_DEPTH_ENABLED_DEFAULT;
+  /** 0122 — the last in-game day the daily confessional sweep ran, so it fires at most once per day. */
+  private lastConfessionalSweepDay = 0;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -1376,6 +1444,18 @@ export class GameSessionAdapter implements GameSession {
    * budget (0016-style) — never the content.
    */
   private seededRels: SeededRelationships = { ties: [], showmances: [] };
+
+  /**
+   * Feature 0116 — the model-authored pre-show tie graph (validated by the genesis envelope). When
+   * non-null, `seedSeededRelationships` PREFERS it over the floor draw at createCharacter (folding the
+   * engine-owned `TIE_AFFINITY_BIAS` + sealing, exactly as for a floor tie); showmances stay engine-seeded.
+   * Null ⇒ the deterministic floor tie draw stands, so the seeded sims are byte-identical (byte-neutral).
+   */
+  private genesisTies: PreGameTie[] | null = null;
+  /** 0116 — the seeded season brief the genesis proposal was steered by (persisted as part of the world-gen artifact). */
+  private seasonBrief: SeasonBrief | null = null;
+  /** 0116 — provenance: true once cast genesis authored this cast's skeleton (distinguishes an authored cast from the floor). */
+  private genesisAuthored = false;
   private tieBudget = DEFAULT_TIE_BUDGET;
   private showmanceBudget = DEFAULT_SHOWMANCE_BUDGET;
 
@@ -2312,6 +2392,94 @@ export class GameSessionAdapter implements GameSession {
     return { accepted: true, applied };
   }
 
+  /**
+   * Feature 0116 — the model-authored cast-genesis write-back. Validate the whole-cast SKELETON proposal
+   * through the engine's envelope (`castGenesis.validateCastGenesis`) and fold the COMMITTED skeleton onto
+   * the PRE-WARMED cast: names (validated, not pooled), the freeform identity (verbatim), the derived
+   * archetype tag, the banded stats (no raw number escapes the clamp), the closed-kind C9-gated hidden
+   * elements, the persona prose, and the sanity-validated pre-show tie graph. Generalizes ADR 0005 to
+   * world-gen: identity is OPEN-set (recorded faithfully), power is CLOSED-set (engine-owned, banded,
+   * clamped). Hidden game weights are never proposable (stripped + flagged); the descriptive 0063 identity
+   * facets (ethnicity/gender/orientation/age) continue to route through the UNCHANGED `recordCastIdentity`
+   * pipeline, not this call.
+   *
+   * A PRE-GAME operation ONLY (the §4 decided lifecycle: genesis runs async DURING the casting interview,
+   * onto the `preSeedCast` warm). Refused once a season runs — never mutate a live cast's stats/identity
+   * mid-game (the calibration/fairness hazard). Player-BLIND: the player NAME (from the in-flight intake)
+   * feeds ONLY the post-hoc name near-duplicate NUDGE, never the accepted identity. Idempotent; durable
+   * pre-game state (0030). With NO proposal this call is never made and the deterministic floor stands
+   * (byte-neutral). Returns the structured, Vault-free violations for the bounded FE re-roll.
+   */
+  recordCastGenesis(req: RecordCastGenesisReq): RecordCastGenesisResult {
+    // Refused mid-season: genesis is a pre-game operation (never mutate a live cast's stats/identity).
+    if (this.house) {
+      return { accepted: false, committed: 0, violations: [], varianceOk: true,
+        reason: this.live?.finished ? "over" : "a season is already running" };
+    }
+    // Requires a pre-warmed cast to fold onto (preSeedCast mints + warms the deterministic floor first).
+    if (!this.prewarm) {
+      return { accepted: false, committed: 0, violations: [], varianceOk: true, reason: "no warmed cast — call preSeedCast first" };
+    }
+    const cast = this.prewarm;
+
+    // The player-BLIND validation context, built from the warmed FLOOR cast (the per-NPC fallback source).
+    // The in-flight intake NAME feeds ONLY the post-hoc name near-duplicate NUDGE — it is never woven into
+    // any accepted identity (sycophancy-proof by construction). The player carries no vocation/hometown
+    // facet in the current model, so the vocation+hometown nudge is dormant until that is added.
+    const gctx: GenesisContext = {
+      npcs: cast.npcs.map((n) => ({
+        id: n.id, floorArchetype: n.character.archetype,
+        floorStats: { ...n.character.stats }, floorName: n.name,
+      })),
+      playerId: PLAYER,
+      ...(this.intake.playerName && this.intake.playerName.trim() ? { playerName: this.intake.playerName.trim() } : {}),
+    };
+    const result = validateCastGenesis(req as unknown as CastGenesisProposal, gctx);
+
+    // Fold the committed skeleton onto each byte-stable warmed Character (the recordCastIdentity /
+    // recordCastProfile per-field-fallback discipline): an absent committed field keeps the floor value,
+    // so a proposal that failed a re-roll validator for one facet never breaks the whole houseguest.
+    let committed = 0;
+    for (const c of result.npcs) {
+      const target = cast.npcs.find((n) => n.id === c.id);
+      if (!target) continue;
+      let touched = false;
+      if (c.name !== undefined) { target.name = c.name; touched = true; }
+      if (c.identityConcept !== undefined) { target.character.identityConcept = c.identityConcept; touched = true; }
+      if (c.archetype !== undefined) { target.character.archetype = c.archetype; touched = true; }
+      if (c.stats !== undefined) { target.character.stats = { ...c.stats }; touched = true; }
+      if (c.hiddenElements !== undefined) { target.character.hiddenElements = c.hiddenElements; touched = true; }
+      if (c.vocation !== undefined) { target.character.vocation = c.vocation; touched = true; }
+      if (c.hometown !== undefined) { target.character.hometown = c.hometown; touched = true; }
+      if (c.demeanor !== undefined) { target.character.demeanor = c.demeanor; touched = true; }
+      if (c.background !== undefined) { target.character.background = c.background; touched = true; }
+      // Authoring the biography over the floor placeholder is the same season-start UPGRADE as
+      // recordCastProfile (#1067): mark the provenance so the 0031 superset check reads it as an
+      // accretion, not degradation, once the cast goes live.
+      if (c.biography !== undefined) { target.character.biography = c.biography; target.character.deepProfileAuthored = true; touched = true; }
+      if (c.presentation !== undefined) { target.character.presentation = c.presentation; touched = true; }
+      if (c.appearance !== undefined) { target.character.appearance = c.appearance; touched = true; }
+      if (touched) committed++;
+    }
+
+    // The validated tie graph → stored for `seedSeededRelationships` to prefer over the floor draw at
+    // createCharacter (where the move-in edges exist, so TIE_AFFINITY_BIAS folds + the ties seal). The
+    // seeded season brief + provenance ride the prewarm as the persisted world-gen artifact (mandate #4).
+    this.genesisTies = result.ties;
+    this.seasonBrief = generateSeasonBrief(cast.seed);
+    this.genesisAuthored = true;
+    cast.genesisTies = result.ties;
+    cast.seasonBrief = this.seasonBrief;
+    cast.genesisAuthored = true;
+
+    this.persist(); // durable pre-game state (0030), exactly like preSeedCast / a prewarm recordCastIdentity fold
+
+    const violations: GenesisViolationDTO[] = result.violations.map((v) => ({
+      scope: v.scope, ...(v.npcId ? { npcId: v.npcId } : {}), field: v.field, rule: v.rule, action: v.action,
+    }));
+    return { accepted: true, committed, violations, varianceOk: result.varianceOk };
+  }
+
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
   seasonRecap(): SeasonRecapView {
     const events = this.record?.events() ?? [];
@@ -2771,6 +2939,12 @@ export class GameSessionAdapter implements GameSession {
       ...(Object.keys(this.playerBluffBelief).length ? { secretPlayerBluffBelief: cloneSession(this.playerBluffBelief) } : {}),
       ...(this.seededRels.ties.length || this.seededRels.showmances.length
         ? { seededRelationships: cloneSession(this.seededRels) } : {}),
+      // 0116 — the model-authored world-gen artifact: the seeded season brief (mandate #4 — the committed
+      // genesis is the persisted artifact, recalled never regenerated) + the authored-skeleton provenance.
+      // (The genesis TIE graph is NOT persisted here — pre-game it rides the `prewarm`, and post-createCharacter
+      // it lives in `seededRelationships` above with exposure "sealed"; so it is durable without a third copy.)
+      ...(this.seasonBrief ? { seasonBrief: cloneSession(this.seasonBrief) } : {}),
+      ...(this.genesisAuthored ? { genesisAuthored: true } : {}),
       // 0059 §5 — the tie-surfacing scheduler's hidden bookkeeping: the season player-surface cap counter,
       // the subjects already surfaced to the player (so a tie never re-spends the cap), and the dedicated
       // stream's tick counter. Persisted so a discovered tie stays discovered, the cap is never re-opened
@@ -3110,6 +3284,14 @@ export class GameSessionAdapter implements GameSession {
     } else {
       this.seededRels = { ties: [], showmances: [] };
     }
+    // 0116 — restore the model-authored world-gen artifact. The seeded season brief + the authored-skeleton
+    // provenance are recalled, never regenerated (mandate #4). `genesisTies` is NOT a persisted top-level
+    // field (pre-game it rides the restored `prewarm`; post-createCharacter the ties live in `seededRels`
+    // above, already folded + sealed), so it stays null here — the floor-vs-genesis choice was made at
+    // createCharacter and is baked into `seededRels`. Absent on a pre-0116 save ⇒ null/false (the floor cast).
+    this.seasonBrief = core.seasonBrief ? cloneSession(core.seasonBrief) : null;
+    this.genesisAuthored = core.genesisAuthored ?? false;
+    this.genesisTies = null;
     // 0059 §5 — restore the tie-surfacing bookkeeping (absent on pre-§5 saves ⇒ zero/empty: the cap is
     // intact, no tie has surfaced, the dedicated stream restarts at 0). Never silently re-opens the cap.
     this.playerTieSurfaceCount = core.playerTieSurfaceCount ?? 0;
@@ -3576,7 +3758,7 @@ export class GameSessionAdapter implements GameSession {
     if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
     const immediate = id === PLAYER
       ? playerRestDeficit(this.live)
-      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id), this.lateCompanyFor(id));
     // Extension 3 (compounding multi-night meter): only ADD the accumulated meter when its own flag is
     // on; off ⇒ just the single-night immediate deficit (byte-identical to the Phase-1 comp term).
     if (!this.multiNightFatigueEnabled) return immediate;
@@ -3592,7 +3774,7 @@ export class GameSessionAdapter implements GameSession {
     if (!this.multiNightFatigueEnabled || !this.live || !this.house) return;
     const lastNight = (id: EntityId): number => id === PLAYER
       ? playerRestDeficit(this.live!)
-      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
+      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id), this.lateCompanyFor(id));
     this.live.playerFatigue = accrueFatigue(this.live.playerFatigue ?? 0, lastNight(PLAYER));
     const next: Record<EntityId, number> = { ...(this.live.npcFatigue ?? {}) };
     for (const n of this.house.npcs) next[n.id] = accrueFatigue(next[n.id] ?? 0, lastNight(n.id));
@@ -3608,6 +3790,21 @@ export class GameSessionAdapter implements GameSession {
     const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
     const conflicts = this.nightConflicts.get(id) ?? 0;
     return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
+  }
+
+  /** 0066 Extension 4 — the count of OTHER active NPCs who are natural night-owls tonight (their own
+   *  conflict-drained chronotype bedtime runs past midnight) and would be up as late company. Feeds the
+   *  EMERGENT bedtime (`npcRestDeficit`): an owl only lingers (and pays sleep debt) when they had company
+   *  to stay up with — alone on a dead night they wind down early and carry none (never a flat archetype
+   *  tax). The player is excluded (their staying-up is the separate `nightEnd`/social-floor extension).
+   *  Pure — reads the same deterministic chronotype math; no rng. */
+  private lateCompanyFor(id: EntityId): number {
+    let n = 0;
+    for (const other of this.presenceActive()) {
+      if (other === id || other === PLAYER) continue;
+      if (this.effectiveBedDepth(other) > CLOCK.midnightHour) n++;
+    }
+    return n;
   }
 
   /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at the 8am wake) —
@@ -4004,6 +4201,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.age !== undefined ? { age: n.character.age } : {}),
       ...(n.character.presentation !== undefined ? { presentation: n.character.presentation } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
       ...(n.character.genderPresentation !== undefined ? { genderPresentation: n.character.genderPresentation } : {}),
     };
   }
@@ -4318,6 +4516,12 @@ export class GameSessionAdapter implements GameSession {
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
       this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
+      // 0116 — carry the model-authored genesis layer off the warm: the validated tie graph (preferred
+      // over the floor draw by seedSeededRelationships below), the seeded season brief, and the provenance.
+      // Absent on a non-genesis warm ⇒ null/false, so seedSeededRelationships draws the floor ties.
+      this.genesisTies = adopt.genesisTies ?? null;
+      this.seasonBrief = adopt.seasonBrief ?? null;
+      this.genesisAuthored = adopt.genesisAuthored ?? false;
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -4336,6 +4540,10 @@ export class GameSessionAdapter implements GameSession {
       // #1140 — NOW the name-keyed deep layer is fixed off the original names; apply the deferred gender-
       // coherent renames onto the byte-stable Character (no-op when nothing was renamed).
       this.applyDiversityRenames();
+      // 0116 — a plain (non-adopted) start has no model-authored genesis: the floor tie draw stands.
+      this.genesisTies = null;
+      this.seasonBrief = null;
+      this.genesisAuthored = false;
       // A stale warm whose seed didn't match an explicit one is discarded (the season is now started).
       this.prewarm = null;
     }
@@ -4354,6 +4562,9 @@ export class GameSessionAdapter implements GameSession {
     // first impressions so the bias rides the scattered baseline; persisted so a showmance never resets.
     this.seedSeededRelationships(seed);
     this.wireDispositions(); // archetype → disposition (B55): grudges stick, loyalists forgive
+    // 0124 (part C): tune each houseguest's starting reactivity to their disposition (temperamental ⇒ more
+    // volatile + slower to settle) instead of the flat random draw. Off ⇒ skipped ⇒ the draw stands (byte-identical).
+    if (this.soulDepthEnabled) this.applyDispositionReactivity();
     // Move-in (0049): seat everyone somewhere (first assignment may place anyone anywhere). L21/L24:
     // seed BOTH views from the SAME premiere stream — the player-facing WEIGHTED positions (`presence`)
     // and the calibration-neutral BASE the off-screen society pairs on (`presenceBase`). The player's
@@ -4496,6 +4707,7 @@ export class GameSessionAdapter implements GameSession {
       ...(n.character.vocation !== undefined ? { vocation: n.character.vocation } : {}),
       ...(n.character.hometown !== undefined ? { hometown: n.character.hometown } : {}),
       ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+      ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
       ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),
       ...(n.character.physicalCharacteristics !== undefined
         ? { physicalCharacteristics: n.character.physicalCharacteristics }
@@ -4586,6 +4798,11 @@ export class GameSessionAdapter implements GameSession {
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
+    // 0116 — a freshly-warmed cast carries no model-authored genesis yet (recordCastGenesis, if the FE
+    // wires a model, authors it AFTER this warm). The floor tie draw stands until then (byte-neutral).
+    this.genesisTies = null;
+    this.seasonBrief = null;
+    this.genesisAuthored = false;
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -5074,8 +5291,19 @@ export class GameSessionAdapter implements GameSession {
   private seedSeededRelationships(seed: number): void {
     if (!this.house) return;
     const rng = new SeededRandom(hashSeed(`${seed}:seeded-relationships`));
-    this.seededRels = loadSeededRelationships(
+    const floor = loadSeededRelationships(
       this.house.npcs, this.tieBudget, this.showmanceBudget, rng, this.showmanceEligiblePredicate());
+    // 0116 — when cast genesis authored the pre-show tie graph, PREFER it over the floor draw (already
+    // envelope-validated: ≤ budget, distinct pairs, no NPC doubled, never the player, exposure "sealed").
+    // SHOWMANCES stay engine-seeded (§2 — a showmance seed is outcome-adjacent dynamics, not identity).
+    // No genesis ties (the floor / no-model path) ⇒ the floor layer stands verbatim, so the seeded sims
+    // (which never wire a model) are BYTE-IDENTICAL to before this feature. A defensive id-filter guards
+    // against a persisted tie referencing a since-evicted/unknown id.
+    const knownIds = new Set(this.house.npcs.map((n) => n.id));
+    const ties: PreGameTie[] = this.genesisTies
+      ? this.genesisTies.filter((t) => knownIds.has(t.a) && knownIds.has(t.b))
+      : floor.ties;
+    this.seededRels = { ties, showmances: floor.showmances };
     // Fold the small standing affinity bias between each seeded pair (both directions). NEVER a
     // deterministic advantage — just unconscious warmth a careful player reads only as behavior (§3).
     const bias = (a: EntityId, b: EntityId, amount: number): void => {
@@ -5927,7 +6155,9 @@ export class GameSessionAdapter implements GameSession {
       statsOf: (id) => this.statsOf(id),
       rel: this.rel,
       // The LIVE soul emotional state (0041) feeds the competition modifier + the rattled-HOH read.
-      emotionalOf: (id) => this.soulObj(id)?.emotionalState ?? 0.5,
+      // 0124 (part A): with soul-depth on, the COMPOSED read (confidence lifts, distress drags harder)
+      // stands in for the single scalar — so "confident AND rattled" competes worse. Off ⇒ the plain state.
+      emotionalOf: (id) => this.emotionalReadOf(id),
       // The hidden REST deficit (ADR 0006): the player's from how late THEY stayed up last night, an
       // NPC's from the latest phase they were ACTUALLY awake last night (ENG-NEW-1 — the earlier of
       // their character bedtime and how far the night ran, not a static aptitude tax). Feeds the comp
@@ -5944,18 +6174,15 @@ export class GameSessionAdapter implements GameSession {
           ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
           : undefined;
         if (!hg) return 0.55;
-        return derivedLoyalty(dispositionOf(hg.character.archetype), hg.soul.emotionalState);
+        return derivedLoyalty(this.dispositionReadOf(id), this.emotionalReadOf(id));
       },
       // 0107: the named-alliance cement into bloc detection — bounded, saturation-diluted; 0 for every
       // pair when no alliance is named ⇒ the seeded bloc/vote read is byte-identical (the calibration spine).
       allianceTie: (a, b) => allianceTieBoost(this.alliances.all(), a, b),
       // Static disposition (0044): gates which nomination tactic an HOH plays (pawn/backdoor/direct).
-      dispositionOf: (id) => {
-        const hg = this.house
-          ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
-          : undefined;
-        return hg ? dispositionOf(hg.character.archetype) : "neutral";
-      },
+      // 0124 (part B): with soul-depth on, the EFFECTIVE disposition (baseline bent by temperament drift)
+      // gates it instead — a repeatedly-burned houseguest plays more defensively. Off ⇒ the static baseline.
+      dispositionOf: (id) => this.dispositionReadOf(id),
       // #1320 night-gate: the HOH→nominations day boundary is live ONLY when the clock pacing is running
       // (the per-conversation clock AND the master clock) — it is the "deeper half" of the fast-forward
       // fix and rides the same pair, so the golden replay (which pins `ORWELL_TIME_PER_CONVERSATION=0`)
@@ -6061,6 +6288,42 @@ export class GameSessionAdapter implements GameSession {
   /** Turn the 0120 STRATEGIC-DRIVE initiator cadence on/off. Off by default — the calibration harness leaves
    *  it off (with it off the off-screen tick passes no `initiatorDriveOf` ⇒ the seeded spine is byte-identical). */
   setStrategicCadenceEnabled(on: boolean): void { this.strategicCadenceEnabled = on; }
+
+  /** Turn the 0121 deal-depth layer on/off (active-obligation kinds + reliability rewards). Off by default —
+   *  the calibration harness leaves it off (off ⇒ the new kinds can't be made ⇒ byte-identical). */
+  setDealDepthEnabled(on: boolean): void { this.dealDepthEnabled = on; }
+  /** Whether the deal-depth layer is live (0121). */
+  dealDepthEnabledNow(): boolean { return this.dealDepthEnabled; }
+  /** 0121 R1 — wire the "keeps their word" reputation diffuser (the registry owns the KnowledgeService +
+   *  social graph). Only invoked when the deal-depth layer is on (the ledger gates `reputation` on it), so
+   *  an unwired / flag-off game is byte-identical. */
+  setDealReputationSink(fn: (honorer: EntityId, other: EntityId) => void): void { this.dealReputationSink = fn; }
+  /** 0121 R1 — wire the Vault-free reliability-reputation READER (the registry owns the KnowledgeService):
+   *  which honorers a holder credits as "keeps their word" (the diffusing `reliable:<honorer>` belief). Read
+   *  by the NPC deal-willingness lean in `mintNpcDeal`. Off unless the deal-depth layer is on ⇒ byte-identical. */
+  setReliabilityReader(fn: (holder: EntityId) => ReadonlySet<EntityId>): void { this.reliabilityReader = fn; }
+
+  /** Turn the 0122 deeper+daily confessional layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ no daily sweep, no depth context ⇒ every confessional is byte-identical to 0040). */
+  setConfessionalDepthEnabled(on: boolean): void { this.confessionalDepthEnabled = on; }
+  /** Whether the deeper+daily confessional layer is live (0122). */
+  confessionalDepthEnabledNow(): boolean { return this.confessionalDepthEnabled; }
+
+  /** Turn the 0123 NPC-initiated deal-offer layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ no offer is ever generated ⇒ byte-identical). */
+  setNpcDealOffersEnabled(on: boolean): void { this.npcDealOffersEnabled = on; }
+  /** Whether the NPC-initiated deal-offer layer is live (0123). */
+  npcDealOffersEnabledNow(): boolean { return this.npcDealOffersEnabled; }
+
+  /** Turn the 0124 deeper character-evolution layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ evolveEmotion moves only the 0041 scalar, reads use the plain state ⇒ byte-identical).
+   *  Applies the disposition-tuned reactivity post-pass (part C) to the live cast when switched on. */
+  setSoulDepthEnabled(on: boolean): void {
+    this.soulDepthEnabled = on;
+    if (on) this.applyDispositionReactivity();
+  }
+  /** Whether the deeper character-evolution layer is live (0124). */
+  soulDepthEnabledNow(): boolean { return this.soulDepthEnabled; }
 
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
@@ -6993,13 +7256,50 @@ export class GameSessionAdapter implements GameSession {
    * (keyed off the game seed + the soul's own arc position — deterministic, restart-stable, and
    * the main beat stream is untouched).
    */
+  /** 0124 — the STATIC baseline disposition (from the archetype, the CHARACTER value); never drifts (0007). */
+  private baselineDispositionOf(id: EntityId): Disposition {
+    const hg = this.house
+      ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
+      : undefined;
+    return hg ? dispositionOf(hg.character.archetype) : "neutral";
+  }
+
+  /** 0124 (part B) — the EFFECTIVE disposition: the static baseline bent by the soul's temperament drift when
+   *  the layer is on; the plain static baseline otherwise (byte-identical). Never mutates the CHARACTER. */
+  private dispositionReadOf(id: EntityId): Disposition {
+    const baseline = this.baselineDispositionOf(id);
+    const soul = this.soulObj(id);
+    return this.soulDepthEnabled && soul ? effectiveDisposition(baseline, soul) : baseline;
+  }
+
+  /** 0124 (part A) — the emotional read the behavior layer uses: the COMPOSED axes (confidence lifts,
+   *  distress drags) when the layer is on; the plain 0041 `emotionalState` scalar otherwise (byte-identical). */
+  private emotionalReadOf(id: EntityId): number {
+    const soul = this.soulObj(id);
+    if (!soul) return 0.5;
+    return this.soulDepthEnabled ? composedEmotion(soul) : soul.emotionalState;
+  }
+
+  /** 0124 (part C) — stamp each houseguest's reactivity from their DISPOSITION rather than a flat random draw:
+   *  `volatility = VOL_OF[disposition]` (the temperamental swing harder; the same table the player uses) and a
+   *  `settleScale` (clash lingers, bond shrugs off). Touches only the SOUL (CHARACTER byte-stable, 0007) and no
+   *  rng (draw-preserving). Idempotent; applied only when the layer is on (at cast genesis / when toggled on). */
+  private applyDispositionReactivity(): void {
+    if (!this.house) return;
+    for (const hg of [this.house.player, ...this.house.npcs]) {
+      const disp = this.baselineDispositionOf(hg.id);
+      hg.soul.volatility = VOL_OF[disp];
+      hg.soul.settleScale = settleScaleOf(disp);
+    }
+  }
+
   private inflect(id: EntityId, event: EmotionalEvent): void {
     const soul = this.soulObj(id);
     if (!soul) return;
     const rng = new SeededRandom(hashSeed(
       `${this.gameSeed ?? this.house?.player.name ?? "season"}:arc:${id}:${event}:${soul.emotionalHistory.length}`,
     ));
-    evolveEmotion(soul, event, undefined, rng);
+    evolveEmotion(soul, event, undefined, rng, { soulDepth: this.soulDepthEnabled });
     const note = arcNote(event, this.week);
     soul.memory.push(note);                 // persisted arc (house snapshot, monotonic — 0007/0030)
     this.soul?.recordToSoul(id, note);       // vector recall index (0024), when wired into the sandbox
@@ -7225,7 +7525,11 @@ export class GameSessionAdapter implements GameSession {
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
     const view = this.inOneCommit(() => {
       let ev: BeatEvent | null = null;
-      if (!this.live!.pending && !this.live!.finished) {
+      // 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER. No-op unless
+      // the layer is on; when it fires it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the
+      // beat does NOT advance this turn — the player answers the offer first. Flag off ⇒ byte-identical.
+      this.maybeOfferPlayerDeal();
+      if (!this.live!.pending && !this.live!.dealOffer && !this.live!.finished) {
         ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
         // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
         // toward late-night and wrapping to a new morning (banking a late night the player never ended).
@@ -7292,6 +7596,9 @@ export class GameSessionAdapter implements GameSession {
     // Anything else (a missing confirmation, confirmed:false/absent) is a safe no-op — the player
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
     if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
+    // 0123 — an NPC deal offer resolves through its own path (NOT the ceremony-pending machinery): it
+    // lives on `live.dealOffer`, not `live.pending`. `vote:"accept"` makes the deal; anything else declines.
+    if (req.kind === "deal-offer") return remember(this.resolveDealOffer(req.vote === "accept"));
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
@@ -7425,7 +7732,11 @@ export class GameSessionAdapter implements GameSession {
     if (!this.timeOfDayEnabled) return remember(this.advanceView(null)); // dormant unless the clock is running
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return remember(this.advanceView(null));
     return remember(this.inOneCommit(() => {
+      const closingDay = this.live!.dayNumber ?? 1; // capture BEFORE materialize bumps it (0122 sweep key)
       const recap = this.materializeDailyRecap();
+      // 0122 — most living NPCs privately confess the day that just closed (deeper than 0040, bare games
+      // skipped). No-op unless the flag + in-game clock are live ⇒ byte-identical off. Records Vault-only.
+      this.sweepDailyConfessionals(closingDay);
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
       this.rollNightConflicts();
@@ -7502,6 +7813,9 @@ export class GameSessionAdapter implements GameSession {
     // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
+    // 0121: the ACTIVE-obligation kinds (comp-throw / veto-save) exist only when the deal-depth layer is on
+    // (off ⇒ refuse, so no such deal is ever made in the calibration harness / a stock game — byte-identical).
+    if (isPositiveObligation(req.kind) && !this.dealDepthEnabled) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
     const isActiveOther = target !== PLAYER
@@ -8140,6 +8454,15 @@ export class GameSessionAdapter implements GameSession {
     const { broken } = this.deals.reconcile(action, {
       rel: this.rel,
       rng: this.beatRng(),
+      // 0121: the deal-depth layer — a kept deal compounds via the LOYALTY STREAK (consecutive kept deals
+      // with the same partner scale the honored fold, bounded). OFF ⇒ the plain 0039/0109 honored fold,
+      // byte-identical.
+      dealDepth: this.dealDepthEnabled,
+      // 0121 R1: a kept deal also seeds a diffusing "keeps their word" reputation — the honorer's deal
+      // partner spreads it NPC→NPC, and third parties who hear it lean toward the honorer as a safer deal
+      // partner (the positive mirror of the betrayal rumor). The ledger only calls this when `dealDepth`
+      // is on, and the sink is registry-wired (it owns the KnowledgeService), so off ⇒ byte-identical.
+      reputation: (honorer, other) => this.dealReputationSink?.(honorer, other),
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
@@ -8181,6 +8504,28 @@ export class GameSessionAdapter implements GameSession {
     const s = this.live;
     if (!s) return [];
     switch (ev.beat) {
+      // 0121: a comp CROWN is where a `comp-throw` promise resolves — judged by OUTCOME (did the promisor
+      // WIN the comp they swore to throw?), which is observable here; no fragile comp-intent threading.
+      // A compete action per competitor: the winner "won" (breaks a throw-promise), everyone else "threw"
+      // (kept — they didn't take the power). Gated on the deal-depth layer (off ⇒ no comp-throw deals ⇒
+      // a no-op anyway — byte-identical). The intermediate inert comp-round/comp-elimination beats never
+      // reach here (distinct beat keys); this fires only at the crown, where the winner is set.
+      case "hoh-competition": {
+        if (!this.dealDepthEnabled || !s.hoh) return [];
+        const finalThree = s.active.length === 3; // Final 3 lifts the outgoing-HOH sit-out
+        const field = s.active.filter((id) => finalThree || id !== s.outgoingHoh);
+        return field.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.hoh ? "won" : "threw") as "won" | "threw",
+        }));
+      }
+      case "veto-competition": {
+        if (!this.dealDepthEnabled || !s.vetoHolder || !s.vetoField) return [];
+        return s.vetoField.map((id) => ({
+          actor: id, kind: "compete" as const, targets: [],
+          outcome: (id === s.vetoHolder ? "won" : "threw") as "won" | "threw",
+        }));
+      }
       case "nominations":
         return s.hoh && s.nominees
           ? [{
@@ -8188,8 +8533,20 @@ export class GameSessionAdapter implements GameSession {
               alternatives: s.active.filter((h) => h !== s.hoh),
             }]
           : [];
-      case "veto-ceremony":
-        return s.hoh && s.replacement ? [{ actor: s.hoh, kind: "replace", targets: [s.replacement] }] : [];
+      case "veto-ceremony": {
+        const actions: BindingAction[] = [];
+        if (s.hoh && s.replacement) actions.push({ actor: s.hoh, kind: "replace", targets: [s.replacement] });
+        // 0121: the veto DECISION as a positive-obligation action — a `veto-save` promise resolves here.
+        // `nominees` is who was originally on the block (the replacement is EXCLUDED — it was not up when
+        // the veto could have saved anyone); `saved` is who the veto actually pulled down. Gated on the
+        // deal-depth layer (off ⇒ no veto-save deals exist ⇒ this would be a no-op anyway — byte-identical).
+        if (this.dealDepthEnabled && s.vetoHolder) {
+          const saved = s.saved ? [s.saved] : [];
+          const onBlock = [...(s.nominees ?? []).filter((n) => n !== s.replacement), ...saved];
+          actions.push({ actor: s.vetoHolder, kind: "veto-use", targets: [], saved, nominees: onBlock });
+        }
+        return actions;
+      }
       case "eviction": {
         const e = s.eviction;
         const evictee = ev.participants[0];
@@ -8329,6 +8686,106 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * Feature 0122 — the once-per-in-game-day confessional SWEEP, fired from `turnIn` (the day-close hook,
+   * beside 0102's daily recap) once the deeper-confessional layer AND the in-game clock are live. MOST
+   * living NPCs privately confess their day's read — DEEPER than the 0040 threat+trust snapshot (the
+   * triggered plan / standing / grudge / conversation-aftermath / adjacent-move facets, so the HOH &
+   * nominees get the deepest confessionals and a coasting houseguest a short one) — UNLESS their game is
+   * bare (`isBareGame`: no clear target/ally and no salient recent beat they witnessed ⇒ nothing to say).
+   * Recorded Vault-only (witnessed by the NPC alone, `hidden` — the wall is UNCHANGED from 0040) + folded
+   * to soul. A DEDICATED per-npc/day rng drives phrasing; the shared society/vote stream is never touched.
+   * The whole method is skipped when the flag or the per-conversation clock is off (calibration + golden
+   * both pin it off), so the seeded spine and the golden fixture are byte-identical.
+   */
+  private sweepDailyConfessionals(day: number): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    if (!this.confessionalDepthEnabled || !this.perConversationClockLive()) return;
+    if (day <= this.lastConfessionalSweepDay) return; // at most once per in-game day
+    this.lastConfessionalSweepDay = day;
+    const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
+    const allEvents = this.record?.events() ?? [];
+    const living = new Set(this.livingIds());
+    for (const n of this.house.npcs) {
+      const npc = n.id;
+      if (!living.has(npc)) continue; // the evicted don't confess
+      const recent = selectRecentForConfessional(allEvents, npc, allEvents.length, {
+        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional-daily-recent:${npc}:${day}`)),
+      });
+      const hasSalient = recent.some((f) => f.type !== "flavor");
+      if (isBareGame(npc, everyone, this.rel, hasSalient)) continue; // a bare game stays quiet this day
+      const voice = n.character.voice;
+      const conf = confessionalFor(npc, everyone, this.rel, {
+        player: PLAYER,
+        recentEvents: recent,
+        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional-daily:${npc}:${day}`)),
+        nameOf: (id) => this.nameOf(id),
+        ...(voice !== undefined ? { voice } : {}),
+        ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+        depth: this.confessionalDepthFor(npc, allEvents),
+      });
+      // witnessSet = [the confessing NPC] → hidden (the player is never a witness, 0002 — same as 0040).
+      this.onPlayerEvent(conf.content, [conf.npc], "confessional");
+      this.soulObj(conf.npc)?.memory.push(conf.content);
+      if (this.soul) recordConfessionalToSoul(this.soul, conf);
+    }
+  }
+
+  /**
+   * Feature 0122 — build the Vault-safe depth inputs for one confessor from PUBLIC role/beat state + the
+   * confessor's OWN witnessed events (never another houseguest's hidden read). `role` is their public
+   * this-week standing (drives the plan + safe/exposed facets); `recentTalk` is the partner of the most
+   * recent conversation THEY witnessed (the aftermath facet); `adjacent` is a relation of theirs (their
+   * own top bond / top threat, only when it clears the floor) who is on the live public board.
+   */
+  private confessionalDepthFor(npc: EntityId, allEvents: readonly GameEvent[]): ConfessionalDepth {
+    const s = this.live!;
+    let role: ConfessionalDepth["role"] = "none";
+    if (s.hoh === npc) role = "hoh";
+    else if (s.vetoHolder === npc) role = "veto-holder";
+    else if ((s.nominees ?? []).some((id) => id === npc)) role = "nominee";
+    // recentTalk — the OTHER party of the most recent conversation this houseguest witnessed.
+    let recentTalk: EntityId | undefined;
+    for (let i = allEvents.length - 1; i >= 0; i--) {
+      const ev = allEvents[i]!;
+      if (ev.type === "conversation" && ev.witnessSet.includes(npc)) {
+        const partner = ev.initiator !== npc ? ev.initiator : ev.witnessSet.find((w) => w !== npc);
+        if (partner && partner !== npc) { recentTalk = partner; break; }
+      }
+    }
+    const adjacent = this.adjacentMoveFor(npc);
+    return { role, ...(recentTalk ? { recentTalk } : {}), ...(adjacent ? { adjacent } : {}) };
+  }
+
+  /**
+   * Feature 0122 — the confessor's most charged ADJACENT move: a relation of theirs (their own clear ally
+   * or clear target — over the FLOOR, so a coasting houseguest's arbitrary max-peer never triggers it) who
+   * is on the live PUBLIC board this week (the HOH, or a nominee). Public board × the confessor's own read
+   * — no hidden state of anyone else. Returns the first (most charged) match, else undefined.
+   */
+  private adjacentMoveFor(npc: EntityId): ConfessionalDepth["adjacent"] {
+    const s = this.live;
+    if (!s) return undefined;
+    const others = this.livingIds().filter((id) => id !== npc);
+    let ally: EntityId | undefined; let bestBond = -Infinity;
+    let target: EntityId | undefined; let bestThreat = -Infinity;
+    for (const o of others) {
+      const e = this.rel.edge(npc, o);
+      const bond = (e.trust + e.affinity) / 2;
+      if (bond > bestBond) { bestBond = bond; ally = o; }
+      if (e.threat > bestThreat) { bestThreat = e.threat; target = o; }
+    }
+    const clearAlly = ally !== undefined && bestBond >= CONFESSIONAL.depth.clearBond ? ally : undefined;
+    const clearTarget = target !== undefined && bestThreat >= CONFESSIONAL.depth.clearThreat ? target : undefined;
+    const noms = new Set(s.nominees ?? []);
+    if (clearAlly && s.hoh === clearAlly) return { relation: clearAlly, bond: "ally", beat: "won-power" };
+    if (clearAlly && noms.has(clearAlly)) return { relation: clearAlly, bond: "ally", beat: "nominated" };
+    if (clearTarget && s.hoh === clearTarget) return { relation: clearTarget, bond: "target", beat: "won-power" };
+    if (clearTarget && noms.has(clearTarget)) return { relation: clearTarget, bond: "target", beat: "nominated" };
+    return undefined;
+  }
+
+  /**
    * NPC↔NPC deals exist (audit E46): at the nomination ceremony, the tightest UNBOUND pair of
    * living NPCs occasionally seals a pact of their own — Vault-held (the made event's witness set
    * excludes the player ⇒ hidden, 0002), binding through the SAME ledger the votes reconcile
@@ -8345,17 +8802,23 @@ export class GameSessionAdapter implements GameSession {
     const bound = (a: EntityId, b: EntityId): boolean =>
       this.deals.open().some((d) => d.parties.includes(a) && d.parties.includes(b));
     let best: [EntityId, EntityId] | null = null;
-    let bestTrust: number = D.mutualTrustMin;
+    let bestScore: number = D.mutualTrustMin; // the WILLINGNESS threshold (mutual trust + any 0121 R1 reputation lean)
+    let bestMutual = 0;                        // the chosen pair's BARE mutual trust — drives the KIND, unbiased by reputation
     for (let i = 0; i < npcs.length; i++) {
       for (let j = i + 1; j < npcs.length; j++) {
         const a = npcs[i]!, b = npcs[j]!;
         if (bound(a, b)) continue;
         const mutual = Math.min(this.rel.edge(a, b).trust, this.rel.edge(b, a).trust);
-        if (mutual >= bestTrust) { bestTrust = mutual; best = [a, b]; }
+        // 0121 R1: a candidate who credits the other as "keeps their word" (the diffusing 0038 reputation) is
+        // a more-appealing partner — a bounded, hidden lean on the WILLINGNESS to seal. Off (flag off / no
+        // reader) ⇒ 0 ⇒ this selection is byte-identical to the pre-R1 bare-mutual pick.
+        const willingness = mutual + this.reliabilityLean(a, b);
+        if (willingness >= bestScore) { bestScore = willingness; bestMutual = mutual; best = [a, b]; }
       }
     }
     if (!best) return;
-    const kind = bestTrust >= D.finalTwoTrustMin ? "final-two" : "safety";
+    // The KIND stays keyed to the BARE mutual trust — reputation buys the OPPORTUNITY to deal, not a bigger promise.
+    const kind = bestMutual >= D.finalTwoTrustMin ? "final-two" : "safety";
     const [a, b] = best;
     // A vague paraphrase, not hidden numbers — but still Vault-held (no player witness).
     const evId = this.onPlayerEvent(
@@ -8363,6 +8826,98 @@ export class GameSessionAdapter implements GameSession {
       [a, b], "deal",
     );
     this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
+  }
+
+  /**
+   * 0121 R1 — the bounded reliability-reputation nudge to a candidate NPC pair's deal WILLINGNESS: a
+   * houseguest who credits their prospective partner as "keeps their word" (the diffusing 0038 belief, read
+   * through `reliabilityReader`) reads them as a more-appealing deal partner. Either direction crediting the
+   * other adds the single, bounded `DEAL_REPUTATION.dealLean`. OFF (deal-depth flag off / no reader wired) ⇒
+   * 0, so `mintNpcDeal` is byte-identical. HIDDEN — a magnitude the player never sees (mandate #2/#3), and
+   * DISTINCT from the affinity-only social whisper (`GOSSIP_HEARD.reliable`) so the two never double-count.
+   */
+  private reliabilityLean(a: EntityId, b: EntityId): number {
+    if (!this.dealDepthEnabled || !this.reliabilityReader) return 0;
+    const credits = this.reliabilityReader(a).has(b) || this.reliabilityReader(b).has(a);
+    return credits ? DEAL_REPUTATION.dealLean : 0;
+  }
+
+  /**
+   * 0123 — the NPC->player deal OFFER (the counterpart of `makeDeal`). At a LULL a motivated houseguest
+   * pulls the player aside and floats a deal, GROUNDED in their real read (a strong bond ⇒ a final-two ask;
+   * otherwise a mutual-safety ask). Bounded: at most one open offer, at most one per in-game week, seeded +
+   * probability-gated. Sets `live.dealOffer` (surfaced as a `deal-offer` pending) and records the approach
+   * as a PLAYER-WITNESSED event (not hidden — the NPC came to them). No-op unless the layer is on and the
+   * game is at a genuine lull (no ceremony pending), so a ceremony is never preempted and the flag-off path
+   * is byte-identical. The choice of NPC + kind draws a DEDICATED seeded rng (never the shared vote stream).
+   */
+  private maybeOfferPlayerDeal(): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    if (!this.npcDealOffersEnabled) return;                       // the layer is opt-in
+    if (s.pending || s.dealOffer || s.finished) return;           // lull-only, one open offer at a time
+    if (s.hoh === undefined) return;                              // the game must be live (an HOH crowned)
+    if (s.lastDealOfferWeek === s.week) return;                   // at most one offer per in-game week
+    const O = DECISION.playerOffer;
+    const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:deal-offer:${s.week}:${s.beat ?? ""}`));
+    if (rng.next() >= O.prob) return;
+    // Pick the most-motivated living NPC not already bound to the player: max(bond, threat) over the floor.
+    const evicted = new Set(s.evictionOrder);
+    const boundToPlayer = (id: EntityId): boolean =>
+      this.deals.open().some((d) => d.parties.includes(PLAYER) && d.parties.includes(id));
+    let from: EntityId | undefined;
+    let best: number = O.motivationMin;
+    for (const n of this.house.npcs) {
+      if (evicted.has(n.id) || boundToPlayer(n.id)) continue;
+      const e = this.rel.edge(n.id, PLAYER);
+      const motivation = Math.max((e.trust + e.affinity) / 2, e.threat); // wants alliance OR wants safety
+      if (motivation > best) { best = motivation; from = n.id; }
+    }
+    if (!from) return;                                            // a house with no motivated NPC floats nothing
+    const e = this.rel.edge(from, PLAYER);
+    const bond = (e.trust + e.affinity) / 2;
+    const kind: DealKind = bond >= O.finalTwoBond ? "final-two" : "safety";
+    const terms = kind === "final-two"
+      ? "take me to the end and I'll take you"
+      : "you keep me safe, I keep you safe";
+    s.dealOffer = { id: `offer:${from}:${s.week}`, from, kind, terms, madeWeek: s.week };
+    s.lastDealOfferWeek = s.week;
+    // A PLAYER-WITNESSED approach (not hidden — the NPC came to them; 0002): the offer is the player's
+    // own knowledge, never Vault content. The paraphrase carries no number, no sealed state.
+    this.onPlayerEvent(`${this.nameOf(from)} pulls ${this.nameOf(PLAYER)} aside to float a ${kind} deal`, [PLAYER, from], "conversation");
+  }
+
+  /**
+   * 0123 — resolve an open NPC deal offer. `accept` routes through the SAME `deals.make` spine every deal
+   * binds against (a real player↔NPC deal, reconciled/folded like any other); `decline` creates NO deal but
+   * applies one bounded, seeded directed COOLING of the rebuffed NPC's read of the player (a mild `conflict`
+   * move — never a betrayal-shock; the change is real, recorded, and invisible — the Vault Wall working).
+   * Either way the offer is consumed. A no-op (safe) if no offer stands.
+   */
+  private resolveDealOffer(accept: boolean): AdvanceView {
+    const s = this.live;
+    if (!s?.dealOffer || !this.house) return this.advanceView(null);
+    return this.inOneCommit(() => {
+      const o = s.dealOffer!;
+      s.dealOffer = undefined; // consumed either way
+      if (accept) {
+        const evId = this.onPlayerEvent?.(
+          `${this.nameOf(PLAYER)} accepts ${this.nameOf(o.from)}'s ${o.kind} deal: ${o.terms}`,
+          [PLAYER, o.from], "deal",
+        );
+        this.deals.make([PLAYER, o.from], o.kind, o.terms, evId, o.madeWeek);
+      } else {
+        this.onPlayerEvent?.(
+          `${this.nameOf(PLAYER)} declines ${this.nameOf(o.from)}'s ${o.kind} offer`,
+          [PLAYER, o.from], "conversation",
+        );
+        // The rebuffed houseguest cools on the player a touch (bounded, seeded, hidden — never surfaced).
+        const rng = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:deal-decline:${o.from}:${o.madeWeek}`));
+        this.rel.applyDirected(o.from, PLAYER, "conflict", rng);
+      }
+      this.persist();
+      return this.advanceView(null);
+    });
   }
 
   /**
@@ -8517,6 +9072,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "self-evict", confirmed: req.confirmed === true };
       case "secret-veto": // 0025: the player plays (true) or holds (false) their one-time safety.
         return { kind: "secret-veto", use: req.use === true };
+      case "deal-offer": // 0123: intercepted in `submitDecision` BEFORE this map (its own path) — never here.
+        throw new Error("deal-offer resolves through resolveDealOffer, not the ceremony-decision map");
     }
   }
 
@@ -8535,6 +9092,18 @@ export class GameSessionAdapter implements GameSession {
         kind: "self-evict", by,
         prompt: "Leaving the game is final — a real walk-out you cannot undo. Confirm to self-evict and end your season, or cancel to stay in the house.",
         options: [], pick: 0,
+      };
+    }
+    // 0123 — an NPC-initiated deal offer awaiting the player (only when no ceremony pending blocks it, and
+    // never on the self-evict channel above). A player-witnessed approach with two picks: accept / decline.
+    if (!p && this.live?.dealOffer && this.house) {
+      const o = this.live.dealOffer;
+      return {
+        kind: "deal-offer", by: this.named(PLAYER)!,
+        prompt: `${this.nameOf(o.from)} pulls you aside with a ${o.kind} deal: ${o.terms}. Accept, or decline.`,
+        options: [{ id: "accept", name: "Accept the deal" }, { id: "decline", name: "Decline" }],
+        offer: { from: this.named(o.from)!, kind: o.kind, terms: o.terms },
+        pick: 1,
       };
     }
     if (!p) return null;
@@ -8663,14 +9232,20 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * Vault-free projection of an in-progress finale (0037): names, the current stage, the
-   * juror asking, and the votes REVEALED SO FAR (`revealIx`) only. No lean, no tally, no
-   * manner, and no pre-reveal winner ever crosses — a juror's vote appears only after it is
-   * revealed in order. Null unless the finale is actively staging.
+   * Vault-free projection of a finale (0037): names, the current stage, the juror asking, and the
+   * votes REVEALED SO FAR (`revealIx`) only. No lean, no tally, no manner, and no pre-reveal winner
+   * ever crosses — a juror's vote appears only after it is revealed in order.
+   *
+   * S4-2: this read SURVIVES THE FLIP TO `finished`. The `finale` progress is durable (persisted +
+   * restart-safe via the snapshot), so once the season is over it returns the COMPLETED finale (every
+   * reveal, stage `reveal`) plus the crowned `winner` — the same public winner `gameStatus`/
+   * `seasonRecap` expose — instead of null, so a finale-panel client agrees with every surface
+   * post-finish. `winner` stays null while the finale is still staging (the pre-reveal winner never
+   * crosses). Null only when no finale exists at all (never staged / no game).
    */
   finaleView(): FinaleView | null {
     const f: FinaleProgress | undefined = this.live?.finale;
-    if (!f || this.live?.finished) return null;
+    if (!f) return null;
     const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
     const q = f.script.questions[f.questionIx];
     return {
@@ -8680,6 +9255,9 @@ export class GameSessionAdapter implements GameSession {
       reveals: f.script.revealOrder.slice(0, f.revealIx).map((juror) => ({
         juror: ref(juror), votedFor: ref(f.votes![juror]!),
       })),
+      // The crowned winner is a PUBLIC fact only once the season is over — null while staging so the
+      // pre-reveal winner never crosses (mirrors gameStatus/seasonRecap/AdvanceView post-finish).
+      winner: this.live?.finished ? this.named(this.live.winner) : null,
     };
   }
 
@@ -9326,6 +9904,9 @@ export class GameSessionAdapter implements GameSession {
         // L28 (voice register): the STORED observable demeanor — the narrator voices THIS so the cast
         // is not a room of identical warm professionals. Public, Vault-free.
         ...(n.character.demeanor !== undefined ? { demeanor: n.character.demeanor } : {}),
+        // 0116: the model-authored FREEFORM identity concept the narrator voices alongside the archetype
+        // tag. Public, Vault-free; absent on the deterministic floor cast.
+        ...(n.character.identityConcept !== undefined ? { identityConcept: n.character.identityConcept } : {}),
         // 0058: the PUBLIC multi-sentence biography. Public, Vault-free; the HIDDEN profile
         // (secrets/goals/weakness/perception) is NEVER selected here.
         ...(n.character.biography !== undefined ? { biography: n.character.biography } : {}),

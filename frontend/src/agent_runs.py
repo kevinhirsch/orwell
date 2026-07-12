@@ -17,6 +17,7 @@ close / navigation / refresh). It does NOT survive a server restart.
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import AsyncGenerator, Dict, Optional
 
@@ -54,7 +55,28 @@ _RUNS: Dict[str, _Run] = {}
 # last subscriber disconnects, so a reconnect within the window can still
 # replay the result. After this, the run is evicted to bound memory — without
 # it, every session that ever streamed kept its entire event log forever.
-_EVICT_GRACE_S = 180
+#
+# Operators tune this streamed-buffer retention window with ORWELL_EVICT_GRACE_S
+# (seconds) — ADR 0012 #7 — read per-use so a change takes effect on the next
+# eviction without a restart. Unset / blank / unparseable ⇒ the 180 s default, so
+# the default path is byte-identical to the previous hard-coded constant.
+_DEFAULT_EVICT_GRACE_S = 180
+
+
+def _evict_grace_s() -> float:
+    """The terminal-run buffer-retention grace, in seconds (ADR 0012 #7).
+
+    Reads ORWELL_EVICT_GRACE_S from the environment on every call (mirroring the
+    other per-use ORWELL_* FE settings) so operators can tune the retention window
+    without a code change; an unset / blank / non-numeric value falls back to the
+    180 s default, leaving default behavior unchanged."""
+    raw = os.getenv("ORWELL_EVICT_GRACE_S")
+    if raw is None or not raw.strip():
+        return _DEFAULT_EVICT_GRACE_S
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_EVICT_GRACE_S
 
 
 def _safe_cancel(task: Optional["asyncio.Task"]) -> None:
@@ -95,7 +117,7 @@ def _schedule_evict(session_id: str) -> None:
 
     async def _evict(run_ref: _Run) -> None:
         try:
-            await asyncio.sleep(_EVICT_GRACE_S)
+            await asyncio.sleep(_evict_grace_s())
         except asyncio.CancelledError:
             return
         cur = _RUNS.get(session_id)

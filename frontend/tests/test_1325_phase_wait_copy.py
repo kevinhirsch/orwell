@@ -154,9 +154,11 @@ def test_byline_constant_and_call_sites_are_unchanged_by_this_fix():
     chat = _read("static", "js", "chat.js")
     renderer = _read("static", "js", "chatRenderer.js")
     # the sender-label sites still read the constant directly — no phase branch was added to them.
-    assert "isGameBuild() ? GAME_NARRATOR : (modelLabel || '')" in chat  # _senderLabel
+    assert "isGameBuild() ? GAME_NARRATOR : (modelLabel || '')" in chat  # _senderLabel (the one streaming bubble's byline)
     assert "else if (document.body.hasAttribute('data-game-build')) label = GAME_NARRATOR;" in chat  # _setRoleModelLabel
-    assert "newRole.textContent = isGameBuild() ? GAME_NARRATOR : (_modelRouteLabel(_roundRequested, _roundActual) || '');" in chat
+    # (#829 turn-coalescing removed the per-round CONTINUATION bubble + its own `newRole` byline
+    # site — a turn is now ONE bubble whose byline is set once via _senderLabel above, so there is
+    # no separate continuation-round label to keep diegetic.)
     assert "isGameBuild() ? GAME_NARRATOR : (model || 'image').split('/').pop();" in renderer  # buildImageBubble
     assert "roleEl.textContent = isGameBuild() ? GAME_NARRATOR : modelRouteLabel(pair.requestedModel, contModel);" in renderer
 

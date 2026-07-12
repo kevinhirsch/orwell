@@ -54,7 +54,8 @@ def test_history_api_exposes_id_and_seq():
 # ── Leg 2: render-/reconcile-by-id (adopt + divergence-gated rebuild) ─────────────
 
 def test_soft_reload_history_adopts_then_rebuilds_only_on_divergence():
-    src = _read("static", "js", "chat.js")
+    # #1414 R3 PR7: softReloadHistory + flushPendingReconcile moved to chatReconcile.js.
+    src = _read("static", "js", "chatReconcile.js")
     assert "ADOPT PASS" in src, "the cheap adopt pass (no churn) must be present"
     # The divergence guard: the full innerHTML rebuild must be gated, never unconditional. (ADR 0012
     # GAP 2 added a one-shot `_forced` bypass for the error path — `converged && !_forced` — so the
@@ -83,7 +84,7 @@ def test_stream_end_resets_stream_session_id_so_deferred_reconcile_can_flush():
     # concurrently residual, reproduced + fixed live). The foreground reader's finally must clear it —
     # guarded to `=== streamSessionId` so a newer stream's session isn't clobbered by a late finally.
     src = _read("static", "js", "chat.js")
-    assert "if (_streamSessionId === streamSessionId) _streamSessionId = null;" in src, \
+    assert "if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;" in src, \
         "the foreground stream's finally must reset _streamSessionId so hasActiveStream clears at stream end"
 
 
@@ -93,7 +94,7 @@ def test_stream_end_reset_ordering_lets_deferred_peer_resume_attach():
     # BEFORE it schedules flushPendingPeerResume — otherwise the deferred attach short-circuits on its
     # own hasActiveStream guard and the peer turn never renders live (the ±1 the 50× smoke caught).
     src = _read("static", "js", "chat.js")
-    reset_at = src.index("if (_streamSessionId === streamSessionId) _streamSessionId = null;")
+    reset_at = src.index("if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;")
     flush_at = src.index("flushPendingPeerResume(streamSessionId)")
     assert reset_at < flush_at, \
         "the finally must reset _streamSessionId BEFORE re-attempting the deferred peer-resume"

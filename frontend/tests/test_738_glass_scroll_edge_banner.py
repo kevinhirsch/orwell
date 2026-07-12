@@ -10,9 +10,10 @@ content running off it ("content scrolls under the chrome"), and the title banne
 (.chat-top-bar) recedes as the reader scrolls down into the conversation. Both are gated to
 the glass theme (body.theme-frosted) and are REDUCED-MOTION SAFE — the static mask stays as
 a legibility affordance, but the intensify + recede TRANSITIONS are neutralized under Reduce
-Motion. chat.js toggles the state classes from a passive, rAF-coalesced scroll handler and a
-childList-only observer; it must NOT force a synchronous layout in the hot path and must NOT
-touch the streaming buffers / live-stream render path.
+Motion. chatScrollEdges.js (a leaf extracted from chat.js in #1414 R3 PR1) toggles the state
+classes from a passive, rAF-coalesced scroll handler and a childList-only observer; it must
+NOT force a synchronous layout in the hot path and must NOT touch the streaming buffers /
+live-stream render path. chat.js still calls _initChatScrollEdges() from init().
 """
 import re
 from pathlib import Path
@@ -20,6 +21,11 @@ from pathlib import Path
 FE = Path(__file__).resolve().parents[1]
 CSS = (FE / "static" / "style.css").read_text(encoding="utf-8")
 CHAT_JS = (FE / "static" / "js" / "chat.js").read_text(encoding="utf-8")
+# #1414 (R3 PR1): the scroll-edge banner functions (_applyChatScrollEdges /
+# _scheduleChatScrollEdges / _initChatScrollEdges) were extracted from chat.js into their
+# own leaf module. The banner-SOURCE assertions read chatScrollEdges.js; chat.js still owns
+# the init() wiring that calls _initChatScrollEdges().
+SCROLL_JS = (FE / "static" / "js" / "chatScrollEdges.js").read_text(encoding="utf-8")
 
 
 def _css_blocks(text: str, selector_literal: str):
@@ -128,14 +134,14 @@ def test_chatjs_wires_scroll_edges_from_init():
 def test_scroll_handler_is_passive_and_raf_coalesced():
     """The scroll listener is passive + rAF-coalesced (one class write per frame), and the
     hot handler forces NO synchronous layout (no getBoundingClientRect)."""
-    assert "addEventListener('scroll', _scheduleChatScrollEdges, { passive: true })" in CHAT_JS
+    assert "addEventListener('scroll', _scheduleChatScrollEdges, { passive: true })" in SCROLL_JS
     # coalescing guard
-    i = CHAT_JS.index("function _scheduleChatScrollEdges")
-    sched = CHAT_JS[i: i + 400]
+    i = SCROLL_JS.index("function _scheduleChatScrollEdges")
+    sched = SCROLL_JS[i: i + 400]
     assert "if (_scrollEdgeRaf) return" in sched and "requestAnimationFrame" in sched
     # the apply function must not force layout
-    a = CHAT_JS.index("function _applyChatScrollEdges")
-    apply = CHAT_JS[a: CHAT_JS.index("function _scheduleChatScrollEdges")]
+    a = SCROLL_JS.index("function _applyChatScrollEdges")
+    apply = SCROLL_JS[a: SCROLL_JS.index("function _scheduleChatScrollEdges")]
     assert ".getBoundingClientRect(" not in apply, (
         "the scroll-edge apply pass must NOT force a synchronous layout (getBoundingClientRect)"
     )
@@ -146,11 +152,11 @@ def test_scroll_handler_is_passive_and_raf_coalesced():
 def test_observer_is_childlist_only_not_subtree():
     """The content-growth observer watches childList ONLY (not subtree/characterData) so
     streaming token appends into an existing bubble never storm it."""
-    assert "mo.observe(box, { childList: true })" in CHAT_JS, (
+    assert "mo.observe(box, { childList: true })" in SCROLL_JS, (
         "the scroll-edge observer must watch childList only (not subtree/characterData)"
     )
     # guard against an accidental subtree/characterData widening on THIS observer call
-    call = CHAT_JS[CHAT_JS.index("mo.observe(box,"):]
+    call = SCROLL_JS[SCROLL_JS.index("mo.observe(box,"):]
     call = call[: call.index(")") + 1]
     assert "subtree" not in call and "characterData" not in call
 
@@ -159,8 +165,8 @@ def test_scroll_edges_do_not_touch_streaming_buffers():
     """The added CODE is glass polish only — it must not reference the streaming/reasoning
     buffers or the live-stream render path (the reasoning-scrub contract). Scoped to the
     executable functions, not the doc-comment (which names them to document the contract)."""
-    a = CHAT_JS.index("var _scrollEdgeRaf = 0;")
-    seg = CHAT_JS[a: CHAT_JS.index("export function init(apiBase)")]
+    a = SCROLL_JS.index("var _scrollEdgeRaf = 0;")
+    seg = SCROLL_JS[a:]
     for forbidden in ("roundReplyText", "roundReasoningText", "_renderLiveStream"):
         assert forbidden not in seg, (
             f"the #738 item 9 block must not touch {forbidden} (streaming/render contract)"
