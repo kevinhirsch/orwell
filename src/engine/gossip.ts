@@ -268,11 +268,18 @@ export function diffuseGossip(deps: {
    * jury draw stream is byte-identical off vs on (the drift already rides a per-hop FORK of the parent).
    */
   voiceOf?: (id: EntityId) => VoiceProfile | undefined;
+  /**
+   * 0121 R1 — an explicit lineage id to seed the belief under (instead of minting a fresh `fact:<origin>:…`).
+   * ABSENT (every existing caller) ⇒ mint as before, drawing `rng.int(1_000_000)` — byte-identical. PRESENT
+   * ⇒ use it verbatim AND skip that mint draw; used only by the reliability-reputation tick, which runs on
+   * its OWN dedicated side-rng (never a shared/seeded stream), so skipping the draw perturbs nothing.
+   */
+  factId?: string;
 }): { factId: string; original: string } {
   const { knowledge, graph, rng, origin, fact, rounds, rel, sceneType } = deps;
   const transmitProb = deps.transmitProb ?? GOSSIP.transmitProb;
   const decay = deps.decay ?? 0.7;
-  const factId = `fact:${origin}:${rng.int(1_000_000)}`;
+  const factId = deps.factId ?? `fact:${origin}:${rng.int(1_000_000)}`;
   const original = fact.content;
 
   knowledge.seedBelief(

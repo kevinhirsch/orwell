@@ -48,7 +48,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
-import { isPositiveObligation } from "../../domain/deal";
+import { isPositiveObligation, reliableFactId } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
 import { confessionalFor, involvedConfessionals, isBareGame, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
@@ -164,7 +164,7 @@ import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
 import {
-  CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
+  CEREMONY_IMPACTS, DEAL_REPUTATION, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { notorietyBias, recognitionFor } from "../../engine/notoriety";
@@ -829,6 +829,16 @@ export class GameSessionAdapter implements GameSession {
   /** The monotonic count of secrets SPENT into the hidden economy this season (0099, sibling of
    *  `legendCount`/`tradeCount`) — the knowledge layer only deepens as secrets change hands (++ only). */
   private secretBarterCount = 0;
+  /**
+   * 0121 R1 — the diffusing reliability-reputation layer (deal-depth). `pendingReliabilitySeeds` are
+   * (honorer, other) pairs from KEPT deals awaiting their belief-seed: populated by `reconcileDeals`'s
+   * `reputation` sink during a beat commit (which holds NO knowledge handle) and drained by
+   * `reliabilityTick`, which the orchestrator calls with the live knowledge. `reliabilityTickCount` is the
+   * DEDICATED reputation-rng tick counter (forked off the game seed, NEVER the shared society/competition/
+   * vote stream, the same isolation `secretBarterTickCount` uses). Both empty/0 unless the deal-depth flag
+   * is on — off ⇒ the queue never fills, the tick never draws ⇒ byte-identical. */
+  private pendingReliabilitySeeds: Array<{ honorer: EntityId; other: EntityId }> = [];
+  private reliabilityTickCount = 0;
   /**
    * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
    * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
@@ -1743,6 +1753,13 @@ export class GameSessionAdapter implements GameSession {
   }): void {
     this.npcKnowledge = p;
   }
+
+  /** 0121 R1 — the Vault-free reliability-reputation reader (wired by the registry from the KnowledgeService):
+   *  for a holder, the set of honorer ids they believe "keep their word" (derived from the diffusing
+   *  `reliable:<honorer>` belief lineage). A knowledge-layer read, NEVER a Vault read. Absent (a bare adapter
+   *  with no registry wiring) ⇒ no reputation is read ⇒ no deal-willingness lean. */
+  private reliabilityReader?: (holder: EntityId) => ReadonlySet<EntityId>;
+  setReliabilityReader(fn: (holder: EntityId) => ReadonlySet<EntityId>): void { this.reliabilityReader = fn; }
 
   /** Caps so a long season's voicing context stays tight (prefer removing context — ADR 0003). */
   private static readonly VOICE_KNOWS_CAP = 20;
@@ -2776,6 +2793,12 @@ export class GameSessionAdapter implements GameSession {
       // survive a restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0099-barter save / off).
       ...(this.secretBarterTickCount > 0 ? { secretBarterTickCount: this.secretBarterTickCount } : {}),
       ...(this.secretBarterCount > 0 ? { secretBarterCount: this.secretBarterCount } : {}),
+      // 0121 R1 — the DEDICATED reputation-rng tick counter + any (honorer, other) seeds a kept deal queued
+      // but the next off-screen tick has not diffused yet, persisted so the isolated stream stays reproducible
+      // AND no kept-word reputation is lost across a save (0007/0030, non-degradation #4). Both absent ⇒
+      // 0/none on restore (byte-shaped as a pre-0121-R1 save / the layer off).
+      ...(this.reliabilityTickCount > 0 ? { reliabilityTickCount: this.reliabilityTickCount } : {}),
+      ...(this.pendingReliabilitySeeds.length ? { pendingReliabilitySeeds: this.pendingReliabilitySeeds.map((s) => ({ ...s })) } : {}),
       // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
       // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
       // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
@@ -3070,6 +3093,9 @@ export class GameSessionAdapter implements GameSession {
     // (absent on pre-0099-barter saves ⇒ 0).
     this.secretBarterTickCount = core.secretBarterTickCount ?? 0;
     this.secretBarterCount = core.secretBarterCount ?? 0;
+    // 0121 R1: restore the dedicated reputation-rng counter + any un-diffused kept-word seeds (absent ⇒ 0/none).
+    this.reliabilityTickCount = core.reliabilityTickCount ?? 0;
+    this.pendingReliabilitySeeds = core.pendingReliabilitySeeds ? core.pendingReliabilitySeeds.map((s) => ({ ...s })) : [];
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // 0096: restore the emergent-nemesis arc + its sustain history (absent on a pre-0096 save / when the
@@ -4465,6 +4491,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+      this.resetDealReputation(); // 0121 R1 — a fresh season credits no kept word yet
       this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
       // 0116 — carry the model-authored genesis layer off the warm: the validated tie graph (preferred
       // over the floor draw by seedSeededRelationships below), the seeded season brief, and the provenance.
@@ -4744,6 +4771,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
+    this.resetDealReputation(); // 0121 R1 — a warmed/fresh cast credits no kept word yet
     this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
     // 0116 — a freshly-warmed cast carries no model-authored genesis yet (recordCastGenesis, if the FE
     // wires a model, authors it AFTER this warm). The floor tie draw stands until then (byte-neutral).
@@ -5114,6 +5142,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
     this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+    this.resetDealReputation(); // 0121 R1 — a fresh season credits no kept word yet
     this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
@@ -5233,6 +5262,14 @@ export class GameSessionAdapter implements GameSession {
   private resetSecretBarter(): void {
     this.secretBarterTickCount = 0;
     this.secretBarterCount = 0;
+  }
+
+  /** 0121 R1 — clear the diffusing reliability-reputation bookkeeping (a fresh season: no kept-word seed
+   *  pending, the dedicated reputation stream starts from zero). The reputation BELIEFS themselves live in
+   *  the knowledge layer, reset with it at the season boundary. */
+  private resetDealReputation(): void {
+    this.pendingReliabilitySeeds = [];
+    this.reliabilityTickCount = 0;
   }
 
   private seedSeededRelationships(seed: number): void {
@@ -7147,6 +7184,76 @@ export class GameSessionAdapter implements GameSession {
    *  symmetry/tests. */
   secretBarterEnabledNow(): boolean { return this.secretBarterEnabled; }
 
+  /**
+   * Feature 0121 R1 — the diffusing "keeps their word" REPUTATION reward. Drains the (honorer, other) seeds
+   * a KEPT deal queued during its beat commit (`reconcileDeals`'s `reputation` sink) and, for each honorer the
+   * counterparty doesn't ALREADY credit as reliable, seeds a Vault-free `reliable:<honorer>` belief on `other`
+   * and lets it DIFFUSE NPC→NPC through the EXISTING 0038 gossip machinery — the positive mirror of the
+   * betrayal rumor. A houseguest who has HEARD it reads the honorer as a more-appealing deal partner
+   * (`reliabilityLean` in `mintNpcDeal`); the player only ever feels it as behavior, never a number. Called
+   * once per off-screen tick by the orchestrator, passing the live knowledge.
+   *
+   * SELF-GATED (the `legendTick`/`secretBarterTick` discipline): a STRUCTURAL no-op (ZERO draws, no counter
+   * advance) unless the deal-depth layer is on AND a kept deal is actually pending a fresh seed — so the
+   * calibration/UAT harness (which never enables it) is byte-identical. Runs on a DEDICATED, isolated rng
+   * (forked off the game seed + this tick's OWN counter, NEVER the orchestrator's shared stream), and — like
+   * `legendTick` — folds NO relationship edge: only the hidden KNOWLEDGE layer changes, so the seeded
+   * competition/vote/jury spine is byte-identical whether the layer is OFF or ON. The idempotency watermark
+   * is the knowledge layer itself (already-credited ⇒ skip), so a season-long deal that honors at every
+   * ceremony seeds the reputation exactly ONCE. Vault Wall (mandate #2): the reputation is a POSITIVE public
+   * belief, held/diffused as ordinary knowledge — never Vault content, and it reaches the player only along a
+   * modeled pathway (`tests/unit/dealReputation.test.ts` sentinel).
+   */
+  reliabilityTick(knowledge: KnowledgeService): void {
+    // OFF (or pre-game): drop any queued seeds and take no draw — the flag can never leave work half-wired.
+    if (!this.dealDepthEnabled || !this.house) { this.pendingReliabilitySeeds = []; return; }
+    if (this.pendingReliabilitySeeds.length === 0) return;
+    const seeds = this.pendingReliabilitySeeds;
+    this.pendingReliabilitySeeds = [];
+    // Keep only the seeds with something NEW to lodge: `other` doesn't already credit `honorer` (a repeated
+    // honoring of a season-long deal, a diffusion that already reached them, or a resumed save). De-dup the
+    // batch too. Filter FIRST so a tick with nothing fresh is a true no-op — the dedicated stream never advances.
+    const seen = new Set<string>();
+    const fresh = seeds.filter(({ honorer, other }) => {
+      if (honorer === other) return false;
+      const key = `${honorer}->${other}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return !knowledge.knownTo(other).some((k) => k.factId === reliableFactId(honorer));
+    });
+    if (fresh.length === 0) return;
+    this.reliabilityTickCount += 1;
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    const rng = new SeededRandom(hashSeed(`deal-reputation:${this.gameSeed ?? ""}:${this.reliabilityTickCount}`));
+    // The affinity graph among the living house (player included as a node — a reputation can reach them as
+    // ordinary knowledge, never a number). Built ONCE. Passing NO `rel`/`subjects` to `diffuseGossip` ⇒ no
+    // edge moves (calibration-neutral even ON) — only the hidden knowledge layer changes.
+    const living = this.livingIds();
+    const edges: Array<readonly [EntityId, EntityId]> = [];
+    for (let i = 0; i < living.length; i++) {
+      for (let j = i + 1; j < living.length; j++) {
+        if (gossipEdgeAffinity(this.rel, living[i]!, living[j]!) > GOSSIP.affinityEdge) {
+          edges.push([living[i]!, living[j]!] as const);
+        }
+      }
+    }
+    const graph = makeSocialGraph(edges);
+    for (const { honorer, other } of fresh) {
+      // `origin: other` — the counterparty knows FIRST-HAND the honorer kept their word; `seedBelief` always
+      // lodges it on them (even with no affinity neighbor to spread to), and it diffuses where edges exist.
+      diffuseGossip({
+        knowledge, graph, rng, origin: other,
+        fact: { content: `${this.nameOf(honorer)} keeps their word` },
+        factId: reliableFactId(honorer),
+        rounds: GOSSIP.rounds, transmitProb: GOSSIP.transmitProb, decay: GOSSIP.decay,
+      });
+    }
+  }
+
+  /** Turn the 0121 R1 diffusing reliability-reputation reward on/off is folded into `setDealDepthEnabled`
+   *  (the whole deal-depth layer shares one flag). This exists only for the tests' wiring symmetry. */
+  reliabilityReputationPending(): number { return this.pendingReliabilitySeeds.length; }
+
   /** Turn CHARACTER-MEDIATED gossip drift on/off (issue #1397). Off by default — the calibration harness
    *  leaves it off; even ON the drift rides a per-hop fork, so the seeded outcome draw stream is byte-
    *  identical either way (the flag gates only whether the reteller's voice colors the belief content). */
@@ -8336,8 +8443,13 @@ export class GameSessionAdapter implements GameSession {
       rng: this.beatRng(),
       // 0121: the deal-depth layer — a kept deal compounds via the LOYALTY STREAK (consecutive kept deals
       // with the same partner scale the honored fold, bounded). OFF ⇒ the plain 0039/0109 honored fold,
-      // byte-identical. (The diffusing "keeps their word" reputation reward is wired in a follow-up.)
+      // byte-identical.
       dealDepth: this.dealDepthEnabled,
+      // 0121 R1: a kept deal seeds a diffusing "keeps their word" reputation. `reconcileDeals` runs inside a
+      // beat commit and holds NO knowledge handle, so QUEUE the (honorer, other) pair; the orchestrator's
+      // `reliabilityTick` drains it against the live knowledge layer. Gated by construction — the ledger only
+      // fires this when `dealDepth` is on, so the queue stays empty when the flag is off (byte-identical).
+      reputation: (honorer, other) => { this.pendingReliabilitySeeds.push({ honorer, other }); },
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
@@ -8677,17 +8789,23 @@ export class GameSessionAdapter implements GameSession {
     const bound = (a: EntityId, b: EntityId): boolean =>
       this.deals.open().some((d) => d.parties.includes(a) && d.parties.includes(b));
     let best: [EntityId, EntityId] | null = null;
-    let bestTrust: number = D.mutualTrustMin;
+    let bestScore: number = D.mutualTrustMin; // the WILLINGNESS threshold (mutual trust + any 0121 R1 reputation lean)
+    let bestMutual = 0;                        // the chosen pair's BARE mutual trust — drives the KIND, unbiased by reputation
     for (let i = 0; i < npcs.length; i++) {
       for (let j = i + 1; j < npcs.length; j++) {
         const a = npcs[i]!, b = npcs[j]!;
         if (bound(a, b)) continue;
         const mutual = Math.min(this.rel.edge(a, b).trust, this.rel.edge(b, a).trust);
-        if (mutual >= bestTrust) { bestTrust = mutual; best = [a, b]; }
+        // 0121 R1: a candidate who credits the other as "keeps their word" (the diffusing 0038 reputation) is
+        // a more-appealing partner — a bounded, hidden lean on the WILLINGNESS to seal. Off (flag off / no
+        // reader) ⇒ 0 ⇒ this selection is byte-identical to the pre-R1 bare-mutual pick.
+        const willingness = mutual + this.reliabilityLean(a, b);
+        if (willingness >= bestScore) { bestScore = willingness; bestMutual = mutual; best = [a, b]; }
       }
     }
     if (!best) return;
-    const kind = bestTrust >= D.finalTwoTrustMin ? "final-two" : "safety";
+    // The KIND stays keyed to the BARE mutual trust — reputation buys the OPPORTUNITY to deal, not a bigger promise.
+    const kind = bestMutual >= D.finalTwoTrustMin ? "final-two" : "safety";
     const [a, b] = best;
     // A vague paraphrase, not hidden numbers — but still Vault-held (no player witness).
     const evId = this.onPlayerEvent(
@@ -8695,6 +8813,19 @@ export class GameSessionAdapter implements GameSession {
       [a, b], "deal",
     );
     this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
+  }
+
+  /**
+   * 0121 R1 — the bounded reliability-reputation nudge to a candidate NPC pair's deal WILLINGNESS: a
+   * houseguest who credits their prospective partner as "keeps their word" (the diffusing 0038 belief, read
+   * through `reliabilityReader`) reads them as a more-appealing deal partner. Either direction crediting the
+   * other adds the single, bounded `DEAL_REPUTATION.dealLean`. OFF (deal-depth flag off / no reader wired) ⇒
+   * 0, so `mintNpcDeal` is byte-identical. HIDDEN — a magnitude the player never sees (mandate #2/#3).
+   */
+  private reliabilityLean(a: EntityId, b: EntityId): number {
+    if (!this.dealDepthEnabled || !this.reliabilityReader) return 0;
+    const credits = this.reliabilityReader(a).has(b) || this.reliabilityReader(b).has(a);
+    return credits ? DEAL_REPUTATION.dealLean : 0;
   }
 
   /**

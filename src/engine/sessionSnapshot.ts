@@ -147,6 +147,17 @@ export interface SessionCore {
    */
   secretBarterTickCount?: number;
   secretBarterCount?: number;
+  /**
+   * Feature 0121 R1 — the diffusing "keeps their word" reputation reward (deal-depth layer).
+   * `reliabilityTickCount` is the DEDICATED reputation-rng tick counter (forked off the game seed, NEVER the
+   * shared society/competition/vote stream — see `GameSessionAdapter.reliabilityTick`), persisted so the
+   * isolated stream stays reproducible across a restart. `pendingReliabilitySeeds` are (honorer, other) pairs
+   * a KEPT deal queued during its beat commit but the next off-screen tick has not diffused yet — persisted
+   * so a kept-word reputation is never lost across a save (non-degradation #4). Both absent ⇒ 0/none
+   * (byte-shaped as a pre-0121-R1 save / the layer off).
+   */
+  reliabilityTickCount?: number;
+  pendingReliabilitySeeds?: Array<{ honorer: EntityId; other: EntityId }>;
   /** Every active houseguest's current DRIVE (0086) — sticky motivation+intensity, so an agenda survives a
    * restart instead of re-rolling. ENGINE-ONLY (hidden strategy). Absent on pre-0086 saves / when the
    * campaign layer is off. */
@@ -723,6 +734,7 @@ export interface SessionCoreCounts {
   legendLastActTick: number;
   secretBarterTickCount: number;
   secretBarterCount: number;
+  reliabilityTickCount: number;
   showrunnerNoteCount: number;
   showrunnerReweightCount: number;
 }
@@ -748,6 +760,7 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     legendLastActTick: snap.legendLastActTick ?? 0,
     secretBarterTickCount: snap.secretBarterTickCount ?? 0,
     secretBarterCount: snap.secretBarterCount ?? 0,
+    reliabilityTickCount: snap.reliabilityTickCount ?? 0,
     tieScheduleTickCount: snap.tieScheduleTickCount ?? 0,
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
     tieExposureCount: snap.tieExposureCount ?? 0,

@@ -17,6 +17,7 @@ import {
   PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
 } from "../engine/diversity";
 import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
+import { reliableHonorerFrom } from "../domain/deal";
 import { recallWitnessedMoments } from "../engine/memoryCallback";
 import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
@@ -115,6 +116,17 @@ function buildUserSandbox(user = "default"): UserSandbox {
   session.setNpcKnowledgeProviders({
     known: (id) => engine.knowledge.knownTo(id),
     suspicions: (id) => engine.knowledge.suspicionsOf(id),
+  });
+  // 0121 R1 — the Vault-free reliability-reputation reader: which honorers a holder credits as "keeps their
+  // word" (the diffusing 0038 belief, `reliable:<honorer>`), read by the NPC deal-willingness nudge in
+  // `mintNpcDeal`. A knowledge-layer read (never a Vault read); off unless the deal-depth layer is on.
+  session.setReliabilityReader((holder) => {
+    const credited = new Set<EntityId>();
+    for (const f of engine.knowledge.knownTo(holder)) {
+      const honorer = f.factId ? reliableHonorerFrom(f.factId) : undefined;
+      if (honorer) credited.add(honorer);
+    }
+    return credited;
   });
   // The season record (0048/B56): the recap reads the PUBLIC record; the retrospective reads the
   // hidden side THROUGH the session's finished-state gate (the one sanctioned Vault seam).

@@ -157,3 +157,54 @@ describe("0121 — the verdict is engine-decided, never prose", () => {
     expect(d.status).toBe("broken");
   });
 });
+
+describe("0121 R1 — the diffusing 'keeps their word' reputation seed (the sink hook fires on a KEPT deal)", () => {
+  /** A sink that RECORDS every reputation seed the ledger emits, plus the deal-depth reward toggle. */
+  function repSink(dealDepth: boolean) {
+    const rel = new RelationshipModel(0.5);
+    const seeds: Array<{ honorer: string; other: string }> = [];
+    const s: ReconcileSink = {
+      rel, rng: new SeededRandom(7), dealDepth,
+      juryDemerit: () => {}, reveal: () => "e",
+      reputation: (honorer, other) => { seeds.push({ honorer, other }); },
+    };
+    return { s, seeds };
+  }
+
+  it("a KEPT active-obligation deal seeds a reputation for the honorer, credited to the counterparty", () => {
+    const ledger = new DealLedger();
+    const { s, seeds } = repSink(true);
+    ledger.make([PROMISOR, PROTECT], "comp-throw", "I'll throw the HOH for you");
+    ledger.reconcile({ actor: PROMISOR, kind: "compete", targets: [], outcome: "threw" }, s);
+    // The honorer (who kept the throw) accrues the reputation; the party they kept it WITH is the origin holder.
+    expect(seeds).toEqual([{ honorer: PROMISOR, other: PROTECT }]);
+  });
+
+  it("a BROKEN deal seeds NO reputation (you only build a name by KEEPING your word)", () => {
+    const ledger = new DealLedger();
+    const { s, seeds } = repSink(true);
+    ledger.make([PROMISOR, PROTECT], "comp-throw", "throw it");
+    ledger.reconcile({ actor: PROMISOR, kind: "compete", targets: [], outcome: "won" }, s); // competed ⇒ broken
+    expect(seeds).toEqual([]);
+  });
+
+  it("with the deal-depth layer OFF, a kept deal seeds NO reputation (byte-identical — nothing to diffuse)", () => {
+    const ledger = new DealLedger();
+    const { s, seeds } = repSink(false); // dealDepth off
+    ledger.make([PROMISOR, PROTECT], "comp-throw", "throw it");
+    ledger.reconcile({ actor: PROMISOR, kind: "compete", targets: [], outcome: "threw" }, s);
+    expect(seeds).toEqual([]); // the reputation hook never fires when off
+  });
+
+  it("a mutual deal honored at its horizon seeds the reputation for the honoring actor", () => {
+    const ledger = new DealLedger();
+    const { s, seeds } = repSink(true);
+    // A safety deal: the actor spares their partner at the eviction vote (the horizon) — that HONORS it.
+    ledger.make([PROMISOR, PROTECT], "safety", "I keep you safe");
+    ledger.reconcile(
+      { actor: PROMISOR, kind: "vote-evict", targets: [OTHER], alternatives: [PROTECT, OTHER] },
+      s,
+    );
+    expect(seeds).toEqual([{ honorer: PROMISOR, other: PROTECT }]);
+  });
+});

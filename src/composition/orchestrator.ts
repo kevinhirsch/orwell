@@ -789,6 +789,15 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   // (overhear/gossip below, 0002/0094) terminates at them — never as a Vault read.
   sandbox.session.secretBarterTick(sandbox.engine.events, sandbox.engine.knowledge);
 
+  // 0121 R1 — the diffusing "keeps their word" REPUTATION reward: a KEPT deal (queued during its beat commit)
+  // seeds a hidden `reliable:<honorer>` belief about the honorer that spreads NPC→NPC through the SAME 0038
+  // gossip machinery (the positive mirror of the betrayal rumor), so a houseguest who hears it reads the
+  // honorer as a more-appealing deal partner (`mintNpcDeal`). SELF-GATED like the ticks above (a no-op — ZERO
+  // draws, no counter advance — unless the deal-depth layer is ON and a kept deal is pending a seed), on its
+  // OWN dedicated rng, folding NO relationship edge — so the seeded competition/vote/jury spine is byte-
+  // identical whether OFF or ON. The player learns a reputation only if a pathway (gossip below) reaches them.
+  sandbox.session.reliabilityTick(sandbox.engine.knowledge);
+
   // B27b — live gossip: occasionally one of the night's scenes becomes a RUMOR that diffuses along
   // the affinity graph (who actually talks to whom), with low per-edge transmission, decaying
   // confidence, and per-telling drift. The PLAYER is a node like anyone: a chain that terminates at
