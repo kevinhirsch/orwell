@@ -5747,10 +5747,26 @@ async def _stream_agent_loop_impl(
                 _in_eviction = str(_framed_phase or "").lower().startswith("eviction")
                 _want_drain_eviction = (_in_eviction and (not _progressed)
                                         and _turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN)
+                # 0118 — the TIMED ceremony interrupt. When the engine reports the scheduled ceremony time
+                # has ARRIVED (the day-schedule `due` flag, cached at framing), fire the forced advance even
+                # during ENGAGING play — production calls the house together at the scheduled hour, whether
+                # or not the turn was a lull (owner ruling 2026-07-12: ceremonies are a HARD, TELEGRAPHED
+                # interrupt; only bedtime is soft). Still bounded like every advance: capped per turn, never
+                # on a turn that already progressed, and it yields to a deliberately-held social runway (the
+                # runway is only ever armed on a SOCIAL moment, not a due ceremony beat, so in practice they
+                # do not collide — the guard just preserves the never-fast-forward protection). Vault-free;
+                # False when the in-game clock is off ⇒ byte-identical to the pre-0118 lull-only pacing.
+                _milestone_due = False
+                try:
+                    from routes import chat_helpers as _ch_md
+                    _milestone_due = bool(_ch_md._LAST_MILESTONE_DUE.get(_belt_key(owner)))
+                except Exception:
+                    _milestone_due = False
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
                     or _want_drain_eviction
+                    or (_milestone_due and (not _progressed) and not _runway_holding)
                     or ((not _progressed) and _is_lull and _stale and not _runway_holding)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.

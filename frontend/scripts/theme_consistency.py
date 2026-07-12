@@ -119,6 +119,19 @@ EXPECTED_UNREACHED: Dict[str, str] = {
                    "is empty at this beat); carry the identical fixed rule as .hs-preview (reached), "
                    "which covers the orwellHeadshot.js token fix",
     ".gadget-rail .ow-window": "gadgets render as .og-card (reached=5), not docked .ow-window",
+    "#orwell-decision-card": "the live-decision affordance (orwellDecision.js CARD_ID) is created "
+                             "ONLY while a pending decision is on the board. This sweep probes the "
+                             "walk's TERMINAL parked state (VisualWalk._run_week breaks at week>=2), "
+                             "and the committed golden fixture terminates at a Week-2 day-1 SOCIAL "
+                             "beat with no pending, so no card is live there. State-gated, not an "
+                             "open-hook the sweep can trigger (never a synthetic state); the "
+                             "decision-card render path is unchanged. Revisit (remove this entry) if "
+                             "a decision-bearing terminal beat is ever re-recorded — the classifier "
+                             "still theme-probes the card whenever it IS present.",
+    ".ow-sheet": "the anchored action-sheet (#753) that HOSTS #orwell-decision-card above the "
+                 "composer — it mounts only alongside a live decision, so it is absent for the "
+                 "exact same reason as #orwell-decision-card at this fixture's terminal social beat "
+                 "(the two are coupled: the sheet is the card's host). Not a sheet-kit regression.",
 }
 
 

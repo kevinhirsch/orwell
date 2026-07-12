@@ -217,18 +217,39 @@ async def _resolve_llm_fn(owner: Optional[str]) -> Optional[LlmFn]:
 
 async def run_identity(cast: list[dict], owner: Optional[str], *,
                        write: Optional[WriteFn] = None) -> int:
-    """Resolve the live deps and seed the cast's identity. Silent no-op (returns 0) if no model resolves.
-    No player identity is threaded in — the cast identity is proposed player-independently."""
+    """Resolve the live deps and seed the cast's identity. Under the `soft` enrichment policy a
+    missing model / failed seed is the legacy silent no-op (returns 0) — the engine's deterministic
+    floor stands byte-identically. Under the DEFAULT `strict` policy (owner directive 2026-07-11)
+    the failure is LOUD: an ERROR + an admin-visible failure-ledger entry. No player identity is
+    threaded in — the cast identity is proposed player-independently."""
+    strict = False
+    try:
+        from src import enrichment_policy
+        strict = enrichment_policy.is_strict()
+    except Exception:
+        strict = False
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
-        logger.debug("[cast-identity] no utility model — keeping the seeded floor")
+        if strict:
+            enrichment_policy.record_failure(
+                owner, "cast-identity", "no model resolved for the cast-identity call class",
+                detail="the deterministic identity floor must not stand silently under the strict policy")
+        else:
+            logger.debug("[cast-identity] no utility model — keeping the seeded floor")
         return 0
     from src import orwell_engine
 
     async def _write(facets: dict) -> dict:
         return await orwell_engine.record_cast_identity(facets, user=owner)
 
-    return await seed_cast_identity(cast, llm_fn, write or _write)
+    applied = await seed_cast_identity(cast, llm_fn, write or _write)
+    # STRICT: a run that seeded NOTHING (llm failure / nothing usable / refused write-back — all
+    # already logged inside seed_cast_identity) is ledgered loudly. Soft: byte-identical legacy.
+    if strict and not applied and cast:
+        enrichment_policy.record_failure(
+            owner, "cast-identity", "cast-identity seeding applied nothing (model or write-back failed)",
+            detail="the engine's deterministic identity floor stands, but the failure is loud + ledgered")
+    return applied
 
 
 def kickoff_identity(cast: list[dict], owner: Optional[str],

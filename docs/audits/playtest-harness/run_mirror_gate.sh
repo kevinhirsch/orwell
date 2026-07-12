@@ -142,6 +142,10 @@ rm -f "$FE_DATA/auth.json" "$FE_DATA/sessions.json" "$FE_DATA/app.db" "$FE_DATA/
 ( cd "$ROOT/frontend" && ORWELL_ADMIN_USER=$ADMIN_USER ORWELL_ADMIN_PASSWORD="$ADMIN_PW" \
     ORWELL_SKIP_ADMIN_PROMPT=1 ORWELL_SKIP_RUN_HINT=1 ORWELL_DATA_DIR="$FE_DATA" \
     .venv/bin/python setup.py >"$LOGS/fe-setup.log" 2>&1 )
+# Pin the deterministic-floor enrichment policy (like the golden driver): this gate seeds a game
+# against a FAKE model that wires no per-class enrichment provider, so the runtime `strict` default
+# would (correctly) refuse game creation and the mirror could never start. "Floor for tests, loud
+# for production" — the SERVER/product default stays strict; only this automated gate opts to soft.
 # ORWELL_WS_TRANSPORT=0 (#1087 CI honesty): the product default flipped ON (2026-07-10), so an unset
 # env makes the page inject body[data-ws-transport="1"] and the client's `_flagOn()` honors it EVEN
 # when a leg's init script never sets the window global — i.e. the "SSE" leg silently ran WS. Pin the
@@ -149,6 +153,7 @@ rm -f "$FE_DATA/auth.json" "$FE_DATA/sessions.json" "$FE_DATA/app.db" "$FE_DATA/
 # genuinely SSE/poll, and a WS leg forces `window.ORWELL_WS_TRANSPORT = true` before app JS (the
 # `/api/ws/session` route is registered regardless of the env flag, so the forced upgrade still works).
 ( cd "$ROOT/frontend" && ORWELL_GAME_BUILD=1 AUTH_ENABLED=true LOCALHOST_BYPASS=false \
+    ORWELL_ENRICHMENT_POLICY=soft \
     ORWELL_WS_TRANSPORT=0 \
     ORWELL_ENGINE_MCP_URL="$ENGINE_URL" ORWELL_DATA_DIR="$FE_DATA" \
     exec .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port $FE_PORT >"$LOGS/fe.log" 2>&1 ) & PIDS+=($!)

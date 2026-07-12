@@ -1,15 +1,16 @@
 """WS turn-on plumbing (gate #1299) — the two server-side fixes that make the
-WebSocket Phase-1 transport UPGRADE-CAPABLE and FLIPPABLE-BY-ENV while it stays
-DORMANT by default (ORWELL_WS_TRANSPORT off).
+WebSocket Phase-1 transport UPGRADE-CAPABLE and FLIPPABLE-BY-ENV. It is now ON by
+default (ORWELL_WS_TRANSPORT default-ON since 2026-07-10, #1357); an explicit
+off/0/false is the rollback lever back to the SSE/poll stack.
 
 Roles only — no houseguest/player names.
 
   BLOCKER 1 — a WebSocket protocol library is installed, so uvicorn can answer the
               /api/ws/session upgrade instead of 404 "No supported WebSocket library
               detected". (Pinned via requirements.txt/.lock — `websockets`.)
-  BLOCKER 3 — app.py emits body[data-ws-transport="1"] ONLY when ws_transport_enabled()
-              is true (ORWELL_WS_TRANSPORT truthy). Unset ⇒ attr ABSENT ⇒ byte-identical
-              page ⇒ WS stays dormant on the existing SSE/poll stack.
+  BLOCKER 3 — app.py emits body[data-ws-transport="1"] whenever ws_transport_enabled()
+              is true. Unset ⇒ default ON ⇒ attr PRESENT ⇒ the client engages WS; an
+              explicit off/0/false ⇒ attr ABSENT ⇒ rollback to the SSE/poll stack.
 """
 
 import os
@@ -72,7 +73,7 @@ def test_ws_transport_explicit_falsey_values_disable(monkeypatch, val):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BLOCKER 3b — the served page: attr ABSENT by default, PRESENT when flipped on
+# BLOCKER 3b — the served page: attr PRESENT by default, ABSENT on explicit rollback
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _StubRequest:

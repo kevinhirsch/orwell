@@ -108,7 +108,10 @@ def boot():
         os.remove(os.path.join(ROOT, "data", "orwell_layout.json"))
     except FileNotFoundError:
         pass
-    env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true")
+    env = dict(os.environ, ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
+               # 2026-07-11: pin the legacy soft enrichment policy — the smoke wires no model, and
+               # strict (the prod default) would refuse the game creation it drives.
+               ORWELL_ENRICHMENT_POLICY="soft")
     proc = subprocess.Popen(
         [PY, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=ROOT, env=env, stdout=open(f"/tmp/fe-browser-{PORT}.log", "w"), stderr=subprocess.STDOUT,

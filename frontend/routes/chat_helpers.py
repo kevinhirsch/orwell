@@ -904,6 +904,15 @@ _LAST_BEAT_SEQ: dict = {}
 # changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
 _LAST_FRAMED_BEAT_KEY: dict = {}
 
+# 0118 (in-game-time pivot, Phase 2) — whether the engine reports the scheduled ceremony time has ARRIVED
+# (the Vault-free day-schedule `due` flag), cached at framing so the agent loop's advance-nudge can fire the
+# TIMED, TELEGRAPHED ceremony interrupt at its scheduled in-game hour REGARDLESS of a conversational lull
+# (owner ruling 2026-07-12: ceremonies are a hard interrupt; only bedtime is soft). Keyed the SAME
+# "default"-fallback way as `_LAST_FRAMED_BEAT_KEY` above, so the agent loop's `_belt_key(owner)` read
+# matches single-tenant. Absent/False when the in-game clock is off ⇒ byte-identical to the pre-0118
+# lull-only pacing (the seeded gates + golden replay pin the per-conversation clock off, so `due` is never set).
+_LAST_MILESTONE_DUE: dict = {}
+
 # #670 — one-shot flag: did `_pre_resolve_npc_ceremony` walk a real beat for this user THIS turn? The
 # pre-resolve advances ONE engine-driven beat per turn at the top of the turn (ceremonies AND the long
 # staged finale, `_CEREMONY_RESOLVE_PHASES`). With "finale" now in the agent loop's `_ADVANCE_PHASES`,
@@ -3184,6 +3193,11 @@ async def apply_game_framing(
                 if _pending_kind is not None
                 else (game_state.get("week"), game_state.get("phase"), moment)
             )
+            # 0118 — cache the day-schedule `due` flag alongside the beat key (zero extra read: game_state
+            # is already in hand). The agent loop reads this to fire the timed ceremony interrupt at its
+            # scheduled hour even during engaging play. Vault-free; absent/False when the clock is off.
+            _ds = game_state.get("daySchedule")
+            _LAST_MILESTONE_DUE[user or "default"] = bool(_ds.get("due")) if isinstance(_ds, dict) else False
         if session_id is not None and session_id not in _SESSION_GAME_FRAMED:
             moment = RE_ENTRY_MOMENT
         try:

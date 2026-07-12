@@ -226,6 +226,31 @@ export class BbWorld extends World {
   drSecret?: string;
   drRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
 
+  // Feature 0117 — the house lives in in-game time scratch state.
+  igtSandbox?: import("../../src/composition/registry").UserSandbox;
+  igtHourBefore?: number;
+  igtScenesBefore?: Set<string>;
+  igtNewScenes?: string[];
+  igtTickTurns?: number;
+
+  // Feature 0118 — ceremonies as timed interrupts scratch state.
+  dscSandbox?: import("../../src/composition/registry").UserSandbox;
+  dscContext?: string;
+
+  // Feature 0119 — per-event felt durations scratch state.
+  pfdFlat?: { winner?: string; order: string[] };
+  pfdVariable?: { winner?: string; order: string[] };
+
+  // Feature 0120 — strategic-drive off-screen cadence scratch state.
+  scSandbox?: import("../../src/composition/registry").UserSandbox;
+  scOrch?: import("../../src/composition/orchestrator").Orchestrator;
+  scUser?: string;
+  scSharpDrive?: number;
+  scPassiveDrive?: number;
+  scOffStream?: string[];
+  scOnStream?: string[];
+  scOnStreamB?: string[];
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;

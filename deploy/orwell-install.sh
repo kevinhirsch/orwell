@@ -275,6 +275,10 @@ write_config() {
       echo "ORWELL_SECRET_PACING=1"
       echo "ORWELL_JURY_HOUSE=1"
       echo "ORWELL_SEEDED_TIE_SURFACING=1"
+      # Strategic-drive off-screen cadence (0120): sharper/more-strategic houseguests initiate the
+      # hidden off-screen scheming a touch more often (a slight, bounded variance — never a wild skew).
+      # DEFAULT OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
+      echo "ORWELL_STRATEGIC_CADENCE=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded

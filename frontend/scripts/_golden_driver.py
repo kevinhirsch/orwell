@@ -289,7 +289,12 @@ class GoldenDriver:
                       # and replay pins a resolvable (dead-end) utility endpoint. Force the house-entry
                       # authoring gate OFF so createCharacter returns without blocking on authoring —
                       # keeping the record/replay timing deterministic and byte-identical to the seam.
-                      ORWELL_ALLOW_FLOOR_START="1")
+                      ORWELL_ALLOW_FLOOR_START="1",
+                      # Owner directive 2026-07-11 — the enrichment policy defaults to STRICT (loud
+                      # refusals + strict-only retries). The golden record/replay must stay
+                      # byte-deterministic with the legacy fail-soft call shapes, so the driver pins
+                      # the LEGACY `soft` policy (exactly like the floor-start hatch above).
+                      ORWELL_ENRICHMENT_POLICY="soft")
         if self.mode == "record":
             fe_env["ORWELL_GOLDEN_RECORD"] = "1"
             fe_env["ORWELL_GOLDEN_FIXTURE"] = self.fixture

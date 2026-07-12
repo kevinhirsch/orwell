@@ -1,6 +1,7 @@
 # 0017 — One multiplexed WebSocket per session (end-to-end dynamic transport)
 
-> **Status:** **Proposed** (owner-requested, 2026-07-09). A transport-layer consolidation: replace the
+> **Status:** **Accepted** (owner directive, 2026-07-12). Accepted 2026-07-12 (owner directive — WS Phase-2
+> turn-on); originally owner-requested 2026-07-09. A transport-layer consolidation: replace the
 > current real-time patchwork (SSE-over-fetch chat stream + a mirror SSE + 20–30 s HUD polls + the 0064
 > cross-device push + the up-channel POSTs) with **one multiplexed WebSocket per canonical session** that
 > carries **every dynamic, Vault-free surface** as a framed channel.
