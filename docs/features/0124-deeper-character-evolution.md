@@ -1,6 +1,6 @@
 # 0124 — Deeper character evolution (multi-axis affect · temperament drift · personality-tuned reactivity)
 
-> **Status:** Spec (BDD/TDD-first). **Expands 0041** (character evolution & season arc) per the PO review
+> **Status:** ✅ Built (BDD/TDD-first; BDD-gated in `cucumber.cjs`). **Expands 0041** (character evolution & season arc) per the PO review
 > (2026-07-12). 0041 made a season *change* a houseguest — but the change is **one dial** (a single
 > confidence↔distress slider + volatility), personality-flat (an NPC's reactivity is a **random draw**, not
 > their character), and mood-only (their *strategy* never hardens). This deepens all three, so the house
@@ -114,18 +114,18 @@ invariants: CHARACTER byte-stable (0007); bounded; never overrides a hard rule (
 
 ## 6. Definition of Done
 
-- [ ] **Multi-axis:** with soul-depth on, a houseguest can carry **high confidence AND high distress at once**;
+- [x] **Multi-axis:** with soul-depth on, a houseguest can carry **high confidence AND high distress at once**;
       the distress axis drags a competition even when confident; off ⇒ only the single `emotionalState` dial
       moves (byte-identical to 0041).
-- [ ] **Temperament drift:** repeated betrayals bend a bond houseguest's **effective disposition** toward
+- [x] **Temperament drift:** repeated betrayals bend a bond houseguest's **effective disposition** toward
       paranoia (and bend a live decision); a calm stretch **reverts** it toward baseline; the **static
       CHARACTER disposition never changes**; off ⇒ decisions use the static disposition exactly.
-- [ ] **Personality-tuned reactivity:** with soul-depth on, a **clash** houseguest's on-edge dial **swings
+- [x] **Personality-tuned reactivity:** with soul-depth on, a **clash** houseguest's on-edge dial **swings
       harder** and **settles slower** than a **bond** houseguest facing the same shock; the starting volatility
       is **disposition-derived, draw-preserving** (no extra rng); off ⇒ the legacy random draw stands.
-- [ ] **Vault-free + deterministic:** no new axis/drift/reactivity number on any player surface (extend the
+- [x] **Vault-free + deterministic:** no new axis/drift/reactivity number on any player surface (extend the
       0001 canary); same seed ⇒ same axes/drift/reactivity; persisted across restart (0030).
-- [ ] **Calibration-neutral:** flag **off** ⇒ the seeded spine (`juryReach`) + golden fixture are
+- [x] **Calibration-neutral:** flag **off** ⇒ the seeded spine (`juryReach`) + golden fixture are
       **byte-identical**; name-agnostic (roles only); added to `cucumber.cjs`; `npm test` + `test:arch` green.
 
 ## 7. Dependencies & traceability
