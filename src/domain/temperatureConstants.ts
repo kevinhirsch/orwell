@@ -22,8 +22,10 @@ export interface OutcomeWeights {
   playSafePenalty: number;
   /**
    * The hidden sleep cost (ADR 0006): a competitor's rest deficit (0..1) scales this into a bounded
-   * score malus. ~¾ of the emotion weight — meaningful but never fatal, and never protective. Tuning,
-   * not architecture; 0 here would disable the sleep→comp consequence entirely.
+   * score malus. #1419 owner ruling (2026-07-12) — staying up costs MORE at competitions: a full rest
+   * deficit now shaves ~0.20 off the outcome score (against the stat weight of 1.0), on par with the
+   * emotion weight — meaningful but never fatal, and never protective (a tired favorite can still lose).
+   * Tuning, not architecture; 0 here would disable the sleep→comp consequence entirely.
    */
   sleepPenalty: number;
   /**
@@ -96,7 +98,7 @@ export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   // convictionVarianceGain/Cap (0098): a low-conviction read at conviction→0 widens the span up to ~2×
   // (gain 1.0), hard-capped at 2.5×. INERT at runtime (no caller passes a conviction — owner-gated); they
   // tune the mechanic the 0098 property tests exercise. A bold gamble is a real swing, never mean-moving.
-  outcome: { stat: 1.0, temperature: 0.40, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.15, convictionVarianceGain: 1.0, convictionVarianceCap: 2.5 },
+  outcome: { stat: 1.0, temperature: 0.40, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.20, convictionVarianceGain: 1.0, convictionVarianceCap: 2.5 },
   emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3, swingTemperatureWeight: 0.25 },
   hiddenSurfacingRate: 0.05,
 };
