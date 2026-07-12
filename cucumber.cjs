@@ -95,6 +95,7 @@ module.exports = {
       "docs/features/0122-deeper-daily-npc-confessionals.feature",
       "docs/features/0123-npc-initiated-deal-offers.feature",
       "docs/features/0124-deeper-character-evolution.feature",
+      "docs/features/0125-competition-theme-variety.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

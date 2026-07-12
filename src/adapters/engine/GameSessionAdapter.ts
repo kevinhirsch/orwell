@@ -216,6 +216,8 @@ import {
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
+import { themeForWeek, applyTheme } from "../../engine/competitionThemes";
+import type { CompetitionDef } from "../../engine/competitionLibrary";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, soreSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -507,6 +509,17 @@ const NPC_DEAL_OFFERS_ENABLED_DEFAULT = process.env.ORWELL_NPC_DEAL_OFFERS === "
  * byte-identical (the seeded `juryReach`/golden spine untouched).
  */
 const SOUL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_SOUL_DEPTH === "1";
+
+/**
+ * 0125 — whether the competition THEME/skin layer runs by DEFAULT. ON for real play unless
+ * `ORWELL_COMP_THEMES=0` (default-on, like the per-conversation clock — real players want the variety).
+ * It is a pure Vault-free PROJECTION: the seeded theme is chosen on a dedicated hash (never the beat rng)
+ * and only reskins the SURFACED name/premise — the mechanic, the governing stat, and the winner are
+ * unchanged — so the seeded spine (juryReach/gradient/UAT) is byte-identical whether it is on or off. The
+ * golden driver pins `=0` so the committed fixture (recorded theme-free) replays byte-identically without a
+ * re-record; a fresh re-cut can drop the pin to capture themed scaffolds.
+ */
+const COMP_THEMES_ENABLED_DEFAULT = process.env.ORWELL_COMP_THEMES !== "0";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -907,6 +920,8 @@ export class GameSessionAdapter implements GameSession {
    *  deal-willingness lean, so `mintNpcDeal` is byte-identical. */
   private reliabilityReader?: (holder: EntityId) => ReadonlySet<EntityId>;
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
+  private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
+
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
   private npcDealOffersEnabled = NPC_DEAL_OFFERS_ENABLED_DEFAULT;
@@ -6374,6 +6389,29 @@ export class GameSessionAdapter implements GameSession {
   /** #1400 — the resolved on/off state of the generative-competition flag (for an admin/status read). */
   genCompetitionsEnabledNow(): boolean { return this.genCompetitionsEnabled; }
 
+  /** 0125 — turn the seeded competition THEME/skin layer on/off. On by default (real play wants the variety);
+   *  the calibration/golden harness pins it off. Pure Vault-free projection ⇒ off is byte-identical to the
+   *  bare 0042 library name/premise, and on never perturbs the seeded winner. */
+  setCompThemesEnabled(on: boolean): void { this.compThemesEnabled = on; }
+  /** 0125 — the resolved on/off state of the competition-theme layer (for an admin/status read). */
+  compThemesEnabledNow(): boolean { return this.compThemesEnabled; }
+
+  /**
+   * 0125 — the Vault-free surfaced scaffold for a drawn mechanic def, dressed in this week's seeded theme
+   * when the layer is on. The theme is a pure PROJECTION (chosen on a dedicated hash, never the beat rng),
+   * so a theme never moves the winner; off (or pre-seed) ⇒ the bare 0042 library name/premise (byte-identical).
+   */
+  private themedScaffold(def: CompetitionDef): { name: string; theme?: string; narrative: { premise: string; beats: string[]; winReads: string } } {
+    if (!this.compThemesEnabled || this.gameSeed === null) {
+      return { name: def.name, narrative: { premise: def.narrative.premise, beats: [...def.narrative.beats], winReads: def.narrative.winReads } };
+    }
+    // A double-eviction night reruns a same-phase comp in the SAME week; mark the compressed second cycle
+    // (twist "running") so it draws a distinct skin from the first crown rather than repeating it.
+    const cycle = this.live?.twist?.phase === "running" ? 1 : 0;
+    const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, this.week, cycle));
+    return { name: t.name, theme: t.theme, narrative: t.narrative };
+  }
+
   /**
    * 0066 Phase-2 (Extension 1) — advance the clock a SMALL step as the player lingers/plays WITHIN a beat.
    * The orchestrator's per-turn off-screen tick calls this once per player TURN (debounced for aux tool
@@ -9546,7 +9584,9 @@ export class GameSessionAdapter implements GameSession {
     if (!this.genCompetitionsEnabled || !this.house || !this.live) return null;
     const data = competitionStagingData(this.live);
     if (!data) return null;
-    const lib = data.def?.narrative;
+    // 0125: dress the library floor in this week's seeded theme so the model riffs FROM structured
+    // variety (it may still author its own theme over it). Off/pre-seed ⇒ the bare 0042 scaffold.
+    const skin = data.def ? this.themedScaffold(data.def) : undefined;
     return {
       comp: data.comp,
       type: data.type,
@@ -9556,10 +9596,11 @@ export class GameSessionAdapter implements GameSession {
       winner: { id: data.winner, name: this.nameOf(data.winner) },
       dropOrder: data.dropOrder.map((id) => ({ id, name: this.nameOf(id) })),
       library: {
-        name: data.def?.name ?? "",
-        premise: lib?.premise ?? "",
-        beats: lib ? [...lib.beats] : [],
-        winReads: lib?.winReads ?? "",
+        name: skin?.name ?? "",
+        ...(skin?.theme ? { theme: skin.theme } : {}),
+        premise: skin?.narrative.premise ?? "",
+        beats: skin ? [...skin.narrative.beats] : [],
+        winReads: skin?.narrative.winReads ?? "",
       },
       alreadyAuthored: data.alreadyAuthored, // the FE's persistent "author exactly once per comp" guard
     };
@@ -9771,14 +9812,19 @@ export class GameSessionAdapter implements GameSession {
         // comp-elimination beats, so the preview `beats` stay the generic library scaffold (no spoiler).
         const f = this.live.competitionFiction;
         const authored = f && f.comp === peek.beat && f.week === this.week ? f : undefined;
+        // 0125: the seeded theme is the deterministic floor's skin; #1400's model-authored fiction still
+        // overrides it (a fresh restart re-grounds the narrator in the authored staging). Precedence:
+        // model fiction > seeded theme > bare 0042 library.
+        const skin = this.themedScaffold(peek.def);
         return {
           started: true, type: peek.type, week: this.week, phase: this.phase,
           winner: this.named(peek.winner),
-          name: authored?.theme ?? peek.def.name, format: peek.def.format,
+          name: authored?.theme ?? skin.name, format: peek.def.format,
+          ...(!authored && skin.theme ? { theme: skin.theme } : {}),
           narrative: {
-            premise: authored?.premise ?? peek.def.narrative.premise,
+            premise: authored?.premise ?? skin.narrative.premise,
             beats: [...peek.def.narrative.beats],
-            winReads: authored?.winReads ?? peek.def.narrative.winReads,
+            winReads: authored?.winReads ?? skin.narrative.winReads,
           },
         };
       }
