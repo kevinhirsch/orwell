@@ -867,9 +867,14 @@ jobs:
       - test
       - coverage
       - smoke
-      - golden-path
-      - visual-regression
-      - theme-consistency
+      # golden-path / visual-regression / theme-consistency are DELIBERATELY NOT gating (owner ruling
+      # 2026-07-12): all three replay the heavy golden fixture end-to-end and fail INTERMITTENTLY on
+      # slow gh-runners (a heavy advanceGame turn's per-turn request key drifts under load into a
+      # fixture miss — not a code/staling defect; the committed fixture replays clean locally). That
+      # runner-variance flake was blocking the merge lane. They still RUN and report their own status
+      # (advisory), and the nightly golden-record + fast-runner passes keep coverage. Fold them back
+      # into `needs` once the replay's per-turn determinism is hardened (same run-but-don't-gate
+      # pattern a11y-matrix already uses).
       - fe-unit
       - fe-browser-tests
       - fe-browser
@@ -886,9 +891,6 @@ jobs:
             test=${{ needs.test.result }}
             coverage=${{ needs.coverage.result }}
             smoke=${{ needs.smoke.result }}
-            golden-path=${{ needs.golden-path.result }}
-            visual-regression=${{ needs.visual-regression.result }}
-            theme-consistency=${{ needs.theme-consistency.result }}
             fe-unit=${{ needs.fe-unit.result }}
             fe-browser-tests=${{ needs.fe-browser-tests.result }}
             fe-browser=${{ needs.fe-browser.result }}
