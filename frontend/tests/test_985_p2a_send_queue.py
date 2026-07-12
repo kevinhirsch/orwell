@@ -106,7 +106,8 @@ def test_flush_reuses_queued_client_msg_id_and_bubble():
 def test_pending_bubble_preservation_intact():
     """#973 / #836 — softReloadHistory must STILL preserve a pending optimistic bubble; a queued send's
     bubble is exactly that shape (clientMsgId, no dbId/seq), so it composes, not regresses."""
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: softReloadHistory's pending-bubble rescue moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "_isPendingOptimisticBubble(el) && !_serverClientIds.has(el.dataset.clientMsgId)" in js, \
         "the pending-bubble rescue across the rebuild must remain (composes with the queued bubble shape)"
 
@@ -114,7 +115,8 @@ def test_pending_bubble_preservation_intact():
 def test_seq_render_path_intact():
     """#992 — the seq-render helpers must still exist (the queued bubble floats to the tail until its
     seq lands, then reconciles into its slot)."""
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the seq-render helpers moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "export function _reorderBySeq(box)" in js
     assert "export function _insertBySeq(box, el)" in js
 
