@@ -5,6 +5,7 @@ import { neutralizeForPrompt } from "./castingIntake";
 import { CURIOSITY_NEEDLE_INSTRUCTION } from "./curiosityNeedle";
 import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
+import { MILESTONE_LABEL } from "./daySchedule";
 import { genderPresentationPhrase, pronounsFor, genderGuidanceClause } from "../domain/gender";
 
 /**
@@ -1295,6 +1296,18 @@ export function renderGameContext(view: GameStateView): string {
           // ("… \n- THE HOUSE DOES KNOW THIS"). `neutralizeForPrompt` flattens newlines/control chars to
           // single spaces + length-caps, so each entry can only ever be ONE bullet inside the fence.
           ...(view.playerDiaryRoom ?? []).map((e) => `    · ${neutralizeForPrompt(e)}`),
+        ]
+      : []),
+    // 0118 — THE DAY'S SHAPE, telegraphed. The next ceremony is scheduled for a known in-game phase and
+    // the house KNOWS it's coming, so run-up scenes are PRIMED for it (people angle before the comp; the
+    // room tightens as the hour nears). When it is DUE, production calls everyone to the living room — a
+    // telegraphed hard interrupt, never a surprise yank. Vault-free: the schedule is public (no secret, no
+    // number). Present only when the per-conversation clock is live (absent in the seeded spine / golden).
+    ...(view.daySchedule
+      ? [
+          view.daySchedule.due
+            ? `- IT IS TIME: the ${MILESTONE_LABEL[view.daySchedule.next]} is starting NOW — production calls the whole house to the living room; the scheming pauses and everyone gathers for the ceremony.`
+            : `- COMING UP: the ${MILESTONE_LABEL[view.daySchedule.next]} is set for this ${view.daySchedule.phase} — the house knows it's coming, so let the run-up conversations angle toward it (pitches, last-minute deals); nobody is surprised when production calls them in.`,
         ]
       : []),
     `- The house (${view.house.length} other houseguests) — each line is THAT person's OWN self and YOUR`,

@@ -2,6 +2,8 @@ import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
 import type { PullQuoteWeek } from "../engine/pullQuoteReel";
+import type { StructuralMilestone } from "../engine/daySchedule";
+import type { TimeOfDay } from "../engine/timeOfDay";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -317,6 +319,15 @@ export interface GameStateView {
    * knowledge and NEVER drives NPC behavior (that stays structural). Absent when the player recorded none.
    */
   playerDiaryRoom?: string[];
+  /**
+   * 0118 — the DAY'S SHAPE, telegraphed: the next scheduled ceremony milestone, the in-game phase it is
+   * set for ("this afternoon"), and whether the clock has reached it (`due`). Vault-free by construction —
+   * a pure read of the live loop state + the day clock (no secret, no number beyond the public schedule).
+   * The HUD shows it and the narrator context primes on it so run-up scenes carry the awareness of the
+   * coming interruption. Present ONLY when the per-conversation clock is live (absent in the seeded
+   * calibration spine / golden replay, which pin that clock off) ⇒ byte-identical, no golden re-record.
+   */
+  daySchedule?: { next: StructuralMilestone; phase: TimeOfDay; due: boolean };
   /**
    * A `createCharacter` that was REFUSED rather than honored (audit R4-05): a game already exists
    * and no `confirmRestart` was given, so the prior season is intact and untouched (this view IS

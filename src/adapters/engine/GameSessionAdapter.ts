@@ -24,6 +24,7 @@ import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
+import { nextMilestone, milestoneDue as milestoneDueOf } from "../../engine/daySchedule";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
@@ -5747,6 +5748,16 @@ export class GameSessionAdapter implements GameSession {
     return this.live.nightDepth ?? WAKE_HOUR;
   }
 
+  /**
+   * 0118 — has the in-game clock reached the next scheduled ceremony milestone (⇒ the FE's time-aware
+   * forced-advance nudge should fire it now, gathering the whole house — the telegraphed hard interrupt)?
+   * Vault-free; false unless the per-conversation clock is live AND the clock has reached the milestone's
+   * scheduled phase. Mirrors the `daySchedule.due` view flag. A pure read — never mutates, never draws rng.
+   */
+  milestoneDue(): boolean {
+    return this.perConversationClockLive() && milestoneDueOf(this.live);
+  }
+
   /** Build the Vault-free season context the pure loop reads (stats + live relationships + mood). */
   private ctx(): SeasonCtx {
     return {
@@ -8952,6 +8963,14 @@ export class GameSessionAdapter implements GameSession {
     // NPC's knowledge or behavior — the DR wall (`deriveNpcKnowledge`) is untouched. `renderGameContext`
     // fences it as GM-only / do-not-voice so the GM narrates the irony of the player's mask, never leaks it.
     const drStrategy = playerDiaryStrategy(this.playerKnowledgeReader?.() ?? []);
+    // 0118 — the day's shape, telegraphed. Present ONLY when the per-conversation clock is live, so the
+    // seeded calibration spine (time-of-day off) and golden replay (per-conversation clock off) never see
+    // it ⇒ byte-identical, no golden re-record. A pure read of the live loop state + the day clock; the
+    // HUD shows it and `renderGameContext` primes on it so run-up scenes carry the coming interruption.
+    const nextM = this.perConversationClockLive() ? nextMilestone(this.live) : null;
+    const daySchedule = nextM
+      ? { next: nextM.beat, phase: nextM.phase, due: milestoneDueOf(this.live) }
+      : undefined;
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -9069,6 +9088,8 @@ export class GameSessionAdapter implements GameSession {
       ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
       // 0115: the player's DR strategy as a PRIVATE narrator steer (present only when they've recorded one).
       ...(drStrategy.length ? { playerDiaryRoom: drStrategy } : {}),
+      // 0118: the telegraphed day schedule (present only when the per-conversation clock is live).
+      ...(daySchedule ? { daySchedule } : {}),
     };
   }
 }

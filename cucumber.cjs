@@ -88,6 +88,7 @@ module.exports = {
       "docs/features/0111-day-1-experience.feature",
       "docs/features/0115-diary-room-strategic-confessional.feature",
       "docs/features/0117-house-lives-in-in-game-time.feature",
+      "docs/features/0118-ceremonies-as-timed-interrupts.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -233,6 +233,10 @@ export class BbWorld extends World {
   igtNewScenes?: string[];
   igtTickTurns?: number;
 
+  // Feature 0118 — ceremonies as timed interrupts scratch state.
+  dscSandbox?: import("../../src/composition/registry").UserSandbox;
+  dscContext?: string;
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;
