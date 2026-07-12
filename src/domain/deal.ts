@@ -21,6 +21,20 @@ export type DealKind = "safety" | "vote" | "final-two" | "target-other" | "comp-
 const POSITIVE_KINDS: ReadonlySet<DealKind> = new Set<DealKind>(["comp-throw", "veto-save"]);
 export function isPositiveObligation(kind: DealKind): boolean { return POSITIVE_KINDS.has(kind); }
 
+/**
+ * 0121 R1 — the diffusing "keeps their word" REPUTATION belief's lineage id. A kept deal seeds a hidden
+ * `reliable:<honorer>` belief about the honorer that spreads NPC→NPC through the 0038 gossip layer (the
+ * positive mirror of the betrayal rumor). The `factId` is preserved verbatim across every retelling hop
+ * (unlike a belief's drifting `subject`), so ANY holder's belief resolves back to WHICH houseguest is
+ * credited as reliable — one home for the format the seed side (the registry reputation sink) and the read
+ * side (the NPC deal-willingness lean in `mintNpcDeal`) both depend on. Pure data, no state.
+ */
+export const RELIABLE_FACT_PREFIX = "reliable:";
+export function reliableFactId(honorer: EntityId): string { return `${RELIABLE_FACT_PREFIX}${honorer}`; }
+export function reliableHonorerFrom(factId: string): EntityId | undefined {
+  return factId.startsWith(RELIABLE_FACT_PREFIX) ? (factId.slice(RELIABLE_FACT_PREFIX.length) as EntityId) : undefined;
+}
+
 export type DealStatus = "open" | "kept" | "broken";
 
 /**

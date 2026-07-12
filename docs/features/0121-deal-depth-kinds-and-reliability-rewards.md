@@ -116,12 +116,19 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
 - [x] **[Part 2b] Reliable-ally protection (reward 2):** delivered by the EXISTING reliability→nomination
       machinery — a proven-reliable partner outranks others as a nomination target (`relationships.ts`
       `bondStrength`/nom read) — and the streak's reliability build amplifies it. No new code needed.
-- [x] **[R1] Reputation that spreads (reward 1)** — SHIPPED. A kept deal seeds a Vault-free "keeps their
-      word" reputation about the honorer that diffuses NPC→NPC (0038); every third party who hears it leans
-      slightly toward the honorer (`gossip.spreadReliableReputation` + `GOSSIP_HEARD.reliable`, wired via
-      `GameSessionAdapter.setDealReputationSink` + the `reconcileDeals` `reputation` hook). Gated on the
-      deal-depth flag ⇒ off is byte-identical (`tests/unit/dealReputation.test.ts`; juryReach unchanged). The
-      engine `dealDepth` flag is now surfaced on `/health` (`bootFlags`) for the FE flag-gate (R2).
+- [x] **[R1] Reputation that spreads (reward 1)** — SHIPPED (knowledge-belief design, refined 2026-07-12,
+      absorbing the parallel #1504). A kept deal seeds a hidden **`reliable:<honorer>` knowledge belief** that
+      diffuses NPC→NPC (0038) under a **stable, resolvable lineage** (`domain/deal.reliableFactId`). The
+      **deal consequence** is an explicit, bounded **deal-willingness lean** read from that belief
+      (`GameSessionAdapter.mintNpcDeal` + `reliabilityLean`, `DEAL_REPUTATION.dealLean`; the pact KIND stays
+      keyed to bare mutual trust — reputation buys the opportunity, not a bigger promise), wired via
+      `GameSessionAdapter.setReliabilityReader`. Plus a small **affinity-only whisper** so reliable players are
+      faintly more liked (`GOSSIP_HEARD.reliable`, affinity-only — kept OFF the deal-trust read so the whisper
+      and the willingness lean never double-count). Seeded **once** (idempotency watermark = the knowledge
+      layer) via `gossip.spreadReliableReputation` + `GameSessionAdapter.setDealReputationSink` + the
+      `reconcileDeals` `reputation` hook. Gated on the deal-depth flag ⇒ off is byte-identical
+      (`tests/unit/dealReputation.test.ts`; juryReach unchanged). The engine `dealDepth` flag is surfaced on
+      `/health` (`bootFlags`) for the FE flag-gate (R2).
 - [x] **[R2] FE chat-extraction of the new kinds** — SHIPPED (flag-gated, no re-record). The FE caches the
       engine's `/health` `flags.dealDepth` (`orwell_engine.engine_flag`) and, when on, extends makeDeal's
       `kind` enum + the deal-extraction prompt/validation with `comp-throw`/`veto-save` at SEND time
@@ -149,16 +156,27 @@ OFF) and must keep the seeded spine + golden replay byte-identical.**
 
 ### R1 — Reputation that spreads (the third reward) — ✅ SHIPPED
 
-> **Built.** `gossip.spreadReliableReputation` (diffuse the single-subject belief + the bounded
-> `GOSSIP_HEARD.reliable` lean on each third-party holder; the deal partner is excluded — they earned the
-> direct fold) ← `GameSessionAdapter.setDealReputationSink` ← the `reconcileDeals` `reputation` hook (the
-> ledger only fires it under the flag). Gated ⇒ off byte-identical. Gate: `tests/unit/dealReputation.test.ts`.
+> **Built** (knowledge-belief design, refined 2026-07-12 — absorbs the parallel #1504). Two distinct axes,
+> never double-counting:
+> - **Deal axis (the reward):** `gossip.spreadReliableReputation` diffuses a hidden `reliable:<honorer>`
+>   belief under a **stable, resolvable lineage** (`domain/deal.reliableFactId`) ← `setDealReputationSink` ←
+>   the `reconcileDeals` `reputation` hook (fires only under the flag, **seeded once** — the knowledge layer
+>   is the idempotency watermark). The read side: `setReliabilityReader` → `mintNpcDeal.reliabilityLean`
+>   adds a bounded `DEAL_REPUTATION.dealLean` to deal WILLINGNESS when a candidate credits the other as
+>   reliable (the pact KIND stays keyed to bare mutual trust — reputation buys the opportunity, not a bigger
+>   promise).
+> - **Social whisper (a faint warmth):** each third-party holder gets a small **affinity-only**
+>   `GOSSIP_HEARD.reliable` lean toward the honorer — "reliable people are more liked" — kept OFF the
+>   deal-trust read so it never double-counts with the willingness lean. The deal partner is excluded (direct
+>   fold) and the honorer never folds toward themself.
+>
+> Gated ⇒ off byte-identical. Gate: `tests/unit/dealReputation.test.ts`.
 
 **What:** a kept deal seeds a hidden *"keeps their word"* reputation belief about the honorer that
 **diffuses NPC→NPC** through the existing **0038** gossip layer; a houseguest who has heard it reads the
-honorer as a **more-appealing, more-trusted deal partner** (raises their willingness to offer/accept a
-deal). The positive mirror of the betrayal rumor. Hidden; the player only ever feels it as behavior (never a
-number).
+honorer as a **more-appealing deal partner** (an explicit, bounded willingness lean) and likes them a little
+more (an affinity-only whisper). The positive mirror of the betrayal rumor. Hidden; the player only ever
+feels it as behavior (never a number).
 
 **Approach:**
 - The hook already exists: `ReconcileSink.reputation?(honorer, other, deal)` (defined in `src/engine/deals.ts`,
