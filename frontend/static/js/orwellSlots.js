@@ -308,7 +308,10 @@
         // quiet until the final clamped position is applied (F2).
         _restacking = true;
         try {
-          try { localStorage.removeItem(offsetKey(o.key)); } catch (_) {}
+          // R5/#1416: offsetKey(o.key) is null when there is no data-user — guard so the null key
+          // never reaches Web Storage (which would coerce it into a shared "null" namespace).
+          const k = offsetKey(o.key);
+          if (k) { try { localStorage.removeItem(k); } catch (_) {} }
           restackSlot(slotName);
           const base = el.getBoundingClientRect();
           saveOffset(o.key, rect.left - base.left, rect.top - base.top);

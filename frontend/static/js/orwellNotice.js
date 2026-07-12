@@ -364,7 +364,10 @@
     var id = String(d.windowId).slice("notice:".length);
     if (d.state.dismissed === true) {
       // Remember it even if the notice isn't mounted right now, so a later show() honors it.
-      try { localStorage.setItem(dismissKey(id), "1"); } catch (_) {}
+      // R5/#1416: dismissKey(id) is null when there is no data-user — guard so the null key never
+      // reaches Web Storage (which would coerce it into a shared "null" namespace).
+      var k = dismissKey(id);
+      if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
       var n = _byId[id];
       if (n) n._applyRemoteDismiss();
     }

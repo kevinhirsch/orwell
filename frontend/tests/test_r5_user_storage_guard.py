@@ -23,6 +23,7 @@ proof that runs the real helper in Node and shows nothing is written when data-u
 
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -79,6 +80,61 @@ def test_every_migrated_site_uses_the_guard_and_dropped_the_empty_fallback():
         # the collapsing `|| ""` / `|| ''` empty-user fallback on dataset.user must be GONE
         assert 'dataset.user) || ""' not in js, f"{panel} still has the empty-user fallback"
         assert "dataset.user) || ''" not in js, f"{panel} still has the empty-user fallback"
+
+
+# The per-user key functions in each migrated file. A fail-closed key fn can return null (absent
+# data-user), so its RESULT must never be handed straight to Web Storage — that string-coerces null
+# into a shared "null" key (the exact isolation hole #1416 closes). Every call site must route the
+# key through a local var that is null-checked first.
+_PER_USER_KEY_FNS = (
+    "dismissKey", "_dismissKey", "offsetKey", "_orderKey",
+    "collapseKey", "storageKey", "computeGameKey",
+)
+# A fail-closed key fn's result is inlined DIRECTLY into a storage call — the regression class
+# Greptile's T-Rex found (orwellNotice _onSyncedLayout, orwellSlots saveDragOffset). Must be zero.
+_INLINED_KEY_INTO_STORAGE = re.compile(
+    r"(?:localStorage\.(?:getItem|setItem|removeItem)|lsGet|lsSet)\(\s*(?:"
+    + "|".join(_PER_USER_KEY_FNS)
+    + r")\s*\("
+)
+
+
+def test_no_migrated_site_hands_an_unguarded_key_to_web_storage():
+    """The #1416 fail-closed guard is only real if a NULL key can NEVER reach Web Storage.
+
+    Every per-user key fn can return null (absent data-user); a null handed to
+    getItem/setItem/removeItem coerces to a shared "null" key — the very isolation hole this PR
+    closes. So no migrated file may inline a key-fn call directly inside a storage call; the key
+    must go through a local var that is null-checked first. This pins the two paths Greptile's
+    T-Rex reproduced (orwellNotice _onSyncedLayout, orwellSlots saveDragOffset) plus every sibling.
+    """
+    offenders = []
+    for panel in MIGRATED:
+        js = _read("static", "js", panel)
+        for m in _INLINED_KEY_INTO_STORAGE.finditer(js):
+            line = js.count("\n", 0, m.start()) + 1
+            offenders.append(f"{panel}:{line}: {m.group(0)}…")
+    assert not offenders, (
+        "a per-user key fn's (nullable) result is passed straight to Web Storage — null would "
+        "coerce to a shared 'null' key. Route it through a null-checked local var:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_the_two_greptile_paths_now_null_guard_before_storage():
+    # orwellNotice.js — the synced-layout remote-dismiss path (_onSyncedLayout).
+    notice = _read("static", "js", "orwellNotice.js")
+    seam = notice[notice.index("function _onSyncedLayout("):]
+    seam = seam[: seam.index("window.addEventListener")]
+    assert "var k = dismissKey(id);" in seam and "if (k)" in seam, \
+        "the remote-dismiss path must null-guard dismissKey(id) before localStorage.setItem"
+
+    # orwellSlots.js — the drag-end save path (saveDragOffset).
+    slots = _read("static", "js", "orwellSlots.js")
+    seam = slots[slots.index("saveDragOffset("):]
+    seam = seam[: seam.index("restack()")]
+    assert "const k = offsetKey(o.key);" in seam and "if (k)" in seam, \
+        "the drag-save path must null-guard offsetKey(o.key) before localStorage.removeItem"
 
 
 def test_data_user_identity_is_injected_on_boot():
