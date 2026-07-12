@@ -162,9 +162,30 @@ class GoldenDriver:
 
     # ── plumbing ──────────────────────────────────────────────────────────────────
 
+    # A read against the live FE/engine can TRANSIENTLY fail under a slow/contended sandbox:
+    # a SQLite reader momentarily blocked behind a writer surfaces as a 404 (the session row
+    # reads absent for one call) or a connection reset, and the assistant-row write can lag the
+    # stream's return so a just-completed turn reads back with no fresh reply. Neither is a golden
+    # determinism failure — the underlying replay is byte-deterministic (the fixture is served by
+    # key) — so a transient read blip must not fail the whole walk on a slow machine. These GET
+    # reads are IDEMPOTENT, so a bounded, backed-off retry is safe and NON-masking: a genuine miss
+    # (the endpoint really 404s, the reply really never persisted) still surfaces after the budget,
+    # while a one-call blip is absorbed. Timing-independent by construction — it converges on the
+    # same state regardless of sandbox speed.
+    _READ_RETRIES = 6
+    _READ_BACKOFF_S = 0.5
+
     def _get(self, base: str, path: str, timeout: int = 20):
-        with urllib.request.urlopen(base + path, timeout=timeout) as r:
-            return json.load(r)
+        last_err: Exception | None = None
+        for attempt in range(self._READ_RETRIES):
+            try:
+                with urllib.request.urlopen(base + path, timeout=timeout) as r:
+                    return json.load(r)
+            except Exception as e:  # HTTPError / URLError / socket timeout — all transient here
+                last_err = e
+                if attempt < self._READ_RETRIES - 1:
+                    time.sleep(self._READ_BACKOFF_S * (attempt + 1))
+        raise last_err  # type: ignore[misc]  # exhausted the budget — a real, persistent failure
 
     def _post_json(self, base: str, path: str, body: dict, timeout: int = 60):
         req = urllib.request.Request(
@@ -469,7 +490,19 @@ class GoldenDriver:
         # otherwise turnsHere/beatSeq in the next system prompt race the write and the
         # replay keys drift (the turnsHere 4-vs-3 class).
         self._quiesce_beats("post-turn", stable_polls=2, budget_s=20, poll_s=0.3, quiet=True)
+        # The assistant row is written by the stream handler at [DONE], but the SQLite write can
+        # LAG the stream's return on a slow/contended sandbox — so a just-completed turn can read
+        # back with no fresh reply for a beat, then land. Re-read a few times before failing: a
+        # lagging write is absorbed (converges to the same reply either way — timing-independent),
+        # while a turn that genuinely persisted NOTHING (a real desync / stale re-serve) still
+        # fails loudly after the budget. This never masks a determinism bug — the reply that lands
+        # is byte-identical; only WHETHER we've observed it yet is what the retry settles.
         msgs = self._history()
+        for _attempt in range(self._READ_RETRIES):
+            if sum(1 for m in msgs if m.get("role") == "assistant") > prior_assistants:
+                break
+            time.sleep(self._READ_BACKOFF_S * (_attempt + 1))
+            msgs = self._history()
         if sum(1 for m in msgs if m.get("role") == "assistant") <= prior_assistants:
             raise RuntimeError(
                 f"no new assistant message persisted for turn {text[:48]!r} — "

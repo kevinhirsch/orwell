@@ -465,13 +465,27 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
             page.wait_for_timeout(350)
         except Exception:
             pass
+        # F4b: the visibility probe is getBoundingClientRect-based, NOT offsetParent-based.
+        # `offsetParent` is null for every `position: fixed` element (and inside a transformed
+        # ancestor), so the old filter SILENTLY EXCLUDED the fixed chrome this sweep is meant to
+        # measure — the composer icon buttons, the scroll-bottom fab, the gadget-rail toggle, the
+        # top corner controls. A rect + computed-style test treats a painted fixed/transformed
+        # control as visible (a real box, not display:none / visibility:hidden / opacity:0), so the
+        # 44px floor is actually enforced against it.
         small = page.evaluate("""
           [...document.querySelectorAll(
              'button, [role=button], a[role=button], a.btn, select, .settings-nav-item,'
              + '.input-icon-btn, .export-dl-btn, #orwell-scroll-bottom,'
              + '.gadget-rail-open, .gadget-rail-head button, .ow-controls button, .ow-dismiss,'
              + '.minimized-dock-x, .oc-pin, .oc-backfill, .opt-dismiss')]
-            .filter(e => e.offsetParent !== null && !e.classList.contains('tap-exempt'))
+            .filter(e => {
+               if (e.classList.contains('tap-exempt')) return false;
+               const cs = getComputedStyle(e);
+               if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+               if (parseFloat(cs.opacity) === 0) return false;
+               const r = e.getBoundingClientRect();
+               return r.width > 0 && r.height > 0;  // painted box (valid for fixed/transformed els)
+            })
             .map(e => { const r = e.getBoundingClientRect();
                         return { t: (e.innerText || e.ariaLabel || e.id || '?').slice(0, 20), w: r.width, h: r.height }; })
             .filter(b => b.w > 0 && b.h > 0 && (b.w < 44 || b.h < 44))
