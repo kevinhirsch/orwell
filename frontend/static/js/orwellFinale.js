@@ -278,6 +278,18 @@ import * as modalManager from "./modalManager.js";
     el.setAttribute("aria-hidden", "true");
     return el;
   }
+  // A reveal row's faces read _portraitById at BUILD time; the roster cache fills async, so a face
+  // can mount as a monogram fallback and then need refreshing once its portrait lands. This signature
+  // captures each person's portrait availability so an append-only row can be rebuilt ONLY when it
+  // actually changed (no per-poll churn) — the reveal-row counterpart of the finalist-card _finSig.
+  function _faceSig(ref) {
+    if (!ref) return "";
+    const c = ref.id != null ? _portraitById[String(ref.id)] : null;
+    return String(ref.id != null ? ref.id : nameOf(ref)) + "|" + ((c && c.portrait) || "") + "|" + ((c && c.status) || "active");
+  }
+  function _revFaceSig(r) {
+    return _faceSig(r && r.juror) + "!" + _faceSig(r && r.votedFor);
+  }
   // Transient-animation audit: play the reveal-row entrance once, then strip the marker (a lingering
   // class would re-fire on any later className touch). Mirrors orwellStatusPanel.js's flashRow — the
   // setTimeout belt clears it under prefers-reduced-motion (where animationend never fires).
@@ -300,6 +312,7 @@ import * as modalManager from "./modalManager.js";
   function _buildRevealRow(r) {
     const line = document.createElement("div");
     line.className = "ofin-reveal";
+    line.setAttribute("data-rev-facesig", _revFaceSig(r)); // so a later portrait landing can refresh this row (append-only rows aren't otherwise revisited)
     // M3-4: each reveal row carries the juror's + the voted-for finalist's face (portrait, or the
     // OrwellMonogram fallback) beside their name — built via DOM (not innerHTML) so the faces slot
     // in at the right reading-order position; aria-hidden keeps them decorative.
@@ -462,6 +475,18 @@ import * as modalManager from "./modalManager.js";
       }
     }
     _shownRevealCount = reveals.length;
+    // Append-only rows read _portraitById at BUILD time, but the roster cache fills async
+    // (_refreshRosterCache kicked from refresh()), so a row first mounted before its portrait landed
+    // would keep its monogram fallback forever — later same-length polls skip the block above. Refresh
+    // any EXISTING row whose face signature changed (a portrait landed): rebuild it in place, keyed so
+    // an unchanged row is never re-decoded (no churn) and with NO entrance (a portrait swap is not a
+    // new-vote beat). Positional: child i corresponds to reveals[i] (the engine's fixed read order).
+    Array.prototype.slice.call(revWrap.children).forEach((row, i) => {
+      const r = reveals[i];
+      if (!r || typeof row.getAttribute !== "function") return;
+      if (row.getAttribute("data-rev-facesig") === _revFaceSig(r)) return;
+      revWrap.replaceChild(_buildRevealRow(r), row);
+    });
 
     // The player's turn (composer-prefill shortcuts; the chat agent submits the binding decision).
     const playerIsFinalist = finalists.some((f) => f && f.id === PLAYER_ID);

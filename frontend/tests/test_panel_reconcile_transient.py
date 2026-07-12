@@ -91,6 +91,13 @@ def test_finale_finalist_cards_are_keyed_and_reused():
     assert "replaceChild" in FINALE, (
         "a changed finalist card replaces its stale predecessor in place (no duplicate card)"
     )
+    # Greptile P1 (#1493): append-only reveal rows read _portraitById at BUILD time; the roster cache
+    # fills async, so a row mounted before its portrait landed must be refreshed once it lands (later
+    # same-length polls skip the append block). A per-row face signature drives an in-place rebuild.
+    assert "data-rev-facesig" in FINALE, (
+        "append-only reveal rows carry a face signature so a landing portrait refreshes the row "
+        "(else reveal-row faces stay monogram fallbacks forever)"
+    )
 
 
 # ── orwellRoomStrip.js — persistent chips so the leaving-fade fires; gated arrival fade ──
