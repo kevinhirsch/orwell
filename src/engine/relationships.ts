@@ -6,6 +6,7 @@ import {
   CURRENT_READ,
   clamp01 as clamp,
   scaleImpact,
+  scaleImpactByValence,
   type EdgeSignals,
   type InteractionType,
   type RelationshipConstants,
@@ -185,6 +186,23 @@ export class RelationshipModel {
   applyDirected(holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource, scale = 1): void {
     const base = this.constants.IMPACT[type];
     this.applyOneDirection(holder, other, scale === 1 ? base : scaleImpact(base, scale), rng);
+  }
+
+  /**
+   * Directed update scaled ASYMMETRICALLY by the ACTOR's fatigue (#1419, the player-side mirror of the
+   * off-screen social-fatigue fold). A tired `other` (the scene's initiator) sways the `holder` LESS on
+   * WARMING components (charm/bonding dampened by `warm` < 1) and MORE on SOURING components (barbs
+   * amplified by `sore` > 1) — "harder to scheme when you aren't sleeping." `warm === sore === 1` (rested /
+   * fatigue off) passes the base impact OBJECT UNCHANGED (same ref ⇒ BYTE-IDENTICAL to `applyDirected`'s
+   * default, the calibration floor); only a real deficit builds a valence-scaled copy. The four-draw jitter
+   * stream is untouched either way (`applyOneDirection` reads only the magnitudes).
+   */
+  applyDirectedValence(
+    holder: EntityId, other: EntityId, type: InteractionType, rng: RandomnessSource, warm = 1, sore = 1,
+  ): void {
+    const base = this.constants.IMPACT[type];
+    const impact = warm === 1 && sore === 1 ? base : scaleImpactByValence(base, warm, sore);
+    this.applyOneDirection(holder, other, impact, rng);
   }
 
   /**
