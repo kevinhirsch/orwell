@@ -11,6 +11,7 @@ import {
   actionHonors,
   conditionFor,
   horizonOf,
+  isPositiveObligation,
   wrongedParty,
 } from "../domain/deal";
 
@@ -164,7 +165,11 @@ export class DealLedger {
         this.applyHonor(deal, action.actor, sink);
         // The horizon (E43): a safety/vote promise runs through ITS week's eviction; the vote is
         // the endpoint where it resolves kept. Season-scoped kinds stay open (and stay binding).
-        if (horizonOf(deal.kind) === "week" && action.kind === "vote-evict") {
+        // 0121: an ACTIVE-obligation deal (comp-throw / veto-save) resolves the MOMENT the promised
+        // act lands — the comp was thrown, the veto was used — not at a later eviction vote.
+        const resolvesNow = isPositiveObligation(deal.kind)
+          || (horizonOf(deal.kind) === "week" && action.kind === "vote-evict");
+        if (resolvesNow) {
           deal.status = "kept";
           kept.push(deal);
         }

@@ -334,6 +334,17 @@ export class BbWorld extends World {
   dealThreatBefore?: number;
   dealVault?: VaultDatum;
 
+  // Feature 0121 — active-obligation deal kinds scratch state.
+  dealDepthLedger?: import("../../src/engine/deals").DealLedger;
+  dealDepthLedgerB?: import("../../src/engine/deals").DealLedger;
+  dealDepthDeal?: import("../../src/domain/deal").Deal;
+  dealDepthDealB?: import("../../src/domain/deal").Deal;
+  dealDepthRel?: RelationshipModel;
+  dealDepthTrustBefore?: number;
+  dealDepthDemerits?: Array<{ wronged: EntityId; breaker: EntityId }>;
+  dealDepthSandbox?: import("../../src/composition/registry").UserSandbox;
+  dealDepthRefused?: boolean;
+
   // Negotiated deal duration (0109) scratch state.
   ddLedger?: import("../../src/engine/deals").DealLedger;
   ddLedgerB?: import("../../src/engine/deals").DealLedger;

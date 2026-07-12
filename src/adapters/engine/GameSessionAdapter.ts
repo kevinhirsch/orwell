@@ -47,6 +47,7 @@ import type { CastingIntake } from "../../engine/castingIntake";
 import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
+import { isPositiveObligation } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
@@ -441,6 +442,15 @@ const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
 const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
 
 /**
+ * 0121 — whether the DEAL-DEPTH layer runs by DEFAULT (the active-obligation kinds `comp-throw`/`veto-save`
+ * + the reliability rewards). OFF unless `ORWELL_DEAL_DEPTH=1`. A DEDICATED flag (sibling to
+ * `ORWELL_STRATEGIC_CADENCE`/`ORWELL_CAMPAIGNS`) so calibration neutrality is provable in isolation: unset ⇒
+ * the new kinds can't be made and every deal fold is exactly 0039/0109 ⇒ byte-identical. NOT yet in the
+ * deploy — the live-loop reconciliation of the new kinds + the reward folds land before it opts in.
+ */
+const DEAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_DEAL_DEPTH === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -824,6 +834,8 @@ export class GameSessionAdapter implements GameSession {
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
   /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
+  /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
+  private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -6044,6 +6056,12 @@ export class GameSessionAdapter implements GameSession {
    *  it off (with it off the off-screen tick passes no `initiatorDriveOf` ⇒ the seeded spine is byte-identical). */
   setStrategicCadenceEnabled(on: boolean): void { this.strategicCadenceEnabled = on; }
 
+  /** Turn the 0121 deal-depth layer on/off (active-obligation kinds + reliability rewards). Off by default —
+   *  the calibration harness leaves it off (off ⇒ the new kinds can't be made ⇒ byte-identical). */
+  setDealDepthEnabled(on: boolean): void { this.dealDepthEnabled = on; }
+  /** Whether the deal-depth layer is live (0121). */
+  dealDepthEnabledNow(): boolean { return this.dealDepthEnabled; }
+
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
   strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
@@ -7484,6 +7502,9 @@ export class GameSessionAdapter implements GameSession {
     // 0065 Part A — refuse a deal computed against a superseded board BEFORE any mutation.
     this.guardBeatSeq(req.expectedBeatSeq);
     if (!this.house || !this.live) return null;
+    // 0121: the ACTIVE-obligation kinds (comp-throw / veto-save) exist only when the deal-depth layer is on
+    // (off ⇒ refuse, so no such deal is ever made in the calibration harness / a stock game — byte-identical).
+    if (isPositiveObligation(req.kind) && !this.dealDepthEnabled) return null;
     const target = req.with;
     const evicted = new Set(this.live.evictionOrder);
     const isActiveOther = target !== PLAYER
