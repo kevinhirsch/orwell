@@ -1,22 +1,33 @@
 #!/usr/bin/env python3
-"""#829 — turn-coalescing (send-while-streaming) LIVE verification driver.
+"""#829 — turn-coalescing (ONE growing bubble per turn) LIVE verification driver.
 
-The owed live-only acceptance for the #829 redo. #822 coalesced a turn into one
-growing bubble but broke live streaming and was reverted (#825); the redo must be
-proven against a REAL model, not just the stubbed browser_smoke (the exact gap that
-let #822 ship broken — issue #829). This driver is the standing live evidence run:
-it is the leg-(3) auto-arm target of `.github/workflows/live-harness-nightly.yml`.
+The owed live-only acceptance for the #829 redo. #822 coalesced a turn's multiple
+AGENT-LOOP ROUNDS into ONE growing message bubble (no per-round bubble mount / hide /
+jump), but broke live streaming (first message hung/disappeared) and was reverted
+(#825). The redo must be proven against a REAL model — not just the stubbed
+browser_smoke, the exact gap that let #822 ship broken (issue #829). This driver is the
+standing live evidence run: the leg-(3) auto-arm target of
+`.github/workflows/live-harness-nightly.yml`.
 
-WHAT IT ASSERTS (the FIXED behavior).
-  A send WHILE a reply is streaming must ENQUEUE, never STOP-and-drop (#891 F-A2):
-    send A (begins streaming) → WHILE A streams, send B →
-      • A's reply completes UNINTERRUPTED (never aborted/truncated), and
-      • B then dispatches and lands its own reply,
-      • both in order, neither aborted nor dropped.
-  Driven through the REAL composer (a genuine, non-headless user Send that flips the
-  live `isStreaming` flag and exercises the send-while-streaming enqueue seam), against
-  a real OpenRouter model wired into the FE — the only path that reproduces the
-  live-streaming class of failure the stubbed gates can't see.
+WHAT IT ASSERTS (the #829 render invariant).
+  A single player turn whose agent loop runs 2+ rounds (a tool-call round + a
+  continuation round) renders as ONE growing message bubble across those rounds —
+  NOT N separate bubbles that mount / hide / jump:
+    • drive a genuine MULTI-ROUND turn through the real composer, confirm the loop
+      actually ran multiple rounds (≥1 tool execution appears);
+    • exactly ONE assistant bubble is created for the whole turn, and it GROWS across
+      the rounds (its text accumulates) — observed live via a DOM MutationObserver;
+    • NO per-round bubble teardown/re-mount during the stream (no msg-ai node removed
+      then re-added, no hidden per-round holders left behind — the churn the reverted
+      #822 and today's per-round path exhibit, incl. the WS `done`-branch discard +
+      N-bubble reconstruction);
+    • the preserved invariants hold where cheaply observable live: the reply / reasoning
+      CHANNEL SPLIT stays intact (reasoning lives in the `.thinking-section` accordion
+      and never leaks into the public reply body), and a SINGLE-round turn still renders
+      as exactly ONE clean bubble (the byte-identity spirit — no regression).
+  Driven through the REAL composer (a genuine, non-headless user Send) against a real
+  OpenRouter model wired into the FE — the only path that reproduces the live-streaming
+  class of failure (#825) the stubbed gates can't see.
 
 THE SELF-SKIP CONTRACT (why this can land BEFORE the feature).
   The #829 coalescing change lives in the fenced `frontend/static/js/chat.js` and is
@@ -71,12 +82,14 @@ CHAT_JS = os.path.join(FRONTEND, "static", "js", "chat.js")
 # All confirmed ABSENT from the served chat.js on main today (the pre-feature state).
 _FEATURE_SENTINELS = ("#829", "coalescerounds", "onebubbleperturn", "growing bubble")
 
-# Distinctive send markers so the transcript walk can identify A's and B's user bubbles
-# unambiguously (the model's narration replies never echo them).
-MARK_A = "ZULU-A17-COALESCE"
-MARK_B = "ZULU-B42-COALESCE"
-MSG_A = f"[{MARK_A}] I slip into the kitchen and start reading the room out loud, slow and deliberate."
-MSG_B = f"[{MARK_B}] Before you answer — I also want to pull someone aside about the vote later tonight."
+# A substantive, tool-triggering directive → the agent loop should run a tool round
+# (advanceGame / recordInteraction — reliably fired by the game's under-call belts on an
+# engaged, game-moving turn) plus a narration continuation round: a genuine MULTI-round turn.
+MULTI_ROUND_MSG = ("I make my move for the week: I pull my closest ally aside, lock in our "
+                   "final-two, and push hard to get the house moving toward the next "
+                   "competition. Let's advance the game.")
+# A quiet OOC beat unlikely to call any engine tool → a SINGLE-round turn (still one bubble).
+SINGLE_ROUND_MSG = "Just taking a slow, quiet breath and soaking in the room for a moment — no rush."
 
 
 def _free_port() -> int:
@@ -138,31 +151,72 @@ def _write_verdict(payload: dict) -> None:
         json.dump(payload, fh, indent=1)
 
 
-# Ordered transcript of visible chat bubbles (role + text), oldest → newest.
-_TRANSCRIPT_JS = """
+# Install a MutationObserver on #chat-history that records assistant-bubble MOUNTS and
+# TEARDOWNS (direct-child add/remove of `.msg-ai` nodes) for the turn about to be sent — this
+# is how "one growing bubble" vs "N per-round bubbles that mount/hide/jump" is observed live.
+# Must be installed BEFORE the send so the turn's first bubble mount is captured.
+_OBS_INSTALL_JS = """
 () => {
   const box = document.getElementById('chat-history');
-  if (!box) return { ready: false, items: [] };
-  const nodes = Array.from(box.querySelectorAll('.msg'))
-    .filter(el => !(el.style && el.style.display === 'none'));
-  const items = nodes.map(el => {
-    const role = el.classList.contains('msg-user') ? 'user'
-               : el.classList.contains('msg-ai') ? 'ai' : 'other';
-    const text = (el.textContent || '').trim();
-    // 'torn off' = the app's engine-interrupt apology took the place of a real reply. Keyed
-    // on that app-specific sentinel (NOT generic English) so narration prose can never
-    // false-positive an abort.
-    return { role, text, stopped: /technical interlude/i.test(text) };
+  if (!box) return false;
+  const isAi = (n) => n && n.nodeType === 1 && n.classList && n.classList.contains('msg-ai');
+  const st = { addedAi: 0, removedAi: 0, events: [] };
+  window.__coalObs = st;
+  if (window.__coalMo) { try { window.__coalMo.disconnect(); } catch (e) {} }
+  const mo = new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type !== 'childList') continue;
+      m.addedNodes.forEach((n) => { if (isAi(n)) { st.addedAi++; st.events.push('add'); } });
+      m.removedNodes.forEach((n) => { if (isAi(n)) { st.removedAi++; st.events.push('remove'); } });
+    }
   });
-  return { ready: true, items };
+  mo.observe(box, { childList: true });  // direct children only — bubbles mount at box top level
+  window.__coalMo = mo;
+  return true;
+}
+"""
+
+_OBS_READ_JS = "() => window.__coalObs || { addedAi: 0, removedAi: 0, events: [] }"
+
+# Rich per-turn DOM snapshot: visible/hidden assistant-bubble counts, tool-round evidence
+# (`.agent-thread-node`), the last bubble's length (growth sampling), and its reply/reasoning
+# split (reply = body MINUS the `.thinking-section` accordion; reasoning = the accordion).
+_SNAPSHOT_JS = """
+() => {
+  const box = document.getElementById('chat-history');
+  if (!box) return { ready: false };
+  const vis = (el) => !(el.style && el.style.display === 'none');
+  const aiAll = Array.from(box.querySelectorAll('.msg.msg-ai'));
+  const aiVisible = aiAll.filter(vis);
+  const threadNodes = box.querySelectorAll('.agent-thread-node').length;
+  const last = aiVisible[aiVisible.length - 1] || null;
+  let replyText = '', reasoningText = '', lastLen = 0;
+  if (last) {
+    lastLen = (last.textContent || '').trim().length;
+    const think = last.querySelector('.thinking-section');
+    reasoningText = think ? (think.textContent || '').trim() : '';
+    const body = last.querySelector('.body') || last;
+    const clone = body.cloneNode(true);
+    clone.querySelectorAll('.thinking-section').forEach((n) => n.remove());
+    replyText = (clone.textContent || '').trim();
+  }
+  return {
+    ready: true,
+    aiVisible: aiVisible.length,
+    aiHidden: aiAll.length - aiVisible.length,
+    threadNodes,
+    lastLen,
+    replyText,
+    reasoningText,
+  };
 }
 """
 
 # Genuine, NON-headless user send: set the composer value + dispatch a real Enter keydown,
 # which routes through the app's messageInput keydown handler → handleSubmit → handleChatSubmit
-# with overrideMsg=null (_headless=false, reads el('message').value). This is the ONLY path that
-# flips the live `isStreaming` flag and hits the send-while-streaming enqueue branch — a
-# programmatic handleChatSubmit(null, text) would set _headless=true and bypass it.
+# with overrideMsg=null (_headless=false, reads el('message').value). This drives a real player
+# turn through the live agent loop — a programmatic handleChatSubmit(null, text) would set
+# _headless=true and take a different path.
 _SEND_JS = """
 (txt) => {
   const ta = document.getElementById('message');
@@ -280,7 +334,7 @@ def main() -> int:
             raise RuntimeError("could not create the FE chat session")
 
         # One warm turn over REST binds the canonical session + proves the model resolves,
-        # so the timed A/B sequence below fails on the coalescing behavior, not on plumbing.
+        # so the multi-round turn below fails on the coalescing render, not on plumbing.
         def _rest_turn(text: str, timeout=600) -> None:
             body = json.dumps({"message": text, "session": sess}).encode()
             req = urllib.request.Request(f"{fbase}/api/chat_stream", data=body, method="POST",
@@ -339,115 +393,57 @@ def main() -> int:
             page.wait_for_timeout(1500)
             page.screenshot(path=os.path.join(OUT, "01_before_send.png"))
 
-            # ── SEND A: a genuine user send that begins streaming ────────────────────────
-            sent_a = page.evaluate(_SEND_JS, MSG_A)
-            _check("send-A-dispatched", bool(sent_a), "composer Enter-send for message A dispatched")
+            # ── The MULTI-ROUND turn: the #829 "one growing bubble per turn" invariant ────
+            mr = _drive_turn(page, MULTI_ROUND_MSG)
+            with open(os.path.join(OUT, "multi_round_obs.json"), "w", encoding="utf-8") as fh:
+                json.dump(mr, fh, indent=1)
+            page.screenshot(path=os.path.join(OUT, "02_multi_round_settled.png"))
 
-            # Wait until A is actively streaming (isStreaming true AND a partial AI bubble).
-            a_streaming = False
-            partial_a_len = 0
-            dl = time.time() + 90
-            while time.time() < dl:
-                streaming = False
-                try:
-                    streaming = bool(page.evaluate(_IS_STREAMING_JS))
-                except Exception:
-                    streaming = False
-                snap = page.evaluate(_TRANSCRIPT_JS)
-                ai = [it for it in snap.get("items", []) if it["role"] == "ai" and it["text"]]
-                if streaming and ai:
-                    a_streaming = True
-                    partial_a_len = len(ai[-1]["text"])
-                    break
-                page.wait_for_timeout(300)
-            _check("A-began-streaming", a_streaming,
-                   f"isStreaming=true with a partial AI bubble ({partial_a_len} chars)")
-            page.screenshot(path=os.path.join(OUT, "02_A_streaming.png"))
+            _check("multi-round-turn-dispatched", mr["sent"] and mr["began"],
+                   f"composer send dispatched and the live stream began (sent={mr['sent']}, began={mr['began']})")
 
-            # ── SEND B while A is mid-stream: must ENQUEUE, not Stop-and-drop ─────────────
-            still_streaming = False
-            try:
-                still_streaming = bool(page.evaluate(_IS_STREAMING_JS))
-            except Exception:
-                still_streaming = False
-            sent_b = page.evaluate(_SEND_JS, MSG_B)
-            _check("send-B-while-A-streaming", bool(sent_b) and still_streaming,
-                   f"message B dispatched while A still streaming (isStreaming={still_streaming})")
+            # The turn actually ran the agent loop across 2+ rounds (≥1 tool execution), else
+            # the "one bubble ACROSS rounds" invariant would be untested (vacuously true).
+            _check("multi-round-confirmed", mr["rounds_toolnodes"] >= 1,
+                   f"tool-execution rounds observed this turn = {mr['rounds_toolnodes']} "
+                   "(agent-thread nodes; ≥1 ⇒ the agent loop ran multiple rounds)")
 
-            # A must NOT have been aborted by B's send — it should still be streaming or have
-            # settled with real content shortly after (never a torn-off/stopped A bubble).
-            page.wait_for_timeout(1500)
-            snap = page.evaluate(_TRANSCRIPT_JS)
-            b_user = [it for it in snap.get("items", []) if it["role"] == "user" and MARK_B in it["text"]]
-            _check("B-not-dropped-immediately", bool(b_user),
-                   f"B's user bubble present right after send ({len(b_user)} found)")
-            page.screenshot(path=os.path.join(OUT, "03_B_enqueued.png"))
+            # THE #829 INVARIANT: exactly ONE assistant bubble is created for the whole
+            # multi-round turn (it grows) — NOT N separate per-round bubbles.
+            _check("one-growing-bubble", mr["added_ai"] == 1 and mr["net_ai"] == 1,
+                   f"assistant bubbles mounted this turn = {mr['added_ai']}, net-new visible = "
+                   f"{mr['net_ai']} (expect exactly 1 that grows)")
 
-            # ── Settle: A completes, then B flushes + completes. Wait for a stable idle. ──
-            stable_since = None
-            settled = False
-            dl = time.time() + 300
-            while time.time() < dl:
-                try:
-                    streaming = bool(page.evaluate(_IS_STREAMING_JS))
-                except Exception:
-                    streaming = True
-                snap = page.evaluate(_TRANSCRIPT_JS)
-                items = snap.get("items", [])
-                has_a = any(it["role"] == "user" and MARK_A in it["text"] for it in items)
-                has_b = any(it["role"] == "user" and MARK_B in it["text"] for it in items)
-                ai_nonempty = [it for it in items if it["role"] == "ai" and it["text"]]
-                if (not streaming) and has_a and has_b and len(ai_nonempty) >= 2:
-                    if stable_since is None:
-                        stable_since = time.time()
-                    elif time.time() - stable_since >= 4.0:  # 4s of continuous idle
-                        settled = True
-                        break
-                else:
-                    stable_since = None
-                page.wait_for_timeout(700)
-            page.screenshot(path=os.path.join(OUT, "04_settled.png"))
+            # NO per-round teardown/re-mount churn: nothing removed (the WS `done`-branch
+            # discard + N-bubble reconstruction the redo must eliminate), no hidden per-round
+            # holders left behind, no bubble removed-then-re-added.
+            _check("no-per-round-teardown", mr["removed_ai"] == 0 and mr["new_hidden"] == 0,
+                   f"assistant bubbles removed this turn = {mr['removed_ai']}, new hidden = "
+                   f"{mr['new_hidden']}; mount/remove event log = {mr['events']}")
 
-            snap = page.evaluate(_TRANSCRIPT_JS)
-            items = snap.get("items", [])
-            with open(os.path.join(OUT, "transcript.json"), "w", encoding="utf-8") as fh:
-                json.dump(items, fh, indent=1)
+            # The single bubble GREW across the rounds (accumulation — proof the rounds folded
+            # into one bubble, not a single static settle paint).
+            _check("bubble-grew-across-rounds", mr["grew"],
+                   f"last-bubble length samples = {mr['len_samples'][:14]} "
+                   "(final grew past its first paint)")
 
-            def _uidx(mark: str):
-                for i, it in enumerate(items):
-                    if it["role"] == "user" and mark in it["text"]:
-                        return i
-                return -1
+            # Reply / reasoning CHANNEL SPLIT preserved: reasoning lives in `.thinking-section`
+            # and never leaks into the public reply body (a #829 must-preserve invariant).
+            leak = bool(mr["final_reasoning"]) and (mr["final_reasoning"] in mr["final_reply"])
+            _check("reply-reasoning-channel-split", bool(mr["final_reply"]) and not leak,
+                   f"reply len={len(mr['final_reply'])}, reasoning len={len(mr['final_reasoning'])}, "
+                   f"reasoning-leaked-into-public-body={leak}")
 
-            ia, ib = _uidx(MARK_A), _uidx(MARK_B)
-
-            # (1) Both user messages present, in order — B was neither dropped nor reordered.
-            _check("both-sends-present-in-order", ia >= 0 and ib >= 0 and ia < ib,
-                   f"A user idx={ia}, B user idx={ib}")
-
-            # (2) A's reply completed BEFORE B — a non-empty AI bubble sits between A and B
-            #     (A ran to completion uninterrupted; the send of B did not abort it).
-            a_reply = [it for k, it in enumerate(items)
-                       if it["role"] == "ai" and it["text"] and ia < k < ib] if (ia >= 0 and ib > ia) else []
-            _check("A-reply-completed-before-B", bool(a_reply),
-                   f"{len(a_reply)} non-empty AI reply(ies) between A and B; A-reply len="
-                   f"{len(a_reply[-1]['text']) if a_reply else 0}")
-
-            # (3) B then landed its own reply — a non-empty AI bubble after B.
-            b_reply = [it for k, it in enumerate(items)
-                       if it["role"] == "ai" and it["text"] and k > ib] if ib >= 0 else []
-            _check("B-reply-landed-after", bool(b_reply),
-                   f"{len(b_reply)} non-empty AI reply(ies) after B; B-reply len="
-                   f"{len(b_reply[-1]['text']) if b_reply else 0}")
-
-            # (4) Neither turn shows an abort/stopped marker (no torn-off reply).
-            aborted = [it for it in items if it["role"] == "ai" and it["text"] and it.get("stopped")]
-            _check("no-aborted-reply", not aborted,
-                   f"{len(aborted)} AI bubble(s) carry a stop/interrupt marker")
-
-            # (5) Overall settle reached within budget.
-            _check("settled-within-budget", settled,
-                   "both turns reached a stable idle" if settled else "timed out before stable idle")
+            # ── The SINGLE-ROUND turn: byte-identity spirit — still ONE clean bubble ──────
+            sr = _drive_turn(page, SINGLE_ROUND_MSG)
+            with open(os.path.join(OUT, "single_round_obs.json"), "w", encoding="utf-8") as fh:
+                json.dump(sr, fh, indent=1)
+            page.screenshot(path=os.path.join(OUT, "03_single_round_settled.png"))
+            _check("single-round-one-bubble",
+                   sr["added_ai"] == 1 and sr["net_ai"] == 1 and sr["removed_ai"] == 0,
+                   f"single-round turn: mounted={sr['added_ai']}, net-new={sr['net_ai']}, "
+                   f"removed={sr['removed_ai']}, tool-rounds={sr['rounds_toolnodes']} "
+                   "(expect one clean bubble, no churn)")
 
             browser.close()
 
@@ -465,6 +461,83 @@ def main() -> int:
                     p.kill()
                 except Exception:
                     pass
+
+
+def _drive_turn(page, text: str, begin_budget: int = 90, settle_budget: int = 300) -> dict:
+    """Install the assistant-bubble MutationObserver, send `text` through the REAL composer,
+    sample the growing bubble across the whole stream, and wait for a stable idle. Returns the
+    per-turn observations the #829 assertions read. Never hangs — every wait is budgeted."""
+    pre = page.evaluate(_SNAPSHOT_JS)
+    ready = bool(pre.get("ready"))
+    pre_ai = int(pre.get("aiVisible", 0)) if ready else 0
+    pre_hidden = int(pre.get("aiHidden", 0)) if ready else 0
+    pre_threads = int(pre.get("threadNodes", 0)) if ready else 0
+
+    page.evaluate(_OBS_INSTALL_JS)
+    sent = bool(page.evaluate(_SEND_JS, text))
+
+    # Wait for the live stream to begin (the turn's bubble mounts + isStreaming flips true).
+    began = False
+    dl = time.time() + begin_budget
+    while time.time() < dl:
+        try:
+            if bool(page.evaluate(_IS_STREAMING_JS)):
+                began = True
+                break
+        except Exception:
+            pass
+        page.wait_for_timeout(300)
+
+    # Sample the last visible assistant bubble's length across the stream (growth evidence),
+    # tracking the peak tool-round count, until a stable idle (isStreaming false for ~4s).
+    lens: list[int] = []
+    max_threads = pre_threads
+    stable_since = None
+    dl = time.time() + settle_budget
+    while time.time() < dl:
+        try:
+            streaming = bool(page.evaluate(_IS_STREAMING_JS))
+        except Exception:
+            streaming = True
+        snap = page.evaluate(_SNAPSHOT_JS)
+        if snap.get("ready"):
+            lens.append(int(snap.get("lastLen", 0)))
+            max_threads = max(max_threads, int(snap.get("threadNodes", 0)))
+        if (not streaming) and began:
+            if stable_since is None:
+                stable_since = time.time()
+            elif time.time() - stable_since >= 4.0:
+                break
+        else:
+            stable_since = None
+        page.wait_for_timeout(600)
+
+    obs = page.evaluate(_OBS_READ_JS)
+    final = page.evaluate(_SNAPSHOT_JS)
+    fready = bool(final.get("ready"))
+    post_ai = int(final.get("aiVisible", 0)) if fready else 0
+    post_hidden = int(final.get("aiHidden", 0)) if fready else 0
+
+    positive = [n for n in lens if n > 0]
+    if not positive:
+        grew = False
+    elif len(positive) >= 2:
+        grew = max(positive) > positive[0] and max(positive) > 40
+    else:
+        grew = positive[-1] > 40
+
+    return {
+        "sent": sent, "began": began,
+        "pre_ai": pre_ai, "post_ai": post_ai, "net_ai": post_ai - pre_ai,
+        "new_hidden": max(0, post_hidden - pre_hidden),
+        "added_ai": int(obs.get("addedAi", 0)), "removed_ai": int(obs.get("removedAi", 0)),
+        "events": obs.get("events", []),
+        "rounds_toolnodes": max(0, max_threads - pre_threads),
+        "len_samples": lens,
+        "grew": grew,
+        "final_reply": final.get("replyText", "") if fready else "",
+        "final_reasoning": final.get("reasoningText", "") if fready else "",
+    }
 
 
 def _finish(verdicts) -> int:
