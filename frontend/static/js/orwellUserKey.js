@@ -13,28 +13,34 @@
  * identity), every key COLLAPSED into one shared empty-user ("") namespace — layout/persistence
  * bleeding across users. That is not a Vault leak, but it is a real cross-user isolation defect.
  *
- * This helper is FAIL-CLOSED: it returns a per-user key ONLY when dataset.user is a non-empty
- * string, and otherwise returns null so callers SKIP persistence (write NOTHING) rather than share
- * the empty-user namespace. A null key MUST NOT be handed to localStorage.getItem/setItem/
- * removeItem — those string-coerce null into a real "null" key — so every call site guards on the
- * null return before touching the store.
+ * This helper keys under the real data-user when present, and under a STABLE "local" namespace when
+ * it is absent/empty — NEVER the shared empty ("") one. The empty/absent case is the single-user /
+ * no-auth posture (AUTH_ENABLED=false, e.g. localhost): there is exactly ONE effective user, so a
+ * stable "local" namespace is correct and lets no-auth persistence work. Isolation still holds: an
+ * authed multi-user page ALWAYS carries a real data-user, so the helper never falls back to "local"
+ * there — each user keys under their own name, two real users never collide, and "" is never used.
  *
  * Storage-agnostic: it only builds the key string (`name + ':' + user`); the caller owns the store.
  * It is deliberately NOT used for per-TAB sessionStorage (the chat send-outbox, the composer draft)
- * — those are per-tab by ADR 0008/0012 design, not a shared cross-user namespace.
+ * — those read document.body.dataset.user DIRECTLY and stay per-tab by ADR 0008/0012 design, so the
+ * boot script leaves data-user EMPTY in no-auth mode and their behavior is unchanged.
  */
 (function () {
   "use strict";
 
+  // The stable single-user / no-auth namespace (used only when there is no data-user identity).
+  var LOCAL_USER = "local";
+
   function orwellUserKey(name) {
+    var u;
     try {
-      var u = document.body && document.body.dataset && document.body.dataset.user;
-      // Fail-closed: only a non-empty string identity yields a key.
-      if (typeof u !== "string" || u === "") return null;
-      return String(name) + ":" + u;
+      u = document.body && document.body.dataset && document.body.dataset.user;
     } catch (_) {
-      return null;
+      u = null;
     }
+    // No real identity ⇒ the stable "local" namespace, NEVER the shared empty ("") one.
+    if (typeof u !== "string" || u === "") u = LOCAL_USER;
+    return String(name) + ":" + u;
   }
 
   if (typeof window !== "undefined") window.orwellUserKey = orwellUserKey;
