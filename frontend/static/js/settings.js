@@ -1058,7 +1058,7 @@ async function initTokenEconomySettings() {
   const providerJson = el('set-openrouterProvider');
   // Owner directive 2026-07-11: the cast-authoring routing + temperature knobs and the enrichment
   // policy switch — runtime-editable beside the sibling per-class budgets (reasoning/max-tokens).
-  const castAuthorModel = el('set-castAuthorModel');
+  const castAuthorSource = el('set-castAuthorSource');
   const castAuthorTemp = el('set-castAuthorTemp');
   const enrichmentPolicy = el('set-enrichmentPolicy');
   const msg = el('set-tokenEconomyMsg');
@@ -1094,8 +1094,8 @@ async function initTokenEconomySettings() {
     if (spendAlert) spendAlert.value = s.token_spend_alert_usd ? String(s.token_spend_alert_usd) : '';
     if (pinThreshold) pinThreshold.value = s.token_pin_threshold_tokens ? String(s.token_pin_threshold_tokens) : '';
     if (tieringToggle) tieringToggle.checked = !!s.context_tiering_enabled;
-    if (castAuthorModel) {
-      castAuthorModel.value = (s.cast_authoring_model_source === 'utility') ? 'utility' : 'narration';
+    if (castAuthorSource) {
+      castAuthorSource.value = (s.cast_authoring_model_source === 'utility') ? 'utility' : 'narration';
     }
     if (castAuthorTemp) {
       castAuthorTemp.value = (s.cast_authoring_temperature != null && s.cast_authoring_temperature !== '')
@@ -1147,8 +1147,8 @@ async function initTokenEconomySettings() {
   maxTokensEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveMaxTokens); });
 
   // Owner directive 2026-07-11: cast-authoring model routing / hot temperature / enrichment policy.
-  if (castAuthorModel) castAuthorModel.addEventListener('change', () => {
-    post({ cast_authoring_model_source: castAuthorModel.value === 'utility' ? 'utility' : 'narration' });
+  if (castAuthorSource) castAuthorSource.addEventListener('change', () => {
+    post({ cast_authoring_model_source: castAuthorSource.value === 'utility' ? 'utility' : 'narration' });
   });
   if (castAuthorTemp) castAuthorTemp.addEventListener('change', () => {
     const raw = (castAuthorTemp.value || '').trim();
