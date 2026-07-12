@@ -75,17 +75,31 @@ def test_the_helper_debounces_a_burst_into_one_event():
         "~250ms: long enough to coalesce one agent turn's tool burst, far below a poll period"
 
 
-# ── 3. every mutation seam calls it ──────────────────────────────────────────
+# ── 3. every mutation seam routes through the ONE dispatcher (DERIVED, #1412) ──
 
-# FEJS-3 (issue #622): the seam previously listed only the seven lifecycle/outcome
-# tools and silently omitted eight other game-MUTATING beats — a sub-second parity
-# asymmetry on long multi-tool turns. They are now enumerated here so each is GATED
-# to route its freshness refresh through the one debounced dispatcher (no ad-hoc
-# CustomEvent — that stays the platform.js single-dispatcher invariant below).
-MUTATING_TOOLS = ["advanceGame", "submitDecision", "recordInteraction",
-                  "createCharacter", "updateCasting", "manageSandbox", "runCompetition",
-                  "moveTo", "moveHouseguest", "makeDeal", "markHouseguestMet", "turnIn",
-                  "surfaceInformationTo", "diaryRoom", "recordImageBeat"]
+# HISTORY: the seam once carried a HAND-CODED array of "which tools fire a HUD
+# refresh" (FEJS-3 #622 grew it 7 → 15; the 0093–0107 DRIFT mutators + 0094/0095
+# confront/accuseTie later took it to 21). That inline list silently went stale
+# whenever a new game-mutating tool got wired — the HUD lagged a whole poll period.
+#
+# #1412 (R1b) — the CONSUMING half: chat.js now calls the shared manifest lookup
+# `window.orwellIsMutatingTool` (platform.js `ORWELL_MUTATING_TOOLS`) instead of an
+# inline array. `test_1412_mutating_manifest.py` (the MANIFEST half, shipped #1479)
+# pins that manifest EQUAL to the engine tool registry's mutating set — so the
+# authoritative "which tools refresh the HUD" set is DERIVED from the registry, not
+# maintained here.
+#
+# So this list is no longer hand-authored: we read it straight from the manifest in
+# platform.js as the doc-anchor. The authoritative set is the manifest.
+def _manifest_mutating_tools():
+    m = re.search(r"ORWELL_MUTATING_TOOLS\s*=\s*Object\.freeze\(\[(.*?)\]\)", PLATFORM, re.S)
+    assert m, "platform.js must export const ORWELL_MUTATING_TOOLS = Object.freeze([ ... ])"
+    body = re.sub(r"//[^\n]*", "", m.group(1))  # strip // comments so words can't masquerade
+    return re.findall(r"'([A-Za-z][A-Za-z0-9]*)'", body)
+
+
+# DERIVED, not hand-authored — the authoritative set is the manifest (see above).
+MUTATING_TOOLS = _manifest_mutating_tools()
 
 
 def _chat_g15_block():
@@ -93,20 +107,49 @@ def _chat_g15_block():
     assert i != -1, "chat.js tool-result seam must carry the G15 dispatcher call"
     # The seam spans the G15 comment, the ok-gated mutating-tool dispatch, and the
     # createCharacter branch (fresh-session hook + the P1 finalizing indicator). The
-    # window covers that whole branch — these are deeply indented lines.
-    # Window sized to reach the createCharacter fresh-session hook: the seam grew with the
-    # full mutating-tools array (FEJS-3 + the 0093–0107 DRIFT mutators + 0094/0095) and the
-    # M1-3 _beat threading, pushing the hook to ~offset 1800.
+    # window covers that whole branch — these are deeply indented lines. (#1412 SHRANK
+    # the seam: the inline 21-name array became a single orwellIsMutatingTool call, so
+    # the fresh-session hook now sits ~offset 1950; 2200 keeps a comfortable margin.)
     return CHAT[i:i + 2200]
 
 
-def test_chat_tool_result_seam_routes_every_mutating_tool_through_the_helper():
+def test_chat_tool_result_seam_consumes_the_shared_manifest_not_a_hand_array():
+    # #1412 (R1b) — source-pin the CONSUMING half: the seam calls the shared lookup in
+    # place of a hand-coded `[...].includes(json.tool)`, and the inline array is gone.
     block = _chat_g15_block()
-    for tool in MUTATING_TOOLS:
-        assert f"'{tool}'" in block, f"the mutating set must include {tool}"
-    assert "window.orwellGameChanged" in block, "the seam calls THE shared helper"
+    assert "window.orwellIsMutatingTool(json.tool)" in block, \
+        "the seam must consume the shared manifest helper (platform.js orwellIsMutatingTool)"
+    assert "window.orwellGameChanged" in block, "the seam calls THE shared dispatcher"
     assert re.search(r"if\s*\(ok\s*&&", block), \
         "only a SUCCESSFUL tool result mutated anything — the nudge is ok-gated"
+    # The whole point of #1412: NO inline tool-name array survives in the seam. Every
+    # former array member (bar createCharacter, which keeps its own fresh-session branch)
+    # must be GONE as a quoted literal — a re-introduced list is exactly the stale-HUD trap.
+    leaked = sorted(t for t in MUTATING_TOOLS
+                    if t != "createCharacter" and f"'{t}'" in block)
+    assert not leaked, (
+        f"the seam still hard-codes tool-name literals {leaked} — #1412 removed the inline "
+        f"array; the mutating set now lives in platform.js ORWELL_MUTATING_TOOLS")
+
+
+def test_a_new_registry_mutating_tool_flows_into_the_seam_with_no_chatjs_edit():
+    # The #1412 Definition-of-Done: "adding a new mutating tool with no extra FE change
+    # still refreshes the HUD — a test proves it." The DERIVATION CHAIN that makes it true:
+    #   1. test_1412_mutating_manifest.py pins  ORWELL_MUTATING_TOOLS == registry mutating set
+    #      (a new registry PLAYER_TOOL is mutating-by-default and MUST join the manifest);
+    #   2. THIS seam consumes window.orwellIsMutatingTool (the manifest lookup) — no inline
+    #      list — so a manifest addition is honoured here WITHOUT editing chat.js.
+    # Together: a newly-wired mutating registry tool refreshes the HUD with a manifest-only
+    # change. This test asserts link #2 structurally (link #1 is the sibling test's whole job).
+    block = _chat_g15_block()
+    assert "window.orwellIsMutatingTool(json.tool)" in block, \
+        "the seam must be manifest-driven for a new mutating tool to flow in edit-free"
+    # The lookup the seam calls is really the registry-pinned manifest helper …
+    assert "export function orwellIsMutatingTool" in PLATFORM, \
+        "platform.js must define the manifest lookup (pinned registry-equal by test_1412)"
+    # … and the drift guard that completes the chain (link #1) must exist.
+    assert (FE / "tests" / "test_1412_mutating_manifest.py").exists(), \
+        "the manifest↔registry drift guard must exist to complete the derivation chain"
 
 
 def test_chat_keeps_the_fresh_session_hook_reachable():
