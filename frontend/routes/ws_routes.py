@@ -536,8 +536,9 @@ async def ws_session(websocket: WebSocket) -> None:
                     data = _sse_event_data(raw)
                     if not isinstance(data, dict):
                         continue
-                    # Drop the bus's own bookkeeping `session` key; forward the layout descriptor only.
-                    descriptor = {k: v for k, v in data.items() if k != "session"}
+                    # Drop the bus's own bookkeeping keys (`session`, and the F3 `busSeq` version
+                    # stamp); forward the layout descriptor only.
+                    descriptor = {k: v for k, v in data.items() if k not in ("session", "busSeq")}
                     await send({"t": "layout", "ch": "layout", "d": descriptor})
             except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
                 return
