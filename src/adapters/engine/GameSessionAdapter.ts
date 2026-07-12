@@ -5725,6 +5725,28 @@ export class GameSessionAdapter implements GameSession {
     return v === "1" || v === "true" || v === "on";
   }
 
+  /**
+   * 0117 (in-game-time pivot) — is in-game time genuinely FLOWING this turn? True only when the master
+   * clock is on, the per-conversation clock is on, AND the day has started (the first ceremony beat
+   * initialises `live.timeOfDay`). The orchestrator reads this to decide whether a social (aux) turn
+   * advances the clock and lets the house live during social play. When false — the seeded calibration
+   * spine (time-of-day off) and golden replay (per-conversation clock off) — social turns stay inert and
+   * byte-identical. Vault-free: reads only the clock flags + the live day-phase.
+   */
+  perConversationClockLive(): boolean {
+    return this.perConversationClockEnabled && this.timeOfDayEnabled && this.live?.timeOfDay !== undefined;
+  }
+
+  /**
+   * 0117 — the current in-game clock-HOUR (8..32, the 24-hour model #1125), or undefined when the clock
+   * isn't running. The orchestrator debounces the social-play society tick on ELAPSED in-game hours (so
+   * the house schemes "with the clock", never once per tool call). Vault-free: reads only the day clock.
+   */
+  inGameHour(): number | undefined {
+    if (!this.timeOfDayEnabled || this.live?.timeOfDay === undefined) return undefined;
+    return this.live.nightDepth ?? WAKE_HOUR;
+  }
+
   /** Build the Vault-free season context the pure loop reads (stats + live relationships + mood). */
   private ctx(): SeasonCtx {
     return {

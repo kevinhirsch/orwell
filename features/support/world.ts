@@ -226,6 +226,13 @@ export class BbWorld extends World {
   drSecret?: string;
   drRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
 
+  // Feature 0117 — the house lives in in-game time scratch state.
+  igtSandbox?: import("../../src/composition/registry").UserSandbox;
+  igtHourBefore?: number;
+  igtScenesBefore?: Set<string>;
+  igtNewScenes?: string[];
+  igtTickTurns?: number;
+
   // Game orchestrator & integrity checkpoint (0031) scratch state.
   orchestrator?: import("../../src/composition/orchestrator").Orchestrator;
   fakeClock?: import("../../src/adapters/time/FakeClock").FakeClock;

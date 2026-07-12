@@ -9,6 +9,7 @@ import { rollOverhears } from "../engine/presence";
 import { diffuseGossip, makeSocialGraph, rumorFrom, gossipEdgeAffinity, GOSSIP } from "../engine/gossip";
 import { confessionalFor, recordConfessional, selectRecentForConfessional } from "../engine/confessionals";
 import { nextHouseEvent, dayOfWeek } from "../engine/houseEvents";
+import { SOCIETY_TICK_HOURS } from "../engine/sleepConstants";
 import { SeededRandom } from "../adapters/random/SeededRandom";
 import { hashSeed } from "../engine/characterFactory";
 import { PLAYER } from "../domain/ids";
@@ -134,6 +135,10 @@ export class Orchestrator {
   private readonly baselines = new Map<string, SessionSnapshot>();
   /** Wall time of the user's last turn-driven off-screen tick (the E57 debounce anchor). */
   private readonly lastTurnTickAt = new Map<string, number>();
+  /** 0117 — the in-game clock-HOUR at which the house last lived for this user. The social-play society
+   *  tick is debounced on ELAPSED in-game hours (SOCIETY_TICK_HOURS) so the house schemes "with the
+   *  clock", not once per tool call. Set on every fired tick (beat and social alike); cleared on reset. */
+  private readonly lastSocietyTickHour = new Map<string, number>();
   /** R3 — commits since this user's last FULL (untrusted-prefix) non-degradation verification. */
   private readonly commitsSinceFullCheck = new Map<string, number>();
   private seq = 0;
@@ -166,6 +171,7 @@ export class Orchestrator {
     this.lastActivity.delete(user);
     this.consecutiveFaults.delete(user);
     this.lastTurnTickAt.delete(user);
+    this.lastSocietyTickHour.delete(user);
   }
 
   /**
@@ -431,19 +437,50 @@ export class Orchestrator {
       || baseline.week !== candidate.week
       || baseline.phase !== candidate.phase
       || JSON.stringify(baseline.live ?? null) !== JSON.stringify(candidate.live ?? null);
-    if (!progressed && this.auxTicksNever) return; // M0-9: logical-clock runs tick on beats only
-    const now = this.clock.now();
-    const last = this.lastTurnTickAt.get(user);
-    if (!progressed && last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5
-    this.lastTurnTickAt.set(user, now);
-    // 0066 Phase-2 (Extension 1 — per-conversation clock advance): this is the once-per-player-TURN,
-    // debounced seam (NOT the wall-clock watcher), so it is exactly "as the player lingers/plays". Press
-    // the clock a small step here — the day's finite scheming time felt turn-by-turn. SELF-GATED in the
-    // session (a no-op unless ORWELL_TIME_PER_CONVERSATION + the master clock are on): off ⇒ nothing
-    // advances ⇒ byte-identical (the seeded spine never runs turn-driven anyway, but this keeps the
-    // guarantee explicit). Pacing-only — it clamps at late-night and never wraps the night without the
-    // player's own turnIn (ADR 0003 / the lull rule), so it cannot rush an engaged scene. No rng.
-    this.registry.sandboxFor(user).session.advanceClockPerConversation();
+    const session = this.registry.sandboxFor(user).session;
+
+    if (!progressed) {
+      // A social (aux) turn — the live loop didn't move. Whether the house lives now turns on the clock.
+      // 0117 (in-game-time pivot): when in-game time is genuinely FLOWING (master + per-conversation clock
+      // on, day started), the house must keep scheming AS TIME PASSES during the player's social play —
+      // not stay frozen until the next ceremony. When it is NOT flowing (the seeded calibration spine with
+      // time-of-day off; golden replay with the per-conversation clock off) social turns stay inert and
+      // byte-identical — exactly the old M0-9 behaviour.
+      const clockLive = session.perConversationClockLive();
+      if (this.auxTicksNever && !clockLive) return; // M0-9: seeded spine / golden replay — inert & byte-identical
+      if (clockLive) {
+        // In-game time flows on this social turn (pacing-only: it clamps at late-night and never wraps the
+        // night without the player's own turnIn — ADR 0003 / the lull rule — so it can't rush an engaged
+        // scene). Then let the house scheme, but debounced ON ELAPSED IN-GAME HOURS (SOCIETY_TICK_HOURS),
+        // NOT once per tool call: the society lives "with the clock", roughly every couple of social turns.
+        session.advanceClockPerConversation();
+        const hour = session.inGameHour();
+        const lastHour = this.lastSocietyTickHour.get(user);
+        if (hour !== undefined && lastHour !== undefined && hour - lastHour < SOCIETY_TICK_HOURS) return; // not enough time yet
+        if (hour !== undefined) this.lastSocietyTickHour.set(user, hour);
+        this.lastTurnTickAt.set(user, this.clock.now());
+        this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
+        return;
+      }
+      // Legacy play-clock debounce path (auxTicksNever off — the non-logical-clock test/BDD configs): one
+      // bounded tick per player TURN, tool calls within a turn share it (audit E57/R5).
+      const now = this.clock.now();
+      const last = this.lastTurnTickAt.get(user);
+      if (last !== undefined && now - last < this.auxTickDebounceMs) return; // E57/R5
+      this.lastTurnTickAt.set(user, now);
+      session.advanceClockPerConversation();
+      this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
+      return;
+    }
+
+    // A beat commit — the live loop genuinely moved (an advance, a resolved decision). It ALWAYS earns its
+    // tick. The per-beat clock already jumped inside advanceGame; press the per-conversation clock a small
+    // step too (unchanged from before), and anchor the social-play pacing to the beat's new in-game hour so
+    // the between-ceremony ticks (0117) measure from here.
+    this.lastTurnTickAt.set(user, this.clock.now());
+    session.advanceClockPerConversation();
+    const beatHour = session.inGameHour();
+    if (beatHour !== undefined) this.lastSocietyTickHour.set(user, beatHour);
     // R3: the commit just exported this. A9: a supplementary tick — an empty society this tick is
     // a clean no-op, not a daily-event fault (the live loop owns that invariant via its beats).
     this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
