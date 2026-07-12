@@ -46,7 +46,7 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_outbox_state_and_helpers_exist():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "chatState._sendOutbox" in js, "the in-memory FIFO outbox must exist (moved to the chatState singleton — #1414)"
     assert "chatState._flushingOutbox" in js, "the re-entrancy guard must exist (moved to the chatState singleton — #1414)"
     assert "function _enqueueSend(text)" in js, "the enqueue helper must exist"
@@ -83,7 +83,7 @@ def test_flush_wired_into_stream_settle_finally():
 
 
 def test_flush_is_idempotent_and_serial():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("\n  /**", 1) if "\n  /**" in fn else len(fn)]
     assert "if (chatState._flushingOutbox) return;" in fn, "re-entrancy guard: one flush at a time"

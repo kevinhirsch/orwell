@@ -29,6 +29,16 @@ CHATSTATE_JS = (STATIC / "js" / "chatState.js").read_text(encoding="utf-8")
 APP_JS = (STATIC / "app.js").read_text(encoding="utf-8")
 ALL_HTML = sorted(STATIC.rglob("*.html"))
 
+# #1414 R3 (PR6+): as chat.js decomposes into focused sibling modules (chatOutbox.js, …), a moved
+# var's SOLE consumer can move OUT of chat.js while still resolving to the ONE shared chatState
+# instance. The "consumed through the singleton" checks below therefore scan the whole chat.js module
+# GRAPH (chat.js + every chat*.js sibling), not chat.js alone — the shared-instance guarantee is
+# unchanged; only the file that holds a given consumer moved (e.g. the outbox's _flushingOutbox /
+# _outboxRestoreDone reads/writes now live in chatOutbox.js).
+CHAT_GRAPH_JS = "\n".join(
+    p.read_text(encoding="utf-8") for p in sorted((STATIC / "js").glob("chat*.js"))
+)
+
 # The full set of module-level mutable state relocated to chatState in PR0.
 MOVED_VARS = [
     "isStreaming", "currentAbort", "_sendInFlight", "_streamSessionId", "_displayOverride",
@@ -98,21 +108,27 @@ def test_chat_js_declares_no_moved_var_module_level():
 
 
 def test_chat_js_consumes_the_singleton():
-    # Every moved var is referenced through the singleton somewhere in chat.js.
-    unused = [v for v in MOVED_VARS if f"chatState.{v}" not in CHAT_JS]
-    assert not unused, f"chat.js never references chatState.<var> for: {unused}"
+    # Every moved var is referenced through the singleton somewhere in the chat.js module GRAPH
+    # (chat.js + its extracted chat*.js siblings — PR6 moved the outbox's _flushingOutbox /
+    # _outboxRestoreDone consumers into chatOutbox.js, still one shared chatState instance).
+    unused = [v for v in MOVED_VARS if f"chatState.{v}" not in CHAT_GRAPH_JS]
+    assert not unused, f"the chat module graph never references chatState.<var> for: {unused}"
 
 
 def test_single_flight_guards_route_through_chatstate():
+    # #1414 R3 PR6: the outbox guards (_flushingOutbox / _outboxRestoreDone) are consumed in
+    # chatOutbox.js now, so resolve these against the chat.js module GRAPH — the shared-instance
+    # guarantee is unchanged (one chatState), only the consuming file moved.
+    code = _strip_line_comments(CHAT_GRAPH_JS)
     for g in SINGLE_FLIGHT_GUARDS:
-        assert f"chatState.{g}" in CHAT_JS, (
+        assert f"chatState.{g}" in CHAT_GRAPH_JS, (
             f"single-flight guard {g!r} must resolve through chatState.{g} so submit/outbox/reconcile "
             "share ONE instance (re-entrancy must actually serialize)."
         )
-        # And there is no bare, un-namespaced assignment left (would be a dangling reference).
-        code = _strip_line_comments(CHAT_JS)
+        # And there is no bare, un-namespaced assignment left anywhere in the graph (a dangling ref).
         assert not re.search(rf"(?<![.\w]){re.escape(g)}\s*=(?!=)", code), (
-            f"a bare `{g} = …` assignment remains in chat.js — every write must go through chatState."
+            f"a bare `{g} = …` assignment remains in the chat module graph — every write must go "
+            "through chatState."
         )
 
 
