@@ -1009,6 +1009,41 @@ export function momentForPhase(phase: string): string {
   return "default";
 }
 
+/**
+ * #1411 — the closed-set beats where exactly ONE engine-owned lever is legal, so the narrator's only
+ * job is to CALL it and VOICE the deterministic result. Exactly the deterministic competition /
+ * ceremony / eviction beats: the comp winner + every staged drop are the engine's to compute, and the
+ * ceremony/eviction beats are the engine's to drip — the model must `advanceGame` to surface the next
+ * one. This is the SINGLE source of the beat→lever mapping the front-end used to hard-code
+ * (`_FORCE_COMP_PHASES ∪ _FORCE_ADVANCE_PHASES`) and could drift from the tool registry; it is now
+ * SIGNALED on `GameStateView.requiredLever`. `premiere`/`finale`/`final-eviction`/`twist-reveal` are
+ * deliberately OUT (their own belts; more delicate) — mirroring the retired FE literal exactly.
+ */
+export const CLOSED_SET_ADVANCE_PHASES: ReadonlySet<string> = new Set([
+  "hoh-competition",
+  "veto-competition",
+  "nominations",
+  "veto-ceremony",
+  "eviction",
+]);
+
+/**
+ * The single ENGINE-OWNED lever a closed-set `phase` REQUIRES the narrator to call this turn, or `null`
+ * when the beat has no single legal lever (every ordinary/social/premiere/finale beat, where
+ * spontaneous calling stays primary). The closed-set counterpart to `momentForPhase`: a pure function
+ * of the live `phase`, surfaced on `GameStateView.requiredLever` (#1411) so the FRONT-END forces
+ * whatever the engine NAMES on the wire instead of keeping its own beat→lever map. Vault-free (a lever
+ * NAME only — no secret, no number). NEVER returns `submitDecision`: that carries the player's binding
+ * pick, and forcing it would make the model invent the player's choice (the mandate's exact inverse).
+ *
+ * Byte-identity (the golden gate): the set is EXACTLY the FE's retired `_FORCE_COMP_PHASES ∪
+ * _FORCE_ADVANCE_PHASES`, so the same forced `tool_choice` fires on the same beats — the recorded
+ * golden requests are unchanged. Absent field ⇒ no forcing ⇒ byte-identical (0065 sync-spine discipline).
+ */
+export function requiredLeverForPhase(phase: string): string | null {
+  return CLOSED_SET_ADVANCE_PHASES.has((phase || "").toLowerCase()) ? "advanceGame" : null;
+}
+
 /** The managed fragment for a moment (falls back to `default`). */
 export function momentFragment(moment: string): string {
   return MOMENT_PROMPTS[moment] ?? MOMENT_PROMPTS["default"]!;

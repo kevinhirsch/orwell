@@ -904,6 +904,15 @@ _LAST_BEAT_SEQ: dict = {}
 # changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
 _LAST_FRAMED_BEAT_KEY: dict = {}
 
+# #1411 — the engine-SIGNALED required lever for the framed beat (`GameStateView.requiredLever`),
+# captured from the SAME framing state read that builds `_LAST_FRAMED_BEAT_KEY` (zero extra engine
+# read). The agent loop's forced-`tool_choice` gate reads THIS instead of a FE-held beat→lever map
+# that could drift from the tool registry: the engine now names which single lever a closed-set beat
+# requires ("advanceGame" at the deterministic comp/ceremony/eviction beats), or None. Keyed the SAME
+# "default"-fallback way as `_LAST_FRAMED_BEAT_KEY`. Absent ⇒ no forcing ⇒ byte-identical (the field is
+# derived purely from the engine `phase`, exactly the retired `_FORCE_COMP_PHASES ∪ _FORCE_ADVANCE_PHASES`).
+_LAST_FRAMED_REQUIRED_LEVER: dict = {}
+
 # 0118 (in-game-time pivot, Phase 2) — whether the engine reports the scheduled ceremony time has ARRIVED
 # (the Vault-free day-schedule `due` flag), cached at framing so the agent loop's advance-nudge can fire the
 # TIMED, TELEGRAPHED ceremony interrupt at its scheduled in-game hour REGARDLESS of a conversational lull
@@ -3198,6 +3207,12 @@ async def apply_game_framing(
             # scheduled hour even during engaging play. Vault-free; absent/False when the clock is off.
             _ds = game_state.get("daySchedule")
             _LAST_MILESTONE_DUE[user or "default"] = bool(_ds.get("due")) if isinstance(_ds, dict) else False
+            # #1411 — cache the ENGINE-SIGNALED required lever for the framed beat, from the SAME state
+            # (zero extra read). The forced-`tool_choice` gate reads THIS instead of a FE-held beat→lever
+            # map that could drift from the tool registry. The engine derives it purely from `phase`
+            # (the SAME `game_state["phase"]` the framed key stores above), so this is byte-identical to
+            # the retired `phase in _FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES` lookup. None ⇒ no forcing.
+            _LAST_FRAMED_REQUIRED_LEVER[user or "default"] = game_state.get("requiredLever")
         if session_id is not None and session_id not in _SESSION_GAME_FRAMED:
             moment = RE_ENTRY_MOMENT
         try:

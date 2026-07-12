@@ -1491,59 +1491,74 @@ _ADVANCE_GRACE_TURNS = 2
 # alone is always sufficient here (it resolves the field on first entry AND reveals the next batch
 # mid-reveal), so forcing it by name guarantees real progression on every forced attempt, one batch per
 # turn, until the crown.
-_FORCE_COMP_PHASES = {"hoh-competition", "veto-competition"}
-# Ceremony advance-phases the model reliably narrates as already-done WITHOUT advancing (so the engine
-# sits unmoved and the board contradicts the prose). At these we force a NAMED advanceGame — only
-# advanceGame drips these deterministic beats. (premiere/finale/twist-reveal are deliberately EXCLUDED:
-# they carry their own belts — premiere markHouseguestMet, the finale flow — and are more delicate.)
-_FORCE_ADVANCE_PHASES = {"nominations", "veto-ceremony", "eviction"}
+# #1411 — the beat→lever mapping USED to be an FE literal here (`_FORCE_COMP_PHASES` /
+# `_FORCE_ADVANCE_PHASES` → advanceGame) that could DRIFT from the engine's tool registry. It is now
+# ENGINE-SIGNALED: the engine names the single lever a closed-set beat requires on
+# `GameStateView.requiredLever` (`requiredLeverForPhase`, src/engine/momentPrompts.ts) — captured at
+# framing into `chat_helpers._LAST_FRAMED_REQUIRED_LEVER` — and the FE forces WHATEVER THE ENGINE NAMES.
+# Byte-identical to the retired literal: the engine derives it purely from `phase` = exactly
+# `{hoh-competition, veto-competition, nominations, veto-ceremony, eviction} → advanceGame`, so the same
+# forced `tool_choice` fires on the same beats (the golden requests are unchanged).
+#
+# What STAYS FE-side is the framing-override SUPPRESSION — a FE concern the engine cannot see: the social-
+# runway hold and the witnessed-ceremony moment override. `_CEREMONY_MOMENT_OVERRIDES` is exactly the set
+# of ceremony beats the FE's OWN `_with_moment` override re-frames as WITNESSED; it is NOT a beat→lever
+# map (it names no lever), only a detector for "the framed moment was overridden ahead of the phase" so
+# forcing does not chase it. It mirrors the retired `_FORCE_ADVANCE_PHASES` values byte-for-byte.
+_CEREMONY_MOMENT_OVERRIDES = {"nominations", "veto-ceremony", "eviction"}
 # J-3 fix — mirrors chat_helpers._SOCIAL_MOMENT (kept as a local literal to avoid an import cycle: this
 # module is imported BY chat_helpers). The framed moment `apply_game_framing` stashes while a social
 # runway holds; see _forced_tool_choice_for_beat's docstring.
 _SOCIAL_HOLD_MOMENT = "social"
 
 
-def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool):
+def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool, required_lever):
     """Return the OpenAI/OpenRouter `tool_choice` to FORCE this round at a catastrophic-miss beat, or
     None to leave the call unconstrained (spontaneous interleaved calling — the default everywhere).
 
     Pure + side-effect-free so it is unit-testable in isolation (the suite stubs the LLM). Inputs:
       • framed_beat_key  — the beat the model is grounded on THIS turn (`_LAST_FRAMED_BEAT_KEY[owner]`,
-        a (week, phase, moment[, pendingKind]) tuple); phase at index 1, moment at index 2.
+        a (week, phase, moment[, pendingKind]) tuple); phase at index 1, moment at index 2. Used ONLY
+        for the FE framing-override SUPPRESSION below (never to pick the lever anymore).
       • turn_tool_names  — the set of engine tool NAMES already fired THIS turn (from tool_events). The
         beat's tool having ALREADY fired this turn ⇒ the guarantee is met ⇒ do NOT re-force (which would
         fight the model on a later round of a multi-round turn).
       • pending_open     — True iff the engine has an OPEN player pending. Any open pending SUPPRESSES
         forcing: the engine waits on the PLAYER (a card), and the model must surface it, not advance or
-        run a comp past it. (We never force submitDecision — see the block comment above.)
+        run a comp past it. (We never force submitDecision — see below.)
+      • required_lever   — #1411: the single lever the ENGINE says this closed-set beat requires
+        (`GameStateView.requiredLever` = "advanceGame" at the deterministic comp/ceremony/eviction beats),
+        or None/falsy when the engine names no forceable lever. This REPLACES the retired FE-held
+        `_FORCE_COMP_PHASES`/`_FORCE_ADVANCE_PHASES` map — the FE forces whatever the engine names, so it
+        can never drift from the registry. None ⇒ never force (byte-identical to "phase not in the map").
 
-    Precedence: a comp phase forces a NAMED advanceGame directly (never a bare `"required"`) whenever
-    `advanceGame` hasn't fired yet this round. #1319: `runCompetition` is a genuine NO-OP once a staged
-    competition is already in progress — `peekCompetition` (liveSeason.ts) re-reports the SAME fixed
-    winner without touching `stillIn`/`eliminated`, so it never reveals the next drop batch. The prior
-    `"required"` choice let the model satisfy the guarantee by calling that dead-end preview instead of
-    `advanceGame`; if a turn's internal round budget didn't allow the follow-up escalation round, the
-    turn ended having "read the winner" without ever revealing a round — the staged reveals silently
-    never surfaced (zero play-by-play) while the model narrated around the gap, until a later turn's
-    advanceGame call landed on a stale expectedBeatSeq. Forcing the NAMED call directly closes that gap:
-    `advanceGame` alone is always sufficient at this phase (it resolves the field on first entry AND
-    reveals the next batch mid-reveal — the one call an in-progress comp ever needs), so every forced
-    attempt now guarantees real progression, one batch per turn, until the crown. A non-comp ceremony
-    advance-phase that hasn't advanced yet → force a named advanceGame (unchanged).
+    #1319 is now the ENGINE's concern: it names `advanceGame` (never a bare "required") at a comp phase,
+    because `advanceGame` is the ONE call that both resolves an unstarted comp AND reveals the next batch
+    of an already-staged one — so every forced attempt guarantees real progression, one batch per turn,
+    until the crown. The FE just forces the named lever until it actually fires this round.
 
     J-3 fix (ceremony one-beat-per-turn guard, root (a)): `chat_helpers` overrides the framed MOMENT
     away from the raw `phase` in exactly two cases — the social-runway HOLD (`_hold_for_social`, moment
     → "social" while `phase` stays whatever unresolved ceremony is next) and the witnessed-ceremony
     override (`_with_moment(new_state, "nominations")`, moment → "nominations" after the engine has
     already self-advanced `phase` to the NEXT beat, e.g. "veto-competition" — NARR-7). Forcing off the
-    raw `phase` in either case is phase-blind to the override and re-opens the exact force-march those
-    overrides exist to prevent: a held social beat gets force-advanced past the player's lingering, or a
-    just-witnessed ceremony gets force-dragged toward the NEXT phase's requirement instead of being
-    narrated. So: a "social" moment always suppresses forcing, and a moment that is itself one of the
-    ceremony-advance beats but does NOT match the (already-rolled) phase also suppresses — the model
-    already has everything it needs to narrate that beat; forcing would only chase the phase ahead of it.
+    engine's raw requiredLever in either case is phase-blind to the override and re-opens the exact
+    force-march those overrides exist to prevent: a held social beat gets force-advanced past the
+    player's lingering, or a just-witnessed ceremony gets force-dragged toward the NEXT phase's
+    requirement instead of being narrated. So: a "social" moment always suppresses forcing, and a moment
+    that is itself one of the ceremony-advance beats but does NOT match the (already-rolled) phase also
+    suppresses — the model already has everything it needs to narrate that beat.
     """
     if pending_open:
+        return None
+    # #1411: the engine names the lever this beat requires (or None). No lever ⇒ never force — byte-
+    # identical to the retired `phase not in _FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES → None`.
+    if not required_lever:
+        return None
+    # Defense in depth (the mandate, kept literal): NEVER force submitDecision — it carries the PLAYER's
+    # binding pick. The engine never names it here, but a hard guard means a future signal regression
+    # can never make the model invent the player's choice.
+    if required_lever == "submitDecision":
         return None
     phase = ""
     moment = ""
@@ -1553,23 +1568,14 @@ def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_op
         moment = str(framed_beat_key[2] or "").lower()
     if moment == _SOCIAL_HOLD_MOMENT:
         return None
-    if moment in _FORCE_ADVANCE_PHASES and moment != phase:
+    if moment in _CEREMONY_MOMENT_OVERRIDES and moment != phase:
         return None
     names = turn_tool_names or set()
-    if phase in _FORCE_COMP_PHASES:
-        # #1319: force the NAMED advanceGame directly — it is the ONE call that both resolves an
-        # unstarted comp AND reveals the next batch of an already-staged one, so this alone guarantees
-        # real progression every forced attempt (see the docstring precedence note above). A model that
-        # ALSO calls runCompetition first (e.g. for narrative color) is unaffected — only advanceGame
-        # satisfies the guarantee, so the force stays live until it actually fires this round.
-        if "advanceGame" not in names:
-            return {"type": "function", "function": {"name": "advanceGame"}}
+    if required_lever in names:
+        # The beat's required lever ALREADY fired this turn ⇒ the guarantee is met ⇒ do NOT re-force
+        # (which would fight the model on a later round of a multi-round turn).
         return None
-    if phase in _FORCE_ADVANCE_PHASES:
-        if "advanceGame" not in names:
-            return {"type": "function", "function": {"name": "advanceGame"}}
-        return None
-    return None
+    return {"type": "function", "function": {"name": required_lever}}
 
 
 # ── Gap #3 — the CASTING-FINALIZE forced tool_choice (the #1154 pattern generalized to the one
@@ -5080,12 +5086,18 @@ async def _stream_agent_loop_impl(
             try:
                 from routes import chat_helpers as _ch_force
                 _framed_key = _ch_force._LAST_FRAMED_BEAT_KEY.get(_force_owner)
+                # #1411: the ENGINE-SIGNALED required lever for the framed beat (captured at framing from
+                # `GameStateView.requiredLever`), replacing the retired FE-held beat→lever map. The FE
+                # forces whatever the engine NAMES — it can never drift from the tool registry.
+                _framed_required_lever = _ch_force._LAST_FRAMED_REQUIRED_LEVER.get(_force_owner)
                 _framed_phase_force = (str(_framed_key[1]).lower()
                                        if isinstance(_framed_key, (tuple, list)) and len(_framed_key) >= 2
                                        else "")
-                # Only touch the engine when the framed phase is actually a force candidate (no
-                # per-turn cost on ordinary social/lull turns).
-                if _framed_phase_force in (_FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES):
+                # Only touch the engine when the engine NAMED a required lever for the framed beat (no
+                # per-turn cost on ordinary social/lull turns). Byte-identical to the retired
+                # `_framed_phase_force in _FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES` gate: the engine
+                # signals a lever for EXACTLY those phases.
+                if _framed_required_lever:
                     _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
                                               if isinstance(ev, dict) and ev.get("tool")}
                     # An OPEN player pending SUPPRESSES forcing (the player owns the decision via the
@@ -5098,7 +5110,8 @@ async def _stream_agent_loop_impl(
                         and isinstance(_force_status.get("pending"), dict)
                         and (_force_status["pending"].get("kind") or "").strip())
                     _candidate_choice = _forced_tool_choice_for_beat(
-                        _framed_key, _turn_tool_names_force, pending_open=_pending_open)
+                        _framed_key, _turn_tool_names_force, pending_open=_pending_open,
+                        required_lever=_framed_required_lever)
                     if _candidate_choice is not None and _model_honors_forced_tool_choice(model):
                         _forced_tool_choice = _candidate_choice
                         # Belt note DEFERRED until the forced call lands (Greptile P1 — see

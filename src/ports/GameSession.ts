@@ -327,6 +327,18 @@ export interface GameStateView {
   /** The current beat key (drives which managed prompt fragment is injected). */
   moment: string;
   /**
+   * #1411 — the single ENGINE-OWNED lever this closed-set beat REQUIRES the narrator to call this
+   * turn (today `"advanceGame"` at the deterministic comp/ceremony/eviction beats), or ABSENT when the
+   * beat has no single legal lever (every ordinary/social/premiere/finale beat). Vault-free by
+   * construction: a lever NAME only — never a secret, a number, or the player's binding pick
+   * (`submitDecision` is never named; forcing it would invent the player's choice). The FRONT-END reads
+   * THIS to force `tool_choice` on the wire at the closed-set beats, instead of keeping its own
+   * beat→lever map that could drift from the tool registry (`src/surfaces/tools/registry.ts`). Derived
+   * purely from `phase` via `requiredLeverForPhase`. Absent ⇒ no forcing ⇒ byte-identical (opt-in /
+   * back-compat, 0065 sync-spine discipline; the golden replay's non-force turns are untouched).
+   */
+  requiredLever?: string | null;
+  /**
    * This week's ceremony state — the HOH, the nominees, and the veto. All PUBLIC ceremony facts the
    * whole house knows (Vault-free; mirrors `PublicGameStatus`). Surfaced into the model's persistent
    * GAME CONTEXT (audit C8-04) so the narrator voices the REAL HOH / nominations / veto holder
