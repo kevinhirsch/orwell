@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordWorldSnapshotReq, RecordCompetitionFictionReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordCastGenesisReq, RecordWorldSnapshotReq, RecordCompetitionFictionReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -246,6 +246,15 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         refuse("facets", "an object mapping houseguest id → proposed facets when present");
       }
       return;
+    case "recordCastGenesis":
+      // 0116: the FE cast-genesis skeleton write-back. `npcs` is the whole-cast proposal array; `ties` is
+      // the optional tie graph. Both are OPTIONAL-tolerant like recordCastIdentity's `facets` /
+      // recordWorldSnapshot's `slices`: refuse ONLY if PRESENT and not an array (the R6 class that would
+      // cast blindly into the envelope), so a leak/sentinel sweep calling the tool with `{}` is a clean
+      // no-op, never a 400. Each NPC's own field shape is validated + clamped + repaired inside the envelope.
+      if (args["npcs"] !== undefined && !Array.isArray(args["npcs"])) refuse("npcs", "an array of proposed NPC skeletons when present");
+      if (args["ties"] !== undefined && !Array.isArray(args["ties"])) refuse("ties", "an array of proposed ties when present");
+      return;
     case "preSeedCast":
       // 0065: optional explicit seed (tests/replays); default is real entropy minted in the adapter.
       if (args["seed"] !== undefined && typeof args["seed"] !== "number") refuse("seed", "a number when present");
@@ -355,6 +364,11 @@ export class McpServer {
         // #544: validate + REPAIR the FE-proposed cast identity facets against the diversity targets, fold the
         // PUBLIC facets onto the byte-stable cast, re-ground skin tone, re-seal each private orientation. Vault-free out.
         return this.deps.session.recordCastIdentity(args as unknown as RecordCastIdentityReq);
+      case "recordCastGenesis":
+        // 0116: validate the whole-cast SKELETON proposal through the engine's envelope (banded stats / variance
+        // floor / name validators / closed hidden-element kinds / tie-graph sanity / hidden-weight stripping) and
+        // fold the committed skeleton onto the pre-warmed cast. Structured Vault-free violations out; pre-game only.
+        return this.deps.session.recordCastGenesis(args as unknown as RecordCastGenesisReq);
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
