@@ -7,17 +7,23 @@ Phase-2 `dockable` window docks into `#gadget-rail-body`). This is the "no singl
 grammar" the audit tracked (`docs/audits/2026-06-21-window-system-scope.md`, Direction B
 / WAY-7).
 
-SAFE FIRST INCREMENT — "converge the destination" (the audit's Direction-B step 1). This
-does NOT change minimize/restore SEMANTICS (that would rip out the deeply-pinned finale/
-cast chip-park refresh-persistence gate, test_g16_refresh_fixes.py — the "same GESTURE"
-step is deferred). Instead it makes the `#minimized-dock` chip strip a THIN ALIAS that is
-HOMED INTO the control-room rail in the game build, so both a minimized window's chip and a
-docked window now live in the ONE control room. The full inherited build (no rail) keeps
-the legacy nav-sidebar cluster verbatim.
+This file pins the "converge the destination" increment (the audit's Direction-B step 1):
+the `#minimized-dock` chip strip is a THIN ALIAS HOMED INTO the control-room rail in the
+game build, so both a minimized window's chip and a docked window live in the ONE control
+room. The full inherited build (no rail) keeps the legacy nav-sidebar cluster verbatim.
+These chip primitives — the dock element/id, the class-driven reveal, `saveParked` — are
+UNCHANGED and still serve every NON-dockable kit window.
 
-These are wiring/convention source-pins; the live behaviour (minimize → chip appears in the
-rail → restore) is exercised for real in frontend/scripts/browser_smoke.py (the T20/G16
-dock blocks + the new `dockInRail` assertion).
+FOLLOW-ON — "same GESTURE" (#573 gesture unification): a DOCKABLE window's minimize now IS
+the dock (one gesture, one destination), so the finale/cast go straight to the rail as
+docked windows rather than parking a chip. That gesture change and its DOCKED-refresh
+migration are pinned in test_g16_refresh_fixes.py; the destination-convergence pins HERE
+stay valid for the still-live non-dockable chip path.
+
+These are wiring/convention source-pins; the live behaviour (a non-dockable window: Escape →
+chip in the rail → restore; a dockable window: minimize → docks) is exercised for real in
+frontend/scripts/browser_smoke.py (the ow-smoke-window `dockInRail` block + the T20/G16 dock
+blocks).
 """
 import os
 import re
@@ -80,13 +86,15 @@ def test_dock_falls_back_to_the_sidebar_in_the_full_build():
     assert "insertBefore(dock, userBar)" in home
 
 
-def test_minimize_restore_semantics_are_unchanged_thin_alias():
+def test_chip_dock_primitives_are_intact_thin_alias():
     # THIN ALIAS: only the dock's HOME moves — the chip element, its id, and the class-driven
-    # F1 reveal are untouched (so every chip-park gate, incl. G16 refresh-persistence, still holds).
+    # reveal are untouched, so the non-dockable chip-park path is unchanged by the destination
+    # convergence. (The #573 gesture unification routes DOCKABLE windows to the dock instead of a
+    # chip; that's pinned in test_g16 — the chip primitives here remain for non-dockable windows.)
     assert "dock.id = 'minimized-dock'" in MODAL
     assert MODAL.count("classList.add('ow-has-rows')") == 1
     assert MODAL.count("classList.remove('ow-has-rows')") == 1
-    # minimize() still persists the parked flag through the kit (G16); this increment didn't touch it.
+    # minimize() still persists the parked flag through the kit for a NON-dockable window (G16).
     kit = _read("static", "js", "orwellWindow.js")
     assert "saveParked(this.o.id, true)" in kit
 
