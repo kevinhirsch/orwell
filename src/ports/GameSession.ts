@@ -1644,6 +1644,17 @@ export interface RecordCastProfileReq {
   biography?: string;
   /** The structured physical-characteristics facet (text↔image single source of truth). */
   physicalCharacteristics?: PhysicalCharacteristics;
+  /**
+   * The authored VOICE fingerprint (feature 0084 — idiolect/voice notes; the expressive-e2e authoring
+   * widening, owner directive 2026-07-11). PUBLIC and Vault-free (how a person talks is observable) and
+   * byte-stable once folded — voice is IDENTITY (owner ruling 2026-06-25), so like the other public
+   * facets it is authored as part of the ONE season-start floor→authored upgrade, never drifted later.
+   * Folded ONLY when the WHOLE profile is well-formed (all seven dials + signature non-empty short
+   * strings, lexicon a small string list) — voice is replaced whole or not at all; anything partial /
+   * malformed is dropped and the engine's seeded voice (the deterministic floor) simply stands. NEVER a
+   * stat or hidden weight: this shapes how the houseguest TALKS, not any outcome math.
+   */
+  voice?: VoiceProfile;
   // --- HIDDEN (Vault-sealed; NEVER projected to player or admin) ---
   /** 2–3 secrets. */
   secrets?: string[];

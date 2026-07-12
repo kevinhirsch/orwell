@@ -547,6 +547,23 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                     val = float(val)
                 except (TypeError, ValueError):
                     raise HTTPException(400, f"{key} must be a number")
+            # Owner directive 2026-07-11 — the cast-authoring routing/temperature + enrichment-policy
+            # knobs are validated here like the sibling settings (the readers ALSO validate
+            # defensively, so a value written around this route can still never go live malformed).
+            if key == "cast_authoring_model_source":
+                if str(val).strip().lower() not in ("narration", "utility"):
+                    raise HTTPException(400, "cast_authoring_model_source must be 'narration' or 'utility'")
+                val = str(val).strip().lower()
+            if key == "cast_authoring_temperature":
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "cast_authoring_temperature must be a number")
+                val = max(0.0, min(val, 2.0))
+            if key == "enrichment_policy":
+                if str(val).strip().lower() not in ("", "soft", "strict"):
+                    raise HTTPException(400, "enrichment_policy must be 'soft', 'strict', or ''")
+                val = str(val).strip().lower()
             current[key] = val
         _save_settings(current)
         # ADR 0006: apply an in-game-clock switch flip to the LIVE engine immediately (no restart) —

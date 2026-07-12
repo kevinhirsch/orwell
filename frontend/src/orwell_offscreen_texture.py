@@ -124,6 +124,12 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     Best-effort + background — never blocks the game advance. Uses the SAME proven plumbing as the
     other FE-driven write-backs: the shared utility-LLM resolver (``orwell_cast_authoring``) and the
     engine player-channel client (``orwell_engine``)."""
+    strict = False
+    try:
+        from src import enrichment_policy
+        strict = enrichment_policy.is_strict()
+    except Exception:
+        strict = False
     try:
         from src.orwell_cast_authoring import _resolve_llm_fn  # the shared background-utility completion
     except Exception:
@@ -131,7 +137,14 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
 
     llm_fn = await _resolve_llm_fn(owner)
     if llm_fn is None:
-        logger.debug("[offscreen-texture] no utility model — keeping the deterministic templates")
+        # STRICT enrichment policy (owner directive 2026-07-11): an unwired class is a LOUD failure —
+        # an ERROR + an admin-visible ledger entry. Soft: the legacy silent debug line, byte-identical.
+        if strict:
+            enrichment_policy.record_failure(
+                owner, "offscreen-texture", "no model resolved for the off-screen-texture call class",
+                detail="the deterministic templates must not stand silently under the strict policy")
+        else:
+            logger.debug("[offscreen-texture] no utility model — keeping the deterministic templates")
         return {"voiced": 0, "total": 0, "reason": "no-model"}
 
     from src import orwell_engine
@@ -146,6 +159,9 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
         result = await enrich_tick(get_skeletons, llm_fn, write_back)
     except Exception as exc:
         logger.warning("[offscreen-texture] run_enrich failed: %s", exc)
+        if strict:
+            enrichment_policy.record_failure(
+                owner, "offscreen-texture", "off-screen texture enrichment failed", detail=str(exc))
         return {"voiced": 0, "total": 0, "error": str(exc)}
     # #617: voiced texture landed on the live game — push a server-side "game-updated" so open
     # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.

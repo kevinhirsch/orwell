@@ -23,6 +23,7 @@ import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
+import type { VoiceProfile } from "../../domain/voiceProfile";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
 import { nextMilestone, milestoneDue as milestoneDueOf, beatFeltHours } from "../../engine/daySchedule";
 import { driveSuspicion } from "../../engine/suspicion";
@@ -100,6 +101,46 @@ export function isReasonableName(s: string): boolean {
     if (consonantRunRe.test(token)) return false;
   }
   return true;
+}
+
+/**
+ * Sanitize an authored VOICE fingerprint (feature 0084 / the 2026-07-11 expressive-e2e authoring
+ * widening of `recordCastProfile`). Voice is IDENTITY (owner ruling 2026-06-25): it folds WHOLE or not
+ * at all — never spliced field-by-field over the seeded floor. Well-formed = all six dials + the prose
+ * signature are non-empty bounded strings, and `lexicon` cleans to a small list (1–4) of short habitual
+ * fillers. Returns the trimmed, whitespace-collapsed profile, or null when anything is missing or
+ * malformed — the engine's seeded deterministic voice (the floor) then simply stands, exactly like a
+ * dropped name/vocation. Pure and Vault-free by construction: voice is a PUBLIC, observable facet
+ * (how a person talks), never a stat or hidden weight.
+ */
+const AUTHORED_VOICE_DIAL_MAX = 80;
+const AUTHORED_VOICE_SIGNATURE_MAX = 200;
+const AUTHORED_VOICE_LEXICON_MAX_ENTRIES = 4;
+const AUTHORED_VOICE_LEXICON_ENTRY_MAX = 32;
+export function sanitizeAuthoredVoice(v: unknown): VoiceProfile | null {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+  const raw = v as Record<string, unknown>;
+  const field = (key: string, cap: number): string | null => {
+    const val = raw[key];
+    if (typeof val !== "string") return null;
+    const s = val.trim().replace(/\s+/g, " ");
+    return s.length > 0 && s.length <= cap ? s : null;
+  };
+  const register = field("register", AUTHORED_VOICE_DIAL_MAX);
+  const rhythm = field("rhythm", AUTHORED_VOICE_DIAL_MAX);
+  const energy = field("energy", AUTHORED_VOICE_DIAL_MAX);
+  const directness = field("directness", AUTHORED_VOICE_DIAL_MAX);
+  const humor = field("humor", AUTHORED_VOICE_DIAL_MAX);
+  const stressTell = field("stressTell", AUTHORED_VOICE_DIAL_MAX);
+  const signature = field("signature", AUTHORED_VOICE_SIGNATURE_MAX);
+  if (!register || !rhythm || !energy || !directness || !humor || !stressTell || !signature) return null;
+  if (!Array.isArray(raw["lexicon"])) return null;
+  const lexicon = (raw["lexicon"] as unknown[])
+    .map((x) => (typeof x === "string" ? x.trim().replace(/\s+/g, " ") : ""))
+    .filter((x) => x.length > 0 && x.length <= AUTHORED_VOICE_LEXICON_ENTRY_MAX)
+    .slice(0, AUTHORED_VOICE_LEXICON_MAX_ENTRIES);
+  if (lexicon.length === 0) return null;
+  return { register, rhythm, energy, directness, humor, stressTell, signature, lexicon };
 }
 
 /** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
@@ -1904,7 +1945,12 @@ export class GameSessionAdapter implements GameSession {
     const playerName = ctx.playerName;
     const mentionsPlayer = (text: string): boolean =>
       playerName.length >= 3 && text.toLowerCase().includes(playerName.toLowerCase());
-    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""}`;
+    // The authored voice (0084 widening) is a PUBLIC facet too — its text joins the mirror guard so a
+    // model that weaves the player into the idiolect ("always brings up <player>") is refused whole.
+    const voiceGuardText = req.voice !== null && typeof req.voice === "object"
+      ? Object.values(req.voice as unknown as Record<string, unknown>).flat().filter((x): x is string => typeof x === "string").join(" ")
+      : "";
+    const publicText = `${req.biography ?? ""} ${req.physicalCharacteristics ? Object.values(req.physicalCharacteristics).join(" ") : ""} ${voiceGuardText}`;
     const storylineText = `${(req.secrets ?? []).join(" ")} ${(req.trueGoals ?? []).join(" ")} ${req.weakness ?? ""}`;
     if (mentionsPlayer(publicText) || mentionsPlayer(storylineText)) {
       return { accepted: false, publicFields: [], hiddenFields: [], reason: "authored profile mirrors the player" };
@@ -2007,6 +2053,20 @@ export class GameSessionAdapter implements GameSession {
       const grounded = this.groundedSkinTones[target.id]
         ?? ALL_ETHNICITIES.find((e) => e.heritage === target.character.ethnicity)?.skinTone;
       if (grounded) target.character.physicalCharacteristics.skinTone = grounded;
+    }
+    // VOICE (0084 / the 2026-07-11 expressive-e2e widening): fold the authored idiolect/voice
+    // fingerprint ONLY when it is a complete, well-formed profile (`sanitizeAuthoredVoice` — voice is
+    // IDENTITY, owner ruling 2026-06-25: replaced whole at the season-start authoring upgrade or not at
+    // all, never spliced). Partial/malformed ⇒ dropped, the seeded deterministic voice stands — exactly
+    // the name/vocation per-field-drop rule, never a whole-call failure. PUBLIC + Vault-free (the roster
+    // card's `voice` clause re-derives from it via `voiceFingerprint`); NEVER outcome math — no stat,
+    // lean, or hidden weight is touched, so the anti-sycophancy calibration (juryReach) is untouched.
+    if (req.voice !== undefined) {
+      const authoredVoice = sanitizeAuthoredVoice(req.voice);
+      if (authoredVoice) {
+        target.character.voice = authoredVoice;
+        publicFields.push("voice");
+      }
     }
     // #1067 — MARK the season-start floor→authored UPGRADE of the PUBLIC deep-profile facets. The seeded
     // floor (`seedDeepProfiles`) sets `biography`/`physicalCharacteristics`/`vocation` to a placeholder and

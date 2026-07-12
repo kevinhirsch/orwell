@@ -1878,6 +1878,22 @@
                 <input id="set-maxTokensAuthoring" type="text" inputmode="numeric" placeholder="default 1200" class="settings-select" style="width:120px;">
               </div>
               <div class="settings-row">
+                <label class="settings-label">Cast authoring model</label>
+                <select id="set-castAuthorSource" class="settings-select" style="width:120px;">
+                  <option value="narration">narration</option><option value="utility">utility</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Cast authoring temperature</label>
+                <input id="set-castAuthorTemp" type="text" inputmode="decimal" placeholder="default 1.1" class="settings-select" style="width:120px;">
+              </div>
+              <div class="settings-row">
+                <label class="settings-label">Enrichment policy</label>
+                <select id="set-enrichmentPolicy" class="settings-select" style="width:120px;">
+                  <option value="strict">strict (loud)</option><option value="soft">soft (legacy)</option>
+                </select>
+              </div>
+              <div class="settings-row">
                 <label class="settings-label">Spend alert (USD / game)</label>
                 <input id="set-tokenSpendAlert" type="text" inputmode="decimal" placeholder="0 = off" class="settings-select" style="width:120px;">
               </div>
