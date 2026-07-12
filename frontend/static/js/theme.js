@@ -3262,8 +3262,23 @@ const themeModule = { initThemeUI, togglePopup, closePopup, openPopup, makeDragg
 
 export default themeModule;
 
+// F-S1-H: the /login page is UNAUTHENTICATED, but this module gets pulled in there whenever the
+// admin's login background is the "bundled" perlin-flow source (login_bg.js dynamically imports
+// theme.js to reuse its wallpaper generator). Its two cross-device sync fetches below
+// (GET /api/prefs/theme, GET /api/prefs/custom-themes) are session-gated, so pre-auth they only
+// ever 401 — two red console lines on every login load. Skip the server round-trip on /login: the
+// login page reads its palette straight from localStorage (its inline bootstrap) and needs no
+// server prefs, so this drops the noise with no visual or behavioral change.
+function _onLoginPage() {
+  try { return (window.location.pathname || '').toLowerCase().startsWith('/login'); }
+  catch (_) { return false; }
+}
+
 // Init on DOM ready, with server-side sync fallback
 async function _initWithSync() {
+  // F-S1-H: pre-auth on /login the authed prefs fetches can only 401 — skip them (no console noise).
+  // initThemeUI() still runs exactly as it did before, so nothing else about boot changes.
+  if (_onLoginPage()) { initThemeUI(); return; }
   // If no local theme, try loading from server (cross-device sync)
   if (!getSaved()) {
     const serverTheme = await _loadFromServer();
