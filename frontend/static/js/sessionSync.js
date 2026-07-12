@@ -125,6 +125,28 @@
     try { window.dispatchEvent(new CustomEvent('orwell:layout-changed', { detail: data || {} })); } catch (_) {}
   }
 
+  // #891 (F3): board pings (game-updated / layout-changed) are now carried in the server's per-session
+  // SSE replay ring, so a device that reconnected or was backgrounded REPLAYS the pings it missed on
+  // connect — instead of sitting stale until its 20-30s poll. Each ping carries a monotonic per-session
+  // `busSeq`; we keep the highest applied per session and DROP a ping whose busSeq we've already passed,
+  // so a replayed ping we already handled does not re-fire a redundant HUD refetch / geometry re-apply.
+  // game-updated and layout-changed share the SAME per-session bus counter (one monotonic stream), so a
+  // single high-water mark per session is correct — a genuinely new ping always carries a higher busSeq
+  // than anything seen. Fail-open: a ping with no numeric busSeq (older server / an unversioned event)
+  // is always applied — dedupe never drops an unversioned ping. A busSeq RESET (server restart, or a
+  // long-idle ring eviction) can drop one ping; the ~20-30s panel poll is the correctness floor for
+  // that rare case, exactly as it is for the live fan-out.
+  var _lastBusSeq = {};
+  function _isFreshPing(id, data) {
+    if (!id) return true;                                        // no session key — can't dedupe, apply
+    var bs = data && data.busSeq;
+    if (typeof bs !== 'number' || !isFinite(bs)) return true;    // unversioned — always apply
+    var last = _lastBusSeq[id];
+    if (typeof last === 'number' && bs <= last) return false;    // already applied — stale/duplicate replay
+    _lastBusSeq[id] = bs;
+    return true;
+  }
+
   // #985 (P2-C): is an incoming event's session one WE should accept? We accept the per-tab session
   // we're viewing (the original rule) AND — in the game build — the bound CANONICAL game session,
   // even when our per-tab `currentSession()` hasn't yet converged to it. The published `run-started`
@@ -172,8 +194,10 @@
     var id = data && data.session;
     // Board/layout pings are not chat — handle them before the chat-session gate (they ride the
     // canonical session; the player is on it during the game). Messenger model: NO spectator/lockout.
-    if (type === 'game-updated') { notifyGameUpdated(); return; }
-    if (type === 'layout-changed') { dispatchLayoutChanged(data); return; }
+    // #891 (F3): dedupe by the ping's `busSeq` so a ring-REPLAYED ping (reconnect/backgrounded catch-up)
+    // we already applied doesn't re-fire; a genuinely missed ping (higher busSeq) still applies.
+    if (type === 'game-updated') { if (_isFreshPing(id, data)) notifyGameUpdated(); return; }
+    if (type === 'layout-changed') { if (_isFreshPing(id, data)) dispatchLayoutChanged(data); return; }
     if (!isWatchedSession(id)) return;       // not the session we're viewing or the canonical game run
     var cm = chat();
     if (!cm) return;

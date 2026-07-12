@@ -225,13 +225,17 @@ def test_subscribe_replays_a_run_started_published_before_connect():
         "the run-started published before connect must be REPLAYED on subscribe (the §3.4b ring)"
 
 
-def test_ring_replays_recent_invitations_but_not_unbounded():
-    """The ring carries reconcile-invitation events (run-started / message-added / game-updated) —
-    NOT every event type, and not an unbounded log. `game-updated` is replayed (F5 first-turn edge):
-    a window opening mid-first-turn still gets the HUD-refetch ping it would otherwise miss."""
+def test_ring_replays_recent_invitations_and_board_pings():
+    """The ring carries the reconcile-invitation AND cross-device board-ping events (run-started /
+    message-added / game-updated / layout-changed) so a reconnecting/backgrounded device replays what
+    it missed. `game-updated` is replayed (F5 first-turn edge: a window opening mid-first-turn still
+    gets the HUD-refetch ping), and — F3 / #891 — `layout-changed` is now replay-durable too (a device
+    that reconnects after a peer's window move still catches it). Dedupe rides the `busSeq` stamp so the
+    replay is not reconnect noise; the ring stays bounded (see test_ring_is_bounded_to_max)."""
     async def main():
         sid = "adr0012-ring-bounded"
-        # A non-invitation event (layout sync, 0064 §F) must NOT be ringed (it's not an attach/reconcile signal).
+        # A board ping (layout sync, 0064 §F / #891) IS now ringed — replay-durable so a reconnecting
+        # device catches it; the client dedupes by busSeq so the replay adds no noise (F3).
         session_events.publish(sid, "layout-changed")
         session_events.publish(sid, "game-updated")
         session_events.publish(sid, "message-added", {"id": "x", "seq": 0})
@@ -242,8 +246,8 @@ def test_ring_replays_recent_invitations_but_not_unbounded():
     assert any("message-added" in ev for ev in replayed), "an invitation event is replayed"
     assert any("game-updated" in ev for ev in replayed), \
         "game-updated is a reconcile invitation — replayed so a mid-first-turn joiner re-fetches its HUD (the F5 edge)"
-    assert not any("layout-changed" in ev for ev in replayed), \
-        "a non-invitation event must NOT be ringed (avoid reconnect noise)"
+    assert any("layout-changed" in ev for ev in replayed), \
+        "layout-changed is now ring-durable (F3 / #891) — a reconnecting device replays the board ping it missed"
 
 
 def test_ring_survives_a_transient_disconnect_within_grace():

@@ -17,6 +17,7 @@ SSE connection just removes that subscriber; the client reconnects.
 import asyncio
 import json
 import logging
+import threading
 import time
 from collections import deque
 from typing import AsyncGenerator, Deque, Dict, Optional, Set
@@ -38,6 +39,29 @@ _SUBS: Dict[str, Set[asyncio.Queue]] = {}
 # session_id -> deque of formatted SSE event strings (most recent last)
 _RING: Dict[str, Deque[str]] = {}
 _RING_MAX = 8
+
+# F3 (#891) — a monotonic per-session BUS sequence stamped on every published event as `busSeq`. It
+# is the "version" that makes the ring's replay-durability usable: a client that reconnects/was
+# backgrounded replays the board pings it missed, and dedupes a ping it ALREADY applied by comparing
+# busSeq (drop stale/duplicate). Because `publish` formats ONE payload and uses it for BOTH the ring
+# and the live fan-out, the live copy and the later-replayed copy of a ping carry the IDENTICAL
+# busSeq — exactly what the client keys dedupe on. Vault-free: a bus position, never game state.
+# Process-local (like the ring) and torn down with the ring; a reset (restart / long-idle eviction)
+# is covered by the panels' 20-30s poll floor, the same correctness floor the live push relies on.
+# session_id -> last-issued busSeq
+_SEQ: Dict[str, int] = {}
+# Guards the counter's read-modify-write: a sync route runs in a threadpool, so two concurrent
+# publishes must never mint a DUPLICATE busSeq (that would make the client drop a distinct ping as an
+# 'already seen' replay). deque.append + the _SUBS list-copy are already atomic; only this is not.
+_SEQ_LOCK = threading.Lock()
+
+
+def _next_seq(session_id: str) -> int:
+    """The next monotonic per-session bus sequence (F3 / #891)."""
+    with _SEQ_LOCK:
+        n = _SEQ.get(session_id, 0) + 1
+        _SEQ[session_id] = n
+        return n
 
 # SYNC-RING-1 (#571): keep the ring after the LAST subscriber leaves for a short grace, rather than
 # popping it immediately. For the dominant one-tab topology, a transient SSE drop empties `_SUBS[sid]`
@@ -84,6 +108,7 @@ def _schedule_ring_evict(session_id: str) -> None:
         # have repopulated _SUBS — this is belt-and-braces against a race).
         if not _SUBS.get(session_id):
             _RING.pop(session_id, None)
+            _SEQ.pop(session_id, None)  # F3: the bus counter shares the ring's lifecycle (bounded)
         _RING_EVICT_TASKS.pop(session_id, None)
 
     try:
@@ -91,15 +116,19 @@ def _schedule_ring_evict(session_id: str) -> None:
     except RuntimeError:
         # No running loop (sync test teardown / shutdown) — fall back to the prior immediate behavior.
         _RING.pop(session_id, None)
+        _SEQ.pop(session_id, None)
 
-# Only replay the event TYPES that are an "attach / reconcile" invitation an idle peer
-# could have missed. Anything else (heartbeats, layout pings) is not worth re-delivering and
-# would only add reconnect noise. `game-updated` IS a reconcile invitation (F5 / 0064): replaying
-# the last HUD-refetch ping closes the FIRST-TURN edge — a window that opens DURING another window's
-# first turn (which binds the canonical session mid-turn) would otherwise miss that turn's push and
-# sit stale until its 20–30s poll. The ring is bounded (maxlen 8) and the replayed ping is idempotent
-# (the joiner just re-fetches its own Vault-free projection; no state body crosses).
-_RING_REPLAY_EVENTS = ("run-started", "message-added", "game-updated")
+# Replay the event TYPES that are an "attach / reconcile" invitation an idle peer could have missed.
+# `game-updated` is a HUD-refetch reconcile (F5 / 0064) and `layout-changed` is a per-device geometry
+# mirror (F3 / #891) — BOTH are cross-device board pings that historically fanned out to LIVE
+# subscribers only, so a reconnecting/backgrounded device missed them until its 20–30s poll. Ringing
+# them makes them replay-durable: a device that connects AFTER the ping replays it on connect. The
+# `busSeq` stamp (above) lets the client dedupe a ping it already applied, so the replay adds no
+# reconnect noise (the old reason layout-changed was excluded). The ring is bounded (maxlen 8) and
+# every replayed ping is idempotent — game-updated re-fetches the joiner's own Vault-free projection;
+# layout-changed re-applies per-device geometry (the client scopes by deviceId + drops its own origin
+# echo). No state body ever crosses. Heartbeats (`connected`/`keepalive`) are never published here.
+_RING_REPLAY_EVENTS = ("run-started", "message-added", "game-updated", "layout-changed")
 
 # Send an SSE comment heartbeat this often so idle connections (and any proxy in
 # front) stay open between real events.
@@ -111,13 +140,20 @@ def _fmt(event: str, data: dict) -> str:
 
 
 def publish(session_id: str, event: str, data: Optional[dict] = None) -> None:
-    """Fan one event out to every device currently viewing `session_id`."""
+    """Fan one event out to every device currently viewing `session_id`.
+
+    Every event is stamped with a monotonic per-session `busSeq` (F3 / #891). The SAME formatted
+    payload is appended to the replay ring AND fanned out live, so the ping a client receives live and
+    the copy it later replays on reconnect carry the IDENTICAL busSeq — which is exactly what lets the
+    client dedupe a replayed ping it already applied (drop stale ones) while still catching one it
+    missed. `busSeq` wins over any caller-supplied key (it is placed last).
+    """
     if not session_id:
         return
-    payload = _fmt(event, {"session": session_id, **(data or {})})
-    # ADR 0012 §3.4b: append the invitation-class events to the per-session replay ring
-    # BEFORE the live fan-out, so a window connecting in the publish→connect gap replays
-    # it. Independent of whether anyone is currently subscribed (that is the whole point).
+    payload = _fmt(event, {"session": session_id, **(data or {}), "busSeq": _next_seq(session_id)})
+    # ADR 0012 §3.4b: append the ring-durable events to the per-session replay ring BEFORE the live
+    # fan-out, so a window connecting in the publish→connect gap replays it. Independent of whether
+    # anyone is currently subscribed (that is the whole point).
     if event in _RING_REPLAY_EVENTS:
         ring = _RING.get(session_id)
         if ring is None:
