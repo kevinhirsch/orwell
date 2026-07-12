@@ -1511,6 +1511,31 @@ _CEREMONY_MOMENT_OVERRIDES = {"nominations", "veto-ceremony", "eviction"}
 # runway holds; see _forced_tool_choice_for_beat's docstring.
 _SOCIAL_HOLD_MOMENT = "social"
 
+# #1411 (degraded-mode fallback) — the FE consumes the ENGINE-SIGNALED required lever
+# (`GameStateView.requiredLever` → `chat_helpers._LAST_FRAMED_REQUIRED_LEVER`, stashed by
+# `apply_game_framing`) as the AUTHORITATIVE source of the beat→lever mapping: that IS #1411 — the
+# engine, not the FE, owns the map, so it can never drift from the tool registry. This local set is the
+# DEGRADED-MODE mirror, consulted ONLY when that stash is absent for the framed beat (a framing miss, or
+# a unit harness that stashes just the beat key): it re-derives the lever from the framed PHASE so the
+# closed-set force guarantee is never SILENTLY lost when the engine signal didn't arrive. It is a
+# byte-identical twin of the engine's `requiredLeverForPhase` / `CLOSED_SET_ADVANCE_PHASES`
+# (src/engine/momentPrompts.ts) — the SAME five phases (== the retired `_FORCE_COMP_PHASES ∪
+# _FORCE_ADVANCE_PHASES`) — so on a LIVE turn, where the stash is ALWAYS present and computed from the
+# SAME `phase`, this branch never fires and the golden replay is untouched. Keep it EXACTLY equal to the
+# engine set; if that set ever changes, this mirror follows.
+_CLOSED_SET_ADVANCE_PHASES = frozenset({
+    "hoh-competition", "veto-competition", "nominations", "veto-ceremony", "eviction",
+})
+
+
+def _fallback_required_lever_for_phase(phase):
+    """DEGRADED-MODE mirror of engine `requiredLeverForPhase`: 'advanceGame' at a closed-set comp/
+    ceremony/eviction beat, else None. Consulted ONLY when the engine's `requiredLever` signal was not
+    stashed for the framed beat (see `_CLOSED_SET_ADVANCE_PHASES` — byte-identical to the engine in
+    production, where the signal is always present). NEVER returns submitDecision (the mandate: the
+    engine never speaks the player's binding pick)."""
+    return "advanceGame" if str(phase or "").lower() in _CLOSED_SET_ADVANCE_PHASES else None
+
 
 def _forced_tool_choice_for_beat(framed_beat_key, turn_tool_names, *, pending_open: bool, required_lever):
     """Return the OpenAI/OpenRouter `tool_choice` to FORCE this round at a catastrophic-miss beat, or
@@ -5093,10 +5118,18 @@ async def _stream_agent_loop_impl(
                 _framed_phase_force = (str(_framed_key[1]).lower()
                                        if isinstance(_framed_key, (tuple, list)) and len(_framed_key) >= 2
                                        else "")
-                # Only touch the engine when the engine NAMED a required lever for the framed beat (no
-                # per-turn cost on ordinary social/lull turns). Byte-identical to the retired
-                # `_framed_phase_force in _FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES` gate: the engine
-                # signals a lever for EXACTLY those phases.
+                # #1411 degraded-mode fallback: if the framing seam left NO engine signal for this beat
+                # (a framing miss, or a unit harness that stashes just the beat key) but there IS a framed
+                # beat, re-derive the lever from the framed PHASE so the closed-set force guarantee is not
+                # silently lost. Byte-identical on a live turn — apply_game_framing ALWAYS stashes the
+                # engine signal there, computed from this SAME phase, so this branch never fires in
+                # production and the golden replay is untouched (see _fallback_required_lever_for_phase).
+                if _framed_required_lever is None and _framed_key is not None:
+                    _framed_required_lever = _fallback_required_lever_for_phase(_framed_phase_force)
+                # Only force when a required lever is named for the framed beat (no per-turn ENGINE cost on
+                # ordinary social/lull turns — the status read below stays gated behind this). Byte-
+                # identical to the retired `_framed_phase_force in _FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES`
+                # gate: the engine signals a lever for EXACTLY those phases.
                 if _framed_required_lever:
                     _turn_tool_names_force = {ev.get("tool") for ev in (tool_events or [])
                                               if isinstance(ev, dict) and ev.get("tool")}
