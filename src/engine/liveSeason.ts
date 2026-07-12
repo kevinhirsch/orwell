@@ -1360,8 +1360,15 @@ function advanceClockBy(s: LiveSeasonState, hours: number, wrapAtEnd: boolean): 
   s.timeOfDay = phaseForHour(next);
 }
 
-export function advanceClock(s: LiveSeasonState): void {
-  advanceClockBy(s, CLOCK.perBeatHours, true);
+/**
+ * Advance the per-beat clock by a resolved SUBSTANTIVE beat. Defaults to the flat `CLOCK.perBeatHours`
+ * (byte-identical to the pre-0119 model); 0119 passes the beat's own FELT duration (a quick ceremony ~1h,
+ * a comp ~3h, an eviction ~2h) so different events cost different amounts of the in-game day. The felt
+ * duration is only ever passed when the per-conversation clock is live (the caller gates it), so golden
+ * replay (per-conversation clock off, master on) keeps the flat default and the fixture is unchanged.
+ */
+export function advanceClock(s: LiveSeasonState, hours: number = CLOCK.perBeatHours): void {
+  advanceClockBy(s, hours, true);
 }
 
 /**

@@ -24,6 +24,7 @@ import type { GameEvent } from "../../domain/event";
 import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "../../engine/presence";
 import { moodWord, voiceFingerprint } from "../../engine/voice";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
+import { nextMilestone, milestoneDue as milestoneDueOf, beatFeltHours } from "../../engine/daySchedule";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
   formCampaigns, advanceCampaign, replan, campaignTilt, CAMPAIGN, PLAN_FOR, advancePlayerCampaign,
@@ -114,6 +115,7 @@ import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace } from "../../engine/characterFactory";
 import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion } from "../../engine/emotionalArc";
+import { strategicDriveWeight } from "../../engine/offscreen";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
@@ -386,6 +388,16 @@ const ALLIANCE_ADVERSE = new Set(["nominate", "replace", "vote-evict"]);
  * per-session via `setTrajectoriesEnabled`.
  */
 const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
+
+/**
+ * 0120 — whether the STRATEGIC-DRIVE INITIATOR CADENCE runs by DEFAULT. OFF unless
+ * `ORWELL_STRATEGIC_CADENCE=1`. A DEDICATED flag (sibling to `ORWELL_TRAJECTORIES`/`ORWELL_CAMPAIGNS`) so
+ * calibration neutrality is provable in isolation: unset ⇒ the off-screen initiator is drawn with the
+ * uniform `rng.pick` exactly (no `initiatorDriveOf` is passed), and every seeded gate is byte-identical.
+ * The calibration/UAT harness never sets it; the live deploy does. A test overrides per-session via
+ * `setStrategicCadenceEnabled`. When on, sharper/more-strategic houseguests scheme a touch more often.
+ */
+const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
 
 /**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
@@ -769,6 +781,8 @@ export class GameSessionAdapter implements GameSession {
    * instance; a test flips it via `setTrajectoriesEnabled`.
    */
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
+  /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
+  private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -5796,6 +5810,38 @@ export class GameSessionAdapter implements GameSession {
     return v === "1" || v === "true" || v === "on";
   }
 
+  /**
+   * 0117 (in-game-time pivot) — is in-game time genuinely FLOWING this turn? True only when the master
+   * clock is on, the per-conversation clock is on, AND the day has started (the first ceremony beat
+   * initialises `live.timeOfDay`). The orchestrator reads this to decide whether a social (aux) turn
+   * advances the clock and lets the house live during social play. When false — the seeded calibration
+   * spine (time-of-day off) and golden replay (per-conversation clock off) — social turns stay inert and
+   * byte-identical. Vault-free: reads only the clock flags + the live day-phase.
+   */
+  perConversationClockLive(): boolean {
+    return this.perConversationClockEnabled && this.timeOfDayEnabled && this.live?.timeOfDay !== undefined;
+  }
+
+  /**
+   * 0117 — the current in-game clock-HOUR (8..32, the 24-hour model #1125), or undefined when the clock
+   * isn't running. The orchestrator debounces the social-play society tick on ELAPSED in-game hours (so
+   * the house schemes "with the clock", never once per tool call). Vault-free: reads only the day clock.
+   */
+  inGameHour(): number | undefined {
+    if (!this.timeOfDayEnabled || this.live?.timeOfDay === undefined) return undefined;
+    return this.live.nightDepth ?? WAKE_HOUR;
+  }
+
+  /**
+   * 0118 — has the in-game clock reached the next scheduled ceremony milestone (⇒ the FE's time-aware
+   * forced-advance nudge should fire it now, gathering the whole house — the telegraphed hard interrupt)?
+   * Vault-free; false unless the per-conversation clock is live AND the clock has reached the milestone's
+   * scheduled phase. Mirrors the `daySchedule.due` view flag. A pure read — never mutates, never draws rng.
+   */
+  milestoneDue(): boolean {
+    return this.perConversationClockLive() && milestoneDueOf(this.live);
+  }
+
   /** Build the Vault-free season context the pure loop reads (stats + live relationships + mood). */
   private ctx(): SeasonCtx {
     return {
@@ -5933,6 +5979,22 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the trajectory layer is live (0087) — the orchestrator reads this so it passes `trajectoryOf`
    *  ONLY when on (off ⇒ the off-screen call is byte-identical to the pre-feature stretch). */
   trajectoriesEnabledNow(): boolean { return this.trajectoriesEnabled; }
+
+  /** Turn the 0120 STRATEGIC-DRIVE initiator cadence on/off. Off by default — the calibration harness leaves
+   *  it off (with it off the off-screen tick passes no `initiatorDriveOf` ⇒ the seeded spine is byte-identical). */
+  setStrategicCadenceEnabled(on: boolean): void { this.strategicCadenceEnabled = on; }
+
+  /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
+   *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
+  strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
+
+  /** 0120 — how often this houseguest INITIATES off-screen scheming, weighted by strategic intelligence
+   *  (Mental stat) + personality (strategyStyle). Engine-internal (the off-screen society is hidden) —
+   *  never a player-facing number. A bounded, slight variance (see `strategicDriveWeight`). */
+  initiatorDrive(id: EntityId): number {
+    const npc = this.house?.npcs.find((n) => n.id === id);
+    return strategicDriveWeight(this.statsOf(id).mental, npc?.character.strategyStyle);
+  }
 
   // --- 0066 Phase-2 (#1125): the three sleep-economy extension flags (each default OFF) --------------
 
@@ -7106,7 +7168,14 @@ export class GameSessionAdapter implements GameSession {
         // deficit is 0 (no night ran) and the conflict tally is still empty.
         if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
           const wasRetired = this.live!.playerRetired ?? false;
-          advanceClock(this.live!);
+          // 0119 — different events cost different amounts of the in-game day: a quick ceremony ~1h, a
+          // comp ~3h, an eviction ~2h (beatFeltHours), instead of a flat +3h. Applied ONLY when the
+          // per-conversation clock is live, so golden replay (that clock off, master on) keeps the flat
+          // default and the recorded time-of-day stream is byte-identical (no re-record); calibration
+          // (master off) skips this whole block. A beat with no distinct felt duration ⇒ the flat default.
+          const feltHours = this.perConversationClockLive() ? beatFeltHours(ev?.beat) : null;
+          if (feltHours !== null) advanceClock(this.live!, feltHours);
+          else advanceClock(this.live!);
           // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
           // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
           // did NOT reach via retirement.
@@ -9096,6 +9165,14 @@ export class GameSessionAdapter implements GameSession {
     // NPC's knowledge or behavior — the DR wall (`deriveNpcKnowledge`) is untouched. `renderGameContext`
     // fences it as GM-only / do-not-voice so the GM narrates the irony of the player's mask, never leaks it.
     const drStrategy = playerDiaryStrategy(this.playerKnowledgeReader?.() ?? []);
+    // 0118 — the day's shape, telegraphed. Present ONLY when the per-conversation clock is live, so the
+    // seeded calibration spine (time-of-day off) and golden replay (per-conversation clock off) never see
+    // it ⇒ byte-identical, no golden re-record. A pure read of the live loop state + the day clock; the
+    // HUD shows it and `renderGameContext` primes on it so run-up scenes carry the coming interruption.
+    const nextM = this.perConversationClockLive() ? nextMilestone(this.live) : null;
+    const daySchedule = nextM
+      ? { next: nextM.beat, phase: nextM.phase, due: milestoneDueOf(this.live) }
+      : undefined;
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -9213,6 +9290,8 @@ export class GameSessionAdapter implements GameSession {
       ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
       // 0115: the player's DR strategy as a PRIVATE narrator steer (present only when they've recorded one).
       ...(drStrategy.length ? { playerDiaryRoom: drStrategy } : {}),
+      // 0118: the telegraphed day schedule (present only when the per-conversation clock is live).
+      ...(daySchedule ? { daySchedule } : {}),
     };
   }
 }

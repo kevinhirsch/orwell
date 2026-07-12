@@ -69,6 +69,17 @@ export const CLOCK: ClockConstants = {
   perConversationHours: 0.5,
 };
 
+/**
+ * 0117 (in-game-time pivot, Phase 1) — the in-game hours that must elapse during the player's social
+ * play before the off-screen house schemes again. This is the cadence at which the hidden society
+ * (0038 scenes + gossip + motivated movement + campaigns/drives) lives BETWEEN ceremonies, paced to the
+ * in-game clock rather than to a per-tool-call counter. With the per-conversation clock stepping the
+ * floor (~0.5h/turn), the house lives roughly every few social turns; a ceremony beat's +3h jump always
+ * clears it, so beat-driven ticks are unchanged. Tunable; a lower value = a livelier between-ceremony
+ * house. Purely gates the OPEN-set texture layer — the seeded spine and the Vault Wall never read it.
+ */
+export const SOCIETY_TICK_HOURS = 1.5;
+
 // --- Bedtimes & the immediate (single-night) sleep debt -------------------------------------------
 
 export interface SleepConstants {

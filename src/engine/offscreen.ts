@@ -158,6 +158,34 @@ function natureWeights(e: EdgeSignals): number[] {
  * betrayal only fires over a real prior bond with incentive. Without those deps the legacy
  * uniform draw is preserved byte-for-byte (pure tests and the pre-wiring tick are unchanged).
  */
+/**
+ * 0120 — the STRATEGIC-DRIVE initiator cadence weights (tunable in one place). Deliberately a SLIGHT
+ * slope (the owner's "slight variance, not wildly skewed"): across the mental range the weight roughly
+ * doubles at the extremes, so a sharp mind schemes a touch more often than a passive one — never dominates.
+ */
+export const STRATEGIC_CADENCE = {
+  floor: 0.7,        // the least-strategic houseguest's relative initiate rate
+  mentalSlope: 0.6,  // added across mental ∈ [0,1] — strategic intelligence
+  styleBonus: 0.15,  // a scheming-forward strategyStyle nudges up; a passive one down — personality
+};
+
+const SCHEMING_STYLES: ReadonlySet<string> = new Set(["strategic", "aggressive"]);
+const PASSIVE_STYLES: ReadonlySet<string> = new Set(["under-the-radar", "loyal"]);
+
+/**
+ * 0120 — a bounded, gently-sloped POSITIVE weight for how often a houseguest INITIATES an off-screen
+ * scene, from their strategic intelligence (`mental`) + personality (`strategyStyle`). Pure; no rng.
+ * Always > 0 so `weightedPick` has a valid distribution. Engine-internal (the off-screen society is
+ * hidden) — never a player-facing number.
+ */
+export function strategicDriveWeight(mental: number, style?: string): number {
+  const m = Math.max(0, Math.min(1, mental));
+  let w = STRATEGIC_CADENCE.floor + STRATEGIC_CADENCE.mentalSlope * m;
+  if (style && SCHEMING_STYLES.has(style)) w += STRATEGIC_CADENCE.styleBonus;
+  else if (style && PASSIVE_STYLES.has(style)) w -= STRATEGIC_CADENCE.styleBonus;
+  return Math.max(0.1, w);
+}
+
 export function richOffscreenStretch(deps: {
   events: EventStore;
   rng: RandomnessSource;
@@ -212,10 +240,21 @@ export function richOffscreenStretch(deps: {
    * motivated path; the legacy uniform draw has no per-pair nature weights to tilt).
    */
   trajectoryOf?: (a: EntityId, b: EntityId) => Trajectory;
+  /**
+   * STRATEGIC-DRIVE INITIATOR CADENCE (feature 0120, opt-in via `ORWELL_STRATEGIC_CADENCE`). When supplied,
+   * the initiator of each off-screen scene is drawn WEIGHTED by each houseguest's strategic drive (a
+   * bounded, gently-sloped positive weight — a sharper/more-strategic player schemes a touch more often;
+   * "slight variance", never a wild skew). CRITICAL (calibration): it replaces the uniform `rng.pick` with
+   * a single-draw `weightedPick` — the SAME one `rng.next()` — so the draw count/order is unchanged and the
+   * seeded competition/vote spine reading this same stream stays in phase; only WHICH eligible initiator
+   * this one draw lands on shifts. Absent (the default / the calibration harness) ⇒ today's uniform
+   * `rng.pick` exactly (byte-identical). Requires `edgeOf` (the motivated path).
+   */
+  initiatorDriveOf?: (id: EntityId) => number;
 }): OffscreenScene[] {
   const {
     events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy,
-    showmancePlausible, hasActiveShowmance, playerSubject, trajectoryOf,
+    showmancePlausible, hasActiveShowmance, playerSubject, trajectoryOf, initiatorDriveOf,
   } = deps;
   const scenes: OffscreenScene[] = [];
   // #840 — houseguests who pick up a NEW showmance partner during this stretch, so a later scene in
@@ -234,7 +273,11 @@ export function richOffscreenStretch(deps: {
       };
       const initiators = npcs.filter((n) => candidatesFor(n).length > 0);
       if (initiators.length === 0) break; // nobody shares a room with anybody — no scene to have
-      a = rng.pick(initiators);
+      // 0120 — the sharper players scheme a touch more often: a single-draw WEIGHTED pick by strategic
+      // drive when supplied (byte-identical uniform `rng.pick` when off — same one rng.next() either way).
+      a = initiatorDriveOf
+        ? weightedPick(initiators, initiators.map((n) => initiatorDriveOf(n)), rng)
+        : rng.pick(initiators);
       const candidates = candidatesFor(a);
       b = weightedPick(
         candidates,
