@@ -1445,7 +1445,17 @@ export class OrwellWindow {
 
   minimize() {
     if (!this.el || this._docked) return;  // docked windows live in the rail, no chip dock
-    saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
+    // #573 GESTURE UNIFICATION (window-system audit Direction B): a DOCKABLE window's minimize
+    // IS the dock — ONE gesture, ONE destination (the control-room rail). Route through the dock
+    // (mount the full window into the rail) instead of parking a compact chip in a separate
+    // "Windows" strip; the chip-park path below is now exclusively for NON-dockable kit windows.
+    // minimize() is only ever reached while FLOATING (the yellow control is gated on !_docked and
+    // we early-return above when docked), so this is always a plain float→dock re-home. Escape
+    // (dismissTop) and a remote-layout minimize both funnel here too, so a dockable window tucks
+    // into the rail consistently however it was triggered; restore is the dock's own undock (⇱)
+    // toggle — one gesture back out, the same single destination.
+    if (this.o.dockable) { this.toggleDock(); return; }
+    saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh (non-dockable)
     this._emit({ minimized: true });  // 0064/D1
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);

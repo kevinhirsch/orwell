@@ -180,6 +180,13 @@ import * as modalManager from "./modalManager.js";
       // top-left/clipped over the chat + composer. Non-modal windows opt in
       // explicitly; docked still wins (the rail owns docked placement).
       sheet: true,
+      // #573 gesture unification: minimize now DOCKS the finale into the control room.
+      // On the dock/undock re-home the kit keeps the SAME instance + content node but
+      // rebuilds the element; re-assert the finale's display for the new mode (docked →
+      // inline `flex` in the rail, floating → `block`) so a just-docked finale is visible
+      // immediately — its content CSS defaults to `display:none`, so without this it would
+      // dock invisibly and the rail would hide.
+      onDock: () => { try { window._orwellFinaleEnsure && window._orwellFinaleEnsure(); } catch (_) {} },
       content,
     });
     _win.open();
@@ -270,11 +277,14 @@ import * as modalManager from "./modalManager.js";
 
   function render(finale) {
     const el = ensureUI();
-    // 0054 Phase 2: docked, clear the inline display so the .ow-docked flex-column
-    // rule applies (an inline `block` would break the kit's docked layout — the rail
-    // shows it via content-driven visibility). Floating, show as a block as before.
+    // 0054 Phase 2 + #573 gesture unification: when docked, the finale lives in the
+    // control-room rail. Set an EXPLICIT inline `display:flex` (never "" — the finale's
+    // own `#orwell-finale{display:none}` ID rule out-ranks the `.ow-docked` class rule,
+    // so clearing the inline display would leave a docked finale invisible and hide the
+    // rail; inline `flex` beats the ID rule AND matches the .ow-docked flex-column layout).
+    // Floating shows as a block as before.
     const _wasHidden = !el.style.display || el.style.display === "none";
-    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "flex";
     else if (!isMinimized()) el.style.display = "block";
     // #780 (finale opens flush top-left, clipped): the finale's content CSS defaults to
     // `display:none`, so the slot restack at open() SKIPS it (an invisible entry is not
@@ -464,7 +474,9 @@ import * as modalManager from "./modalManager.js";
   // Seam for the headless gate (F3 and the finale's own F-2 wave): build + show on demand.
   window._orwellFinaleEnsure = () => {
     const el = ensureUI();
-    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    // #573: docked → inline `flex` beats the finale's own `#orwell-finale{display:none}` ID
+    // rule (a plain "" would fall through to it and leave the docked finale invisible).
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "flex";
     else if (!isMinimized()) el.style.display = "block";
     // #780: re-anchor once visible (see render()) so the headless/explicit show lands on
     // the slot base rather than the clipped CSS-default 0,0.
