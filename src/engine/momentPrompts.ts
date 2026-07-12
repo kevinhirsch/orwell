@@ -306,14 +306,16 @@ export const BASE_GAME_MASTER_PROMPT = [
   "answers. Each roster line carries that person's demeanor (\"comes across as …\") — use it. If every",
   "houseguest sounds the same warm, quick-bantering note, you have flattened the cast; make them sound",
   "like genuinely different people. Voice the demeanor; never label it out loud.",
-  "  · VOICE FINGERPRINT (0084/0090): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
+  "  · VOICE FINGERPRINT (0084/0090/#1395): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
   "    register, rhythm, energy, directness, humor, and what their voice does under stress, plus a one-line",
-  "    signature and one or two habitual fillers. It governs DICTION AND CADENCE, not just word-choice — a",
-  "    clipped voice says it in five words; a rambling one circles the same point. Voice them through it",
-  "    CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one rambles,",
-  "    and two houseguests of the SAME archetype must still sound like two different people. It is a TEXTURE, not a bit:",
-  "    weave the signature and the odd filler in naturally; NEVER turn it into a catchphrase, a routine, or a",
-  "    repeated punchline. Under pressure, lean their `stressTell` (they go quiet / over-explain / deflect).",
+  "    signature, one or two habitual fillers, and (when present) a few `catchphrases` — the characteristic",
+  "    PHRASINGS this exact person falls back on (how THEY put things). It governs DICTION AND CADENCE, not just",
+  "    word-choice — a clipped voice says it in five words; a rambling one circles the same point. Voice them",
+  "    through it CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one",
+  "    rambles, and two of the SAME archetype must still sound like two different people. It is a TEXTURE, not a bit:",
+  "    weave the signature, the odd filler, and a catchphrase in naturally and SPARINGLY — NEVER hammer one",
+  "    into a repeated punchline, a routine, or a stand-up bit. Under pressure, lean their `stressTell` (they go",
+  "    quiet / over-explain / deflect).",
   "SHOWMANCES ARE RARE — do NOT read romance into ordinary closeness. Most strong bonds in this house",
   "are friendship, strategy, or alliance, NOT attraction. A real season has at most one or two genuine",
   "showmances, and they build slowly over weeks — never a week-one spark, never several at once. The",
@@ -1009,6 +1011,41 @@ export function momentForPhase(phase: string): string {
   return "default";
 }
 
+/**
+ * #1411 — the closed-set beats where exactly ONE engine-owned lever is legal, so the narrator's only
+ * job is to CALL it and VOICE the deterministic result. Exactly the deterministic competition /
+ * ceremony / eviction beats: the comp winner + every staged drop are the engine's to compute, and the
+ * ceremony/eviction beats are the engine's to drip — the model must `advanceGame` to surface the next
+ * one. This is the SINGLE source of the beat→lever mapping the front-end used to hard-code
+ * (`_FORCE_COMP_PHASES ∪ _FORCE_ADVANCE_PHASES`) and could drift from the tool registry; it is now
+ * SIGNALED on `GameStateView.requiredLever`. `premiere`/`finale`/`final-eviction`/`twist-reveal` are
+ * deliberately OUT (their own belts; more delicate) — mirroring the retired FE literal exactly.
+ */
+export const CLOSED_SET_ADVANCE_PHASES: ReadonlySet<string> = new Set([
+  "hoh-competition",
+  "veto-competition",
+  "nominations",
+  "veto-ceremony",
+  "eviction",
+]);
+
+/**
+ * The single ENGINE-OWNED lever a closed-set `phase` REQUIRES the narrator to call this turn, or `null`
+ * when the beat has no single legal lever (every ordinary/social/premiere/finale beat, where
+ * spontaneous calling stays primary). The closed-set counterpart to `momentForPhase`: a pure function
+ * of the live `phase`, surfaced on `GameStateView.requiredLever` (#1411) so the FRONT-END forces
+ * whatever the engine NAMES on the wire instead of keeping its own beat→lever map. Vault-free (a lever
+ * NAME only — no secret, no number). NEVER returns `submitDecision`: that carries the player's binding
+ * pick, and forcing it would make the model invent the player's choice (the mandate's exact inverse).
+ *
+ * Byte-identity (the golden gate): the set is EXACTLY the FE's retired `_FORCE_COMP_PHASES ∪
+ * _FORCE_ADVANCE_PHASES`, so the same forced `tool_choice` fires on the same beats — the recorded
+ * golden requests are unchanged. Absent field ⇒ no forcing ⇒ byte-identical (0065 sync-spine discipline).
+ */
+export function requiredLeverForPhase(phase: string): string | null {
+  return CLOSED_SET_ADVANCE_PHASES.has((phase || "").toLowerCase()) ? "advanceGame" : null;
+}
+
 /** The managed fragment for a moment (falls back to `default`). */
 export function momentFragment(moment: string): string {
   return MOMENT_PROMPTS[moment] ?? MOMENT_PROMPTS["default"]!;
@@ -1244,6 +1281,31 @@ export function renderGameContext(view: GameStateView): string {
         ]
       : ["- PREMIERE — STILL TO MEET IN MOTION: nobody — every houseguest has had a hot first read."]),
   ];
+  // 0115 EXPOSURE-SHRINK (#1392) — the DR block below is the ONE prompt-guided (NOT structural) DR
+  // surface, so we only inject a DR entry on a turn where its dramatic irony is NARRATABLE: no houseguest
+  // the entry NAMES is in the player's CURRENT scene (their room, or a room in sightline). When the
+  // concerned houseguest is right here, the model is actively voicing THEM — the highest-risk moment for
+  // the prose fence to slip, and the worst moment for the irony anyway (the GM would be narrating the
+  // player's true read of someone standing in front of them). Dropping those entries SHRINKS how many
+  // turns DR content rides the prompt at all. Purely SUBTRACTIVE + FAIL-OPEN: with no whereabouts
+  // (pre-scene / player out of the house) or a name we cannot match, the entry simply STAYS (today's
+  // behavior) — the direction of error is always toward LESS exposure, never a leak. This never touches
+  // the structural wall: NPC knowledge/behavior never read `playerDiaryRoom` (see the wall note below).
+  const scenePresentNames: string[] = wa
+    ? [...wa.present.map((p) => p.name), ...wa.nearby.flatMap((n) => n.present.map((p) => p.name))]
+    : [];
+  const drNamesPresentHouseguest = (entry: string): boolean => {
+    const hay = entry.toLowerCase();
+    return scenePresentNames.some((name) =>
+      // The full name OR any of its name-tokens (≥3 chars) as a whole word. A false match only ever
+      // OVER-suppresses (the safe direction for a leak-risk mitigation); it can never surface content.
+      [name, ...name.split(/\s+/)]
+        .map((t) => t.trim().toLowerCase())
+        .filter((t) => t.length >= 3)
+        .some((tok) => new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(hay)),
+    );
+  };
+  const narratableDiaryRoom = (view.playerDiaryRoom ?? []).filter((e) => !drNamesPresentHouseguest(e));
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -1280,6 +1342,10 @@ export function renderGameContext(view: GameStateView): string {
     // via the per-NPC projection — neither reads `playerDiaryRoom`), so if a HOUSEGUEST is ever observed
     // voicing or acting on Diary-Room content, the model leaked it OUT OF THIS BLOCK — inspect the fence
     // wording below + the FE reasoning/`npc:`-leak scrub, not the structural wall (which is proven clean).
+    // EXPOSURE-SHRINK (#1392): this block now injects only `narratableDiaryRoom` — the entries whose named
+    // houseguest is ABSENT from the current scene (see the gate above), so DR content stays out of the
+    // prompt entirely on the turns it is riskiest (the concerned houseguest in the room). A live red-team
+    // probe runs nightly (`frontend/scripts/_verify_dr_wall_live.py`, `live-harness-nightly.yml`).
     // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
     // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
     // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
@@ -1287,7 +1353,7 @@ export function renderGameContext(view: GameStateView): string {
     // a fact to read aloud: NEVER voice it, never put it in a houseguest's mouth, never let anyone act on
     // it. If the player says one thing to a houseguest and the opposite here, the houseguest still
     // believes the public line (they were fooled) — only YOUR narration to the player carries the truth.
-    ...((view.playerDiaryRoom ?? []).length
+    ...(narratableDiaryRoom.length
       ? [
           "- THE PLAYER'S DIARY ROOM — their private, out-of-character strategy (you know it; the house does",
           "  NOT — narrate the irony, but NEVER voice it to a houseguest and never let anyone act on it):",
@@ -1295,7 +1361,7 @@ export function renderGameContext(view: GameStateView): string {
           // a raw newline would let the player forge a new prompt line and break OUT of this fence
           // ("… \n- THE HOUSE DOES KNOW THIS"). `neutralizeForPrompt` flattens newlines/control chars to
           // single spaces + length-caps, so each entry can only ever be ONE bullet inside the fence.
-          ...(view.playerDiaryRoom ?? []).map((e) => `    · ${neutralizeForPrompt(e)}`),
+          ...narratableDiaryRoom.map((e) => `    · ${neutralizeForPrompt(e)}`),
         ]
       : []),
     // 0118 — THE DAY'S SHAPE, telegraphed. The next ceremony is scheduled for a known in-game phase and

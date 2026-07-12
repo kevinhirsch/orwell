@@ -116,11 +116,19 @@ export function isReasonableName(s: string): boolean {
  * malformed — the engine's seeded deterministic voice (the floor) then simply stands, exactly like a
  * dropped name/vocation. Pure and Vault-free by construction: voice is a PUBLIC, observable facet
  * (how a person talks), never a stat or hidden weight.
+ *
+ * #1395 — the OPTIONAL `catchphrases` (up to 3 short characteristic phrasings). Unlike the six dials +
+ * signature + lexicon (the required whole), catchphrases are a BONUS: present + well-formed ⇒ they fold
+ * in; absent/garbage ⇒ they are simply omitted (NEVER a whole-voice failure), so a model that authors a
+ * good core voice but no catchphrases still lands its voice. Same bounds/whole-or-nothing philosophy at
+ * the entry level (each phrase trimmed, collapsed, dropped if empty/over-long), capped small.
  */
 const AUTHORED_VOICE_DIAL_MAX = 80;
 const AUTHORED_VOICE_SIGNATURE_MAX = 200;
 const AUTHORED_VOICE_LEXICON_MAX_ENTRIES = 4;
 const AUTHORED_VOICE_LEXICON_ENTRY_MAX = 32;
+const AUTHORED_VOICE_CATCHPHRASE_MAX_ENTRIES = 3;
+const AUTHORED_VOICE_CATCHPHRASE_ENTRY_MAX = 48;
 export function sanitizeAuthoredVoice(v: unknown): VoiceProfile | null {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
   const raw = v as Record<string, unknown>;
@@ -144,7 +152,17 @@ export function sanitizeAuthoredVoice(v: unknown): VoiceProfile | null {
     .filter((x) => x.length > 0 && x.length <= AUTHORED_VOICE_LEXICON_ENTRY_MAX)
     .slice(0, AUTHORED_VOICE_LEXICON_MAX_ENTRIES);
   if (lexicon.length === 0) return null;
-  return { register, rhythm, energy, directness, humor, stressTell, signature, lexicon };
+  // #1395 — OPTIONAL catchphrases: fold a well-formed small set, omit otherwise (never fails the voice).
+  const catchphrases = Array.isArray(raw["catchphrases"])
+    ? (raw["catchphrases"] as unknown[])
+        .map((x) => (typeof x === "string" ? x.trim().replace(/\s+/g, " ") : ""))
+        .filter((x) => x.length > 0 && x.length <= AUTHORED_VOICE_CATCHPHRASE_ENTRY_MAX)
+        .slice(0, AUTHORED_VOICE_CATCHPHRASE_MAX_ENTRIES)
+    : [];
+  return {
+    register, rhythm, energy, directness, humor, stressTell, signature, lexicon,
+    ...(catchphrases.length > 0 ? { catchphrases } : {}),
+  };
 }
 
 /** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */
@@ -176,7 +194,7 @@ import {
   type Trajectory, type FoldSignal,
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
-import { buildSystemPrompt, momentForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, requiredLeverForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
 import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
@@ -198,7 +216,7 @@ import {
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, soreSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists, planReserveTwists } from "../../engine/reserveTwists";
@@ -626,7 +644,11 @@ const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
 // with per-conversation advance OFF the day had no in-fiction time between ceremonies (the fast-forward
 // bug). `=0` is the escape hatch. Still self-gated on `timeOfDayEnabled`, so the clock-off sims are byte-identical.
 const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVERSATION !== "0";
-const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE === "1";
+// Default ON — sleep cost must reach social play, not just competitions. When tired, warming folds are
+// dampened (harder to bond/scheme) and souring folds are amplified (spats cut deeper) — an asymmetric bias
+// toward negative consequence (owner ruling 2026-07-12). `=0` is the escape hatch. Self-gated on
+// `timeOfDayEnabled`, so the clock-off calibration sims stay byte-identical.
+const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE !== "0";
 const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
 
 /**
@@ -2803,6 +2825,7 @@ export class GameSessionAdapter implements GameSession {
       ...(this.legendTickCount > 0 ? { legendTickCount: this.legendTickCount } : {}),
       ...(this.legendCount > 0 ? { legendCount: this.legendCount } : {}),
       ...(this.legendLastActTick > 0 ? { legendLastActTick: this.legendLastActTick } : {}),
+      ...(this.lastConfessionalSweepDay > 0 ? { lastConfessionalSweepDay: this.lastConfessionalSweepDay } : {}),
       // 0099 (hidden half) — the DEDICATED secret-barter rng tick counter + the monotonic count of secrets
       // spent into the hidden economy, persisted so the isolated barter stream + the non-degradation count
       // survive a restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0099-barter save / off).
@@ -3093,6 +3116,7 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = core.legendTickCount ?? 0;
     this.legendCount = core.legendCount ?? 0;
     this.legendLastActTick = core.legendLastActTick ?? 0;
+    this.lastConfessionalSweepDay = core.lastConfessionalSweepDay ?? 0; // 0122 — restore the sweep watermark
     // 0101/#1401: restore the showrunner's production bible + its monotonic count (absent on a pre-0101
     // save / when the layer is off ⇒ []/0 — byte-identical to a pre-feature load).
     this.showrunnerNotes = core.showrunnerNotes ? cloneSession(core.showrunnerNotes) : [];
@@ -3730,6 +3754,20 @@ export class GameSessionAdapter implements GameSession {
   socialFoldScale(id: EntityId): number {
     if (!this.socialFatigueEnabled) return 1; // Extension 2 off ⇒ the off-screen fold is byte-identical
     return socialSwayScale(this.restDeficitOf(id));
+  }
+
+  /**
+   * #1419 — the ASYMMETRIC social-fatigue scale for a scene's INITIATOR: a tired houseguest is worse at
+   * charm (`warm` < 1 dampens WARMING folds — bonding, trust, warming a bond) while their barbs cut DEEPER
+   * (`sore` ≥ 1 amplifies SOURING folds — conflict, threat, souring). "A bias for negative consequence":
+   * harder to scheme when you aren't sleeping. `{ warm: 1, sore: 1 }` (no change) unless the social-fatigue
+   * flag is on AND the clock is running ⇒ the hidden society + its seeded calibration spine are BYTE-
+   * IDENTICAL; the asymmetric fold fires only on the live clock-ON game. Pure — no rng, no number crosses.
+   */
+  socialFoldValence(id: EntityId): { warm: number; sore: number } {
+    if (!this.socialFatigueEnabled) return { warm: 1, sore: 1 };
+    const deficit = this.restDeficitOf(id);
+    return { warm: socialSwayScale(deficit), sore: soreSwayScale(deficit) };
   }
 
   /** The hidden rest deficit (0..1) a houseguest carries TODAY: tonight's immediate deficit (graded by how
@@ -4496,6 +4534,7 @@ export class GameSessionAdapter implements GameSession {
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh season hasn't swept any in-game day yet
       this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
       this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
       // 0116 — carry the model-authored genesis layer off the warm: the validated tie graph (preferred
@@ -4778,6 +4817,7 @@ export class GameSessionAdapter implements GameSession {
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh/warmed season hasn't swept any in-game day yet
     this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
     // 0116 — a freshly-warmed cast carries no model-authored genesis yet (recordCastGenesis, if the FE
@@ -5148,6 +5188,7 @@ export class GameSessionAdapter implements GameSession {
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.lastConfessionalSweepDay = 0; // 0122 — a fresh season hasn't swept any in-game day yet
     this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
     this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
@@ -7579,8 +7620,13 @@ export class GameSessionAdapter implements GameSession {
     // stays ACTIVE (the anti-accident handshake; never a fabricated exit, §4.2).
     if (req.kind === "self-evict") return remember(this.resolveSelfEviction(req.confirmed === true));
     // 0123 — an NPC deal offer resolves through its own path (NOT the ceremony-pending machinery): it
-    // lives on `live.dealOffer`, not `live.pending`. `vote:"accept"` makes the deal; anything else declines.
-    if (req.kind === "deal-offer") return remember(this.resolveDealOffer(req.vote === "accept"));
+    // lives on `live.dealOffer`, not `live.pending`. Only an EXPLICIT `accept`/`decline` resolves it; a
+    // malformed/missing `vote` (a stale or garbled client call) is a safe NO-OP — the offer stands and no
+    // hidden cooling is applied. Never silently decline on bad input (Greptile P1).
+    if (req.kind === "deal-offer") {
+      if (req.vote === "accept" || req.vote === "decline") return remember(this.resolveDealOffer(req.vote === "accept"));
+      return remember(this.advanceView(null));
+    }
     // No-op unless there's a matching pending decision to resolve (idempotent + robust
     // to malformed calls — the boundary must never throw an unhandled error). `comp-intent` and
     // `comp-round` are interchangeable aliases for the staged per-round approach (0006 staged-rounds).
@@ -8723,9 +8769,11 @@ export class GameSessionAdapter implements GameSession {
   private confessionalDepthFor(npc: EntityId, allEvents: readonly GameEvent[]): ConfessionalDepth {
     const s = this.live!;
     let role: ConfessionalDepth["role"] = "none";
+    // Precedence matches the codebase's `standing()` read (hoh > nominee > veto-holder): a houseguest who is
+    // a current NOMINEE who just won the veto still reads "nominee"/exposed, not "veto-holder"/safe (CodeRabbit).
     if (s.hoh === npc) role = "hoh";
-    else if (s.vetoHolder === npc) role = "veto-holder";
     else if ((s.nominees ?? []).some((id) => id === npc)) role = "nominee";
+    else if (s.vetoHolder === npc) role = "veto-holder";
     // recentTalk — the OTHER party of the most recent conversation this houseguest witnessed.
     let recentTalk: EntityId | undefined;
     for (let i = allEvents.length - 1; i >= 0; i--) {
@@ -9811,6 +9859,12 @@ export class GameSessionAdapter implements GameSession {
     const daySchedule = nextM
       ? { next: nextM.beat, phase: nextM.phase, due: milestoneDueOf(this.live) }
       : undefined;
+    // #1411 — the single closed-set lever this beat requires the narrator to CALL (advanceGame at the
+    // deterministic comp/ceremony/eviction beats), or null otherwise. The FE forces THIS on the wire
+    // instead of keeping its own beat→lever map that could drift from the tool registry. Vault-free (a
+    // lever NAME only); a pure function of `phase`, so it never perturbs the golden replay's non-force
+    // turns. Absent (spread below) at every non-force beat ⇒ byte-identical / no forcing.
+    const requiredLever = requiredLeverForPhase(this.phase);
     return {
       started: true,
       beatSeq: this.beatSeq, // 0065 Part A — the monotonic CAS token surfaced on every read
@@ -9838,6 +9892,9 @@ export class GameSessionAdapter implements GameSession {
       phase: this.phase,
       ...(this.timeOfDayEnabled && this.live?.timeOfDay ? { timeOfDay: this.live.timeOfDay, asleep: this.asleepNpcs() ?? [] } : {}), // ADR 0006: the public day-phase + who's turned in
       moment,
+      // #1411: the closed-set required lever (present ONLY at a comp/ceremony/eviction beat) — the FE's
+      // engine-signaled force directive. Absent everywhere else ⇒ byte-identical / no forcing.
+      ...(requiredLever ? { requiredLever } : {}),
       player: {
         id: p.id,
         name: p.name,

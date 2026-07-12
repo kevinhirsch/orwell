@@ -1,18 +1,19 @@
 """#1411 — pre-refactor CHARACTERIZATION PIN of the FE-held beat→lever forced-`tool_choice` map.
 
-Today the front-end owns the map that decides WHICH single engine lever is forced on the wire at a
-closed-set beat where exactly one lever is legal (`docs/design/undercall-seam-structural.md` §2.1 /
-§3, the #1154/#1319 forced-`tool_choice` seam). The force set is an FE literal
-(`_FORCE_COMP_PHASES` / `_FORCE_ADVANCE_PHASES`) plus the one pre-game casting-finalize force
-(`_forced_tool_choice_for_casting`). Issue **#1411** moves that decision to an **engine-signalled
-`requiredLever`** field (the pending/moment projection names the lever; the FE forces whatever the
-engine names). The undercall doc §3, option (a), calls this out as the accepted follow-on shape.
+The front-end decides WHICH single engine lever is forced on the wire at a closed-set beat where
+exactly one lever is legal (`docs/design/undercall-seam-structural.md` §2.1 / §3, the #1154/#1319
+forced-`tool_choice` seam). Issue **#1411 has LANDED**: the beat→lever decision moved from the FE
+literals `_FORCE_COMP_PHASES` / `_FORCE_ADVANCE_PHASES` to an **engine-signalled `requiredLever`**
+(`GameStateView.requiredLever` → `chat_helpers._LAST_FRAMED_REQUIRED_LEVER`); the FE forces whatever
+the engine names, with `_CLOSED_SET_ADVANCE_PHASES` + `_fallback_required_lever_for_phase` as the
+byte-identical degraded-mode mirror (== the retired union). This file is now **RE-PINNED against that
+engine-signalled shape**: the golden beat→lever table (`EXPECTED_BEAT_LEVER_MAP`) is unchanged (the
+migration is behaviour-preserving), and the completeness invariant reads the new closed-set source.
 
-This file exists to make that migration provably behaviour-preserving. It pins the CURRENT
-beat→lever map as a single golden table (`EXPECTED_BEAT_LEVER_MAP`) plus the invariants that keep
-the seam safe, and asserts the live source honours it exactly. **If the #1411 refactor changes which
-lever a beat forces — or adds/removes a forced beat — THIS test flips red**, forcing a conscious
-re-pin against the new engine-signalled shape rather than a silent behaviour drift.
+This file pins the beat→lever map as a single golden table plus the invariants that keep the seam
+safe, and asserts the live source honours it exactly. **If a future refactor changes which lever a
+beat forces — or adds/removes a forced beat — THIS test flips red**, forcing a conscious re-pin
+rather than a silent behaviour drift.
 
 The *implementation* of the migration (the `requiredLever` wiring in the FENCED
 `frontend/src/agent_loop.py` + the engine projection) is **separate fenced work** tracked under
@@ -47,8 +48,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _REQUIRED_SYMBOLS = (
     "_forced_tool_choice_for_beat",       # the pure live-beat force gate
     "_forced_tool_choice_for_casting",    # the pure casting-finalize force gate
-    "_FORCE_COMP_PHASES",                 # comp phases → forced lever
-    "_FORCE_ADVANCE_PHASES",              # ceremony advance-phases → forced lever
+    "_CLOSED_SET_ADVANCE_PHASES",         # post-#1411: engine-mirrored closed-set force phases
+                                          # (== the retired _FORCE_COMP_PHASES ∪ _FORCE_ADVANCE_PHASES)
+    "_fallback_required_lever_for_phase", # post-#1411: degraded-mode requiredLever mirror
     "_CASTING_FINALIZE_TOOL",             # the casting-finalize forced lever name
     "_SOCIAL_HOLD_MOMENT",                # the social-runway hold that suppresses forcing
 )
@@ -105,12 +107,19 @@ _DELIBERATELY_UNFORCED_BEATS = ("premiere", "finale", "twist-reveal", "social", 
 _NAMED_ADVANCE = {"type": "function", "function": {"name": "advanceGame"}}
 
 
-def _force_live(phase, fired=(), *, moment=None, pending=False):
+_UNSET = object()
+
+
+def _force_live(phase, fired=(), *, moment=None, pending=False, required_lever=_UNSET):
     """Drive the pure live-beat force gate the way the loop does: a (week, phase, moment[, pending])
-    framed key, the set of tool names already fired this turn, and the open-pending flag."""
+    framed key, the set of tool names already fired this turn, the open-pending flag, and — post-#1411
+    — the engine-signalled `required_lever`. Default: the byte-identical fallback derivation for the
+    framed phase (`_fallback_required_lever_for_phase`, what `GameStateView.requiredLever` carries on a
+    live closed-set beat), so the beat→lever map is still pinned end-to-end FROM THE PHASE."""
     al = _forcing_api()
     key = ("w1", phase, phase if moment is None else moment)
-    return al._forced_tool_choice_for_beat(key, set(fired), pending_open=pending)
+    lever = al._fallback_required_lever_for_phase(phase) if required_lever is _UNSET else required_lever
+    return al._forced_tool_choice_for_beat(key, set(fired), pending_open=pending, required_lever=lever)
 
 
 def _force_casting(fired=(), *, ready=True, finalizable=True, started=False, player=True):
@@ -145,7 +154,7 @@ def test_force_set_equals_the_map_keys_no_beat_added_or_dropped():
     # COMPLETENESS invariant (the property #1411 must preserve): the source's force sets are EXACTLY
     # the live map's keys — nothing more, nothing less. Adding or removing a forced beat flips this red.
     al = _forcing_api()
-    source_force_phases = set(al._FORCE_COMP_PHASES) | set(al._FORCE_ADVANCE_PHASES)
+    source_force_phases = set(al._CLOSED_SET_ADVANCE_PHASES)
     assert source_force_phases == set(_LIVE_BEAT_LEVER_MAP), (
         "the FE force set drifted from the pinned beat→lever map — re-pin EXPECTED_BEAT_LEVER_MAP "
         f"(source={sorted(source_force_phases)}, pinned={sorted(_LIVE_BEAT_LEVER_MAP)})")
@@ -177,7 +186,7 @@ def test_submit_decision_is_never_forced_anywhere_in_the_live_map():
     # Sweep every live force phase × representative fired-set × pending flag: no input shape may ever
     # yield a submitDecision force. Forcing it would make the model INVENT the player's binding pick.
     al = _forcing_api()
-    for phase in set(al._FORCE_COMP_PHASES) | set(al._FORCE_ADVANCE_PHASES):
+    for phase in set(al._CLOSED_SET_ADVANCE_PHASES):
         for fired in ([], ["runCompetition"], ["advanceGame"]):
             for pend in (True, False):
                 got = _force_live(phase, fired, pending=pend)

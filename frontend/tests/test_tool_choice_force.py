@@ -173,9 +173,27 @@ def test_reasoning_low_without_forcing_has_no_tool_choice(monkeypatch):
 
 # ── (c) the gate fires at the right beats and NOT on ordinary turns ──────────────────────────────────
 
-def _gate(framed_key, fired, *, pending=False):
+# #1411 — the beat→lever map is now ENGINE-SIGNALED (`requiredLeverForPhase`, src/engine/momentPrompts.ts):
+# advanceGame at EXACTLY the five closed-set beats, else None. The FE gate no longer holds this map. For
+# the pure-gate tests below we mirror the engine's rule so the existing beat-forcing assertions read as
+# "at this framed beat the engine signals advanceGame, and the gate forces it". The byte-identity anchor
+# for this mirror lives ENGINE-side (tests/unit/requiredLever.test.ts).
+_CLOSED_SET_BEATS = {"hoh-competition", "veto-competition", "nominations", "veto-ceremony", "eviction"}
+_UNSET = object()
+
+
+def _engine_lever_for(framed_key):
+    phase = (str(framed_key[1]).lower()
+             if isinstance(framed_key, (tuple, list)) and len(framed_key) >= 2 else "")
+    return "advanceGame" if phase in _CLOSED_SET_BEATS else None
+
+
+def _gate(framed_key, fired, *, pending=False, required_lever=_UNSET):
+    """Drive the pure gate. `required_lever` defaults to what the ENGINE would signal for the framed
+    beat's phase (the map is now engine-owned); pass it explicitly to test the gate in isolation."""
     from src.agent_loop import _forced_tool_choice_for_beat
-    return _forced_tool_choice_for_beat(framed_key, set(fired), pending_open=pending)
+    lever = _engine_lever_for(framed_key) if required_lever is _UNSET else required_lever
+    return _forced_tool_choice_for_beat(framed_key, set(fired), pending_open=pending, required_lever=lever)
 
 
 _ADV = {"type": "function", "function": {"name": "advanceGame"}}
@@ -285,21 +303,57 @@ def test_open_player_pending_suppresses_all_forcing():
 
 def test_never_forces_submit_decision():
     # Defensive: no input shape may ever yield a submitDecision force (the mandate: engine never speaks
-    # for the player). Sweep every force phase + a representative pending.
-    from src.agent_loop import _FORCE_COMP_PHASES, _FORCE_ADVANCE_PHASES
-    for phase in (_FORCE_COMP_PHASES | _FORCE_ADVANCE_PHASES):
+    # for the player). Sweep every closed-set beat + a representative pending, AND the explicit case
+    # where the engine (impossibly) NAMES submitDecision — the gate's hard guard must still refuse it.
+    for phase in _CLOSED_SET_BEATS:
         for fired in ([], ["runCompetition"], ["advanceGame"]):
             for pend in (True, False):
                 got = _gate(("w1", phase, phase), fired, pending=pend)
                 if isinstance(got, dict):
                     assert got["function"]["name"] != "submitDecision", (phase, fired, pend)
+    # The hard guard: even if the engine signal regressed to name submitDecision, the gate refuses.
+    assert _gate(("w1", "eviction", "eviction"), [], required_lever="submitDecision") is None
+
+
+# ── #1411: the gate forces WHATEVER THE ENGINE NAMES — no FE-held beat→lever map remains ────────────
+
+def test_gate_forces_the_engine_named_lever_regardless_of_a_local_map():
+    # The lever the ENGINE signals is forced verbatim — even at a phase string the retired FE map never
+    # knew (proving the map is gone: the FE no longer classifies the phase itself).
+    got = _gate(("w1", "some-future-closed-beat", "some-future-closed-beat"),
+                [], required_lever="advanceGame")
+    assert got == _ADV
+
+
+def test_gate_never_forces_when_engine_names_no_lever_even_at_a_comp_phase():
+    # The crux of #1411: at hoh-competition the OLD FE map would have forced advanceGame; now, when the
+    # engine signals NO lever (requiredLever absent ⇒ None), the gate must NOT force — it obeys the
+    # engine's signal, not a local phase classification.
+    assert _gate(("w1", "hoh-competition", "hoh-competition"), [], required_lever=None) is None
+    assert _gate(("w1", "eviction", "eviction"), [], required_lever=None) is None
+
+
+def test_gate_already_fired_check_keys_on_the_named_lever():
+    # The "guarantee met" suppression keys on the ENGINE-NAMED lever, not a hard-coded "advanceGame".
+    assert _gate(("w1", "eviction", "eviction"), ["advanceGame"], required_lever="advanceGame") is None
+    # A different named lever that already fired is likewise not re-forced.
+    assert _gate(("w1", "premiere", "premiere"), ["createCharacter"], required_lever="createCharacter") is None
+    # …but if it has NOT fired, the named lever is forced.
+    assert _gate(("w1", "premiere", "premiere"), [], required_lever="createCharacter") \
+        == {"type": "function", "function": {"name": "createCharacter"}}
 
 
 def test_malformed_framed_key_is_safe():
-    # Fail-open on a None / too-short / non-tuple framed key — never raise, never force.
+    # Fail-open on a None / too-short / non-tuple framed key — never raise, never force. Via _gate (which
+    # derives the engine lever from the key's phase), a malformed key yields no lever ⇒ no force.
     assert _gate(None, []) is None
     assert _gate(("just-week",), []) is None
     assert _gate("not-a-tuple", []) is None
+    # And the gate itself never RAISES on a malformed key even when a lever is (defensively) named — its
+    # internal isinstance guards default phase/moment to "" (no social/override suppression to read).
+    from src.agent_loop import _forced_tool_choice_for_beat
+    assert _forced_tool_choice_for_beat("not-a-tuple", set(), pending_open=False,
+                                        required_lever="advanceGame") == _ADV
 
 
 # ── the model-rejecter gate: DeepSeek-V4 (always-thinking) NEVER gets forced; GLM does ──────────────
@@ -327,7 +381,8 @@ def test_kill_switch_defaults_on():
 # tool_choice through — not just the pure gate above.
 
 def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=None,
-                                    force_setting=True, game_mode="game", owner="tester"):
+                                    force_setting=True, game_mode="game", owner="tester",
+                                    required_lever=_UNSET):
     from src import agent_loop as al
     from routes import chat_helpers as ch
     from src import orwell_engine as oe
@@ -350,10 +405,18 @@ def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=N
     # #1154 no-auth: the loop resolves owner→"default" when None, and the store keys under that same
     # fallback — so mirror it here so an owner=None drive reads the key the gate will look for.
     _fk_owner = owner or "default"
+    # #1411: the loop reads the ENGINE-SIGNALED required lever from `_LAST_FRAMED_REQUIRED_LEVER` (what
+    # apply_game_framing stashes from `GameStateView.requiredLever`), not a FE-held map. Mirror it here:
+    # default to what the engine would signal for the framed beat's phase, or force an explicit value.
+    _lever = _engine_lever_for(framed_key) if required_lever is _UNSET else required_lever
     if framed_key is None:
         ch._LAST_FRAMED_BEAT_KEY.pop(_fk_owner, None)
     else:
         ch._LAST_FRAMED_BEAT_KEY[_fk_owner] = framed_key
+    if _lever is None:
+        ch._LAST_FRAMED_REQUIRED_LEVER.pop(_fk_owner, None)
+    else:
+        ch._LAST_FRAMED_REQUIRED_LEVER[_fk_owner] = _lever
 
     # The engine's open-pending check the force consults (None ⇒ no pending ⇒ forcing allowed).
     async def fake_status(user=None):
@@ -383,6 +446,7 @@ def _drive_loop_capture_tool_choice(monkeypatch, *, model, framed_key, pending=N
         asyncio.get_event_loop().run_until_complete(drive())
     finally:
         ch._LAST_FRAMED_BEAT_KEY.pop(_fk_owner, None)
+        ch._LAST_FRAMED_REQUIRED_LEVER.pop(_fk_owner, None)
     return cap
 
 

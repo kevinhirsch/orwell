@@ -10,6 +10,7 @@ import { SeededRandom } from "../random/SeededRandom";
 import type { RelationshipModel, InteractionType } from "../../engine/relationships";
 import {
   foldHiddenImpact, foldGenerativeConsequence, foldThirdPartyConsequence, foldPlayerReciprocal,
+  NO_FATIGUE, type FatigueValence,
 } from "../../engine/consequence";
 import { rollOverhears } from "../../engine/presence";
 import { PRESENCE } from "../../engine/presenceConstants";
@@ -75,6 +76,12 @@ export class EngineCommandsAdapter implements EngineCommands {
    * player's own persistent campaign. Unset = standalone (no campaign effect — prior behavior).
    */
   private playerCampaignFold?: (target: EntityId, holder: EntityId) => void;
+  /**
+   * #1419 — the scene INITIATOR's ASYMMETRIC social-fatigue valence (the player-side mirror of the
+   * off-screen fold): a tired initiator's WARMING folds land softer, their SOURING folds cut deeper.
+   * Wired from the session's rest deficit; unset / rested / clock-off ⇒ `NO_FATIGUE` ⇒ byte-identical.
+   */
+  private fatigueValence?: (id: EntityId) => FatigueValence;
   /**
    * #1318 — invoked with the NPC partners of each recorded player↔NPC scene, so the session can register
    * them as genuine premiere HOT reads (the asymmetric first-power gate unlocks on real engagement, not on
@@ -181,6 +188,16 @@ export class EngineCommandsAdapter implements EngineCommands {
    */
   setPlayerCampaignFold(fn: (target: EntityId, holder: EntityId) => void): void {
     this.playerCampaignFold = fn;
+  }
+
+  /**
+   * #1419 — wire the initiator's social-fatigue valence (see the field doc). The registry routes it to
+   * `GameSessionAdapter.socialFoldValence`, which returns `{1,1}` unless the master clock is running,
+   * the social-fatigue extension is on, AND the initiator carries a rest deficit — so an unwired /
+   * clock-off / rested game is byte-identical to the pre-#1419 fold.
+   */
+  setFatigueValence(fn: (id: EntityId) => FatigueValence): void {
+    this.fatigueValence = fn;
   }
 
   /**
@@ -333,6 +350,12 @@ export class EngineCommandsAdapter implements EngineCommands {
     // BE-102: drop any edge naming a non-living `toward` BEFORE it ever reaches the fold — a caller
     // could otherwise move an evicted juror's (or an invented id's) hidden opinion of the initiator
     // with no scene, no witness, no in-game pathway, silently tilting the deterministic jury read.
+    // #1419 — the initiator's ASYMMETRIC fatigue valence (a tired actor sways WARMING folds less and
+    // SOURING folds more). `NO_FATIGUE` unless the master clock is running, social fatigue is on, AND the
+    // initiator carries a rest deficit — so a clock-off / rested game is byte-identical. Applies to the
+    // partner / generative / third-party folds (the actor's outgoing sway), NOT the reciprocal player→NPC
+    // read (the player's own feeling) or a bystander's own-belief observation.
+    const fatigue: FatigueValence = this.fatigueValence?.(req.initiator) ?? NO_FATIGUE;
     const genEdges = req.consequence?.edges?.filter((e) => isLiving(e.toward));
     if (this.rel && (genEdges?.length || (req.kind && INTERACTION_KINDS.has(req.kind)))) {
       this.rollBeatWindow();
@@ -346,6 +369,7 @@ export class EngineCommandsAdapter implements EngineCommands {
         named = foldGenerativeConsequence(
           this.rel, this.rng, req.initiator, genEdges,
           (toward) => toward !== req.initiator && this.spendFoldBudget(toward, req.initiator),
+          fatigue,
         );
         // If a `kind` ALSO rides along, it observes the room MINUS the descriptor's named edges (the
         // tag is the floor): co-present witnesses not named by the descriptor react by their own
@@ -355,7 +379,7 @@ export class EngineCommandsAdapter implements EngineCommands {
             (w) => w !== req.initiator && !named.has(w) && this.spendFoldBudget(w, req.initiator),
           );
           foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
-            [], MAX_FOLDS_PER_INTERACTION, bystanders);
+            [], MAX_FOLDS_PER_INTERACTION, bystanders, fatigue);
         }
       } else {
         // PARTNERS — only those the initiator actually ENGAGED (the caller-named witnesses, or an
@@ -371,7 +395,7 @@ export class EngineCommandsAdapter implements EngineCommands {
           (w) => w !== req.initiator && !namedSet.has(w) && this.spendFoldBudget(w, req.initiator),
         );
         foldHiddenImpact(this.rel, this.rng, req.initiator, witnessSet, req.kind as InteractionType,
-          partners, MAX_FOLDS_PER_INTERACTION, bystanders);
+          partners, MAX_FOLDS_PER_INTERACTION, bystanders, fatigue);
         // Phase 3 (SG-2, the closed-set relationship layer): a PLAYER-initiated scene ALSO
         // reciprocates a bounded share of this SAME kind impact onto the player's OWN edge toward
         // each partner they just engaged — see `foldPlayerReciprocal`. No-op for any other
@@ -398,6 +422,7 @@ export class EngineCommandsAdapter implements EngineCommands {
       const moved = foldThirdPartyConsequence(
         this.rel, this.rng, req.initiator, witnessSet, aboutEdges,
         (holder, about) => this.spendFoldBudget(holder, about),
+        fatigue,
       );
       // Phase 2 of "the player can play offense" (0085 follow-on): an evict-shaped pitch ("more-
       // threatened") FROM THE PLAYER that actually LANDED (never a backfired one — `moved` only

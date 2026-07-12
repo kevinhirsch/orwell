@@ -4,7 +4,8 @@ import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
-import { socialSwayScale, SOCIAL_SWAY_FLOOR } from "../../src/engine/timeOfDay";
+import { socialSwayScale, soreSwayScale, SOCIAL_SWAY_FLOOR } from "../../src/engine/timeOfDay";
+import { scaleImpactByValence } from "../../src/engine/relationshipConstants";
 import type { AdvanceView, GameSession } from "../../src/ports/GameSession";
 
 /**
@@ -148,5 +149,42 @@ describe("0066 Phase-2 Ext 2 — the sway dampening is the identity when off and
     expect(socialSwayScale(1)).toBe(SOCIAL_SWAY_FLOOR);
     expect(socialSwayScale(0.5)).toBeLessThan(1);   // genuinely dampens a tired houseguest
     expect(socialSwayScale(0.5)).toBeGreaterThan(SOCIAL_SWAY_FLOOR);
+  });
+});
+
+describe("#1419 — the fatigue bias is ASYMMETRIC: warming dampened, souring amplified", () => {
+  it("soreSwayScale is 1 when rested and rises above 1 with deficit (a tired houseguest cuts deeper)", () => {
+    expect(soreSwayScale(0)).toBe(1);               // rested ⇒ identity (byte-identical path)
+    expect(soreSwayScale(1)).toBeGreaterThan(1);    // full deficit ⇒ souring folds amplified
+    expect(soreSwayScale(0.5)).toBeGreaterThan(1);
+    expect(soreSwayScale(1)).toBeGreaterThanOrEqual(soreSwayScale(0.5)); // monotone up
+  });
+
+  it("at a real deficit warm < 1 < sore: positive nudges land softer, negative spats land harder", () => {
+    const deficit = 0.8;
+    const warm = socialSwayScale(deficit);
+    const sore = soreSwayScale(deficit);
+    expect(warm).toBeLessThan(1);                   // charm dampened
+    expect(sore).toBeGreaterThan(1);                // barbs amplified
+    expect(sore).toBeGreaterThan(warm);             // net bias toward negative consequence
+  });
+
+  it("scaleImpactByValence applies warm to warming components and sore to souring ones", () => {
+    // A mixed fold from a tired initiator: trust UP (warming), affinity DOWN (souring), threat UP (souring
+    // — the inverted axis), threat DOWN would be warming.
+    const warm = 0.5, sore = 1.3;
+    const out = scaleImpactByValence(
+      { trust: 0.1, affinity: -0.1, threat: 0.1 }, warm, sore,
+    );
+    expect(out.trust).toBeCloseTo(0.1 * warm, 10);      // warming ⇒ dampened
+    expect(out.affinity).toBeCloseTo(-0.1 * sore, 10);  // souring ⇒ amplified
+    expect(out.threat).toBeCloseTo(0.1 * sore, 10);     // rising threat is souring ⇒ amplified
+    // The inverted axis: a FALLING threat is warming ⇒ dampened.
+    expect(scaleImpactByValence({ threat: -0.1 }, warm, sore).threat).toBeCloseTo(-0.1 * warm, 10);
+  });
+
+  it("with warm===sore===1 (rested / flag-off) the valence scale is byte-identical to the raw fold", () => {
+    const raw = { trust: 0.12, affinity: -0.07, threat: 0.09, alignment: -0.03 };
+    expect(scaleImpactByValence(raw, 1, 1)).toEqual(raw);
   });
 });

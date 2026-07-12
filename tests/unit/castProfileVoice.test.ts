@@ -21,6 +21,15 @@ const WELL_FORMED_VOICE = {
   lexicon: ["honestly", "for real"],
 };
 
+// #1395 — the idiolect card carries an OPTIONAL small set of characteristic PHRASINGS (how THIS person
+// puts things). Authored at casting, folded whole onto the static CHARACTER voice, rendered to the
+// narrator as facts-to-voice (never a repeated bit). It is a BONUS on a well-formed core voice: absent
+// or garbage ⇒ dropped, never a whole-voice failure.
+const WELL_FORMED_VOICE_WITH_CATCHPHRASES = {
+  ...WELL_FORMED_VOICE,
+  catchphrases: ["at the end of the day", "we move"],
+};
+
 describe("expressive-e2e — recordCastProfile folds a well-formed authored voice", () => {
   it("accepts a complete voice fingerprint and reports it as a PUBLIC field", () => {
     const s = new GameSessionAdapter();
@@ -54,6 +63,74 @@ describe("expressive-e2e — recordCastProfile folds a well-formed authored voic
       // empties + over-long entries dropped, then capped at 4
       lexicon: ["okay so", "literally", "wait", "right?"],
     });
+  });
+});
+
+describe("#1395 — per-NPC idiolect catchphrases fold, surface to the narrator, and stay byte-stable", () => {
+  it("folds an authored catchphrase set onto the static CHARACTER voice", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Player", seed: 21 });
+    const npc = s.getGameState().house[0]!;
+    const res = s.recordCastProfile({ houseguestId: npc.id, voice: WELL_FORMED_VOICE_WITH_CATCHPHRASES });
+    expect(res.accepted).toBe(true);
+    expect(res.publicFields).toContain("voice");
+    // The catchphrases land on the static CHARACTER voice (byte-persisted, not the roster string).
+    const character = s.snapshot().house!.npcs.find((n) => n.id === npc.id)!.character;
+    expect(character.voice!.catchphrases).toEqual(["at the end of the day", "we move"]);
+  });
+
+  it("surfaces the catchphrases to the narrator via npcVoice (facts-to-voice)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Player", seed: 7 });
+    const npc = s.getGameState().house[0]!;
+    s.recordCastProfile({ houseguestId: npc.id, voice: WELL_FORMED_VOICE_WITH_CATCHPHRASES });
+    // npcVoice carries the FULL fingerprint (the deep-scene read the narrator voices them through).
+    const view = s.npcVoice(npc.id)!;
+    expect(view.persona.voice!.catchphrases).toEqual(["at the end of the day", "we move"]);
+  });
+
+  it("trims, whitespace-collapses, and caps the catchphrases at 3", () => {
+    expect(sanitizeAuthoredVoice({
+      ...WELL_FORMED_VOICE,
+      catchphrases: ["  we   move ", "", "  it is what   it is ", "x".repeat(200), "no cap", "one too many"],
+    })).toEqual({
+      ...WELL_FORMED_VOICE,
+      // empties + over-long entries dropped, whitespace collapsed, then capped at 3
+      catchphrases: ["we move", "it is what it is", "no cap"],
+    });
+  });
+
+  it("drops garbage catchphrases but STILL folds the core voice (a bonus, never a gate)", () => {
+    // All-garbage catchphrases ⇒ omitted; the well-formed core voice still lands whole.
+    expect(sanitizeAuthoredVoice({ ...WELL_FORMED_VOICE, catchphrases: ["", 7, "   "] })).toEqual(WELL_FORMED_VOICE);
+    // A non-array catchphrases value is ignored the same way.
+    expect(sanitizeAuthoredVoice({ ...WELL_FORMED_VOICE, catchphrases: "we move" })).toEqual(WELL_FORMED_VOICE);
+    // And a full recordCastProfile with garbage catchphrases is still accepted (voice folds without them).
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Player", seed: 3 });
+    const npc = s.getGameState().house[0]!;
+    const res = s.recordCastProfile({
+      houseguestId: npc.id,
+      voice: { ...WELL_FORMED_VOICE, catchphrases: ["", "   "] } as never,
+    });
+    expect(res.accepted).toBe(true);
+    expect(res.publicFields).toContain("voice");
+    expect(s.snapshot().house!.npcs.find((n) => n.id === npc.id)!.character.voice!.catchphrases).toBeUndefined();
+  });
+
+  it("keeps the catchphrases byte-stable across a snapshot save/restore (non-degradation pin)", () => {
+    const s = new GameSessionAdapter();
+    s.createCharacter({ playerName: "The Player", seed: 21 });
+    const npc = s.getGameState().house[0]!;
+    s.recordCastProfile({ houseguestId: npc.id, voice: WELL_FORMED_VOICE_WITH_CATCHPHRASES });
+    const before = s.snapshot().house!.npcs.find((n) => n.id === npc.id)!.character.voice;
+    // Lossless persistence round-trip (JSON, the save path) → restore into a fresh session.
+    const core = JSON.parse(JSON.stringify(s.snapshot()));
+    const s2 = new GameSessionAdapter();
+    s2.restore(core);
+    const after = s2.snapshot().house!.npcs.find((n) => n.id === npc.id)!.character.voice;
+    expect(after).toEqual(before);
+    expect(after!.catchphrases).toEqual(["at the end of the day", "we move"]);
   });
 });
 
@@ -122,6 +199,21 @@ describe("expressive-e2e — the voice field crosses the MCP boundary (the four-
     })) as { accepted: boolean; publicFields: string[] };
     expect(res.accepted).toBe(true);
     expect(res.publicFields).toContain("voice");
+  });
+
+  it("#1395 — the catchphrases ride the voice object across the MCP boundary (round-trips engine→store→recall)", async () => {
+    const server = playerServer();
+    // createCharacter builds the live house (so the recall path npcVoice reads is populated).
+    const game = (await server.callTool("createCharacter", { playerName: "The Player", seed: 5 })) as { house: { id: string }[] };
+    const id = game.house[0]!.id;
+    const res = (await server.callTool("recordCastProfile", {
+      houseguestId: id, voice: WELL_FORMED_VOICE_WITH_CATCHPHRASES,
+    })) as { accepted: boolean; publicFields: string[] };
+    expect(res.accepted).toBe(true);
+    expect(res.publicFields).toContain("voice");
+    // Recall it through the same MCP boundary: npcVoice returns the folded catchphrases (engine is truth).
+    const view = (await server.callTool("npcVoice", { id })) as { persona: { voice?: { catchphrases?: string[] } } };
+    expect(view.persona.voice!.catchphrases).toEqual(["at the end of the day", "we move"]);
   });
 
   it("refuses a non-object voice at the boundary shape guard", async () => {

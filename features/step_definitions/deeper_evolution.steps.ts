@@ -152,7 +152,8 @@ Then("the combative houseguest's on-edge dial swings harder", function (this: Bb
 Then("the combative houseguest settles slower over a calm stretch", function () {
   const clash = soul({ volatility: 0.9, settleScale: settleScaleOf("clash") });
   const bond = soul({ volatility: 0.9, settleScale: settleScaleOf("bond") });
-  for (let i = 0; i < 4; i++) { evolveEmotion(clash, "calm"); evolveEmotion(bond, "calm"); }
+  // settleScale only applies under the soul-depth gate (byte-identical to 0041 otherwise), so pass DEPTH.
+  for (let i = 0; i < 4; i++) { evolveEmotion(clash, "calm", undefined, undefined, DEPTH); evolveEmotion(bond, "calm", undefined, undefined, DEPTH); }
   assert.ok(clash.volatility > bond.volatility, "agitation lingers on the temperamental one");
 });
 
@@ -217,6 +218,8 @@ Then("the same seed reproduces the same axes, drift, and reactivity", function (
   };
   drive(a); drive(b);
   const axes = (sb: UserSandbox): string =>
-    sb.session.snapshot().house!.npcs.map((n) => `${n.soul.volatility}|${n.soul.distress ?? ""}|${n.soul.temperamentDrift ?? ""}`).join(",");
+    sb.session.snapshot().house!.npcs
+      .map((n) => `${n.soul.volatility}|${n.soul.settleScale ?? ""}|${n.soul.confidence ?? ""}|${n.soul.distress ?? ""}|${n.soul.temperamentDrift ?? ""}`)
+      .join(",");
   assert.equal(axes(a), axes(b));
 });

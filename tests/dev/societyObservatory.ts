@@ -28,7 +28,7 @@ import { richOffscreenStretch } from "../../src/engine/offscreen";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { generateHouse, dispositionOf } from "../../src/engine/characterFactory";
 import type { Houseguest } from "../../src/engine/characterFactory";
-import { RELATIONSHIP_CONSTANTS, scaleImpact } from "../../src/engine/relationshipConstants";
+import { RELATIONSHIP_CONSTANTS, scaleImpactByValence } from "../../src/engine/relationshipConstants";
 import type { EdgeSignals, InteractionType } from "../../src/engine/relationshipConstants";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
@@ -152,9 +152,11 @@ function debtHoursOf(turnIn: number): number {
   return Math.max(0, 8 - slept);
 }
 // The tired SOCIAL penalty = reduced EFFECTIVENESS, applied to scenes a tired houseguest initiates the next
-// day: their fold on the other person is scaled DOWN in magnitude — symmetric, so they're worse at warming
-// AND at souring. They move the needle LESS (reduced sway); they do NOT move it in a different direction.
-const TIRED = { swayDamp: 0.9 }; // fraction of sway lost at full social penalty (fold scaled by 1 − damp×penalty)
+// day. It is ASYMMETRIC (#1419, the shipped model): a WARMING fold (bonding/trust/charm) is dampened HARD
+// (`warmDamp` fraction lost) while a SOURING fold (conflict/threat) is AMPLIFIED (`soreGain` added) — a
+// bias toward negative consequence ("harder to scheme when you aren't sleeping; spats cut deeper"). Still
+// reduced/altered EFFECTIVENESS on the SAME nature — a tired peacemaker does NOT start picking fights.
+const TIRED = { warmDamp: 0.6, warmFloor: 0.4, soreGain: 0.35, soreCap: 1.4 };
 
 // ── Late-night cluster curve: the few who stay up should find EACH OTHER ───────────────────────
 // The deepest owls can end up awake ALONE, paying full sleep cost for no scheming. So add a SLIGHT,
@@ -347,14 +349,17 @@ function run(opts: RunOpts) {
 
   // Fold one scene (partner updates their belief about the initiator). Two model rules ride here:
   //   • FRIENDLY scenes fold AFFINITY ONLY (0078 §3) — no strategic weight, so downtime never feeds votes;
-  //   • a SLEEP-DEPRIVED initiator moves the needle LESS — the fold is scaled down in magnitude (symmetric).
+  //   • a SLEEP-DEPRIVED initiator's fold is scaled ASYMMETRICALLY (#1419) — warming components dampened,
+  //     souring components amplified (a bias toward negative consequence).
   // `applyOneDirection` always draws its 4 jitters regardless of impact contents, so stripping friendly to
   // affinity-only does NOT shift the seeded rng stream (only the magnitudes differ). Returns the impact it
   // actually folded, so the caller can accumulate the strategic-weight proof.
   const foldScene = (initiator: EntityId, partner: EntityId, type: InteractionType): Partial<EdgeSignals> => {
     const base = FRIENDLY.has(type) ? friendlyImpact(type) : RELATIONSHIP_CONSTANTS.IMPACT[type];
-    const damp = Math.max(0, 1 - TIRED.swayDamp * (tiredSocial.get(initiator) ?? 0));
-    const impact = damp === 1 ? base : scaleImpact(base, damp);
+    const deficit = tiredSocial.get(initiator) ?? 0;
+    const warm = Math.max(TIRED.warmFloor, 1 - TIRED.warmDamp * deficit);
+    const sore = Math.min(TIRED.soreCap, 1 + TIRED.soreGain * deficit);
+    const impact = warm === 1 && sore === 1 ? base : scaleImpactByValence(base, warm, sore);
     rel.applyImpactDirected(partner, initiator, impact, socRng);
     return impact;
   };
@@ -510,26 +515,32 @@ function report(seed: number, moveIntent: number, minutesPerTick: number, lateCl
   // The sleep economy: who traded sleep for after-midnight scheming, the penalties they carry into the next
   // day (comp sharpness + reduced social SWAY), and `fights` — the conflicts that drained them earlier to bed.
   // `bed`/`wake`/`slept`/`fights` are averaged over the observed days (emergent bedtime varies nightly).
-  console.log(`\n  ── sleep economy (stay up to scheme ⇒ bank <8h ⇒ pay it back next day: comp sharpness + social sway) ──`);
-  console.log(`     houseguest                         chrono   bed    wake   slept   comp  sway%  fights  late`);
+  console.log(`\n  ── sleep economy (stay up to scheme ⇒ bank <8h ⇒ pay it back next day: comp sharpness + ASYMMETRIC social sway) ──`);
+  console.log(`     houseguest                         chrono   bed    wake   slept   comp  warm↓ sore↑  fights  late`);
   const sleepRows = ids.map((id) => {
     const a = sleepAgg.get(id)!;
     const days = Math.max(1, a.days);
     const debt = a.debtSum / days;
+    const deficit = clamp01(debt / DEBT.socialDiv);
+    // The shipped #1419 asymmetric model: warming folds dampened (warm<1), souring folds amplified (sore>1).
+    const warm = Math.max(TIRED.warmFloor, 1 - TIRED.warmDamp * deficit);
+    const sore = Math.min(TIRED.soreCap, 1 + TIRED.soreGain * deficit);
     return {
       id, late: obs.get(id)!.lateScenes, fights: obs.get(id)!.fights / days,
       bed: a.tiSum / days, wake: a.wakeSum / days, slept: a.sleptSum / days,
-      comp: clamp01(debt / DEBT.compDiv), social: clamp01(debt / DEBT.socialDiv),
+      comp: clamp01(debt / DEBT.compDiv), warmDamp: 1 - warm, soreAmp: sore - 1, sort: deficit,
     };
-  }).sort((x, y) => y.social - x.social); // tired owls on top
+  }).sort((x, y) => y.sort - x.sort); // tired owls on top
   for (const row of sleepRows) {
     console.log(
       `     ${label(row.id).padEnd(34)} ${chronoTag(chrono.get(row.id)!)}   ${hhmm(row.bed).padStart(5)}  ${hhmm(row.wake).padStart(5)}  ${row.slept.toFixed(1).padStart(4)}h` +
-      `   ${row.comp.toFixed(2)}  ${String(Math.round(row.social * 100)).padStart(3)}%   ${row.fights.toFixed(1).padStart(4)}   ${String(row.late).padStart(4)}`,
+      `   ${row.comp.toFixed(2)}  ${(`-${Math.round(row.warmDamp * 100)}%`).padStart(4)} ${(`+${Math.round(row.soreAmp * 100)}%`).padStart(5)}   ${row.fights.toFixed(1).padStart(4)}   ${String(row.late).padStart(4)}`,
     );
   }
-  console.log(`     (sway% = reduced EFFECTIVENESS, not a personality change: a tired actor's social folds move others`);
-  console.log(`      that much LESS — symmetric, never a redirected one. fights = conflicts/day that drain them to bed EARLIER.)`);
+  console.log(`     (warm↓/sore↑ = reduced EFFECTIVENESS, ASYMMETRIC (#1419), never a personality change: a tired actor's`);
+  console.log(`      WARMING folds land softer (charm/bonding dampened) while their SOURING folds cut DEEPER (barbs amplified) —`);
+  console.log(`      a bias toward negative consequence. Same nature; a tired peacemaker does NOT start picking fights.`);
+  console.log(`      fights = conflicts/day that drain them to bed EARLIER.)`);
 
   // archetype-level summary: does game-share track the dials?
   console.log(`\n  ── game-scene share by archetype (does aggression/paranoia scheme more?) ──`);
