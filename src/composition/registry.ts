@@ -17,6 +17,7 @@ import {
   PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
 } from "../engine/diversity";
 import { diffuseGossip, makeSocialGraph, GOSSIP, spreadReliableReputation } from "../engine/gossip";
+import { reliableFactId, reliableHonorerFrom } from "../domain/deal";
 import { recallWitnessedMoments } from "../engine/memoryCallback";
 import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
@@ -282,6 +283,10 @@ function buildUserSandbox(user = "default"): UserSandbox {
   session.setDealReputationSink((honorer, other) => {
     const core = session.snapshot();
     if (!core.house) return;
+    // Idempotency (seed ONCE): a season-long deal honored at every ceremony must not re-diffuse / re-fold the
+    // whisper — if the deal partner already credits the honorer as reliable (a prior honoring, or a diffusion
+    // that already reached them), skip. The knowledge layer IS the watermark; no extra persisted state.
+    if (engine.knowledge.knownTo(other).some((k) => k.factId === reliableFactId(honorer))) return;
     const evicted = new Set(core.live?.evictionOrder ?? []);
     const npcIds: EntityId[] = core.house.npcs.map((n) => n.id).filter((id) => !evicted.has(id));
     const edges: Array<readonly [EntityId, EntityId]> = [];
@@ -293,9 +298,11 @@ function buildUserSandbox(user = "default"): UserSandbox {
       }
     }
     const rng = new SeededRandom(hashSeed(`${core.seed ?? user}:deal-reputation:${honorer}:${core.week}:${engine.events.count()}`));
-    // Diffuse the Vault-free "keeps their word" belief NPC→NPC and lean every third party who hears it
-    // toward the honorer (the pure `spreadReliableReputation`; single subject, dedicated rng — no main-stream
-    // re-phase). Only reachable under the deal-depth flag, so off ⇒ never called ⇒ byte-identical.
+    // Diffuse the Vault-free "keeps their word" belief NPC→NPC under a STABLE `reliable:<honorer>` lineage (so
+    // a holder's belief resolves back to the honorer for the deal-willingness read), and give every third
+    // party who hears it a small AFFINITY-ONLY whisper toward the honorer (`GOSSIP_HEARD.reliable`; single
+    // subject, dedicated rng — no main-stream re-phase). The DEAL consequence is the explicit willingness lean
+    // (`mintNpcDeal`), read from this belief. Only reachable under the deal-depth flag ⇒ off = byte-identical.
     spreadReliableReputation({
       knowledge: engine.knowledge,
       rel: engine.relationships,
@@ -305,7 +312,19 @@ function buildUserSandbox(user = "default"): UserSandbox {
       other,
       content: `${session.publicName(honorer)} keeps their word`,
       candidates: npcIds,
+      factId: reliableFactId(honorer),
     });
+  });
+  // 0121 R1 — the read side: which honorers a holder credits as "keeps their word" (the diffusing
+  // `reliable:<honorer>` belief), read by the NPC deal-willingness lean in `mintNpcDeal`. A knowledge-layer
+  // read (never a Vault read); returns empty unless the deal-depth layer seeded a reputation this game.
+  session.setReliabilityReader((holder) => {
+    const credited = new Set<EntityId>();
+    for (const f of engine.knowledge.knownTo(holder)) {
+      const h = f.factId ? reliableHonorerFrom(f.factId) : undefined;
+      if (h) credited.add(h);
+    }
+    return credited;
   });
   //  (b) TO the player (rare): seed the paraphrase onto an NPC confidant, then surface it `told-by:<npc>`
   //      so the E9 content-lineage check accepts it as a BELIEF (source + confidence) — never an invented

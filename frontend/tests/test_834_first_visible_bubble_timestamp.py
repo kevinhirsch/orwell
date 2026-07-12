@@ -65,22 +65,31 @@ def test_reload_path_uses_first_visible_not_round_zero():
     )
 
 
-def test_live_path_promotes_first_visible_continuation():
+def test_live_path_keeps_the_turn_header_on_the_one_coalesced_bubble():
+    # #829 turn-coalescing SUPERSEDES the old #834 live-path mechanism: rather than minting a
+    # fresh per-round CONTINUATION bubble and PROMOTING it to header when round 0 was a hidden
+    # tool-call, the live path now renders ALL rounds into the ONE turn bubble. That bubble is
+    # created up front WITH its role + `.role-timestamp` header, so the #834 invariant (the first
+    # visible bubble carries a timestamp even when round 0 is a hidden tool-call) holds by
+    # construction — the header can never be lost because the bubble is never replaced.
     js = _read("static/js/chat.js")
-    assert "turnHeaderShown" in js, (
-        "#834: the live path must track whether a visible turn-header was shown."
+    # The one turn bubble carries the role + timestamp header at creation.
+    assert '<span class="role-timestamp">${roleTs}</span>' in js, (
+        "#834/#829: the ONE turn bubble must carry a .role-timestamp header at creation."
     )
-    # When the header round is hidden (pure tool-only round), flag it.
-    assert "if (!roundHolder.classList.contains('msg-continuation')) turnHeaderShown = false;" in js, (
-        "#834: hiding the header bubble must clear turnHeaderShown."
+    # Rounds coalesce into that bubble (no per-round bubble, no promotion machinery).
+    assert "_turnCoalesced" in js and "_commitRoundSegment" in js, (
+        "#829: the live path coalesces rounds into the one turn bubble."
     )
-    # A promoted continuation becomes the header (role + timestamp, not a continuation).
-    assert "const _isTurnHeader = !turnHeaderShown;" in js
-    assert "(_isTurnHeader ? '' : ' msg-continuation')" in js, (
-        "#834: a promoted first-visible bubble must NOT carry msg-continuation."
+    # A pure-tool round may hide the bubble (tool_start empty-branch); the next round UN-HIDES
+    # the same bubble — so its header + timestamp become visible, never a promoted new bubble.
+    assert "if (roundHolder && roundHolder.style.display === 'none') roundHolder.style.display = '';" in js, (
+        "#829: a hidden pure-tool round is re-shown as the SAME (header-bearing) bubble."
     )
-    assert "newRole.appendChild(chatRenderer.roleTimestamp());" in js, (
-        "#834: the promoted header bubble must carry a timestamp (matches the reload path)."
+    # The obsolete per-round promotion machinery is gone (it minted the timestamp-losing
+    # continuation bubble #834 originally worked around).
+    assert "turnHeaderShown" not in js and "newWrap" not in js, (
+        "#829: the pre-coalescing per-round bubble + turnHeaderShown promotion must be gone."
     )
 
 
@@ -181,7 +190,11 @@ def test_first_visible_bubble_gets_timestamp_when_round0_is_hidden_toolcall():
                 proc.kill()
 
     assert not result.get("error"), result.get("error")
-    assert result["visibleBubbles"] >= 1
+    # #829 coalescing: this turn (round 0 a hidden tool-call, round 1 the first narration) renders
+    # as EXACTLY one visible bubble — the whole point of coalescing.
+    assert result["visibleBubbles"] == 1, (
+        f"expected exactly ONE visible bubble (coalesced turn), got {result['visibleBubbles']}"
+    )
     assert result["firstHasTimestamp"], (
         "#834: the first VISIBLE bubble must carry a .role-timestamp even when round 0 "
         "was a hidden tool-call."

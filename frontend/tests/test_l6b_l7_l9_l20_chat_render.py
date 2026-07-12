@@ -80,16 +80,23 @@ def test_l6c_narration_round_with_following_tool_is_kept_live():
 
 
 def test_l6c_agent_step_hides_previous_round_only_when_empty():
-    """Starting a new agent round hides the previous bubble ONLY when it rendered no narration
-    (stripToolBlocks empty); a narration round persists. The old unconditional isGameBuild()-gated
-    hide is gone."""
+    """A round with no narration is DROPPED (its segment removed), a narration round PERSISTS.
+    #829 turn-coalescing moved this from the agent_step new-bubble path into _commitRoundSegment:
+    each round is now a frozen segment inside the ONE turn bubble, so an empty round drops its
+    segment (no lingering holder) while a narration round is rendered + frozen. Same invariant,
+    new home. The old unconditional isGameBuild()-gated hide is gone."""
     chat = _read("static", "js", "chat.js")
-    step = chat[chat.index("} else if (json.type === 'agent_step') {"):]
-    step = step[:step.index("New round: create fresh AI bubble")]
-    assert "!stripToolBlocks(roundReplyText).trim()" in step
-    assert "roundHolder.style.display = 'none';" in step
+    seg = chat[chat.index("const _commitRoundSegment = () =>"):]
+    seg = seg[:seg.index("let _nextIsError")]
+    # emptiness is measured from the reply buffer (stripToolBlocks) AND the reasoning body
+    assert "stripToolBlocks(roundReplyText)" in seg
+    assert "if (!hasReply && !hasReasoning) {" in seg
+    # an empty round DROPS its segment (no lingering holder) …
+    assert "seg.remove();" in seg
+    # … while a narration round is rendered + FROZEN into the one bubble (persists).
+    assert "seg.classList.add('round-seg');" in seg
     # the old unconditional game-build hide string is gone
-    assert "if (isGameBuild() && roundHolder) {" not in step
+    assert "if (isGameBuild() && roundHolder) {" not in chat
 
 
 def test_l6c_reload_renders_every_narration_round_not_just_last():

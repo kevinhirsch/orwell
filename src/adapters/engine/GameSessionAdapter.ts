@@ -165,7 +165,7 @@ import type { EmotionalEvent } from "../../engine/emotionalArc";
 import type { SoulProvider } from "../../ports/SoulProvider";
 import type { InteractionType } from "../../engine/relationships";
 import {
-  CEREMONY_IMPACTS, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
+  CEREMONY_IMPACTS, DEAL_REPUTATION, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
 import { notorietyBias, recognitionFor } from "../../engine/notoriety";
@@ -872,6 +872,11 @@ export class GameSessionAdapter implements GameSession {
   /** 0121 R1 — seed a diffusing "keeps their word" reputation when a deal is kept (registry-wired; it holds
    *  the KnowledgeService `reconcileDeals` does not). Unset (standalone) ⇒ no reputation ⇒ byte-identical. */
   private dealReputationSink?: (honorer: EntityId, other: EntityId) => void;
+  /** 0121 R1 — the Vault-free reliability-reputation READER (registry-wired from the KnowledgeService): for a
+   *  holder, the set of honorer ids they believe "keep their word" (the diffusing `reliable:<honorer>` belief
+   *  lineage). A knowledge-layer read, NEVER a Vault read. Unset (a bare adapter) ⇒ no reputation is read ⇒ no
+   *  deal-willingness lean, so `mintNpcDeal` is byte-identical. */
+  private reliabilityReader?: (holder: EntityId) => ReadonlySet<EntityId>;
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
@@ -6278,6 +6283,10 @@ export class GameSessionAdapter implements GameSession {
    *  social graph). Only invoked when the deal-depth layer is on (the ledger gates `reputation` on it), so
    *  an unwired / flag-off game is byte-identical. */
   setDealReputationSink(fn: (honorer: EntityId, other: EntityId) => void): void { this.dealReputationSink = fn; }
+  /** 0121 R1 — wire the Vault-free reliability-reputation READER (the registry owns the KnowledgeService):
+   *  which honorers a holder credits as "keeps their word" (the diffusing `reliable:<honorer>` belief). Read
+   *  by the NPC deal-willingness lean in `mintNpcDeal`. Off unless the deal-depth layer is on ⇒ byte-identical. */
+  setReliabilityReader(fn: (holder: EntityId) => ReadonlySet<EntityId>): void { this.reliabilityReader = fn; }
 
   /** Turn the 0122 deeper+daily confessional layer on/off. Off by default — the calibration harness leaves
    *  it off (off ⇒ no daily sweep, no depth context ⇒ every confessional is byte-identical to 0040). */
@@ -8731,17 +8740,23 @@ export class GameSessionAdapter implements GameSession {
     const bound = (a: EntityId, b: EntityId): boolean =>
       this.deals.open().some((d) => d.parties.includes(a) && d.parties.includes(b));
     let best: [EntityId, EntityId] | null = null;
-    let bestTrust: number = D.mutualTrustMin;
+    let bestScore: number = D.mutualTrustMin; // the WILLINGNESS threshold (mutual trust + any 0121 R1 reputation lean)
+    let bestMutual = 0;                        // the chosen pair's BARE mutual trust — drives the KIND, unbiased by reputation
     for (let i = 0; i < npcs.length; i++) {
       for (let j = i + 1; j < npcs.length; j++) {
         const a = npcs[i]!, b = npcs[j]!;
         if (bound(a, b)) continue;
         const mutual = Math.min(this.rel.edge(a, b).trust, this.rel.edge(b, a).trust);
-        if (mutual >= bestTrust) { bestTrust = mutual; best = [a, b]; }
+        // 0121 R1: a candidate who credits the other as "keeps their word" (the diffusing 0038 reputation) is
+        // a more-appealing partner — a bounded, hidden lean on the WILLINGNESS to seal. Off (flag off / no
+        // reader) ⇒ 0 ⇒ this selection is byte-identical to the pre-R1 bare-mutual pick.
+        const willingness = mutual + this.reliabilityLean(a, b);
+        if (willingness >= bestScore) { bestScore = willingness; bestMutual = mutual; best = [a, b]; }
       }
     }
     if (!best) return;
-    const kind = bestTrust >= D.finalTwoTrustMin ? "final-two" : "safety";
+    // The KIND stays keyed to the BARE mutual trust — reputation buys the OPPORTUNITY to deal, not a bigger promise.
+    const kind = bestMutual >= D.finalTwoTrustMin ? "final-two" : "safety";
     const [a, b] = best;
     // A vague paraphrase, not hidden numbers — but still Vault-held (no player witness).
     const evId = this.onPlayerEvent(
@@ -8749,6 +8764,20 @@ export class GameSessionAdapter implements GameSession {
       [a, b], "deal",
     );
     this.deals.make(best, kind, "a quiet pact sealed away from the cameras", evId, s.week);
+  }
+
+  /**
+   * 0121 R1 — the bounded reliability-reputation nudge to a candidate NPC pair's deal WILLINGNESS: a
+   * houseguest who credits their prospective partner as "keeps their word" (the diffusing 0038 belief, read
+   * through `reliabilityReader`) reads them as a more-appealing deal partner. Either direction crediting the
+   * other adds the single, bounded `DEAL_REPUTATION.dealLean`. OFF (deal-depth flag off / no reader wired) ⇒
+   * 0, so `mintNpcDeal` is byte-identical. HIDDEN — a magnitude the player never sees (mandate #2/#3), and
+   * DISTINCT from the affinity-only social whisper (`GOSSIP_HEARD.reliable`) so the two never double-count.
+   */
+  private reliabilityLean(a: EntityId, b: EntityId): number {
+    if (!this.dealDepthEnabled || !this.reliabilityReader) return 0;
+    const credits = this.reliabilityReader(a).has(b) || this.reliabilityReader(b).has(a);
+    return credits ? DEAL_REPUTATION.dealLean : 0;
   }
 
   /**
