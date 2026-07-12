@@ -138,11 +138,20 @@ Calls baked into this record, flagged for easy adjustment:
 - **Bound:** ✅ *resolved by PO (2026-06-20)* — diegetic and **character-driven**: the house puts
   itself to sleep most nights, a few night owls may run late, every NPC has a latest bedtime (so the
   house always empties), and the **player always chooses their own bedtime** — no mechanical curfew.
-- **Sleep cost scope:** ✅ *resolved by PO (2026-06-28)* — **all three**: comps (Phase-1), **next-day
-  social fatigue**, and the **compounding multi-night fatigue meter** are built (#1125, the Amendment
-  below), each behind its own opt-in flag and byte-identical to the calibration spine when off.
-- **Magnitudes:** the rest-penalty weight and the archetype bedtime spread are tuning, not architecture;
-  they now live (with the rest of the time/sleep tunables) in `src/engine/sleepConstants.ts`.
+- **Sleep cost scope:** ✅ *resolved by PO (2026-06-28; extended 2026-07-12, #1419/#1474)* — sleep cost
+  **REACHES PAST competitions into social play**: comps (Phase-1) **plus** next-day social fatigue and
+  the **compounding multi-night fatigue meter** are built (#1125, the Amendment below). Social fatigue is
+  now **DEFAULT-ON and ASYMMETRIC** (shipped #1474): a tired houseguest is worse at charm (positive sway
+  damped) *and* their barbs cut deeper (souring sway amplified) — so it is harder to scheme on no sleep.
+  Each cost arm rides its own opt-in flag and is byte-identical to the calibration spine when off.
+- **Magnitudes:** ✅ *settled — BLESSED FINAL (owner ruling 2026-07-12, #1419)* — the sleep-economy
+  magnitudes are now final. The comp penalty is **`sleepPenalty = 0.20`** (`temperatureConstants.outcome`;
+  #1419 — staying up costs MORE at competitions: a full rest deficit shaves ~0.20 off the outcome score
+  against the 1.0 stat weight, still hidden/bounded, a tired favorite can still lose). The social-fatigue
+  terms hold: `swayDamp 0.6` / `swayFloor 0.4` / `soreGain 0.35` / `soreCap 1.4`, the multi-night meter
+  `recovery 0.5` / `weight 0.5`, character bedtimes `[21, 26]`, `maxDebtHours 8`, and `companyFull 3` —
+  all in `src/engine/sleepConstants.ts` (with `sleepPenalty` in `temperatureConstants.ts`). Only fine
+  adjustment of the per-beat/per-conversation hour steps and duration tables remains open.
 
 ## Traceability
 

@@ -55,7 +55,7 @@ bedtime** (never auto-slept). A simple time-of-day graphic surfaces in the HUD.
   (night owls), the comp-focused bed early. Derived from static stats ⇒ no randomness, byte-stable.
 - **The bound is diegetic** (`awakeSet` shrinks toward the player + night owls) — no curfew; the
   player is never auto-slept (`turnIn` is the only thing that retires them — Principle 6).
-- **Sleep is a hidden, bounded comp term** (`outcome.sleepPenalty ~0.15`) added beside the emotional
+- **Sleep is a hidden, bounded comp term** (`outcome.sleepPenalty = 0.20`, #1419) added beside the emotional
   modifier in `resolveCompetition`; 0 by default ⇒ byte-identical (Principle 4, never protective).
 - **The Vault Wall holds** (Principle 5): NPC sleep is engine-only; the player's *own* tiredness is a
   qualitative `restStatus` cue (never a number, never any NPC's).
@@ -213,6 +213,18 @@ The five phases are now real HOUR BANDS on a 24-hour day measured from the **8am
   proposal ⇒ the type baseline, byte-identical (the `expressiveNonCollapse`-for-time floor:
   `tests/unit/conversationDurationLoose.test.ts`).
 
-Open *tuning* (not new scope): the sleep-penalty magnitude (`temperatureConstants.outcome.sleepPenalty`), the
-archetype bedtime spread (`SLEEP.earliestBedHour`/`latestBedHour`), the per-beat / per-conversation hour
-steps, the conversation/event duration tables — all in `src/engine/sleepConstants.ts`.
+**Magnitudes — ✅ BLESSED FINAL (owner ruling 2026-07-12, #1419).** The sleep-economy magnitudes are set;
+the §10 DoD "final magnitudes set" is **done**. The settled values:
+
+| magnitude | value | home |
+|---|---|---|
+| comp `sleepPenalty` | **0.20** (#1419 — staying up costs MORE at comps: a full rest deficit shaves ~0.20 off the outcome score vs. the 1.0 stat weight; still hidden/bounded, a tired favorite can still lose) | `temperatureConstants.outcome` |
+| social fatigue `swayDamp` / `swayFloor` | 0.6 / 0.4 (tired ⇒ worse at charm) | `sleepConstants.SOCIAL_FATIGUE` |
+| social fatigue `soreGain` / `soreCap` | 0.35 / 1.4 (asymmetric — tired barbs cut deeper; default-on #1474) | `sleepConstants.SOCIAL_FATIGUE` |
+| multi-night meter `recovery` / `weight` | 0.5 / 0.5 | `sleepConstants.FATIGUE` |
+| character bedtimes | `[21, 26]` (`earliestBedHour` / `latestBedHour`) | `sleepConstants.SLEEP` |
+| `maxDebtHours` | 8 | `sleepConstants.SLEEP` |
+| after-hours `companyFull` | 3 | `sleepConstants.AFTER_HOURS` |
+
+Only fine adjustment remains open (not new scope): the per-beat / per-conversation hour steps and the
+conversation/event duration tables — all in `src/engine/sleepConstants.ts`.
