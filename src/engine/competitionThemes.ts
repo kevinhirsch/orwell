@@ -80,15 +80,29 @@ function seededOrder(key: string, n: number): number[] {
 }
 
 /**
- * The week's theme for a phase: index into a per-(seed, phase) permutation by week. No theme repeats
- * within a phase for the first `COMPETITION_THEMES.length` weeks (24 >> a season), the two phases draw
- * distinct permutations (so same-week HOH and veto differ), and it is a pure function of (seed, phase,
- * week) — no rng draw, no persistence, restart-stable.
+ * The week's theme for a phase. Both phases ride ONE seeded permutation, indexed by week; each same-week
+ * "beat" reads it rotated by its own seed-derived NONZERO offset `k ∈ [1, N-1]` (N = pool size):
+ *  - VETO rotates by a veto offset — so the same-week HOH and veto themes ALWAYS differ (two independent
+ *    permutations could collide at a shared index — the bug this replaces);
+ *  - a compressed twist CYCLE (the double-eviction second cycle, which reruns a same-phase comp in the
+ *    SAME week) rotates by a further cycle offset — so the second crown of a double-eviction night never
+ *    reuses the first cycle's skin.
+ * A nonzero rotation of a permutation is still a permutation, so no phase repeats a theme for the first N
+ * weeks (24 >> a season), and a nonzero rotation can never map an index to itself, so every distinct beat
+ * at the same week lands on a distinct theme. It is a pure function of (seed, phase, week, cycle) — no rng
+ * draw, no persistence, restart-stable — so choosing a theme perturbs no seeded roll.
  */
-export function themeForWeek(seed: number, phase: CompetitionPhase, week: number): CompetitionTheme {
-  const order = seededOrder(`${seed}:comp-theme:${phase}`, COMPETITION_THEMES.length);
-  const w = Math.max(1, week) - 1;
-  return COMPETITION_THEMES[order[w % COMPETITION_THEMES.length]!]!;
+export function themeForWeek(
+  seed: number, phase: CompetitionPhase, week: number, cycle = 0,
+): CompetitionTheme {
+  const n = COMPETITION_THEMES.length;
+  const order = seededOrder(`${seed}:comp-theme:hoh`, n); // one shared permutation for both phases
+  const idx = (Math.max(1, week) - 1) % n;
+  // Rotate the SAME permutation by nonzero, seed-derived offsets — each keeps the phase repeat-free while
+  // guaranteeing a same-week beat lands on a distinct theme (idx + k mod n can never equal idx for k≠0).
+  const vetoK = phase === "veto" ? 1 + ((hashSeed(`${seed}:comp-theme:veto-offset`) >>> 0) % (n - 1)) : 0;
+  const cycleK = cycle > 0 ? 1 + ((hashSeed(`${seed}:comp-theme:cycle-offset`) >>> 0) % (n - 1)) : 0;
+  return COMPETITION_THEMES[order[(idx + vetoK + cycleK) % n]!]!;
 }
 
 /** The themed comp NAME: the theme's adjectival prefix + the mechanic format's noun ("Haunted Trivia"). */

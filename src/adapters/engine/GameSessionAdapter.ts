@@ -6405,7 +6405,10 @@ export class GameSessionAdapter implements GameSession {
     if (!this.compThemesEnabled || this.gameSeed === null) {
       return { name: def.name, narrative: { premise: def.narrative.premise, beats: [...def.narrative.beats], winReads: def.narrative.winReads } };
     }
-    const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, this.week));
+    // A double-eviction night reruns a same-phase comp in the SAME week; mark the compressed second cycle
+    // (twist "running") so it draws a distinct skin from the first crown rather than repeating it.
+    const cycle = this.live?.twist?.phase === "running" ? 1 : 0;
+    const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, this.week, cycle));
     return { name: t.name, theme: t.theme, narrative: t.narrative };
   }
 

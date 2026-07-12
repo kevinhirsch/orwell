@@ -51,10 +51,13 @@ the *mechanic* pool (a separate, calibration-costed follow-on — see §7); the 
 - **Themed premise** = `${theme.setting} ${def.narrative.premise}` — the theme sets the scene, the
   mechanic keeps the action, so the comp stays coherent (a skin, never a new mechanic). Beats + winReads
   are the mechanic's, untouched.
-- **Seeded draw.** `themeForWeek` indexes a per-(seed, phase) LCG Fisher-Yates permutation of the pool by
-  week → **no repeat within a phase for 24 weeks** (>> a season), and HOH/veto use distinct permutations
-  (same-week comps differ). A **pure function of (seed, phase, week)** — no rng draw, no persistence,
-  restart-stable.
+- **Seeded draw.** `themeForWeek` indexes ONE per-seed LCG Fisher-Yates permutation of the pool by week,
+  read through a **nonzero seed-derived rotation per same-week beat** → **no repeat within a phase for 24
+  weeks** (>> a season), and every distinct same-week beat lands on a distinct theme: HOH/veto rotate by
+  different offsets (so same-week comps *always* differ — a nonzero rotation can never map an index to
+  itself), and a compressed double-eviction second `cycle` rotates once more (so the night's two
+  same-phase crowns never share a skin). A **pure function of (seed, phase, week, cycle)** — no rng draw,
+  no persistence, restart-stable.
 - **Projection, not state.** The theme is applied only where the def is *surfaced*
   (`runCompetition`, `competitionStagingView`) — it mutates no live state and consumes no beat rng, so
   the seeded winner is provably unmoved.
@@ -62,10 +65,10 @@ the *mechanic* pool (a separate, calibration-costed follow-on — see §7); the 
 
 ## 5. Contracts (stack-agnostic)
 
-```
+```text
 CompetitionTheme: { id, label, prefix, setting }
 COMPETITION_THEMES: CompetitionTheme[]                              // 24 curated, tunable skins
-themeForWeek(seed, phase, week): CompetitionTheme                   // seeded per-phase permutation; no in-phase repeat
+themeForWeek(seed, phase, week, cycle=0): CompetitionTheme          // one seeded permutation, rotated per same-week beat; no in-phase repeat
 applyTheme(def, theme): { name, theme, narrative }                  // Vault-free reskin; NO stat/score
 CompetitionResultView += { theme?: string }                        // the surfaced skin; absent when off
 resolveCompetition(...) → winner                                   // UNCHANGED (0006/0042) — theme never crosses

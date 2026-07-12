@@ -35,10 +35,47 @@ describe("0125 — the seeded draw never repeats a theme within a phase over a s
     expect(new Set(seen).size).toBe(seen.length); // zero repeats across the whole season
   });
 
-  it("the two phases draw distinct permutations — same-week HOH and veto differ", () => {
-    let differed = 0;
-    for (let w = 1; w <= 11; w++) if (themeForWeek(42, "hoh", w).id !== themeForWeek(42, "veto", w).id) differed++;
-    expect(differed).toBeGreaterThan(8); // they should almost always differ (independent permutations)
+  it("the two phases diverge — same-week HOH and veto ALWAYS differ (a nonzero-rotation guarantee)", () => {
+    // VETO rides the HOH permutation rotated by a nonzero offset, so a same-week theme can never
+    // collide — verified exhaustively across many seeds × the full 24-week pool (not just a season).
+    for (let seed = 0; seed < 400; seed++) {
+      for (let w = 1; w <= COMPETITION_THEMES.length; w++) {
+        expect(
+          themeForWeek(seed, "hoh", w).id,
+          `same-week HOH/veto theme collided at seed ${seed}, week ${w}`,
+        ).not.toBe(themeForWeek(seed, "veto", w).id);
+      }
+    }
+  });
+
+  it("regression: seed 1 / week 10 no longer skins HOH and veto with the same theme", () => {
+    // The confirmed pre-fix collision: independent per-phase permutations both placed "Film Noir" at
+    // week 10 for seed 1, so a double-eviction week ran two identically-skinned comps.
+    expect(themeForWeek(1, "hoh", 10).id).not.toBe(themeForWeek(1, "veto", 10).id);
+  });
+
+  it("a compressed twist cycle (double eviction) reskins the second same-phase comp of the SAME week", () => {
+    // The second cycle of a double-eviction night reruns a same-phase comp under the same (seed, phase,
+    // week); the cycle marker rotates it to a distinct theme so both crowns don't wear one skin.
+    for (let seed = 0; seed < 400; seed++) {
+      for (let w = 1; w <= COMPETITION_THEMES.length; w++) {
+        for (const phase of ["hoh", "veto"] as const) {
+          expect(
+            themeForWeek(seed, phase, w, 0).id,
+            `double-eviction ${phase} cycle collided at seed ${seed}, week ${w}`,
+          ).not.toBe(themeForWeek(seed, phase, w, 1).id);
+        }
+      }
+    }
+  });
+
+  it("cycle 0 is the default — the ordinary (non-twist) week is byte-identical to the bare call", () => {
+    for (let seed = 0; seed < 50; seed++) {
+      for (let w = 1; w <= COMPETITION_THEMES.length; w++) {
+        expect(themeForWeek(seed, "hoh", w, 0).id).toBe(themeForWeek(seed, "hoh", w).id);
+        expect(themeForWeek(seed, "veto", w, 0).id).toBe(themeForWeek(seed, "veto", w).id);
+      }
+    }
   });
 });
 
