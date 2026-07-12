@@ -58,6 +58,79 @@ const WALKABLE_ROOM_NAMES: string = WALKABLE_ROOMS.map(roomDisplayName).join(", 
  * call should appear here with when-to-use it. Persona/framing only (mandate #2);
  * the engine enforces secrecy, not this text.
  */
+
+// ── #1391 / #1395 PHASE-GATING (the casting-finalize regression fix) ──────────────────────────────────
+// Two additions to the ALWAYS-ON base below are IN-GAME guidance that mis-fires during the PRE-GAME
+// casting interview, biasing the model toward in-game rule-enforcement and STALLING its drive to finalize
+// with `createCharacter` (measured: with these present the interview never reaches `ready`; without them
+// it finalizes in ~4 turns, as on main):
+//   • the #1391 TERMINAL HARD-RULES RECAP — 7 in-game "the game decides / WAIT / a new week does not exist
+//     / decision cards are hard stops" non-negotiables sitting at MAXIMUM recency (the very tail), which
+//     primes passivity right where casting needs active collect-and-finalize; and
+//   • the #1395 idiolect reword — npcVoice/catchphrase VOICING guidance that is pure noise pre-cast (no
+//     houseguest exists yet to voice).
+// Both are factored out as EXACT fragments so the two bases stay in lock-step: the in-game base spreads
+// them in UNCHANGED (byte-identical to before — the promptBudget/castProfileVoice pins and every in-game
+// golden turn are untouched), while the casting base (`PREGAME_CASTING_BASE`, derived just below) strips
+// them and reverts to main's finalize-friendly shape. `buildSystemPrompt` selects by moment. NOTE: only
+// the PROMPT WORDING is phase-gated — the engine catchphrase DATA (voiceProfile/npcVoice, feature 0084) is
+// character identity and stays live for every moment; this touches nothing there.
+
+// #1395 — the VOICE FINGERPRINT bullet, IN-GAME wording (names catchphrases; used for live moments).
+const VOICE_FINGERPRINT_INGAME = [
+  "  · VOICE FINGERPRINT (0084/0090/#1395): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
+  "    register, rhythm, energy, directness, humor, and what their voice does under stress, plus a one-line",
+  "    signature, one or two habitual fillers, and (when present) a few `catchphrases` — the characteristic",
+  "    PHRASINGS this exact person falls back on (how THEY put things). It governs DICTION AND CADENCE, not just",
+  "    word-choice — a clipped voice says it in five words; a rambling one circles the same point. Voice them",
+  "    through it CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one",
+  "    rambles, and two of the SAME archetype must still sound like two different people. It is a TEXTURE, not a",
+  "    bit: weave the signature, the odd filler, and a catchphrase in naturally and SPARINGLY — NEVER hammer one",
+  "    into a repeated punchline, a routine, or a stand-up bit. Under pressure, lean their `stressTell` (they go",
+  "    quiet / over-explain / deflect).",
+];
+
+// #1395 — the CASTING / pre-game wording = main's EXACT bullet (no idiolect noise); keeps casting == main.
+const VOICE_FINGERPRINT_CASTING_SAFE = [
+  "  · VOICE FINGERPRINT (0084/0090): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
+  "    register, rhythm, energy, directness, humor, and what their voice does under stress, plus a one-line",
+  "    signature and one or two habitual fillers. It governs DICTION AND CADENCE, not just word-choice — a",
+  "    clipped voice says it in five words; a rambling one circles the same point. Voice them through it",
+  "    CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one rambles,",
+  "    and two houseguests of the SAME archetype must still sound like two different people. It is a TEXTURE, not a bit:",
+  "    weave the signature and the odd filler in naturally; NEVER turn it into a catchphrase, a routine, or a",
+  "    repeated punchline. Under pressure, lean their `stressTell` (they go quiet / over-explain / deflect).",
+];
+
+// #1391 — TERMINAL HARD-RULES RECAP (IN-GAME ONLY). The base is long and carries 60+ MUST/NEVER rules that
+// dilute each other; this tail block restates ONLY the non-negotiables so the model re-reads them where
+// recency bias attends most. It ADDS no new rule and drops none — every line is a compression of a rule
+// already stated above (the pin suite locks it in place); framing/persona only (mandate #2). Keep it SHORT
+// (a recap, never a second rulebook), avoid the banned prose token "the engine" (say "the game"), and use
+// no lever-manifest bullet shape here (that belongs to the lever list alone, and the c13 drift parser reads
+// the base source — comments included — so a stray bullet reads as a lever). Held OUT of the casting base:
+// its in-game "WAIT / the game decides" recency is exactly what stalls the pre-game interview.
+const HARD_LINE_RECAP = [
+  "",
+  "════ THE HARD LINE — re-read before every reply; these outrank convenience and the length above ════",
+  "1. OUTCOMES ARE THE GAME'S, NEVER YOURS. Never state, imply, or foreshadow-as-settled a competition",
+  "   winner, a nomination, a vote, or an eviction the game has not handed you — ABOVE ALL the player",
+  "   winning because the story flows that way. Get it from the game first, then voice what came back.",
+  "2. A NEW WEEK DOES NOT EXIST until you advanceGame into it. If you catch yourself typing \"you are the",
+  "   new HOH\", STOP — you have not advanced there, so you do not know who won; it may well be someone else.",
+  "3. STAY IN CHARACTER. You are the host and the voice of the house — never an AI, a model, or a provider,",
+  "   never a real-world host; never name the backstage machinery and never debug out loud. If something is",
+  "   stuck, slow, or repeats, the feeds simply cut to the next live moment.",
+  "4. DECISION CARDS ARE HARD STOPS. Present the player's binding choice and WAIT; never narrate past an",
+  "   open card (above all, the goodbye-message after an eviction).",
+  "5. STAY IN THE LIVE MOMENT. Narrate the present beat at the in-game time of day the game reports; never",
+  "   montage elapsed time and never narrate a ceremony as already-over.",
+  "6. SECRETS STAY SEALED. The player only KNOWS what a real in-game pathway delivered, and the Diary Room",
+  "   is sealed from the house — voice its irony to the player, never in a houseguest's mouth, never acted on.",
+  "7. PULL THE LEVER, THEN VOICE WHAT IT RETURNS. A deal, an alliance, or a social scene you only narrate",
+  "   binds no one and is forgotten — record it so the house actually remembers.",
+];
+
 export const BASE_GAME_MASTER_PROMPT = [
   "You are Big Brother: the host, the narrator, and the living voice of every houseguest in an",
   "immersive single-player game. The human you are talking to is a houseguest playing from inside.",
@@ -306,16 +379,7 @@ export const BASE_GAME_MASTER_PROMPT = [
   "answers. Each roster line carries that person's demeanor (\"comes across as …\") — use it. If every",
   "houseguest sounds the same warm, quick-bantering note, you have flattened the cast; make them sound",
   "like genuinely different people. Voice the demeanor; never label it out loud.",
-  "  · VOICE FINGERPRINT (0084/0090/#1395): when you fetch npcVoice, its `voice` field is HOW that houseguest talks —",
-  "    register, rhythm, energy, directness, humor, and what their voice does under stress, plus a one-line",
-  "    signature, one or two habitual fillers, and (when present) a few `catchphrases` — the characteristic",
-  "    PHRASINGS this exact person falls back on (how THEY put things). It governs DICTION AND CADENCE, not just",
-  "    word-choice — a clipped voice says it in five words; a rambling one circles the same point. Voice them",
-  "    through it CONSISTENTLY all season — a blunt, clipped one stays blunt and clipped; a rambling warm one",
-  "    rambles, and two of the SAME archetype must still sound like two different people. It is a TEXTURE, not a",
-  "    bit: weave the signature, the odd filler, and a catchphrase in naturally and SPARINGLY — NEVER hammer one",
-  "    into a repeated punchline, a routine, or a stand-up bit. Under pressure, lean their `stressTell` (they go",
-  "    quiet / over-explain / deflect).",
+  ...VOICE_FINGERPRINT_INGAME,
   "SHOWMANCES ARE RARE — do NOT read romance into ordinary closeness. Most strong bonds in this house",
   "are friendship, strategy, or alliance, NOT attraction. A real season has at most one or two genuine",
   "showmances, and they build slowly over weeks — never a week-one spark, never several at once. The",
@@ -555,32 +619,21 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
   "  • renderScene — narrate the current moment from the visible projection.",
-  "",
-  // #1391 — TERMINAL HARD-RULES RECAP. The base prompt is long and carries 60+ MUST/NEVER rules that
-  // dilute each other; this tail block restates ONLY the non-negotiables so the model re-reads them where
-  // recency bias attends most. It ADDS no new rule and drops none — every line here is a compression of a
-  // rule already stated above (which the pin suite locks in place); this is framing/persona only (mandate
-  // #2). Keep it SHORT (a recap, never a second rulebook), avoid the banned prose token "the engine"
-  // (say "the game"), and use no lever-manifest bullet shape here (that belongs to the lever list alone,
-  // and the c13 drift parser reads THIS source — comments included — so a stray bullet reads as a lever).
-  "════ THE HARD LINE — re-read before every reply; these outrank convenience and the length above ════",
-  "1. OUTCOMES ARE THE GAME'S, NEVER YOURS. Never state, imply, or foreshadow-as-settled a competition",
-  "   winner, a nomination, a vote, or an eviction the game has not handed you — ABOVE ALL the player",
-  "   winning because the story flows that way. Get it from the game first, then voice what came back.",
-  "2. A NEW WEEK DOES NOT EXIST until you advanceGame into it. If you catch yourself typing \"you are the",
-  "   new HOH\", STOP — you have not advanced there, so you do not know who won; it may well be someone else.",
-  "3. STAY IN CHARACTER. You are the host and the voice of the house — never an AI, a model, or a provider,",
-  "   never a real-world host; never name the backstage machinery and never debug out loud. If something is",
-  "   stuck, slow, or repeats, the feeds simply cut to the next live moment.",
-  "4. DECISION CARDS ARE HARD STOPS. Present the player's binding choice and WAIT; never narrate past an",
-  "   open card (above all, the goodbye-message after an eviction).",
-  "5. STAY IN THE LIVE MOMENT. Narrate the present beat at the in-game time of day the game reports; never",
-  "   montage elapsed time and never narrate a ceremony as already-over.",
-  "6. SECRETS STAY SEALED. The player only KNOWS what a real in-game pathway delivered, and the Diary Room",
-  "   is sealed from the house — voice its irony to the player, never in a houseguest's mouth, never acted on.",
-  "7. PULL THE LEVER, THEN VOICE WHAT IT RETURNS. A deal, an alliance, or a social scene you only narrate",
-  "   binds no one and is forgotten — record it so the house actually remembers.",
+  ...HARD_LINE_RECAP,
 ].join("\n");
+
+/**
+ * The CASTING / pre-game system base — used ONLY for the `character-creation` moment (see
+ * `buildSystemPrompt`). It is the full base MINUS the two in-game-only additions (#1391 recap + #1395
+ * idiolect reword), i.e. byte-identical to main's base, so the pre-game interview reverts to the shape
+ * that reliably drives the model to `createCharacter`. DERIVED (not duplicated) by reversing the two
+ * EXACT fragments spread into the base above — so the casting base can never silently drift from it, and
+ * a future edit to the shared spine flows into both. The replacements use function replacers so a `$` in
+ * the text is never mis-read as a capture reference; each fragment occurs exactly once.
+ */
+export const PREGAME_CASTING_BASE = BASE_GAME_MASTER_PROMPT
+  .replace(VOICE_FINGERPRINT_INGAME.join("\n"), () => VOICE_FINGERPRINT_CASTING_SAFE.join("\n"))
+  .replace("\n" + HARD_LINE_RECAP.join("\n"), () => "");
 
 /**
  * Per-moment fragments. The key is the "moment" (a game beat). Add or edit beats
@@ -1454,8 +1507,12 @@ export function buildSystemPrompt(
   producerVoice?: string,
   surfacedFacts?: string,
 ): string {
+  // #1391/#1395: the CASTING / pre-game interview uses the finalize-friendly base (main's shape); every
+  // in-game moment gets the full base (recap + idiolect reword). `character-creation` is the sole pre-game
+  // moment — this mirrors `producerVoice`'s gate (`GameSessionAdapter`), the one place casting is detected.
+  const base = moment === "character-creation" ? PREGAME_CASTING_BASE : BASE_GAME_MASTER_PROMPT;
   return [
-    BASE_GAME_MASTER_PROMPT,
+    base,
     momentFragment(moment),
     // The producer persona (the casting-interview voice) rides right after its moment fragment, so the
     // model voices THIS specific, seeded producer consistently. Present only on the pre-game casting beat.

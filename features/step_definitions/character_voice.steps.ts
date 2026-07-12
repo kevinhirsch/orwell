@@ -274,6 +274,8 @@ Then("it instructs the voicer to voice the houseguest's given mood", function ()
 });
 
 Then("it instructs the voicer to use the voice as a consistent texture, never a catchphrase or bit", function () {
-  assert.match(BASE_GAME_MASTER_PROMPT, /TEXTURE, not a bit/);
+  // Whitespace-tolerant: #1395 reworded the bullet so "TEXTURE, not a" and "bit" wrap across a line, so
+  // the joined base has "TEXTURE, not a\n    bit" (main had it on one line). `\s+` matches either.
+  assert.match(BASE_GAME_MASTER_PROMPT, /TEXTURE, not a\s+bit/);
   assert.match(BASE_GAME_MASTER_PROMPT, /catchphrase/);
 });
