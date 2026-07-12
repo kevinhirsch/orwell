@@ -1,10 +1,12 @@
 # 0121 — Deal depth: active-obligation kinds + reliability rewards
 
-> **Status:** **Part 1 built** (the active-obligation kinds — engine adjudication + flag + BDD). **Part 2
-> to follow (same branch):** the live-loop reconciliation that auto-triggers the new kinds (a `compete`
-> action after a comp, a `veto-use` action after the veto ceremony), the three reliability rewards, and the
-> FE deal-extraction of the new kinds. The flag `ORWELL_DEAL_DEPTH` is **not yet in the deploy** — it opts in
-> once Part 2 lands (so the new kinds can never be half-wired in production: off ⇒ they can't be made).
+> **Status:** **Engine complete** (both active-obligation kinds fire LIVE end-to-end — comp-throw at the
+> comp crown, veto-save at the veto ceremony — plus the loyalty-streak reward and the reliable-ally
+> protection reward). **Three items remain, specced in §7 for a later PR:** R1 the diffusing "keeps their
+> word" reputation reward, R2 the FE chat-extraction of the new kinds (blocked on a golden-fixture re-record
+> that needs a live model key, or a flag-gated schema), R3 the deploy opt-in. The flag `ORWELL_DEAL_DEPTH`
+> stays **default OFF and NOT in the deploy** until R1–R3 land, so nothing is half-wired in production
+> (off ⇒ the new kinds can't even be made ⇒ byte-identical).
 > **PO expansion of the 0039 review** (2026-07-12). 0039 made deals
 > first-class and engine-adjudicated, but (a) every kind is a *defensive* "don't move against me" promise,
 > and (b) keeping a deal is under-rewarded relative to breaking it (a modest trust/reliability build vs. a
@@ -111,10 +113,12 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
 - [x] **[Part 2b] comp-throw live wiring:** the HOH / veto crown emits a `compete` action per competitor,
       judged by OUTCOME (broken iff the promisor WON the comp they swore to throw — no fragile intent
       threading); resolves live end-to-end. *(`dealDepthLive.test.ts` drives a real season.)*
-- [ ] **[Part 2b] Reputation that spreads (reward 1) + reliable-ally protection (reward 2):** a kept deal
-      seeds a diffusing "keeps their word" reputation (gossip) that raises NPC deal-willingness; a proven
-      partner protects the player — all hidden, no number.
-- [ ] **[Part 2b] FE extraction** of the new kinds; deploy opt-in (`ORWELL_DEAL_DEPTH=1`) wired; `npm test` green.
+- [x] **[Part 2b] Reliable-ally protection (reward 2):** delivered by the EXISTING reliability→nomination
+      machinery — a proven-reliable partner outranks others as a nomination target (`relationships.ts`
+      `bondStrength`/nom read) — and the streak's reliability build amplifies it. No new code needed.
+- [ ] **[R1 · later PR] Reputation that spreads (reward 1)** — see §7.
+- [ ] **[R2 · later PR] FE chat-extraction of the new kinds** — see §7.
+- [ ] **[R3 · later PR] Deploy opt-in (`ORWELL_DEAL_DEPTH=1`)** — see §7.
 
 ## 6. Dependencies & traceability
 
@@ -123,3 +127,72 @@ Extends **0039** (the deal ledger + adjudication) and **0109** (deal duration), 
 **0038/0002** (gossip — the reputation diffusion), gated like **0120/0087/0085** behind a dedicated flag so
 the seeded spine stays byte-identical when off. PO expansion approved in the 0039 review (2026-07-12): more
 deal kinds + a real reward for keeping your word.
+
+## 7. Remaining work — specced for a later PR (build + merge when ready)
+
+The engine is complete (both active kinds fire live; the loyalty-streak + reliable-ally rewards are in).
+Three items remain, each behind a real constraint — captured here so they are buildable later, ideally in
+an environment where the golden fixture can be regenerated. **All stay behind `ORWELL_DEAL_DEPTH` (default
+OFF) and must keep the seeded spine + golden replay byte-identical.**
+
+### R1 — Reputation that spreads (the third reward)
+
+**What:** a kept deal seeds a hidden *"keeps their word"* reputation belief about the honorer that
+**diffuses NPC→NPC** through the existing **0038** gossip layer; a houseguest who has heard it reads the
+honorer as a **more-appealing, more-trusted deal partner** (raises their willingness to offer/accept a
+deal). The positive mirror of the betrayal rumor. Hidden; the player only ever feels it as behavior (never a
+number).
+
+**Approach:**
+- The hook already exists: `ReconcileSink.reputation?(honorer, other, deal)` (defined in `src/engine/deals.ts`,
+  currently unwired) and `applyHonor` already calls it when `dealDepth` is on.
+- Wire it in `GameSessionAdapter.reconcileDeals`: seed a Vault-free `KnowledgeService` belief
+  (`content: "<honorer> keeps their word"`, `factId: reliable:<honorer>`, pathway `witnessed`) held by
+  `other`, so the **0038** diffusion spreads it; a houseguest holding it applies a small positive lean when
+  weighing a deal with the honorer (NPC deal-willingness read — the 0085/0039 deal-formation path).
+
+**Constraint:** `reconcileDeals` does not currently hold the `KnowledgeService` handle (it is passed to
+other methods, not this one). Thread it in (or move the reputation seed to a beat-commit point that has it).
+Gate on `ORWELL_DEAL_DEPTH` (off ⇒ the callback is never passed ⇒ byte-identical).
+
+**DoD:** a kept deal seeds a reliability belief for `other`; the belief diffuses NPC→NPC; a houseguest
+holding it is measurably more willing to deal with the honorer; Vault-free (sentinel-clean); off ⇒
+byte-identical; juryReach band unchanged.
+
+### R2 — FE chat-extraction of the new kinds
+
+**What:** let the player strike `comp-throw` / `veto-save` deals from natural-language chat (today only the
+four defensive kinds are extractable). Touch points:
+- `frontend/src/tool_schemas.py` — the `makeDeal` tool `kind` enum.
+- `frontend/src/tool_implementations.py` — the `kind` validation set.
+- `frontend/src/agent_loop.py` — the `_DEAL_KINDS` set + the deal-extraction prompt description (add
+  "comp-throw = throw a competition for them; veto-save = use the veto to save them").
+
+**Constraint (golden-safety — the load-bearing one):** the `makeDeal` tool schema is part of what the
+**0108 golden-path fixture** records. Adding two enum values changes the request digest ⇒ **stales the
+fixture** ⇒ requires a **live-model re-record** (`OPENROUTER_API_KEY`, which exists only in the deploy/CI,
+not in a keyless dev box). Two ways to land it:
+- **(a) Flag-gate the schema (golden-safe, no key):** include the two new kinds in the enum/prompt **only
+  when the engine's `ORWELL_DEAL_DEPTH` is on** (the FE reads the flag from the engine `/health` flags
+  block). The golden replay runs with the flag OFF ⇒ the schema is unchanged ⇒ fixture safe. Adds a small
+  amount of FE plumbing to read + cache the flag. **Recommended.**
+- **(b) Re-record in the same PR:** add the kinds unconditionally and regenerate
+  `frontend/tests/golden/golden_path_glm-5.2.jsonl` (needs the key; see `frontend/INTEGRATION.md`
+  §golden-path). Simpler code, but the PR can only be validated where the key exists.
+
+**DoD:** a player striking a throw-a-comp / veto-save promise in chat gets it tracked (the FE extraction +
+`makeDeal` accept the kind); `fe-unit` green; the golden gate green (via (a) flag-gating, or (b) a
+re-recorded fixture); the belt telemetry unchanged.
+
+### R3 — Deploy opt-in
+
+**What:** add `ORWELL_DEAL_DEPTH=1` to the deploy `SHIPPED_FLAGS` (`deploy/smoke.sh`) + the installer env
+(`deploy/orwell-install.sh`, the living-house block) so the live game gets the whole deal-depth layer.
+
+**Constraint:** land **only after R1 + R2** (so nothing is half-wired in production). Keep `ORWELL_DEAL_DEPTH`
+**off** in the golden driver (`frontend/scripts/_golden_driver.py`) so the golden replay stays flag-off and
+byte-identical, matching R2 option (a).
+
+**DoD:** the deploy smoke boots with the flag on and drives a full turn; the new kinds are live end-to-end;
+golden replay unchanged; the calibration band holds with the flag on (heavy-sim it ON alongside the other
+living-house flags, as the deploy already does for 0120/0087/0085).
