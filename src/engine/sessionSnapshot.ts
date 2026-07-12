@@ -328,6 +328,15 @@ export interface SessionCore {
   showrunnerNotes?: ShowrunnerNote[];
   showrunnerNoteCount?: number;
   /**
+   * Feature 0101 (#1401) Phase-2 (#1455) — the monotonic per-season count of off-screen ticks on which the
+   * OUTCOME-AFFECTING reweight (behind `ORWELL_SHOWRUNNER_REWEIGHT`, default off) actually RE-ORDERED the
+   * scheduler (the producer's shortlist jumped a thread ahead of the derive order). A `SessionCoreCounts`
+   * dimension (++ only, reset only at a season boundary), so a resumed game keeps the count durable and the
+   * ON calibration run can prove the layer is non-vacuous. Absent on a pre-Phase-2 save / when the reweight
+   * sub-flag is off ⇒ 0 (byte-identical).
+   */
+  showrunnerReweightCount?: number;
+  /**
    * Feature 0075 — the trust-gated confidence ledger: per-houseguest, the highest TIER they have
    * confided to the player (monotonic for a true secret) + whether that disclosure was truthful (a
    * lie is engine-side only). `confideLieCount` is the per-season lie count (the hard cap). Persisted
@@ -701,6 +710,7 @@ export interface SessionCoreCounts {
   secretBarterTickCount: number;
   secretBarterCount: number;
   showrunnerNoteCount: number;
+  showrunnerReweightCount: number;
 }
 
 /** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
@@ -729,6 +739,7 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     tieExposureCount: snap.tieExposureCount ?? 0,
     tieRevealTickCount: snap.tieRevealTickCount ?? 0,
     showrunnerNoteCount: snap.showrunnerNoteCount ?? 0,
+    showrunnerReweightCount: snap.showrunnerReweightCount ?? 0,
   };
 }
 

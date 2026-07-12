@@ -112,6 +112,41 @@ export function emphasisForThread(note: ShowrunnerNote | undefined, threadId: st
 }
 
 /**
+ * Feature 0101 (#1401) Phase-2 (#1455) — the OUTCOME-AFFECTING REWEIGHT ORDER. Given the scheduler's
+ * threads in their stable DERIVE order (as a list of ids) and the current note, return a PERMUTATION OF
+ * INDICES that moves the note's emphasized shortlist (the top `slots`, in NOTE order — most-emphasized
+ * first) to the FRONT, leaving every other thread in its derive position (a STABLE partition). The caller
+ * iterates the scheduler in this order, so an emphasized RIPE thread wins a SCARCE per-tick slot (activate
+ * / surface) or the season surfacing cap ahead of a lower-priority one — the ONLY effect is WHICH open-set
+ * storyline consumes a bounded slot. It re-orders NOTHING else (every cap still binds, every thread's roll
+ * is its own id-keyed side rng invariant to order, every fold magnitude stays engine-owned + seeded, no
+ * closed-set decision is touched — ADR 0005).
+ *
+ * PURE + deterministic (a stable sort keyed by note-rank then derive index). No note / empty emphases /
+ * `slots <= 0` ⇒ the IDENTITY order (byte-identical to no reweight), so an absent/off note is a no-op by
+ * construction. A thread not on the (clamped-to-`slots`) shortlist keeps the baseline priority — the
+ * reweight is boost-only (it never DEMOTES a thread below its own derive-order pacing, only promotes the
+ * shortlist above it), mirroring the Phase-1 `minEmphasis` floor.
+ */
+export function reweightThreadOrder(
+  threadIds: readonly string[], note: ShowrunnerNote | undefined, slots: number = SHOWRUNNER.reweightSlots,
+): number[] {
+  const identity = threadIds.map((_, i) => i);
+  if (!note || note.emphases.length === 0 || slots <= 0) return identity;
+  // The shortlist that jumps the queue: the note's top-`slots` emphases, in note order (already
+  // score-ranked, most-emphasized first). `rank` maps a shortlisted thread id → its front-of-queue slot.
+  const rank = new Map<string, number>();
+  for (let i = 0; i < note.emphases.length && i < slots; i++) rank.set(note.emphases[i]!.threadId, i);
+  // STABLE partition: shortlisted threads first (by their slot), then every other thread in DERIVE order
+  // (the derive index is the tiebreaker for both partitions), so nothing but the promotion changes.
+  return identity.sort((a, b) => {
+    const ra = rank.get(threadIds[a]!) ?? Number.POSITIVE_INFINITY;
+    const rb = rank.get(threadIds[b]!) ?? Number.POSITIVE_INFINITY;
+    return (ra - rb) || (a - b);
+  });
+}
+
+/**
  * Render one producer note for the 0048 retrospective ("the season's production bible"). VAULT-SAFE by
  * construction: it names each emphasized thread's SOURCE (a public name, resolved via the caller's
  * `sourceNameOf`) and its class/position `rationale`, and describes the emphasis QUALITATIVELY (never the

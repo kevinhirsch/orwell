@@ -48,9 +48,28 @@ export const SHOWRUNNER = {
    *  it may move the most-dramatic threads to the FRONT and raise their surfacing odds, but it NEVER
    *  suppresses any thread below its own engine-owned baseline pacing (nothing persisted is ever lost). */
   minEmphasis: 1.0,
-  /** The MAX emphasis multiplier a note may assign — a bounded ceiling. `emphasis` is read ONLY to decide
-   *  whether an emphasized surfaced thread's belief ALSO reaches the player (an open-set, fold-free routing
-   *  choice); it never scales a magnitude or a seeded roll, so it can touch no closed-set outcome. The
+  /** The MAX emphasis multiplier a note may assign — a bounded ceiling. In Phase-1 `emphasis` is read ONLY to
+   *  decide whether an emphasized surfaced thread's belief ALSO reaches the player (an open-set, fold-free
+   *  routing choice); it never scales a magnitude or a seeded roll, so it can touch no closed-set outcome. The
    *  band's SHAPE (baseline vs emphasized, and the shortlist ordering) is what a note expresses. */
   maxEmphasis: 1.6,
+
+  // ── Phase-2 REWEIGHT (#1455 — the OUTCOME-AFFECTING scheduler bias, behind ORWELL_SHOWRUNNER_REWEIGHT) ──
+  /**
+   * How many of a note's EMPHASIZED threads the Phase-2 reweight moves to the FRONT of the per-tick
+   * scheduler queue (0 ⇒ the reweight is inert even when its flag is on; ≤ `emphasisSlots`, since a note
+   * carries only that many emphases). This is the ONE knob that bounds the reweight's aggressiveness: the
+   * emphasized shortlist (top-N, in note order) gets first crack at the SCARCE per-tick slots
+   * (`THREAD.maxActivationsPerTick` / `maxSurfacesPerTick`, both 1) and the season surfacing cap — so a
+   * "due" or high-friction storyline paces to the front instead of losing the slot to a lower-priority
+   * thread that merely sits earlier in the derive order. It re-orders NOTHING else: every hard 0060 cap
+   * still binds, every thread's activate/surface roll is its OWN thread-id-keyed side rng (invariant to
+   * iteration order), every fold MAGNITUDE stays engine-owned + seeded, and NO closed-set decision
+   * (nomination / vote / eviction / competition) is ever touched — the reweight only changes WHICH
+   * OPEN-SET storyline consumes a bounded slot (ADR 0005). Unlike Phase-1 this DOES perturb the seeded
+   * outcome stream (via which hidden relationship folds land this tick), which is why it is gated behind
+   * the calibration heavy-sims. Set below `emphasisSlots` to tighten the reweight if a calibration band
+   * regresses (e.g. 1 ⇒ "only the single most-emphasized thread ever jumps the queue").
+   */
+  reweightSlots: 3,
 } as const;

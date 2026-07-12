@@ -522,6 +522,27 @@ async def record_offscreen_scene_texture(event_id: str, content: str, user: str 
                        {"eventId": event_id, "content": content}, user=user)
 
 
+async def competition_staging_view(user: str | None = None) -> dict | None:
+    """Feature #1400 READ: the Vault-free 'what to hand the model' projection for the currently-staging
+    competition — ``{comp, type, week, format, participants, winner, dropOrder, library}``. The engine
+    hands the ALREADY-FIXED winner + drop order (the model dresses a decided result, it can never touch
+    it), so the FE can author a theme + per-round fiction MATCHED to it. ``None`` unless generative
+    competitions are enabled on the engine AND a comp has resolved its roll. Vault-free (names + the
+    public drop ORDER, never a score/number)."""
+    result = await _call("competitionStagingView", {}, user=user)
+    return result if isinstance(result, dict) else None
+
+
+async def record_competition_fiction(fiction: dict, user: str | None = None) -> dict:
+    """Feature #1400 WRITE-BACK: write the model-authored competition fiction BACK to the engine. The
+    engine VALIDATES (hard) that every elimination in ``fiction['eliminations']`` maps to the fixed drop
+    order EXACTLY; on any mismatch it is REJECTED and the deterministic 0042 library floor stands (the
+    model can never rename who goes or in what order). ``fiction`` carries ``{comp, week, theme, premise,
+    winReads?, eliminations: [{id, fiction}]}``. Presentation-only — never perturbs a seeded roll.
+    Returns ``{ accepted: bool, reason?: str }``."""
+    return await _call("recordCompetitionFiction", fiction, user=user)
+
+
 async def get_game_state(user: str | None = None, timeout: float | None = None) -> dict:
     """Current Vault-free game state for this user: phase, the player's card, the house roster.
 
