@@ -786,6 +786,16 @@ export class BbWorld extends World {
     detB?: string[];
   };
 
+  // Feature 0126 — expanded competition mechanics scratch state (one bag).
+  cmp?: {
+    hoh?: string[];
+    veto?: string[];
+    evictionOrder?: readonly string[];
+    a?: { hoh: string[]; veto: string[]; evictionOrder: readonly string[] };
+    b?: { hoh: string[]; veto: string[]; evictionOrder: readonly string[] };
+    views?: string;
+  };
+
   constructor(options: IWorldOptions) {
     super(options);
   }

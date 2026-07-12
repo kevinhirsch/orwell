@@ -586,6 +586,12 @@ export interface SeasonCtx {
    * `ORWELL_VOTE_DEDUCTION`; the calibration/UAT harness leaves it off.
    */
   voteDeduction?: boolean;
+  /**
+   * 0126 — fold the expanded mechanic pool (9 HOH + 9 veto extra) into the competition draw. Absent/false
+   * ⇒ the bare base 12, byte-identical (the seeded spine is unmoved). Wired live behind
+   * `ORWELL_COMP_MECHANICS_PLUS`; the calibration/UAT/golden harness leaves it off.
+   */
+  expandedComps?: boolean;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -620,9 +626,10 @@ export type DecisionInput =
   // one-time safety, chooses to play it (pull off the block) or hold it for later ---
   | { kind: "secret-veto"; use: boolean };
 
-/** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats. */
-const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource): CompetitionDef =>
-  drawCompetition(phase, s.week, rng, s.compHistory?.[phase] ?? []);
+/** Draw this week's competition from the curated library (0042) — seeded, no immediate repeats.
+ *  `ctx.expandedComps` (0126) folds in the extra mechanic pool; off ⇒ the base 12 (byte-identical). */
+const drawFor = (s: LiveSeasonState, phase: CompetitionPhase, rng: RandomnessSource, ctx: SeasonCtx): CompetitionDef =>
+  drawCompetition(phase, s.week, rng, s.compHistory?.[phase] ?? [], ctx.expandedComps);
 
 /** Record a resolved draw into the persisted history (0030) — what the NEXT draw must avoid. */
 function recordDraw(s: LiveSeasonState, phase: CompetitionPhase, def: CompetitionDef): void {
@@ -657,7 +664,7 @@ function resolveComp(
  * preview default; the committed approach is folded into the live crown when the comp resolves).
  */
 function resolveHoh(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource, playerApproach: Intent = "compete"): { def: CompetitionDef; field: EntityId[]; result: CompetitionResult } {
-  const def = drawFor(s, "hoh", rng);
+  const def = drawFor(s, "hoh", rng, ctx);
   const field = hohField(s, ctx);
   return { def, field, result: resolveComp(field, def, ctx, rng, playerApproach) };
 }
@@ -682,7 +689,7 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     // Resolve ONCE with the baseline RNG pattern (byte-identical crown), then stage the reveals. The
     // committed `s.compIntent` (round 1's approach) is NOT cleared here — `advanceCompetition` consumes
     // it as round 1's expression and reveals the first drop, so round 1 is asked exactly once.
-    const def = drawFor(s, "hoh", rng);
+    const def = drawFor(s, "hoh", rng, ctx);
     const result = resolveComp(field, def, ctx, rng, s.compIntent ?? "compete");
     recordDraw(s, "hoh", def); // committed for the week — the next hoh draw avoids it (0042)
     s.vetoComp = undefined;
@@ -703,7 +710,7 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
       return null;
     }
     // The SAME comp drawn at stage A (0042) — looked up, never re-drawn (restart-safe, 0030).
-    const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng);
+    const def = (s.vetoComp ? competitionById(s.vetoComp) : undefined) ?? drawFor(s, "veto", rng, ctx);
     const result = resolveComp(field, def, ctx, rng, s.compIntent ?? "compete");
     recordDraw(s, "veto", def); // committed for the week — the next veto draw avoids it (0042)
     // `s.compIntent` (round 1's approach) carries into advanceCompetition as round 1's expression.
@@ -921,7 +928,7 @@ function crownCompetition(s: LiveSeasonState): BeatEvent {
 function resolveVetoDraw(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
   // The comp is drawn FIRST (one rng draw) and held in `vetoComp` so every later stage —
   // including a restart mid-pause (0030) — resolves the SAME drawn competition (0042).
-  const def = drawFor(s, "veto", rng);
+  const def = drawFor(s, "veto", rng, ctx);
   s.vetoComp = def.id;
   const draw = vetoParticipants(weekState(s, ctx), rng, {
     houseguestsChoiceChip: true,
@@ -2176,7 +2183,7 @@ function playSecretVeto(s: LiveSeasonState, ctx: SeasonCtx, holder: EntityId, op
 function resolveBattleBack(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource): BeatEvent {
   const k = Math.min(4, s.evictionOrder.length);
   const field = s.evictionOrder.slice(-k); // the recent jurors — includes the player if they were one
-  const def = drawFor(s, "hoh", rng);
+  const def = drawFor(s, "hoh", rng, ctx);
   const winner = resolveComp(field, def, ctx, rng, "compete").winner;
   s.evictionOrder = s.evictionOrder.filter((h) => h !== winner);
   s.active.push(winner);
