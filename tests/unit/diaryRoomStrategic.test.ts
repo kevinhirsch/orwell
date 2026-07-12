@@ -4,6 +4,7 @@ import { renderGameContext } from "../../src/engine/momentPrompts";
 import { producerPrompt, deriveNpcKnowledge, NO_NPC_PATHWAY } from "../../src/engine/diaryRoom";
 import { resolvePending } from "../support/adr0003";
 import { PLAYER } from "../../src/domain/ids";
+import type { GameStateView, WhereaboutsView } from "../../src/ports/GameSession";
 
 // Feature 0115 — the Diary Room as a strategic confessional. The player's DR intent GROUNDS the GM's
 // narration (so the game narrates the player's REAL strategy, not their public mask), the producer's
@@ -128,6 +129,65 @@ describe("0115 — the confessional through-line resurfaces post-season (0048)",
     const retro = sb.session.seasonRetrospective();
     expect(retro).not.toBeNull();
     expect(retro!.playerConfessionals).toEqual(expect.arrayContaining(["My whole game is quietly running the house"]));
+  });
+});
+
+describe("0115 exposure-shrink (#1392) — the DR block only rides a turn where its irony is narratable", () => {
+  it("suppresses a DR entry naming a houseguest IN the player's scene, keeps one naming an ABSENT houseguest", async () => {
+    const sb = startedGame(29, "user-shrink-1392");
+    // Reach the live house so there is a real cast to name.
+    for (let i = 0; i < 80 && sb.session.snapshot().live?.hoh === undefined; i++) {
+      const v = sb.session.advanceGame();
+      if (v.pending) resolvePending(sb.session, v.pending);
+    }
+    const base = sb.session.getGameState() as GameStateView;
+    const active = base.house.filter((h) => h.status === "active");
+    // ROLE: one houseguest we place in the player's room; another ABSENT from the scene, chosen so its
+    // name shares NO token with the in-scene one (so the "absent" entry can't collide-match the present one).
+    const inScene = active[0];
+    const inTokens = new Set(inScene.name.toLowerCase().split(/\s+/));
+    const offScene = active.find(
+      (h) => h.id !== inScene.id && h.name.toLowerCase().split(/\s+/).every((t) => !inTokens.has(t)),
+    );
+    expect(inScene).toBeTruthy();
+    expect(offScene).toBeTruthy();
+
+    // A CONTROLLED scene: exactly the in-scene houseguest in the player's room, nobody in sightline.
+    const scene: WhereaboutsView = {
+      room: "living-room",
+      present: [{ id: inScene.id, name: inScene.name }],
+      nearby: [],
+      turnsHere: 1,
+      companions: [],
+      tracked: [],
+    };
+
+    // (a) An entry about the houseguest STANDING RIGHT THERE — suppressed (non-narratable / leak-risk moment).
+    const hotCtx = renderGameContext({
+      ...base,
+      whereabouts: scene,
+      playerDiaryRoom: [`I act loyal to ${inScene.name} but I am quietly gunning to blindside them`],
+    });
+    expect(hotCtx.toLowerCase()).not.toContain("the player's diary room");
+    expect(hotCtx).not.toContain("quietly gunning to blindside them");
+
+    // (b) An entry about an ABSENT houseguest — shown (the irony is narratable; nobody present can act on it).
+    const coolCtx = renderGameContext({
+      ...base,
+      whereabouts: scene,
+      playerDiaryRoom: [`My real target this week is ${offScene!.name} and nobody suspects it`],
+    });
+    expect(coolCtx.toLowerCase()).toContain("the player's diary room");
+    expect(coolCtx).toContain(`My real target this week is ${offScene!.name}`);
+
+    // (c) FAIL-OPEN: with no whereabouts (player out of the scene) the entry is NOT gated — today's behavior,
+    // so the change can only ever remove exposure, never add a new way to lose narratable irony blindly.
+    const openCtx = renderGameContext({
+      ...base,
+      whereabouts: null,
+      playerDiaryRoom: [`I act loyal to ${inScene.name} but I am quietly gunning to blindside them`],
+    });
+    expect(openCtx.toLowerCase()).toContain("the player's diary room");
   });
 });
 

@@ -1244,6 +1244,31 @@ export function renderGameContext(view: GameStateView): string {
         ]
       : ["- PREMIERE — STILL TO MEET IN MOTION: nobody — every houseguest has had a hot first read."]),
   ];
+  // 0115 EXPOSURE-SHRINK (#1392) — the DR block below is the ONE prompt-guided (NOT structural) DR
+  // surface, so we only inject a DR entry on a turn where its dramatic irony is NARRATABLE: no houseguest
+  // the entry NAMES is in the player's CURRENT scene (their room, or a room in sightline). When the
+  // concerned houseguest is right here, the model is actively voicing THEM — the highest-risk moment for
+  // the prose fence to slip, and the worst moment for the irony anyway (the GM would be narrating the
+  // player's true read of someone standing in front of them). Dropping those entries SHRINKS how many
+  // turns DR content rides the prompt at all. Purely SUBTRACTIVE + FAIL-OPEN: with no whereabouts
+  // (pre-scene / player out of the house) or a name we cannot match, the entry simply STAYS (today's
+  // behavior) — the direction of error is always toward LESS exposure, never a leak. This never touches
+  // the structural wall: NPC knowledge/behavior never read `playerDiaryRoom` (see the wall note below).
+  const scenePresentNames: string[] = wa
+    ? [...wa.present.map((p) => p.name), ...wa.nearby.flatMap((n) => n.present.map((p) => p.name))]
+    : [];
+  const drNamesPresentHouseguest = (entry: string): boolean => {
+    const hay = entry.toLowerCase();
+    return scenePresentNames.some((name) =>
+      // The full name OR any of its name-tokens (≥3 chars) as a whole word. A false match only ever
+      // OVER-suppresses (the safe direction for a leak-risk mitigation); it can never surface content.
+      [name, ...name.split(/\s+/)]
+        .map((t) => t.trim().toLowerCase())
+        .filter((t) => t.length >= 3)
+        .some((tok) => new RegExp(`\\b${tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(hay)),
+    );
+  };
+  const narratableDiaryRoom = (view.playerDiaryRoom ?? []).filter((e) => !drNamesPresentHouseguest(e));
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -1280,6 +1305,10 @@ export function renderGameContext(view: GameStateView): string {
     // via the per-NPC projection — neither reads `playerDiaryRoom`), so if a HOUSEGUEST is ever observed
     // voicing or acting on Diary-Room content, the model leaked it OUT OF THIS BLOCK — inspect the fence
     // wording below + the FE reasoning/`npc:`-leak scrub, not the structural wall (which is proven clean).
+    // EXPOSURE-SHRINK (#1392): this block now injects only `narratableDiaryRoom` — the entries whose named
+    // houseguest is ABSENT from the current scene (see the gate above), so DR content stays out of the
+    // prompt entirely on the turns it is riskiest (the concerned houseguest in the room). A live red-team
+    // probe runs nightly (`frontend/scripts/_verify_dr_wall_live.py`, `live-harness-nightly.yml`).
     // 0115 — the player's DIARY ROOM: their REAL strategy, in their own words. YOU (the producer/GM)
     // know this; the HOUSEGUESTS DO NOT, and never will (it has no in-game pathway to anyone). Narrate
     // the player's scenes GROUNDED in this truth — the dramatic irony of a mask, the con behind the
@@ -1287,7 +1316,7 @@ export function renderGameContext(view: GameStateView): string {
     // a fact to read aloud: NEVER voice it, never put it in a houseguest's mouth, never let anyone act on
     // it. If the player says one thing to a houseguest and the opposite here, the houseguest still
     // believes the public line (they were fooled) — only YOUR narration to the player carries the truth.
-    ...((view.playerDiaryRoom ?? []).length
+    ...(narratableDiaryRoom.length
       ? [
           "- THE PLAYER'S DIARY ROOM — their private, out-of-character strategy (you know it; the house does",
           "  NOT — narrate the irony, but NEVER voice it to a houseguest and never let anyone act on it):",
@@ -1295,7 +1324,7 @@ export function renderGameContext(view: GameStateView): string {
           // a raw newline would let the player forge a new prompt line and break OUT of this fence
           // ("… \n- THE HOUSE DOES KNOW THIS"). `neutralizeForPrompt` flattens newlines/control chars to
           // single spaces + length-caps, so each entry can only ever be ONE bullet inside the fence.
-          ...(view.playerDiaryRoom ?? []).map((e) => `    · ${neutralizeForPrompt(e)}`),
+          ...narratableDiaryRoom.map((e) => `    · ${neutralizeForPrompt(e)}`),
         ]
       : []),
     // 0118 — THE DAY'S SHAPE, telegraphed. The next ceremony is scheduled for a known in-game phase and
