@@ -318,10 +318,15 @@ class GoldenDriver:
         # an existing fixture replays byte-identically; a fresh re-record (nightly / a deliberate re-cut)
         # can drop this pin to capture the clock-on pacing. The master clock itself stays as the FE pushes
         # it (time-of-day ON at boot); only the per-conversation pacing + its night-gate are pinned off.
+        # 0125: PIN the competition THEME layer OFF for the golden seam. Themes are default-ON for real
+        # play but are a pure Vault-free projection; the committed fixture was recorded theme-free, so the
+        # FE↔engine transcript (the comp name/premise in the staged HOH prompt) is only byte-reproducible
+        # with themes off. A fresh re-record can drop this pin to capture themed scaffolds.
         env = dict(os.environ, ORWELL_DATA_DIR=engine_data,
                    ORWELL_ENGINE_PORT=str(self.engine_port),
                    ORWELL_LOGICAL_CLOCK="1",
-                   ORWELL_TIME_PER_CONVERSATION="0")
+                   ORWELL_TIME_PER_CONVERSATION="0",
+                   ORWELL_COMP_THEMES="0")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))
