@@ -45,7 +45,7 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_delivery_state_helper_exists_and_reuses_existing_css():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "function _setDeliveryState(bubbleEl, state)" in js, "the per-bubble projection must exist"
     helper = js[js.index("function _setDeliveryState(bubbleEl, state)"):]
     helper = helper[:helper.index("function _clearDeliveryRetry")]
@@ -74,7 +74,7 @@ def test_delivery_state_helper_exists_and_reuses_existing_css():
 
 
 def test_failed_bucket_declared_persisted_and_restored():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "chatState._outboxFailed" in js, "the durable-failed bucket must exist (moved to the chatState singleton — #1414)"
     # persistence: failed items serialize with state:'failed'
     persist = js[js.index("function _persistOutbox()"):]
@@ -96,7 +96,7 @@ def test_failed_bucket_declared_persisted_and_restored():
 
 
 def test_confirm_and_dedupe_settle_the_bubble_delivered():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     confirm = js[js.index("function _outboxConfirmDelivery(clientMsgId)"):]
     confirm = confirm[:confirm.index("function _requeueOutboxItem")]
     assert "[chatState._outboxAwaitingConfirm, chatState._sendOutbox, chatState._outboxFailed]" in confirm, \
@@ -110,7 +110,7 @@ def test_confirm_and_dedupe_settle_the_bubble_delivered():
 
 
 def test_dispatch_marks_sending():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     assert "_setDeliveryState(item.bubbleEl, 'sending')" in fn, \
@@ -132,7 +132,7 @@ def test_catch_hook_marks_failed_after_the_requeue_cap():
 
 
 def test_retry_reenters_the_one_normal_flush():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _retryFailedSend(clientMsgId)"):]
     fn = fn[:fn.index("// ── #830: the AGGREGATED")] if "// ── #830: the AGGREGATED" in fn else fn[:2000]
     assert "_outboxFailed.splice(i, 1)" in fn, "Retry must remove the item from the failed bucket"

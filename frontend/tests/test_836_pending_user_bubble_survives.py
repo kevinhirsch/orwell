@@ -48,7 +48,8 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_pending_optimistic_helper_exists():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the reconcile cluster (incl. _isPendingOptimisticBubble) moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "export function _isPendingOptimisticBubble(el)" in js, \
         "the pending-optimistic-bubble predicate must exist"
     block = js[js.index("export function _isPendingOptimisticBubble(el)"):]
@@ -58,7 +59,8 @@ def test_pending_optimistic_helper_exists():
 
 
 def test_visible_count_excludes_pending_optimistic():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: _visibleMsgCount + _isPendingOptimisticBubble moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     block = js[js.index("export function _visibleMsgCount(box)"):]
     block = block[:block.index("export function _isPendingOptimisticBubble")]
     assert "_isPendingOptimisticBubble(el)" in block, \
@@ -66,7 +68,8 @@ def test_visible_count_excludes_pending_optimistic():
 
 
 def test_softreload_preserves_pending_across_rebuild():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: softReloadHistory moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     # The rebuild must rescue pending sends whose client_msg_id is absent from the server snapshot.
     assert "_pendingToPreserve" in js, "softReloadHistory must capture pending bubbles to preserve"
     assert "for (const el of _pendingToPreserve) box.appendChild(el);" in js, \
@@ -87,7 +90,8 @@ def test_assistant_orphan_dedup_not_relaxed():
     # multi-round-aware count that degenerates to visible.length for plain messages, so the #920
     # teeth are unchanged while a legitimately multi-bubble tool-rich turn stops reading as a
     # permanent orphan.)
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the orphanFree convergence guard lives inside softReloadHistory, moved to chatReconcile.js.
+    js = _read("static/js/chatReconcile.js")
     assert "const orphanFree = _visibleMsgCount(box) === _expectedVisibleBubbleCount(visible);" in js, \
         "the orphanFree convergence guard (#920, multi-round-aware) must remain"
     assert "const converged = orphanFree &&" in js

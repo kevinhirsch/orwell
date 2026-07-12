@@ -494,9 +494,12 @@ def test_chat_stream_end_reattempts_the_deferred_peer_resume():
     settles (_streamSessionId cleared ⇒ hasActiveStream false), so we mirror the peer's turn LIVE
     instead of waiting on a later reconcile. The peer run is durable (chained as the current
     _RUNS[canonical], resumable within the evict grace), so the deferred attach replays then tails."""
+    # #1414 R3 PR7: the deferPeerResume / flushPendingPeerResume DEFINITIONS moved to chatReconcile.js;
+    # their CALL SITE (the stream-end finally) + the chatModule re-exports stay in chat.js.
+    recon = _read("static", "js", "chatReconcile.js")
+    assert "export function deferPeerResume(sessionId)" in recon
+    assert "export function flushPendingPeerResume(sessionId)" in recon
     src = _read("static", "js", "chat.js")
-    assert "export function deferPeerResume(sessionId)" in src
-    assert "export function flushPendingPeerResume(sessionId)" in src
     # the finally re-attempts the deferred peer-resume (sequenced AFTER the reconcile flush).
     assert "flushPendingPeerResume(streamSessionId)" in src
     # and the deferred-resume seam is exported on chatModule so sessionSync can reach it.
@@ -507,7 +510,8 @@ def test_flush_peer_resume_guards_against_double_render_and_wrong_session():
     """flushPendingPeerResume must only attach when we're still on the session AND nothing else is
     already rendering it live (hasActiveStream) — resumeStream's own guards make it idempotent, but
     the flush also short-circuits so a newer own-stream that took over keeps ownership of the render."""
-    src = _read("static", "js", "chat.js")
+    # #1414 R3 PR7: flushPendingPeerResume moved to chatReconcile.js.
+    src = _read("static", "js", "chatReconcile.js")
     body = src.split("export function flushPendingPeerResume", 1)[1].split("export function", 1)[0]
     assert "_pendingPeerResume.has(id)" in body, "no-op unless a peer resume was actually deferred"
     assert "hasActiveStream(id)" in body, "don't attach if a newer stream already owns the live render"
@@ -539,7 +543,8 @@ def test_force_rebuild_is_honored_and_self_guarded_in_soft_reload():
     may already carry the persisted {id, seq} but show the wrong CONTENT), and (b) SELF-GUARD so a
     hard fail that persisted NOTHING (server has fewer messages than rendered) keeps its live error
     bubble rather than the rebuild erasing it. The force is one-shot (consumed per reload)."""
-    src = _read("static", "js", "chat.js")
+    # #1414 R3 PR7: softReloadHistory's forced-rebuild self-guard moved to chatReconcile.js.
+    src = _read("static", "js", "chatReconcile.js")
     assert "let _forced = chatState._forceRebuild.delete(sessionId);" in src, "one-shot consume of the force flag"
     assert "if (_forced && visible.length < renderedCount) _forced = false;" in src, \
         "self-guard: don't force-erase a live error bubble with no server replacement"

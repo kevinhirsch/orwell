@@ -54,7 +54,8 @@ def test_history_api_exposes_id_and_seq():
 # ── Leg 2: render-/reconcile-by-id (adopt + divergence-gated rebuild) ─────────────
 
 def test_soft_reload_history_adopts_then_rebuilds_only_on_divergence():
-    src = _read("static", "js", "chat.js")
+    # #1414 R3 PR7: softReloadHistory + flushPendingReconcile moved to chatReconcile.js.
+    src = _read("static", "js", "chatReconcile.js")
     assert "ADOPT PASS" in src, "the cheap adopt pass (no churn) must be present"
     # The divergence guard: the full innerHTML rebuild must be gated, never unconditional. (ADR 0012
     # GAP 2 added a one-shot `_forced` bypass for the error path — `converged && !_forced` — so the

@@ -68,7 +68,7 @@ def _read(rel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_persistence_layer_exists_and_is_per_tab():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "function _persistOutbox()" in js, "the persistence write point must exist"
     assert "'orwell-send-outbox:'" in js, "the storage key must be user-scoped (E71 pattern)"
     assert "sessionStorage.setItem(_outboxKey()" in js, "the queue must persist to sessionStorage"
@@ -80,7 +80,7 @@ def test_persistence_layer_exists_and_is_per_tab():
 
 
 def test_enqueue_persists_immediately():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _enqueueSend(text)"):]
     fn = fn[:fn.index("function _paintOutboxBubble")]
     assert "_persistOutbox();" in fn, "an enqueued send must be reload-durable from the instant it queues"
@@ -88,7 +88,7 @@ def test_enqueue_persists_immediately():
 
 
 def test_restore_exists_and_dedupes_before_resend():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "function _restoreOutboxFromStorage()" in js, "the boot restore must exist"
     restore = js[js.index("function _restoreOutboxFromStorage()"):]
     restore = restore[:restore.index("function _outboxConfirmDelivery")]
@@ -114,7 +114,7 @@ def test_restore_exists_and_dedupes_before_resend():
 
 
 def test_flush_gates_on_offline_and_dedupe_and_keeps_item_persisted_through_dispatch():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     # original #985 guards intact
@@ -138,8 +138,9 @@ def test_item_session_binding_gates_the_dispatch():
     """P1 fix (PR #1379 — Greptile repro / CodeRabbit gate): an item with a recorded sessionId may
     only dispatch while ITS session is currently selected; a non-matching item is HELD (queue kept,
     _flushingOutbox reset, backoff armed) — never shifted into another session's send path."""
-    js = _read("static/js/chat.js")
-    fn = js[js.index("function _flushSendOutbox()"):]
+    js = _read("static/js/chat.js")              # the requeue CALL SITE stays in handleChatSubmit
+    ob = _read("static/js/chatOutbox.js")        # #1414 R3 PR6: the flush body moved to chatOutbox.js
+    fn = ob[ob.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     # the eligibility scan binds by session (and skips still-unverified items)
     assert "!it.sessionId || it.sessionId === _cur" in fn, \
@@ -163,7 +164,7 @@ def test_drain_is_self_continuing():
     is swallowed by the single-flight guard, and early-return dispatch paths never reach the
     stream-end finally that re-kicks the drain — so after each dispatch settles, the flush must
     re-invoke ITSELF while items remain (one hop per settle; every guard re-checked)."""
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     assert "const _continueDrain = () => {" in fn, "the settle continuation must exist"
@@ -195,9 +196,10 @@ def test_offline_send_goes_straight_to_outbox():
 
 
 def test_network_failure_classification_and_requeue():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chat.js")              # the catch-hook CALL SITES stay in handleChatSubmit
+    ob = _read("static/js/chatOutbox.js")        # #1414 R3 PR6: the outbox helpers moved to chatOutbox.js
     # the classifier is deliberately NARROW (browser fetch-network messages + navigator.onLine only)
-    fn = js[js.index("function _isNetworkSendFailure(err)"):]
+    fn = ob[ob.index("function _isNetworkSendFailure(err)"):]
     fn = fn[:fn.index("async function _dedupeOutboxAgainstServer")]
     assert "failed to fetch" in fn and "networkerror" in fn
     assert "_outboxOnline()" in fn
@@ -209,7 +211,7 @@ def test_network_failure_classification_and_requeue():
     assert "!accumulated && _userMsgEl && _isNetworkSendFailure(err)" in hook_region + js[hook_at - 120:hook_at + 120], \
         "requeue must be gated on zero bytes + a real user bubble + the network classifier"
     # the requeue helper: idempotent, dedupe-armed, capped
-    rq = js[js.index("function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId)"):]
+    rq = ob[ob.index("function _requeueOutboxItem(clientMsgId, text, bubbleEl, sessionId)"):]
     rq = rq[:rq.index("function _isNetworkSendFailure")]
     assert "item.needsDedupe = true;" in rq, "a requeued POST may have reached the server — must re-verify"
     assert "_OUTBOX_MAX_RETRIES" in rq, "requeue must be capped (a misclassified error can't loop forever)"
@@ -217,7 +219,7 @@ def test_network_failure_classification_and_requeue():
 
 
 def test_online_event_and_backoff_wiring():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "window.addEventListener('online'" in js, "the reconnect drain must ride the 'online' event"
     assert "window.addEventListener('offline'" in js, "going offline must retag queued bubbles honestly"
     assert "function _armOutboxRetry()" in js
@@ -229,7 +231,7 @@ def test_online_event_and_backoff_wiring():
 
 
 def test_honest_status_tag_exists_and_is_styled():
-    js = _read("static/js/chat.js")
+    js = _read("static/js/chatOutbox.js")
     assert "function _setQueuedTag(bubbleEl, mode)" in js
     assert "'queued — offline'" in js and "'queued'" in js
     assert "tag.className = 'queued-tag'" in js, "the status must be a REAL text node (WCAG 4.1.3)"
@@ -240,15 +242,24 @@ def test_honest_status_tag_exists_and_is_styled():
 
 
 def test_confirm_seam_and_single_send_path():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the adopt pass (softReloadHistory) moved to chatReconcile.js.
+    recon = _read("static/js/chatReconcile.js")
     # delivery confirm rides the EXISTING adopt pass (softReloadHistory) — no new reconcile path
-    adopt_at = js.index("// 1) ADOPT PASS — no DOM churn.")
-    adopt_block = js[adopt_at:adopt_at + 1400]
+    adopt_at = recon.index("// 1) ADOPT PASS — no DOM churn.")
+    adopt_block = recon[adopt_at:adopt_at + 1400]
     assert "_outboxConfirmDelivery(cid)" in adopt_block, \
         "a server row carrying the clientMsgId must release the durable copy (adopt-pass seam)"
-    # the drain still dispatches through the ONE dispatcher → handleChatSubmit (no second send path)
-    assert "let _outboxDispatch = (text, opts) => handleChatSubmit(null, text, opts);" in js
-    assert js.count("let _outboxDispatch") == 1
+    js = _read("static/js/chat.js")
+    # the drain still dispatches through the ONE dispatcher → handleChatSubmit (no second send path).
+    # #1414 R3 PR6: the outbox moved to chatOutbox.js; chat.js registers the SOLE production dispatch
+    # (still a headless handleChatSubmit) through the _setOutboxDispatch seam at module-eval, and the
+    # module holds exactly one dispatcher variable.
+    assert "_setOutboxDispatch((text, opts) => handleChatSubmit(null, text, opts))" in js, \
+        "chat.js must register the production dispatch (→ handleChatSubmit) via the outbox seam"
+    assert js.count("_setOutboxDispatch(") == 1, \
+        "exactly one production dispatch registration → handleChatSubmit (no second send path)"
+    ob = _read("static/js/chatOutbox.js")
+    assert ob.count("let _outboxDispatch") == 1, "the outbox module holds exactly one dispatcher variable"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
