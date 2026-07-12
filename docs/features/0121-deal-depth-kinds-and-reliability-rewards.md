@@ -116,8 +116,13 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
 - [x] **[Part 2b] Reliable-ally protection (reward 2):** delivered by the EXISTING reliability→nomination
       machinery — a proven-reliable partner outranks others as a nomination target (`relationships.ts`
       `bondStrength`/nom read) — and the streak's reliability build amplifies it. No new code needed.
-- [ ] **[R1 · later PR] Reputation that spreads (reward 1)** — see §7.
-- [ ] **[R2 · later PR] FE chat-extraction of the new kinds** — see §7.
+- [x] **[R1] Reputation that spreads (reward 1)** — SHIPPED. A kept deal seeds a Vault-free "keeps their
+      word" reputation about the honorer that diffuses NPC→NPC (0038); every third party who hears it leans
+      slightly toward the honorer (`gossip.spreadReliableReputation` + `GOSSIP_HEARD.reliable`, wired via
+      `GameSessionAdapter.setDealReputationSink` + the `reconcileDeals` `reputation` hook). Gated on the
+      deal-depth flag ⇒ off is byte-identical (`tests/unit/dealReputation.test.ts`; juryReach unchanged). The
+      engine `dealDepth` flag is now surfaced on `/health` (`bootFlags`) for the FE flag-gate (R2).
+- [ ] **[R2 · later PR] FE chat-extraction of the new kinds** — see §7 (flag-gated schema off `/health.flags.dealDepth`).
 - [ ] **[R3 · later PR] Deploy opt-in (`ORWELL_DEAL_DEPTH=1`)** — see §7.
 
 ## 6. Dependencies & traceability
@@ -135,7 +140,12 @@ Three items remain, each behind a real constraint — captured here so they are 
 an environment where the golden fixture can be regenerated. **All stay behind `ORWELL_DEAL_DEPTH` (default
 OFF) and must keep the seeded spine + golden replay byte-identical.**
 
-### R1 — Reputation that spreads (the third reward)
+### R1 — Reputation that spreads (the third reward) — ✅ SHIPPED
+
+> **Built.** `gossip.spreadReliableReputation` (diffuse the single-subject belief + the bounded
+> `GOSSIP_HEARD.reliable` lean on each third-party holder; the deal partner is excluded — they earned the
+> direct fold) ← `GameSessionAdapter.setDealReputationSink` ← the `reconcileDeals` `reputation` hook (the
+> ledger only fires it under the flag). Gated ⇒ off byte-identical. Gate: `tests/unit/dealReputation.test.ts`.
 
 **What:** a kept deal seeds a hidden *"keeps their word"* reputation belief about the honorer that
 **diffuses NPC→NPC** through the existing **0038** gossip layer; a houseguest who has heard it reads the

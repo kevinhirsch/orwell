@@ -89,6 +89,10 @@ export const GOSSIP_HEARD: Record<string, Partial<EdgeSignals>> = {
   gossip: { trust: -0.04 },                     // "talking about everyone behind their backs"
   conflict: { affinity: -0.03 },                // "at each other's throats" — messy to be near
   betrayal: { trust: -0.06, threat: +0.07 },    // "about to turn on someone" — dangerous to trust
+  // 0121 R1 — the POSITIVE mirror: hearing someone "keeps their word" reads them as a safer, more
+  // appealing deal partner (a small bounded trust/affinity lean toward the subject). The only warming
+  // GOSSIP_HEARD entry; only ever seeded by the deal-depth reputation reward (gated ⇒ off = never used).
+  reliable: { trust: +0.05, affinity: +0.03 },  // "keeps their word" — a proven partner
 };
 
 /** The vague gloss a scene's nature gets when it becomes a rumor — NEVER the verbatim scene. */
@@ -375,3 +379,46 @@ export function diffuseGossip(deps: {
 }
 
 type KnowledgeFactLike = { hops?: number; confidence?: number; content: string };
+
+/**
+ * 0121 R1 — the "keeps their word" REPUTATION reward. A kept deal diffuses a Vault-free reputation about the
+ * `honorer` NPC→NPC (seeded on the deal partner `other`, spread along the affinity `graph`); every THIRD
+ * PARTY who comes to hold it then leans slightly toward the honorer as a safer deal partner (`GOSSIP_HEARD.
+ * reliable`, the positive mirror of the betrayal rumor). The deal partner `other` is EXCLUDED (they already
+ * earned the direct honored/reliability fold) and the honorer is the subject (never folds toward themself).
+ *
+ * A single-subject reputation, so it does NOT use `diffuseGossip`'s two-subject scene receipt fold — the
+ * lean is applied here directly, bounded, on the SAME injected rng (dedicated by the caller ⇒ the main
+ * season/vote stream is never re-phased). Off (the caller only invokes it under the deal-depth flag) ⇒ never
+ * runs ⇒ byte-identical. Pure but for the injected `knowledge`/`rel`/`rng` it mutates; no wall-clock, no I/O.
+ */
+export function spreadReliableReputation(deps: {
+  knowledge: KnowledgeService;
+  rel: RelationshipModel;
+  graph: SocialGraph;
+  rng: RandomnessSource;
+  honorer: EntityId;
+  other: EntityId;
+  content: string;
+  candidates: readonly EntityId[];
+  rounds?: number;
+  transmitProb?: number;
+  decay?: number;
+}): { factId: string; leaned: EntityId[] } {
+  const { knowledge, rel, graph, rng, honorer, other, content, candidates } = deps;
+  const { factId } = diffuseGossip({
+    knowledge, graph, rng, origin: other, fact: { content },
+    rounds: deps.rounds ?? GOSSIP.rounds,
+    transmitProb: deps.transmitProb ?? GOSSIP.transmitProb,
+    decay: deps.decay ?? GOSSIP.decay,
+  });
+  const leaned: EntityId[] = [];
+  for (const npc of candidates) {
+    if (npc === honorer || npc === other) continue;
+    if (knowledge.knownTo(npc).some((k) => k.factId === factId)) {
+      rel.applyImpactDirected(npc, honorer, GOSSIP_HEARD.reliable, rng);
+      leaned.push(npc);
+    }
+  }
+  return { factId, leaned };
+}
