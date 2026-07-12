@@ -16,7 +16,7 @@
  * night runs past midnight, NPCs turn in and the awake set thins; then pre-dawn larks wake and it refills.
  */
 
-import { CLOCK, SLEEP, EVENT_DURATION } from "./sleepConstants";
+import { CLOCK, SLEEP, EVENT_DURATION, AFTER_HOURS, type AfterHoursConstants } from "./sleepConstants";
 
 export { SLEEP, type SleepConstants } from "./sleepConstants";
 
@@ -213,6 +213,28 @@ export function sleepDeficitForBedHour(bedHour: number): number {
  */
 export function restDeficitForDepth(lastAwakeHour: number): number {
   return sleepDeficitForBedHour(lastAwakeHour);
+}
+
+/**
+ * 0066 Extension 4 — an NPC's EMERGENT bedtime HOUR: how late they ACTUALLY stayed up, driven by their own
+ * nature + circumstance, NOT capped at the player's bedtime (the fairness fix — the player is no longer the
+ * only free agent of the night). A night-owl (chronotype `base` past the social floor) lingers toward their
+ * full `base` ONLY with late-night COMPANY (`company` = other natural owls still up); ALONE they wind down
+ * to the social floor and pay nothing (no flat archetype tax). The social floor is midnight, extended if the
+ * player kept the house up past it (`nightEndHour` = when the night's sim ended / the player turned in) —
+ * a late house keeps everyone up. A lark whose `base` is already before the floor keeps their own early bed.
+ *
+ * Purely deterministic (no rng), so it never perturbs a seeded stream. `company === 0` ⇒ the owl collapses
+ * to the social floor = `min(base, max(midnight, nightEndHour))`, whose DEFICIT (via `restDeficitForDepth`)
+ * is byte-identical to the pre-feature player-capped `min(base, nightEndHour)` — the calibration floor.
+ */
+export function emergentBedtimeHour(
+  base: number, company: number, nightEndHour: number, c: AfterHoursConstants = AFTER_HOURS,
+): number {
+  const socialFloor = Math.max(CLOCK.midnightHour, nightEndHour); // the free late window; a late house extends it
+  if (base <= socialFloor) return base;                           // beds before the window closes ⇒ their own (early) bed
+  const companyFactor = clamp(company / c.companyFull, 0, 1);      // 0 alone → 1 with a crowd of fellow owls
+  return socialFloor + companyFactor * (base - socialFloor);      // linger toward `base` with company; else the floor
 }
 
 /**
