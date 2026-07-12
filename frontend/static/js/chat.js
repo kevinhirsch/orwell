@@ -2903,10 +2903,15 @@ import { isNarrow } from './platform.js';
                   // refreshes event-driven instead of waiting out a 20–30s poll.
                   // runCompetition rides along: it is the single outcome authority, and a
                   // comp result moves exactly what the status HUD shows (HOH/veto/phase).
-                  // FEJS-3: the trailing 8 also move public state the panels read — debounced.
-                  // DRIFT-1: + the 0093/0099/0107 mutators (sync w/ chat_helpers.py).
-                  // DRIFT-2: + the 0094/0095 mutators (confront / accuseTie).
-                  if (ok && ['advanceGame', 'submitDecision', 'recordInteraction', 'createCharacter', 'updateCasting', 'manageSandbox', 'runCompetition', 'moveTo', 'moveHouseguest', 'makeDeal', 'markHouseguestMet', 'turnIn', 'surfaceInformationTo', 'diaryRoom', 'recordImageBeat', 'formAlliance', 'joinAlliance', 'exposeSecret', 'tradeSecret', 'confront', 'accuseTie'].includes(json.tool)) {
+                  // #1412 (R1b): the "is this tool game-MUTATING?" test is NO LONGER a
+                  // hand-coded array here — it consumes the shared manifest via
+                  // window.orwellIsMutatingTool (platform.js ORWELL_MUTATING_TOOLS, pinned
+                  // registry-equal by test_1412_mutating_manifest.py). A newly-wired mutating
+                  // registry tool flows into THIS HUD-refresh set with NO edit here: the
+                  // drift-guard forces it into the manifest, and this seam picks it up for
+                  // free. The helper is absent outside the game build, so the whole seam
+                  // no-ops there (exactly like orwellGameChanged itself).
+                  if (ok && window.orwellIsMutatingTool && window.orwellIsMutatingTool(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
                     let _beat;
