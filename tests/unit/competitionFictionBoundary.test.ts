@@ -138,4 +138,39 @@ describe("#1400 — the competition staging READ + fiction WRITE-BACK reach the 
     }
     expect(sawFiction, "a staged drop should be told as the model's authored fiction").toBe(true);
   });
+
+  it("engine-side exactly-once: a SECOND valid recordCompetitionFiction is rejected and the stored fiction is unchanged", async () => {
+    const { server, session } = playerServer();
+    driveToResolvedComp(session);
+    const view = (await server.callTool("competitionStagingView", {})) as CompetitionStagingView | null;
+    expect(view).not.toBeNull();
+
+    // First write (FIRST-FICTION) is accepted and stored.
+    const first = (await server.callTool("recordCompetitionFiction", {
+      comp: view!.comp, week: view!.week, theme: "First Theme", premise: "First premise.",
+      eliminations: view!.dropOrder.map((r) => ({ id: r.id, fiction: `FIRST-FICTION: ${r.name} is out.` })),
+    })) as RecordCompetitionFictionResult;
+    expect(first.accepted).toBe(true);
+
+    // A SECOND perfectly VALID write (same fixed order, different prose) is REFUSED — never overwrites.
+    const second = (await server.callTool("recordCompetitionFiction", {
+      comp: view!.comp, week: view!.week, theme: "Second Theme", premise: "Second premise.",
+      eliminations: view!.dropOrder.map((r) => ({ id: r.id, fiction: `SECOND-FICTION: ${r.name} is out.` })),
+    })) as RecordCompetitionFictionResult;
+    expect(second.accepted).toBe(false);
+    expect(second.reason).toBe("already-authored");
+
+    // The STORED fiction is unchanged: the reveals render the FIRST prose, never the rejected second.
+    let sawFirst = false;
+    let sawSecond = false;
+    for (let g = 0; g < 40 && !session.gameStatus().hoh; g++) {
+      const adv = session.advanceGame();
+      if (adv.event?.beat === "comp-elimination") {
+        if (adv.event.content.includes("FIRST-FICTION")) sawFirst = true;
+        if (adv.event.content.includes("SECOND-FICTION")) sawSecond = true;
+      }
+    }
+    expect(sawFirst, "the FIRST authored fiction is preserved").toBe(true);
+    expect(sawSecond, "the rejected SECOND fiction never reached the reveals").toBe(false);
+  });
 });

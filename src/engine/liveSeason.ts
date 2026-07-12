@@ -1047,7 +1047,7 @@ export interface CompetitionFictionInput {
 /** #1400 — a validation outcome: the sanitized fiction to store, or a Vault-free reason it was rejected. */
 export type CompetitionFictionValidation =
   | { ok: true; fiction: CompetitionFiction }
-  | { ok: false; reason: "no-competition" | "not-resolved" | "comp-mismatch" | "week-mismatch" | "drop-order-mismatch" | "empty-fiction" };
+  | { ok: false; reason: "no-competition" | "not-resolved" | "comp-mismatch" | "week-mismatch" | "already-authored" | "drop-order-mismatch" | "empty-fiction" };
 
 const clampLen = (v: string, max: number): string => (v.length > max ? v.slice(0, max).trimEnd() : v);
 
@@ -1068,6 +1068,13 @@ export function validateCompetitionFiction(
   if (c.winner === undefined || c.dropOrder === undefined) return { ok: false, reason: "not-resolved" };
   if (req.comp !== c.comp) return { ok: false, reason: "comp-mismatch" };
   if (req.week !== s.week) return { ok: false, reason: "week-mismatch" };
+  // ENGINE-SIDE EXACTLY-ONCE (idempotence, Greptile P1): validated fiction is ALREADY stored for THIS
+  // (comp, week). The staged comp stays surfaced across every reveal round until it crowns, so a second
+  // `recordCompetitionFiction` — from a re-driven FE kickoff OR a direct MCP caller — must be REFUSED, not
+  // silently overwrite the stored staging (which would make later rounds render different fiction than
+  // earlier ones). Authoring is exactly once per competition; the stored fiction is immutable until crown.
+  const existing = s.competitionFiction;
+  if (existing && existing.comp === c.comp && existing.week === s.week) return { ok: false, reason: "already-authored" };
 
   const named = req.eliminations ?? [];
   // THE DROP-ORDER BRIGHT LINE: same length, same ids, same order as the fixed drop order. Exact map.

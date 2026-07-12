@@ -242,4 +242,18 @@ describe("#1400 — validateCompetitionFiction is the hard drop-order gate", () 
     const v = validateCompetitionFiction(s, { comp: "hoh-competition", week: 1, theme: "t", premise: "p", eliminations: [] });
     expect(v).toMatchObject({ ok: false, reason: "no-competition" });
   });
+
+  it("REJECTS a SECOND write for an already-authored comp (engine-side exactly-once), leaving the first stored", () => {
+    const { s, dropOrder } = resolvedHohSeason(10, 3);
+    const first = validateCompetitionFiction(s, baseReq(s, dropOrder));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    s.competitionFiction = first.fiction; // the adapter stores it here
+    const firstTheme = s.competitionFiction.theme;
+    // A perfectly VALID second write (correct drop order) is still refused — authoring is once per comp.
+    const second = validateCompetitionFiction(s, { ...baseReq(s, dropOrder), theme: "A DIFFERENT theme" });
+    expect(second).toMatchObject({ ok: false, reason: "already-authored" });
+    // The stored fiction is UNCHANGED (the validator never mutates; the adapter never reassigns on reject).
+    expect(s.competitionFiction.theme).toBe(firstTheme);
+  });
 });

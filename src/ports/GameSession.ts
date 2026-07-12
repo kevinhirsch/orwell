@@ -275,8 +275,10 @@ export interface RecordCompetitionFictionResult {
   /**
    * Why a write-back was refused (Vault-free): "disabled" (flag off) | "no-game" | "no-competition"
    * (no comp staging) | "not-resolved" (the roll has not committed yet) | "comp-mismatch" |
-   * "week-mismatch" | "drop-order-mismatch" (the named eliminations did NOT match the fixed order —
-   * the core safety reject) | "empty-fiction". Absent on acceptance.
+   * "week-mismatch" | "already-authored" (fiction is ALREADY stored for this (comp, week) — the
+   * engine-side exactly-once guard; a second write is refused, never overwrites) | "drop-order-mismatch"
+   * (the named eliminations did NOT match the fixed order — the core safety reject) | "empty-fiction".
+   * Absent on acceptance.
    */
   reason?: string;
 }
