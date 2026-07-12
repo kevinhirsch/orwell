@@ -285,6 +285,11 @@ write_config() {
       # DEFAULT OFF in code (+ additionally gated on the live in-game clock, pinned off in the golden
       # driver) so the seeded gates + golden fixture stay byte-identical; the deploy opts in here.
       echo "ORWELL_CONFESSIONAL_DEPTH=1"
+      # NPC-initiated deal offers (0123): a motivated houseguest floats the player a deal at a lull
+      # (accept => a real deal via the same spine; decline => a small hidden cooling). Grounded, Vault-safe,
+      # bounded. DEFAULT OFF in code (+ only ever acts at a lull) so the seeded gates stay byte-identical;
+      # the deploy opts in here.
+      echo "ORWELL_NPC_DEAL_OFFERS=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded

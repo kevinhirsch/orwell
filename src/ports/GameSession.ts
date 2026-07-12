@@ -997,7 +997,11 @@ export interface PendingDecisionView {
     // --- secret veto (0025 reactive redesign): the player is on the block and secretly holds a
     // one-time safety — their choice to play it (pull off the block) or hold it. `options` is the two
     // nominees; the prompt frames the choice. Vault-free: the power's existence is revealed only here. ---
-    | "secret-veto";
+    | "secret-veto"
+    // --- NPC-initiated deal offer (0123): a motivated houseguest floats the player a deal. `options` are
+    // the two picks (accept / decline); the `offer` detail carries who/kind/terms. Vault-free — a
+    // player-witnessed approach, resolved via submitDecision({ kind:"deal-offer", vote:"accept"|"decline" }). ---
+    | "deal-offer";
   by: NamedRef;
   /** A human-readable instruction for the moment (what the player must choose). */
   prompt: string;
@@ -1017,6 +1021,12 @@ export interface PendingDecisionView {
   finalist?: NamedRef;
   /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
   evictee?: NamedRef;
+  /**
+   * 0123 — the NPC-initiated deal offer detail, for a `deal-offer` decision; absent otherwise. Vault-free:
+   * who floated it (public name), the deal `kind`, and a Vault-safe `terms` paraphrase — no number, no
+   * sealed state. The player accepts or declines the whole offer (the `options` carry accept/decline).
+   */
+  offer?: { from: NamedRef; kind: string; terms: string };
   /**
    * STAGED competition (0006 staged-rounds evolution) — for a `comp-round` decision: which round this is
    * (1-based) and WHO IS STILL IN this round, so the player picks their approach based on the narrowed
@@ -1558,7 +1568,10 @@ export interface SubmitDecisionReq {
     | "self-evict"
     // --- secret veto (0025 reactive redesign): the player plays or holds their one-time safety.
     // Accepts the shared boolean `use` (play it off the block when true; hold it when false/absent). ---
-    | "secret-veto";
+    | "secret-veto"
+    // --- NPC deal offer (0123): the player accepts or declines a houseguest's floated deal. The choice
+    // ("accept" | "decline") rides the shared `vote` field (a string, like a tone/appeal value). ---
+    | "deal-offer";
   /**
    * self-evict (0061): the EXPLICIT confirmation. ONLY `confirmed:true` executes the irreversible
    * walk-out (record the event + fold its impact + flip status through the 0046 door). Anything else
