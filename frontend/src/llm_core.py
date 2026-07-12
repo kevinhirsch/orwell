@@ -638,6 +638,24 @@ def _supports_thinking(model: str) -> bool:
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
 
 
+# OpenRouter documents a 1024-token MINIMUM for Anthropic `reasoning.max_tokens`; a request that
+# sends a smaller value for an Anthropic model is REJECTED rather than clamped. Our reply-reserving
+# sub-budget (`token_policy.resolve_reasoning_max_tokens`) can dip below this when an admin sets a
+# tight per-class output cap (e.g. cap 256 → 153), so the emission site must not send a sub-floor
+# value to an Anthropic model. (Non-Anthropic reasoners have no documented floor and keep the exact
+# value, which is what protects their reply from the reasoning chain — #835.)
+_OPENROUTER_ANTHROPIC_REASONING_MIN = 1024
+
+
+def _is_anthropic_model(model: str) -> bool:
+    """True for an Anthropic (Claude) model — direct (``claude-…``) or via an OpenRouter
+    ``anthropic/…`` slug. Used only to honor OpenRouter's Anthropic `reasoning.max_tokens` floor."""
+    if not model:
+        return False
+    m = model.lower()
+    return "claude" in m or m.startswith("anthropic/")
+
+
 def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Optional[Dict],
                             requested_max_tokens: Optional[int] = None) -> None:
     """ADR 0010 slice B: inject the per-call-class reasoning budget into an OpenAI-compatible payload,
@@ -698,7 +716,16 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
                 basis = min(requested_max_tokens, model_cap)
             else:
                 basis = model_cap
-            reasoning_map["max_tokens"] = resolve_reasoning_max_tokens(basis)
+            reasoning_max = resolve_reasoning_max_tokens(basis)
+            # Only attach the explicit sub-budget when it is provider-VALID. A tight admin cap can
+            # drive it below OpenRouter's 1024-token Anthropic floor (cap 256 → 153), which Anthropic
+            # REJECTS — so for a Claude model below the floor we omit `max_tokens` and let `effort`
+            # (plus the tight cap itself) bound the think. A non-Anthropic reasoner has no such floor
+            # and keeps the exact value, which is what protects its reply from the reasoning chain
+            # (#835). At the usual (untightened) caps the sub-budget is far above the floor, so this
+            # guard is a no-op on the common path.
+            if reasoning_max >= _OPENROUTER_ANTHROPIC_REASONING_MIN or not _is_anthropic_model(model):
+                reasoning_map["max_tokens"] = reasoning_max
         payload["reasoning"] = reasoning_map
 
 def _convert_openai_content_to_anthropic(content):

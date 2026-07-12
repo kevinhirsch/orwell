@@ -104,6 +104,44 @@ def test_explicit_tight_request_cap_shrinks_the_reasoning_budget(monkeypatch):
     assert 2000 - tight >= int(0.4 * 2000), "even a tight cap must reserve reply headroom"
 
 
+def test_openrouter_anthropic_omits_a_subfloor_reasoning_max_tokens(monkeypatch):
+    # #1481 (Greptile P1, T-Rex-verified): OpenRouter documents a 1024-token MINIMUM for Anthropic
+    # `reasoning.max_tokens`. A tight admin output cap drives our reply-reserving sub-budget below
+    # that floor (cap 256 → 153), and Anthropic REJECTS the request instead of using it. For a Claude
+    # model below the floor we must NOT send the explicit sub-budget — `effort` (plus the tight cap
+    # itself) governs — so the request is accepted rather than 400ing.
+    from src.token_policy import resolve_reasoning_max_tokens
+    assert resolve_reasoning_max_tokens(256) < 1024  # precondition: the tight cap dips under the floor
+    p = _capture_payload(monkeypatch, OR_URL, "anthropic/claude-sonnet-4",
+                         policy={"reasoning": {"effort": "medium"}}, max_tokens=256)
+    r = p.get("reasoning")
+    assert isinstance(r, dict) and r.get("effort") == "medium", r
+    assert "max_tokens" not in r, "a sub-1024 Anthropic reasoning.max_tokens must be omitted, not sent"
+
+
+def test_openrouter_anthropic_keeps_a_valid_reasoning_max_tokens(monkeypatch):
+    # At the usual (untightened) caps the sub-budget is far above the 1024 floor, so it rides normally
+    # for a Claude model too — the guard is a no-op on the common path (never silently drops thinking).
+    from src.token_policy import resolve_output_cap, resolve_reasoning_max_tokens
+    p = _capture_payload(monkeypatch, OR_URL, "anthropic/claude-sonnet-4",
+                         policy={"reasoning": {"effort": "medium"}})
+    cap = resolve_output_cap("anthropic/claude-sonnet-4")
+    r = p["reasoning"]
+    assert r["max_tokens"] == resolve_reasoning_max_tokens(cap) >= 1024, r
+
+
+def test_openrouter_non_anthropic_keeps_a_subfloor_reasoning_max_tokens(monkeypatch):
+    # A non-Anthropic reasoner has NO documented floor, so a sub-1024 value is both valid AND is what
+    # protects its reply from the reasoning chain under a tight cap (#835) — it must STILL be sent.
+    # (Guards the fix against over-reaching into the DeepSeek/other-reasoner path.)
+    from src.token_policy import resolve_reasoning_max_tokens
+    expected = resolve_reasoning_max_tokens(256)
+    assert expected < 1024
+    p = _capture_payload(monkeypatch, OR_URL, "deepseek/deepseek-v4-pro",
+                         policy={"reasoning": {"effort": "medium"}}, max_tokens=256)
+    assert p["reasoning"]["max_tokens"] == expected, "DeepSeek keeps its sub-floor reply-protecting budget"
+
+
 def test_o_series_reasoning_effort_carries_no_token_subbudget(monkeypatch):
     # OpenAI o-series reasoning is intrinsic/effort-only — it rides `reasoning_effort`, NOT a
     # `reasoning` map, so there is no token sub-budget to attach (and none must appear).
