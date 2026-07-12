@@ -73,6 +73,23 @@
   border-color: color-mix(in srgb, var(--color-error, #e55) 55%, var(--border));
 }
 
+/* ── Form-row primitive (#1451, follow-on to #658) ───────────────────────────────────────────
+ * The row-level counterpart to the card: a label/description on one side and a control/toggle on
+ * the other. This MIRRORS the legacy `.settings-row` layout byte-for-byte (`style.css`) so that a
+ * migrated row carrying BOTH classes is pixel-neutral (identical declarations → same computed
+ * style regardless of cascade order), while a fresh kit-built `.osc-row` — one that a future
+ * consumer creates WITHOUT `.settings-row` — is self-sufficient from these rules alone. The kit's
+ * `row()` builder and `upgradeRow()`/`scanRows()` compose this so a Settings row is composed from
+ * the kit instead of hand-rolled per tab. Deliberately NO responsive / a11y overrides — the legacy
+ * `.settings-row` has none, and adding any here would diverge the two and break pixel-neutrality. */
+.osc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osc-row--end { justify-content: flex-end; }
+.osc-row--between { justify-content: space-between; }
+
 /* Glass build — the card rides the ONE glass plane: a translucent veil + a luminous inset rim
  * instead of the solid `--panel` slab (HIG: no glass-on-glass in the content layer). */
 body.theme-frosted .osc-card {

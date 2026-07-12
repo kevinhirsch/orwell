@@ -1,5 +1,6 @@
 import type { GameHouse } from "./characterFactory";
 import type { DeepProfile, StoryThread } from "./deepProfile";
+import type { ShowrunnerNote } from "./showrunner";
 import type { CastingIntake } from "./castingIntake";
 import type { GameEvent } from "../domain/event";
 import type { EntityId } from "../domain/ids";
@@ -313,6 +314,28 @@ export interface SessionCore {
   pacingDripCount?: number;
   pacingTickCount?: number;
   pacingLastDrippedWeek?: Record<string, number>;
+  /**
+   * Feature 0101 (#1401) — the AI SHOWRUNNER's Vault-held "producer notes". `showrunnerNotes` is the
+   * APPEND-ONLY production bible: one note per (week, phase) beat, each proposing which simmering hidden
+   * story threads the next off-screen tick should EMPHASIZE (a clamped, boost-only multiplier over 0060's
+   * seeded surfacing — never an outcome, ADR 0005). ENGINE-ONLY / Vault-held (this whole snapshot is
+   * engine-only, like `storyThreads`), so no note ever reaches a player- OR admin-facing projection; it
+   * unseals ONLY in the 0048 retrospective (rendered by `buildVaultUnseal`). `showrunnerNoteCount` is the
+   * monotonic per-season count (++ only — a `SessionCoreCounts` dimension below, and the array is a
+   * `sessionCoreIsSuperset` presence-guarded field), so the bible only ever DEEPENS (non-degradation #4).
+   * Both absent on a pre-0101-showrunner save / when the layer is off ⇒ []/0 (byte-identical).
+   */
+  showrunnerNotes?: ShowrunnerNote[];
+  showrunnerNoteCount?: number;
+  /**
+   * Feature 0101 (#1401) Phase-2 (#1455) — the monotonic per-season count of off-screen ticks on which the
+   * OUTCOME-AFFECTING reweight (behind `ORWELL_SHOWRUNNER_REWEIGHT`, default off) actually RE-ORDERED the
+   * scheduler (the producer's shortlist jumped a thread ahead of the derive order). A `SessionCoreCounts`
+   * dimension (++ only, reset only at a season boundary), so a resumed game keeps the count durable and the
+   * ON calibration run can prove the layer is non-vacuous. Absent on a pre-Phase-2 save / when the reweight
+   * sub-flag is off ⇒ 0 (byte-identical).
+   */
+  showrunnerReweightCount?: number;
   /**
    * Feature 0075 — the trust-gated confidence ledger: per-houseguest, the highest TIER they have
    * confided to the player (monotonic for a true secret) + whether that disclosure was truthful (a
@@ -686,6 +709,8 @@ export interface SessionCoreCounts {
   legendLastActTick: number;
   secretBarterTickCount: number;
   secretBarterCount: number;
+  showrunnerNoteCount: number;
+  showrunnerReweightCount: number;
 }
 
 /** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
@@ -713,6 +738,8 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     surfacedThreadCount: snap.surfacedThreadCount ?? 0,
     tieExposureCount: snap.tieExposureCount ?? 0,
     tieRevealTickCount: snap.tieRevealTickCount ?? 0,
+    showrunnerNoteCount: snap.showrunnerNoteCount ?? 0,
+    showrunnerReweightCount: snap.showrunnerReweightCount ?? 0,
   };
 }
 
@@ -791,6 +818,12 @@ export function sessionCoreIsSuperset(later: SessionSnapshot, earlier: SessionSn
     const laterWeek = laterDripped[id];
     if (laterWeek === undefined || laterWeek < week) return false;
   }
+
+  // showrunnerNotes (0101/#1401): the Vault-held production bible is APPEND-ONLY by `seq` — a note is
+  // never rewritten or dropped once composed, so every earlier note's seq must still be present. The
+  // bible only ever DEEPENS over a season (non-degradation #4).
+  const laterNoteSeqs = new Set((later.showrunnerNotes ?? []).map((n) => n.seq));
+  for (const n of earlier.showrunnerNotes ?? []) if (!laterNoteSeqs.has(n.seq)) return false;
 
   return true;
 }

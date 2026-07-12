@@ -29,7 +29,7 @@ const GAME_SESSION_METHODS: Record<keyof GameSession, true> = {
   confide: true, confront: true,
   createCharacter: true, dailyRecap: true,
   exposeSecret: true, finaleView: true, formAlliance: true, gameStatus: true, getGameState: true,
-  getMomentPrompt: true, getOffscreenSceneSkeletons: true, getPortraitPrompt: true, joinAlliance: true,
+  getMomentPrompt: true, recallSceneMemories: true, getOffscreenSceneSkeletons: true, getPortraitPrompt: true, joinAlliance: true,
   makeDeal: true, markHouseguestMet: true, movePlayer: true, npcVoice: true, playerTagline: true,
   preSeedCast: true, preSeedNextSeason: true, premiereIntros: true, producerVaultDump: true,
   recordCastIdentity: true, recordCastProfile: true, recordCompetitionFiction: true, recordHouseguestMove: true,

@@ -1072,12 +1072,15 @@ def main() -> int:
             except Exception:
                 pass
 
-            # T20: a game panel's minimize-to-dock BEHAVIOR — carried by the FINALE now
-            # (the remaining kit game panel; H5 folded social into the sidebar). Mount the
-            # panel, click its minimize control, and assert the panel hides AND a dock chip
-            # for it appears in the shared "Windows" dock; then restore via the chip and
-            # assert the panel returns. A regression that drops the dock wiring (reverting
-            # to an in-place collapse, or losing the chip) fails here, not at a source grep.
+            # T20: a game panel's minimize BEHAVIOR — carried by the FINALE now (the remaining
+            # kit game panel; H5 folded social into the sidebar). #573 GESTURE UNIFICATION
+            # (window-system audit Direction B): a DOCKABLE window's minimize IS the dock —
+            # ONE gesture, ONE destination (the control room). So the finale's minimize control
+            # DOCKS the full window into the gadget rail (mounts into #gadget-rail-body as a
+            # static .ow-docked window), NOT a chip in a separate "Windows" strip; undocking (⇱)
+            # floats it back. A regression that drops the dock wiring (an in-place collapse, a
+            # stranded/invisible docked window, or a re-split into two destinations) fails here,
+            # not at a source grep.
             page.evaluate("window._orwellFinaleEnsure && window._orwellFinaleEnsure()")
             page.wait_for_selector("#orwell-finale", timeout=3000)
             check(page.evaluate("getComputedStyle(document.getElementById('orwell-finale')).display !== 'none'") is True,
@@ -1092,33 +1095,47 @@ def main() -> int:
             })""")
             check(len(fin_cluster) >= 1 and all(c["label"] and c["w"] >= 24 and c["h"] >= 24 for c in fin_cluster),
                   f"finale composes the kit cluster (named, >=24px tap) ({fin_cluster})")
-            # F1 (DWE audit): these are TRUSTED clicks on purpose — the old evaluate()
-            # clicks worked on an invisible dock and masked the stranded-window trap.
+            # #573: these are TRUSTED clicks on purpose — the old evaluate() clicks worked on an
+            # invisible dock and masked the stranded-window trap.
             page.click("#orwell-finale .ow-min")
-            page.wait_for_timeout(500)  # the ruling-#19 fly-out runs ~270ms before the dock renders
+            page.wait_for_timeout(400)  # the dock re-home is synchronous; a short settle for the onDock render
             min_state = page.evaluate("""() => {
               const el = document.getElementById('orwell-finale');
-              const dock = document.getElementById('minimized-dock');
               const rail = document.getElementById('gadget-rail');
+              const body = document.getElementById('gadget-rail-body');
+              const user = (document.body && document.body.dataset.user) || '';
               const chip = document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-finale"]');
-              const dr = dock ? dock.getBoundingClientRect() : null;
-              return { hidden: !el || getComputedStyle(el).display === 'none', chip: !!chip,
-                       dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dr.height > 0,
-                       // #573 B — RAIL UNIFICATION: the parked chip's dock is homed INTO the
-                       // control-room rail (one destination for minimized + docked windows).
-                       dockInRail: !!(dock && rail && rail.contains(dock)) };
+              return { exists: !!el,
+                       // minimize DOCKS the full window into the control room (static, in the rail body)…
+                       docked: !!el && el.classList.contains('ow-docked'),
+                       inRailBody: !!(el && body && body.contains(el)),
+                       staticPos: !!el && getComputedStyle(el).position === 'static',
+                       visible: !!el && getComputedStyle(el).display !== 'none',
+                       railShown: !!rail && !rail.hasAttribute('hidden'),
+                       dockedFlag: localStorage.getItem('orwell-orwell-finale-docked:' + user),
+                       // …and parks NO chip in the legacy "Windows" strip (the gesture split is retired).
+                       noChip: !chip };
             }""")
-            check(min_state.get("hidden") is True, f"finale panel: minimize HIDES the panel ({min_state})")
-            check(min_state.get("chip") is True, f"finale panel: minimize parks a chip in the shared dock ({min_state})")
-            check(min_state.get("dockVisible") is True,
-                  f"F1: the Windows dock is VISIBLE while holding a chip ({min_state})")
-            check(min_state.get("dockInRail") is True,
-                  f"#573 B: the parked-window dock is homed INTO the control-room rail ({min_state})")
-            page.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-finale']")
+            check(min_state.get("docked") is True and min_state.get("inRailBody") is True
+                  and min_state.get("staticPos") is True,
+                  f"T20/#573: minimize DOCKS the finale into the control-room rail ({min_state})")
+            check(min_state.get("visible") is True and min_state.get("railShown") is True,
+                  f"T20/#573: the docked finale is VISIBLE in the (shown) control room ({min_state})")
+            check(min_state.get("dockedFlag") == "1" and min_state.get("noChip") is True,
+                  f"T20/#573: the docked flag persists and NO chip is parked (one destination) ({min_state})")
+            # Undock (⇱ float) — the single gesture back OUT — floats it; re-ensure re-shows it.
+            page.click("#orwell-finale .ow-dock")
+            page.evaluate("window._orwellFinaleEnsure && window._orwellFinaleEnsure()")
             page.wait_for_timeout(250)
-            restored = page.evaluate(
-                "(function(){var e=document.getElementById('orwell-finale');return !!e && getComputedStyle(e).display!=='none';})()")
-            check(restored is True, "finale panel: restoring from the dock chip re-opens the panel (trusted click)")
+            restored = page.evaluate("""() => {
+              const el = document.getElementById('orwell-finale');
+              const user = (document.body && document.body.dataset.user) || '';
+              return !!el && getComputedStyle(el).display !== 'none'
+                && !el.classList.contains('ow-docked')
+                && localStorage.getItem('orwell-orwell-finale-docked:' + user) === '0';
+            }""")
+            check(restored is True,
+                  "T20/#573: undocking floats the finale back (visible, un-docked, float persisted)")
 
             # F2 (DWE audit): drag must MOVE the panel — the slot restack used to revert
             # every windowDrag style write, leaving drag dead and offsets at (0,0).
@@ -1403,12 +1420,25 @@ def main() -> int:
             page.evaluate("document.body.focus()")
             page.keyboard.press("Escape")
             page.wait_for_timeout(350)
-            parked = page.evaluate("""() => ({
-              hidden: getComputedStyle(document.getElementById('ow-smoke-window')).display === 'none',
-              chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-smoke-window"]'),
-            })""")
+            parked = page.evaluate("""() => {
+              const dock = document.getElementById('minimized-dock');
+              const rail = document.getElementById('gadget-rail');
+              return {
+                hidden: getComputedStyle(document.getElementById('ow-smoke-window')).display === 'none',
+                chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="ow-smoke-window"]'),
+                dockVisible: !!dock && getComputedStyle(dock).display !== 'none' && dock.getBoundingClientRect().height > 0,
+                // #573 B — RAIL UNIFICATION: a NON-dockable window still parks to a chip, and that
+                // chip's "Windows" dock is homed INTO the control-room rail (one destination for both
+                // minimized chips and docked windows). Dockable windows now dock directly (T20/G16).
+                dockInRail: !!(dock && rail && rail.contains(dock)),
+              };
+            }""")
             check(parked.get("hidden") is True and parked.get("chip") is True,
-                  f"kit: Escape parks the top window to the dock (F7) ({parked})")
+                  f"kit: Escape parks the top (non-dockable) window to the dock (F7) ({parked})")
+            check(parked.get("dockVisible") is True,
+                  f"F1: the Windows dock is VISIBLE while holding a chip ({parked})")
+            check(parked.get("dockInRail") is True,
+                  f"#573 B: the parked-chip dock is homed INTO the control-room rail ({parked})")
             page.click("#minimized-dock .minimized-dock-chip[data-modal-id='ow-smoke-window']")
             page.wait_for_timeout(250)
             check(page.evaluate("getComputedStyle(document.getElementById('ow-smoke-window')).display !== 'none'") is True,
@@ -1800,7 +1830,8 @@ def main() -> int:
             check(f1_keys.get("collapsed") is True
                   and f1_keys.get("keys") == [f1_keys.get("expected")],
                   f"G16/F1: the collapse writes under the per-user+game key ({f1_keys})")
-            # F2, the act: open the cast window via the seam, then park it (trusted click).
+            # F2, the act: open the cast window via the seam, then DOCK it (#573 unification —
+            # its minimize control docks the full window into the control room; trusted click).
             _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
                          "G16: the cast seam + the kit mount")
             g16.evaluate("window._orwellCastEnsure()")
@@ -1850,14 +1881,35 @@ def main() -> int:
                   and m22.get("gradients") == m22.get("placeholders"),
                   f"M2-2: zero-provider cast renders the DESIGNED monogram on every placeholder ({m22})")
 
+            # F2 — #573 GESTURE UNIFICATION: the cast is a DOCKABLE window, so its minimize IS
+            # the dock (one gesture, one destination — the control room). The minimize control
+            # DOCKS the full cast window into the gadget rail (mounts into #gadget-rail-body as a
+            # static .ow-docked window), never a chip in a separate strip; the docked flag
+            # persists per user+id and survives a reload; undocking (⇱) floats it back. This
+            # block drives that docked-refresh cycle FOR REAL.
             g16.click("#orwell-cast .ow-min")
-            g16.wait_for_selector(  # the ruling-#19 fly-out (~270ms) precedes the chip
-                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
-                timeout=5000)
+            g16.wait_for_selector(  # the dock re-home mounts the full window into the rail body
+                "#gadget-rail-body > #orwell-cast.ow-docked", timeout=5000)
             f2_flag = g16.evaluate(
-                "localStorage.getItem('orwell-win-parked:orwell-cast:' +"
+                "localStorage.getItem('orwell-orwell-cast-docked:' +"
                 " ((document.body && document.body.dataset.user) || ''))")
-            check(f2_flag == "1", f"G16/F2: minimize persists the parked flag ({f2_flag!r})")
+            check(f2_flag == "1", f"G16/F2: minimize DOCKS the cast and persists the docked flag ({f2_flag!r})")
+            f2_dock = g16.evaluate("""() => {
+              const cast = document.getElementById('orwell-cast');
+              const body = document.getElementById('gadget-rail-body');
+              const rail = document.getElementById('gadget-rail');
+              return {
+                docked: !!cast && cast.classList.contains('ow-docked'),
+                inRailBody: !!(cast && body && body.contains(cast)),
+                visible: !!cast && getComputedStyle(cast).display !== 'none',
+                railShown: !!rail && !rail.hasAttribute('hidden'),
+                noChip: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
+              };
+            }""")
+            check(f2_dock.get("docked") is True and f2_dock.get("inRailBody") is True
+                  and f2_dock.get("visible") is True and f2_dock.get("railShown") is True
+                  and f2_dock.get("noChip") is True,
+                  f"G16/F2: the cast docks into the (shown) control room, no chip parked ({f2_dock})")
 
             # RELOAD #1 — the whole point: both states must survive the refresh.
             g16.reload(wait_until="load", timeout=30000)
@@ -1870,40 +1922,40 @@ def main() -> int:
             }""")
             check(f1_after.get("collapsed") is True and f1_after.get("expanded") == "false",
                   f"G16/F1: after a reload the status HUD is still collapsed ({f1_after})")
-            # F2: re-open via the seam — the parked window must mount INTO the dock.
+            # F2: re-open via the seam — the DOCKED window must come back DOCKED in the rail.
             _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
                          "G16: the cast seam + the kit after reload #1")
             g16.evaluate("window._orwellCastEnsure()")
-            g16.wait_for_selector(
-                "#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']",
-                timeout=5000)
+            g16.wait_for_selector("#gadget-rail-body > #orwell-cast.ow-docked", timeout=5000)
             after1 = g16.evaluate("""() => {
               const cast = document.getElementById('orwell-cast');
-              const dock = document.getElementById('minimized-dock');
+              const body = document.getElementById('gadget-rail-body');
+              const rail = document.getElementById('gadget-rail');
               return {
-                castHidden: !!cast && getComputedStyle(cast).display === 'none',
-                castMinimized: !!cast && cast.classList.contains('modal-minimized'),
-                chip: !!document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
-                dockVisible: !!dock && getComputedStyle(dock).display !== 'none'
-                  && dock.getBoundingClientRect().height > 0,
+                docked: !!cast && cast.classList.contains('ow-docked'),
+                inRailBody: !!(cast && body && body.contains(cast)),
+                visible: !!cast && getComputedStyle(cast).display !== 'none',
+                railShown: !!rail && !rail.hasAttribute('hidden'),
               };
             }""")
-            check(after1.get("castHidden") is True and after1.get("castMinimized") is True,
-                  f"G16/F2: re-opened after a reload, the cast window comes back PARKED ({after1})")
-            check(after1.get("chip") is True and after1.get("dockVisible") is True,
-                  f"G16/F2: after a reload its dock chip is back too ({after1})")
-            # Restore via the chip (trusted click) — visible again, un-parked durably.
-            g16.click("#minimized-dock .minimized-dock-chip[data-modal-id='orwell-cast']")
+            check(after1.get("docked") is True and after1.get("inRailBody") is True,
+                  f"G16/F2: re-opened after a reload, the cast window comes back DOCKED ({after1})")
+            check(after1.get("visible") is True and after1.get("railShown") is True,
+                  f"G16/F2: after a reload the docked cast is visible in the shown rail ({after1})")
+            # Undock via the float toggle (trusted click) — floats back, un-docked durably.
+            g16.click("#orwell-cast .ow-dock")
             g16.wait_for_timeout(250)
             restored1 = g16.evaluate("""() => ({
               visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
-              flag: localStorage.getItem('orwell-win-parked:orwell-cast:' +
+              undocked: !document.getElementById('orwell-cast').classList.contains('ow-docked'),
+              flag: localStorage.getItem('orwell-orwell-cast-docked:' +
                 ((document.body && document.body.dataset.user) || '')),
             })""")
-            check(restored1.get("visible") is True and restored1.get("flag") is None,
-                  f"G16/F2: the chip restores a boot-parked window AND clears the flag ({restored1})")
+            check(restored1.get("visible") is True and restored1.get("undocked") is True
+                  and restored1.get("flag") == "0",
+                  f"G16/F2: undocking floats the cast back AND clears the docked flag ({restored1})")
 
-            # RELOAD #2 — restored means restored: the seam must open it VISIBLE now.
+            # RELOAD #2 — floated means floated: the seam must open it FLOATING + visible now.
             g16.reload(wait_until="load", timeout=30000)
             _g16_wait_js("typeof window._orwellCastEnsure === 'function' && !!window.OrwellWindowKit",
                          "G16: the cast seam + the kit after reload #2")
@@ -1911,10 +1963,12 @@ def main() -> int:
             g16.wait_for_selector("#orwell-cast", state="visible", timeout=15000)
             after2 = g16.evaluate("""() => ({
               visible: getComputedStyle(document.getElementById('orwell-cast')).display !== 'none',
+              floating: !document.getElementById('orwell-cast').classList.contains('ow-docked'),
               chipGone: !document.querySelector('#minimized-dock .minimized-dock-chip[data-modal-id="orwell-cast"]'),
             })""")
-            check(after2.get("visible") is True and after2.get("chipGone") is True,
-                  f"G16/F2: after restore + reload the cast window comes back OPEN, no stale chip ({after2})")
+            check(after2.get("visible") is True and after2.get("floating") is True
+                  and after2.get("chipGone") is True,
+                  f"G16/F2: after undock + reload the cast window comes back OPEN (floating), no stale chip ({after2})")
             g16.close()
 
             # 0051 — IN-CHARACTER IMAGES render (the owed browser-render validation): with a

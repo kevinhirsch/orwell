@@ -17,6 +17,7 @@ import {
   PRIVATE_ORIENTATION_KIND, privateOrientationVaultId, privateOrientationToVaultContent,
 } from "../engine/diversity";
 import { diffuseGossip, makeSocialGraph, GOSSIP } from "../engine/gossip";
+import { recallWitnessedMoments } from "../engine/memoryCallback";
 import type { EntityId } from "../domain/ids";
 import type { PlayerSurface } from "../surfaces/player/PlayerSurface";
 import type { AdminPort } from "../surfaces/admin/AdminPort";
@@ -133,6 +134,22 @@ function buildUserSandbox(user = "default"): UserSandbox {
         id: e.id, ts: e.ts, type: e.type as string, content: e.content,
       })),
   });
+  // Feature #1394 — narrator memory callbacks. THE MANDATE LINE: recall reads ONLY the player's
+  // Vault-free visible projection (`outward.visible.getVisibleStateFor(PLAYER).visibleEvents` — the
+  // outward `VisibleStateService`, which by dependency-cruiser has NO Vault handle at all, and whose
+  // events are already witness-filtered to the player + roster-scrubbed). It CANNOT surface Vault
+  // content because it never receives any; the recall only narrows that Vault-free pool to the scene's
+  // NPC(s) and ranks it semantically against the cue, in the SAME embedding space the soul index uses
+  // (`engine.embed`, fastembed at runtime). Deliberately NOT `engine.soul.recall` — that runs over the
+  // FULL hidden soul (confessionals, hidden leanings) and is Vault content. See the leak test.
+  session.setSceneRecall((npcIds, cue) =>
+    recallWitnessedMoments({
+      events: outward.visible.getVisibleStateFor(PLAYER).visibleEvents,
+      npcIds,
+      cue,
+      embed: engine.embed,
+    }).moments,
+  );
   // Reserve twists (0025/B53): the loaded schedule is SEALED into the Vault — the audit copy no
   // player or admin surface can reach (0001 holds structurally), and 0048's unsealing payoff.
   session.setOnSeal((reserve) => {

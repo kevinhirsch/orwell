@@ -101,6 +101,17 @@
     document.head.appendChild(st);
   }
 
+  // #771 — the gadget header icon is the MONOCHROME kit people-glyph (currentColor), the SAME
+  // line-icon the cast WINDOW paints in its titlebar (#780) — not a full-color emoji. The
+  // OrwellGadget kit renders its `icon` option verbatim via textContent (so a "👥" would show
+  // as the OS color emoji, off-brand vs the kit's monochrome chrome), so we author the glyph
+  // by overwriting the .og-icon's innerHTML after the card mounts. The emoji stays only as the
+  // no-kit textContent fallback (harmless if the overwrite is ever skipped).
+  var OCP_HEADER_ICON =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/></svg>';
+
   var _gadget = null;
   function ensureEl() {
     var el = document.getElementById(ID);
@@ -108,6 +119,11 @@
     ensureCss();
     _gadget = window.OrwellGadgetKit.create({ id: ID, title: "Cast", icon: "👥", role: "group", ariaLabel: "Cast" });
     var body = _gadget.ensure();
+    // paint the monochrome kit glyph over the kit's textContent emoji (see OCP_HEADER_ICON).
+    try {
+      var _ico = _gadget.el && _gadget.el.querySelector(".og-icon");
+      if (_ico) _ico.innerHTML = OCP_HEADER_ICON;
+    } catch (_) {}
     _gadget.addAction({ label: "Open", title: "Open the full cast window", dataset: { act: "open" }, onClick: openFullWindow });
     _gadget.addAction({ label: "Un-pin", title: "Un-pin back to a floating window", dataset: { act: "unpin" }, onClick: function () { setPinned(false); } });
     body.innerHTML =

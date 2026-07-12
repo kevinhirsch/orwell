@@ -179,12 +179,6 @@
   var MAX_LIVE_SURFACES = 20;        // desktop hard cap on simultaneously-refracted elements
   var MAX_LIVE_SURFACES_MOBILE = 8;  // small-screen hard cap (GPU-cheap; CSS glass for the rest)
   var MOBILE_W = 768;                // ≤ this viewport width ⇒ the mobile cap applies
-  var SIZE_BUCKET = 8;               // (legacy) coarse size grid — NO LONGER USED by the rounded-rect
-                                     // path: the map is now generated at the element's EXACT px W×H and
-                                     // applied 1:1 (the non-square fix), so the cache keys on exact size.
-                                     // Same-size gadget cards still collide on one map; off-grid unique
-                                     // elements get their own exact-fit filter (correct — stretching a
-                                     // bucketed map to a non-square box was the bug). Kept for reference.
   var RESIZE_DEBOUNCE_MS = 140;      // coalesce a resize-drag burst into one re-map
   var MAP_RES_CAP = 1024;            // cap a map's canvas dimension (perf + the SVG res ceiling)
 

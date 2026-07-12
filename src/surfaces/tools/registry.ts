@@ -22,6 +22,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "playerTagline", channel: "player", readsVault: false, description: "A snarky, state-aware one-line Big Brother hero tagline for the player (Vault-free; reflects current standing)." },
   { name: "finaleView", channel: "player", readsVault: false, description: "Vault-free projection of an in-progress finale for the finale panel: finalists, stage, and the votes revealed so far (null when no finale is staging)." },
   { name: "getMomentPrompt", channel: "player", readsVault: false, description: "The managed system prompt to inject for the current moment (persona + framing; Vault-free)." },
+  { name: "recallSceneMemories", channel: "player", readsVault: false, description: "Feature #1394 — the 0–2 WITNESSED past moments involving the houseguest(s) the player is in a scene with ({withIds}), ranked by relevance to the scene cue ({cue}), for the narrator to reference ('you told me on day 3 you'd never write my name down'). Reads ONLY the player's visible projection — witnessed/journal-visible events, NEVER the Vault. FE-driven framing infra (the front-end weaves it into the moment prompt); returns { moments: [] } when there is no relevant history. Not a model lever." },
   { name: "getVisibleStateFor", channel: "player", readsVault: false, description: "Visible events + the player's own knowledge." },
   { name: "renderScene", channel: "player", readsVault: false, description: "Narrate a moment from the visible projection." },
   { name: "socialRead", channel: "player", readsVault: false, description: "Honest, Vault-free read of the room or a houseguest; may hint, never names off-screen events." },
@@ -134,6 +135,11 @@ export function toolsFor(channel: OutwardChannel): readonly ToolDescriptor[] {
 // (E20: resolveCompetition is gone from the channel entirely — runCompetition has been the single
 // competition authority since B37; an un-advertised-but-callable second resolver was still a seam.)
 const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSessionSummary", "playerTagline", "finaleView", "getPortraitPrompt", "recordImageBeat",
+  // Feature #1394: `recallSceneMemories` is FE framing infrastructure — the front-end weaves the
+  // recalled witnessed moments into the moment prompt (like `getMomentPrompt`/`stateDelta`), NOT a
+  // game-driving lever the GM model pulls. Excluded from the base prompt's lever manifest so the
+  // manifest↔registry drift test stays green.
+  "recallSceneMemories",
   // 0065 Part E: `stateDelta` is FE/harness infrastructure (the per-turn "what changed since" feed the
   // FE weaves into the moment context) — NOT a game-driving lever the model pulls. Excluded from the
   // base prompt's lever manifest so the manifest↔registry drift test stays green.

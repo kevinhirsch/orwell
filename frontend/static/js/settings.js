@@ -89,6 +89,20 @@ function _upgradeSettingsCards(panel) {
   } catch (_) {}
 }
 
+// #1451 (follow-on to #658): compose the tab's hand-rolled settings rows from the OrwellSettingsCard
+// row primitive. scanRows() ADDS `.osc-row` to every `.settings-row` in the shown panel in place —
+// it KEEPS `.settings-row` (whose style.css layout `.osc-row` mirrors byte-for-byte, so this is
+// pixel-neutral) and touches only a class (no node/id/listener/ARIA change). Idempotent + fail-open:
+// no kit ⇒ the raw `.settings-row` markup stands. The row-level sibling of _upgradeSettingsCards():
+// one funnel (_swapToPanel) composes both the cards and the rows of each activated tab.
+function _upgradeSettingsRows(panel) {
+  try {
+    var Kit = window.OrwellSettingsCardKit;
+    if (!panel || !Kit || typeof Kit.scanRows !== 'function') return;
+    Kit.scanRows(panel);
+  } catch (_) {}
+}
+
 function _swapToPanel(tab) {
   modalEl.querySelectorAll('[data-settings-tab]').forEach(b => {
     const isActive = b.dataset.settingsTab === tab;
@@ -102,7 +116,7 @@ function _swapToPanel(tab) {
   modalEl.querySelectorAll('[data-settings-panel]').forEach(p => {
     const isActive = p.dataset.settingsPanel === tab;
     p.classList.toggle('hidden', !isActive);
-    if (isActive) _upgradeSettingsCards(p);
+    if (isActive) { _upgradeSettingsCards(p); _upgradeSettingsRows(p); }
   });
   // Mark when the Appearance tab is open so the modal can go
   // semi-transparent — lets the user see the rest of the UI react as

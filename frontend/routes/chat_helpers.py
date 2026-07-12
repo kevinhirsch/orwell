@@ -2732,6 +2732,53 @@ def _render_presence_movement(prev: Optional[dict], cur: Optional[dict]) -> Opti
     )
 
 
+# ── Feature #1394 — narrator memory callbacks (default OFF) ──────────────────────────────────── #
+
+# How many recalled moments ride the framing at most (mirrors the engine's MEMORY_CALLBACK.k).
+_MEMORY_CALLBACK_MAX = 2
+
+
+def _memory_callbacks_enabled() -> bool:
+    """Feature #1394 — default OFF. Absent flag ⇒ the recall is NEVER fetched and the framing is
+    byte-identical (the floor contract). Read at call time (no restart), like the other runtime dials."""
+    raw = (os.getenv("ORWELL_MEMORY_CALLBACKS") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _scene_npc_ids(whereabouts) -> list:
+    """The houseguest ids co-present with the player right now (the presence seam) — who the player is
+    in a scene with. Reads only the Vault-free public {id,name} refs the whereabouts projection already
+    carries. [] when out of the house / pre-game / odd shape (⇒ no recall, no framing change)."""
+    if not isinstance(whereabouts, dict):
+        return []
+    out: list = []
+    for p in (whereabouts.get("present") or []):
+        if isinstance(p, dict):
+            pid = str(p.get("id") or "").strip()
+            if pid:
+                out.append(pid)
+    return out
+
+
+def _render_memory_callbacks(moments) -> Optional[str]:
+    """Feature #1394 — render the engine's recalled WITNESSED moments as "facts you MAY reference", or
+    None when there are none (recall absence is NOT a failure → no block → byte-identical framing). The
+    moments are Vault-free by construction (the engine reads only the player's visible projection)."""
+    if not isinstance(moments, list):
+        return None
+    clean = [str(m).strip() for m in moments if isinstance(m, str) and str(m).strip()][:_MEMORY_CALLBACK_MAX]
+    if not clean:
+        return None
+    lines = "\n".join(f"  • {m}" for m in clean)
+    return (
+        "MEMORY — real earlier moments the player SHARED with a houseguest here (recalled from the "
+        "record, never invented). A houseguest MAY reference one naturally if it fits the scene — "
+        "\"you told me at the veto you'd never write my name\" — grounding the callback in what actually "
+        "happened. Never force it, never contradict it, and never invent a moment that is not listed:\n"
+        + lines
+    )
+
+
 async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
     turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
@@ -3246,6 +3293,24 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _db_steer
         except Exception as e:
             logger.warning("[orwell] day-break steer framing skipped for user=%s: %s", _gkey, e)
+        # Feature #1394 — narrator memory callbacks (default OFF via ORWELL_MEMORY_CALLBACKS). When ON,
+        # recall 1–2 WITNESSED past moments involving the houseguest(s) the player is in a scene with
+        # (the presence seam), ranked against the player's message, and hand them to the narrator as
+        # "facts you MAY reference" ("you told me on day 3 you'd never write my name down"). The engine
+        # reads ONLY the player's Vault-free visible projection — never the Vault. Additive + fail-open;
+        # absent flag / no present NPC / no player message / no relevant history ⇒ NO block, so the
+        # framing is byte-identical to today (the floor contract). NOTE: enabling the flag adds this
+        # block to the moment-framing request digest ⇒ the golden fixture must be re-recorded (#1394).
+        if _memory_callbacks_enabled():
+            try:
+                _scene_ids = _scene_npc_ids(game_state.get("whereabouts"))
+                if _scene_ids and isinstance(player_msg, str) and player_msg.strip():
+                    _recall = await orwell_engine.recall_scene_memories(_scene_ids, cue=player_msg, user=user)
+                    _cb = _render_memory_callbacks((_recall or {}).get("moments")) if isinstance(_recall, dict) else None
+                    if _cb:
+                        gm_prompt = gm_prompt + "\n\n" + _cb
+            except Exception as e:
+                logger.warning("[orwell] memory-callback framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING

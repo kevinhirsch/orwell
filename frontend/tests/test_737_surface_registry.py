@@ -21,6 +21,15 @@ This is that additive layer. `surface_registry.json` is the manifest; this file:
       that isn't registered fails here; a registered kit whose definition disappears
       or moves file fails too. Never silent.
 
+This drift guard (b) closes the "new KIT slips in unregistered" hole — but only for chrome
+that EXPOSES a `window.Orwell*Kit` seam. The complementary hole — a new **orphan** surface
+family that hand-rolls bespoke floating chrome and composes NO kit at all (so it has no seam
+for (b) to see, and no `data-<ns>-*` marker for the browser_smoke runtime census to see) — is
+closed by the UNIVERSAL scan in tests/test_1454_orphan_chrome_ratchet.py (#1454): a single
+static gate that fails on ANY `static/js` module authoring un-registered `position: fixed`
+surface chrome. Together they make "a new surface family cannot be introduced without composing
+a registered kit or being registered" hold for BOTH the kit-seam and the orphan cases.
+
 It does NOT re-implement the per-family gates (they own the deep chrome/a11y pins) and
 it does NOT build a visual/screenshot matrix (that is #113's job). One manifest, one
 coverage/drift contract.

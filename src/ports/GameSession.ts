@@ -775,6 +775,26 @@ export interface MomentPromptView {
   systemPrompt: string;
 }
 
+/**
+ * Feature #1394 — narrator memory callbacks. The FE asks, before framing a player↔NPC scene, for the
+ * witnessed past moments involving the houseguest(s) the player is with, so the narrator can reference
+ * a real earlier beat ("you told me on day 3 you'd never write my name down"). Vault-free by
+ * construction: the adapter reads ONLY the player's visible projection (see the registry wiring).
+ */
+export interface RecallSceneMemoriesReq {
+  /** The houseguest(s) the player is in a scene with — the FE presence seam (`whereabouts.present` ids).
+   *  Recall is scoped to witnessed moments involving these NPCs. Absent/empty ⇒ no recall. */
+  withIds?: EntityId[];
+  /** The current scene cue to rank relevance against (the player's message). Absent/empty ⇒ no recall. */
+  cue?: string;
+}
+
+export interface RecallSceneMemoriesView {
+  /** 0–2 Vault-free witnessed moments to hand the narrator as "facts you may reference." Empty when
+   *  there is no relevant history (the enrichment policy: recall absence is NOT a failure). */
+  moments: string[];
+}
+
 export interface RunCompetitionReq {
   /** Competition type; an unknown/missing value falls back to a sensible default. */
   type?: string;
@@ -1503,6 +1523,9 @@ export interface BehavioralFlags {
   seededTieSurfacing?: boolean;
   /** 0101 — NPC myth-making (the house turns a rare, notable player act into a spreading legend). */
   mythMaking?: boolean;
+  /** 0101/#1401 — the AI showrunner (Vault-held producer notes that pace which simmering threads the
+   *  off-screen tick emphasizes; open-set only — never an outcome). */
+  showrunner?: boolean;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */
@@ -1826,6 +1849,13 @@ export interface GameSession {
   stateDelta(sinceBeatSeq: number): StateDeltaView;
   /** The managed system prompt to inject for the current (or requested) moment. */
   getMomentPrompt(req: MomentPromptReq): MomentPromptView;
+  /**
+   * Feature #1394 — recall the Vault-free witnessed moments involving the scene's houseguest(s),
+   * ranked by relevance to the cue, for the narrator's framing. A pure READ (never mutates). Vault-free
+   * by construction: it reads only the player's visible projection (the registry wires the source).
+   * Returns `{ moments: [] }` when nothing relevant exists — never an error (enrichment absence is fine).
+   */
+  recallSceneMemories(req: RecallSceneMemoriesReq): RecallSceneMemoriesView;
   /**
    * Resolve a competition over the live house using the engine's OWN stats +
    * seeded temperature. Returns only the winner (name) — no stats/scores cross
