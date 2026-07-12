@@ -3586,6 +3586,12 @@ export class GameSessionAdapter implements GameSession {
    *  early-evening hour. Drives both who is awake late (`awakeNow`) and their next-day sleep deficit,
    *  coherently. With Extension 2 off the conflict tally is never populated, so this is just the base
    *  chronotype bedtime hour ⇒ byte-identical. */
+  private effectiveBedDepth(id: EntityId): number {
+    const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
+    const conflicts = this.nightConflicts.get(id) ?? 0;
+    return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
+  }
+
   /** 0066 Extension 4 — the count of OTHER active NPCs who are natural night-owls tonight (their own
    *  conflict-drained chronotype bedtime runs past midnight) and would be up as late company. Feeds the
    *  EMERGENT bedtime (`npcRestDeficit`): an owl only lingers (and pays sleep debt) when they had company
@@ -3599,12 +3605,6 @@ export class GameSessionAdapter implements GameSession {
       if (this.effectiveBedDepth(other) > CLOCK.midnightHour) n++;
     }
     return n;
-  }
-
-  private effectiveBedDepth(id: EntityId): number {
-    const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
-    const conflicts = this.nightConflicts.get(id) ?? 0;
-    return Math.max(BEDTIME_DEPTH_FLOOR, base - CONFLICT_BEDTIME_DRAIN * conflicts);
   }
 
   /** Clear the per-night conflict tally at the moment the day rolls over (a fresh morning at the 8am wake) —
