@@ -321,6 +321,10 @@ function ensureCss() {
        window's lowest controls don't fall below the fold when the soft keyboard opens; vh first
        as the fallback for engines without dvh. */
     .ow-body { padding: .4rem .7rem .6rem; overflow: auto; max-height: min(70vh, 560px); max-height: min(70dvh, 560px); }
+    /* WCAG 2.1.1 (Keyboard): the scroll body is focusable (tabindex=0, set in _build) so a
+       keyboard/SR user can Tab to it and use arrows/PageDown/Space to read non-interactive
+       content below the fold. Ring matches the kit's neutral iOS-blue focus ring (titlebar). */
+    .ow-body:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }
     /* ── A7 [ruling #19] — the Windows-7 fly-out family ───────────────────────
        The animation CONTRACT exposes DISTINCT minimize vs. close keyframes, both
        DRIVEN (not pure transitions) so the CSS itself names the two motions; the
@@ -900,6 +904,14 @@ export class OrwellWindow {
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';
+    // WCAG 2.1.1 (Keyboard): .ow-body is overflow:auto with a max-height, so when its content is
+    // non-interactive (Memory Wall, Retrospective, Deals…) a keyboard-only / SR user has no way to
+    // scroll below the fold. tabindex=0 lets Tab land on it (native arrow/PageDown/Space scroll)
+    // and — since _trapFocus's query already matches [tabindex] — folds it into the focus trap.
+    // role=region + a title-derived label names it in the accessibility tree.
+    body.setAttribute('tabindex', '0');
+    body.setAttribute('role', 'region');
+    body.setAttribute('aria-label', this.o.title ? this.o.title + ' content' : 'panel content');
     if (this.o.content instanceof Node) body.appendChild(this.o.content);
     else if (typeof this.o.content === 'string') body.innerHTML = this.o.content;
     // #893: the sheet grabber — the iOS pill above the titlebar (44px hit region in
