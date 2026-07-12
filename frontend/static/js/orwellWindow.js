@@ -610,15 +610,21 @@ const SHEET_DISMISS_FRACTION = 0.4;
 // the dock (chip rendered, panel hidden, no open animation — no flash, no
 // raise, no focus steal).
 function parkedKey(id) {
-  return 'orwell-win-parked:' + id + ':' + ((document.body && document.body.dataset.user) || '');
+  // R5/#1416b: per-user via the shared fail-closed helper — 'orwell-win-parked:<id>:<user>' when
+  // there is an identity (or ':local' under an explicit no-auth signal), else null so the caller
+  // SKIPS persistence rather than sharing a namespace across users.
+  return (window.orwellUserKey && window.orwellUserKey('orwell-win-parked:' + id)) || null;
 }
 function loadParked(id) {
-  try { return localStorage.getItem(parkedKey(id)) === '1'; } catch (_) { return false; }
+  var k = parkedKey(id);
+  try { return !!k && localStorage.getItem(k) === '1'; } catch (_) { return false; }
 }
 function saveParked(id, on) {
+  var k = parkedKey(id);
+  if (!k) return;                       // no identity ⇒ skip (never a shared-namespace write)
   try {
-    if (on) localStorage.setItem(parkedKey(id), '1');
-    else localStorage.removeItem(parkedKey(id));
+    if (on) localStorage.setItem(k, '1');
+    else localStorage.removeItem(k);
   } catch (_) {}
 }
 
@@ -627,18 +633,23 @@ function saveParked(id, on) {
 // key pattern so docked-vs-floating survives a reload exactly like the rail's
 // other persisted layout. Default is floating unless `defaultDocked` flips it.
 function dockedKey(id) {
-  return 'orwell-' + id + '-docked:' + ((document.body && document.body.dataset.user) || '');
+  // R5/#1416b: per-user via the shared fail-closed helper — 'orwell-<id>-docked:<user>' (or
+  // ':local' under an explicit no-auth signal), else null so the caller SKIPS persistence.
+  return (window.orwellUserKey && window.orwellUserKey('orwell-' + id + '-docked')) || null;
 }
 function loadDocked(id, dflt) {
+  const k = dockedKey(id);
   try {
-    const v = localStorage.getItem(dockedKey(id));
+    const v = k && localStorage.getItem(k);
     if (v === '1') return true;
     if (v === '0') return false;
   } catch (_) {}
   return !!dflt;
 }
 function saveDocked(id, on) {
-  try { localStorage.setItem(dockedKey(id), on ? '1' : '0'); } catch (_) {}
+  const k = dockedKey(id);
+  if (!k) return;                       // no identity ⇒ skip (never a shared-namespace write)
+  try { localStorage.setItem(k, on ? '1' : '0'); } catch (_) {}
 }
 
 // ── 0064 Part F: cross-device layout sync ──────────────────────────────────
@@ -1069,7 +1080,10 @@ export class OrwellWindow {
     const dirs = { ArrowLeft: [-STEP, 0], ArrowRight: [STEP, 0], ArrowUp: [0, -STEP], ArrowDown: [0, STEP] };
     if (e.key === 'Home' && this._slot && this.o.slotKey) {
       e.preventDefault();
-      try { localStorage.removeItem('orwell-slot-offset:' + this.o.slotKey + ':' + ((document.body && document.body.dataset.user) || '')); } catch (_) {}
+      // R5/#1416b: per-user via the shared fail-closed helper; null-guarded so a missing identity
+      // skips the removeItem rather than coercing a null key into a shared 'null' namespace.
+      const k = window.orwellUserKey && window.orwellUserKey('orwell-slot-offset:' + this.o.slotKey);
+      if (k) { try { localStorage.removeItem(k); } catch (_) {} }
       this._slot.restack();
       return;
     }

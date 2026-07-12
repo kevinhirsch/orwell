@@ -28,7 +28,10 @@
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (_) {} }
   function lsDel(k) { try { localStorage.removeItem(k); } catch (_) {} }
   function pinKey() {
-    return "orwell-cast-pinned:" + ((document.body && document.body.dataset.user) || "");
+    // R5/#1416b: per-user via the shared fail-closed helper — 'orwell-cast-pinned:<user>' (or
+    // ':local' under an explicit no-auth signal), else null so the caller SKIPS persistence
+    // rather than sharing the pinned state across users on one browser.
+    return (window.orwellUserKey && window.orwellUserKey("orwell-cast-pinned")) || null;
   }
   function _isNarrow() {
     try { return window.matchMedia("(max-width: 768px)").matches; } catch (_) { return false; }
@@ -40,7 +43,8 @@
   // explicitly un-pinned it ("0"). Tri-state storage keeps desktop untouched: "1" = pinned,
   // "0" = explicitly un-pinned, absent = undecided (desktop: floating; mobile: auto-docked).
   function isPinned() {
-    var v = lsGet(pinKey());
+    var k = pinKey();                    // R5/#1416b: null when there is no resolved identity
+    var v = k ? lsGet(k) : null;
     if (v === "1") return true;
     if (v === "0") return false;        // explicit un-pin wins on every viewport
     return _isNarrow();                  // undecided: docked on mobile, floating on desktop
@@ -239,7 +243,10 @@
   function setPinned(on) {
     // #656 — store an EXPLICIT un-pin ("0") rather than deleting the key, so the choice
     // sticks on mobile (where absent ⇒ auto-docked). "1" = pinned, "0" = explicitly off.
-    lsSet(pinKey(), on ? "1" : "0");
+    // R5/#1416b: null-guarded — a missing identity skips the write (the toggle still applies
+    // in-session below; it just doesn't persist a shared-namespace pin).
+    var k = pinKey();
+    if (k) lsSet(k, on ? "1" : "0");
     ensureEl();
     if (on) {
       // pinning DOCKS the roster: close the floating cast window if open, render the gadget

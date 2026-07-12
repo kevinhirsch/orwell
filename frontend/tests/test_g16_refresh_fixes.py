@@ -118,12 +118,11 @@ def test_sourcepin_f1_collapse_reapplies_on_a_game_key_change():
 
 def test_sourcepin_f2_parked_key_mirrors_the_slot_offset_scheme():
     js = _read("static", "js", "orwellWindow.js")
-    # Per-window, per-user — the same key shape as orwell-slot-offset:<key>:<user>.
-    assert re.search(
-        r"return 'orwell-win-parked:' \+ id \+ ':' \+ "
-        r"\(\(document\.body && document\.body\.dataset\.user\) \|\| ''\);",
-        js,
-    ), "parkedKey must be 'orwell-win-parked:<id>:<user>'"
+    # Per-window, per-user — base 'orwell-win-parked:<id>' preserved, the ':<user>' derivation now
+    # routes through the shared fail-closed helper (R5/#1416b): 'orwell-win-parked:<id>:<user>' with
+    # an identity, ':local' under an explicit no-auth signal, else null so the caller SKIPS.
+    assert "window.orwellUserKey('orwell-win-parked:' + id)" in js, \
+        "parkedKey must derive 'orwell-win-parked:<id>:<user>' via the shared helper"
     assert "function loadParked(id)" in js
     assert "function saveParked(id, on)" in js
 
@@ -251,8 +250,10 @@ def test_smoke_drives_both_fixes_for_real():
     # HUD collapse → reload → still collapsed under the key the panel writes (F1 unchanged).
     smoke = _read("scripts", "browser_smoke.py")
     assert "G16 (G5 refresh-persistence audit, F1+F2)" in smoke
-    # F2 — the dockable cast docks (not a chip) and the docked flag survives the reload
-    assert "orwell-orwell-cast-docked:" in smoke
+    # F2 — the dockable cast docks (not a chip) and the docked flag survives the reload. R5/#1416b:
+    # the probe derives the per-user key via window.orwellUserKey (base 'orwell-orwell-cast-docked'),
+    # the SAME way the app now writes it — so the ':<user>' suffix lives inside the helper.
+    assert "orwell-orwell-cast-docked" in smoke
     assert "comes back DOCKED" in smoke
     assert "comes back OPEN" in smoke
     # F1 — the status HUD collapse still survives the reload under its per-user+game key
