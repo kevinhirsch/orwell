@@ -35,9 +35,41 @@ const TURN = process.env.MIRROR_TURN || "(I glance around the room, curious who'
 const A_SETTLE_MS = parseInt(process.env.MIRROR_TOOLTURN_A_SETTLE_MS || '45000', 10);
 const B_SETTLE_MS = parseInt(process.env.MIRROR_TOOLTURN_B_SETTLE_MS || '30000', 10);
 
+// TRANSPORT MODE (#1087): the same per-leg client-side pin mirror_live_parity.mjs uses. The gate's
+// FE runs with the server-injected flag OFF (run_mirror_gate.sh), so `MIRROR_WS_TRANSPORT=1` forces
+// `window.ORWELL_WS_TRANSPORT` in an init script (before app JS) and `=0`/unset is genuine SSE/poll.
+// The WS init script also wraps WebSocket to record every frame in/out on /api/ws/session
+// (`window.__wsFrames`) — the evidence rail for the subscribe-churn collapse checks below.
+const WS_TRANSPORT = process.env.MIRROR_WS_TRANSPORT === '1' || process.env.MIRROR_WS_TRANSPORT === 'true';
+const MODE = WS_TRANSPORT ? 'ws' : 'fallback';
+const WS_FLAG_INIT = WS_TRANSPORT
+  ? `(() => { try {
+      window.ORWELL_WS_TRANSPORT = true;
+      window.__wsFrames = [];
+      var _OWS = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        var s = protocols ? new _OWS(url, protocols) : new _OWS(url);
+        try {
+          if (/\\/api\\/ws\\/session/.test(String(url))) {
+            var _send = s.send.bind(s);
+            s.send = function (data) { try { window.__wsFrames.push({ dir: 'out', d: String(data).slice(0, 300), t: Date.now() }); } catch (_) {} return _send(data); };
+            s.addEventListener('message', function (ev) { try { window.__wsFrames.push({ dir: 'in', d: String(ev.data).slice(0, 300), t: Date.now() }); } catch (_) {} });
+            s.addEventListener('close', function (ev) { try { window.__wsFrames.push({ dir: 'close', code: ev.code, t: Date.now() }); } catch (_) {} });
+          }
+        } catch (_) {}
+        return s;
+      };
+      window.WebSocket.prototype = _OWS.prototype;
+      window.WebSocket.CONNECTING = _OWS.CONNECTING; window.WebSocket.OPEN = _OWS.OPEN;
+      window.WebSocket.CLOSING = _OWS.CLOSING; window.WebSocket.CLOSED = _OWS.CLOSED;
+    } catch (_) {} })()`
+  : null;
+
+console.log(`\nMIRROR TOOL-TURN transport mode: ${MODE.toUpperCase()}${WS_TRANSPORT ? ' (ORWELL_WS_TRANSPORT forced ON via init script)' : ' (SSE/poll fallback — flag OFF)'}`);
+
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
-const A = await openMirrorWindow(browser, 'A');
-const B = await openMirrorWindow(browser, 'B');
+const A = await openMirrorWindow(browser, 'A', { extraInit: WS_FLAG_INIT });
+const B = await openMirrorWindow(browser, 'B', { extraInit: WS_FLAG_INIT });
 
 const e0 = { A: pub(await engineSnapshot(A.ctx)), B: pub(await engineSnapshot(B.ctx)) };
 console.log(`CP0: started A=${e0.A.started} B=${e0.B.started} beat=${e0.A.beatSeq}/${e0.B.beatSeq}`);
@@ -84,6 +116,33 @@ const serverVisibleB = histB.visibleCount;
 const dupA = findDupedText(tA);
 const dupB = findDupedText(tB);
 
+// ── #1087 WS churn-collapse evidence (WS mode only) ──
+// A healthy window issues ONE chat subscribe per run it attaches (the initial handshake subscribe
+// plus one `run-started` re-attach for the turn) and never loops on stale replayed `run-started`
+// edges. The regression's frame-log signature was ~10 chat subscribes / ~23 run-started edges over
+// two runs, GROWING with time (the ~2s rebind→ring-replay churn) — so these bounds are deliberately
+// loose (a reconnect or a ring-replayed-but-ignored stale edge each add one) while staying far
+// below the churn signature.
+const WS_CHAT_SUB_MAX = 4;
+const WS_RUNSTART_MAX = 5;
+const wsFramesA = WS_TRANSPORT ? await A.page.evaluate(() => window.__wsFrames || []) : [];
+const wsFramesB = WS_TRANSPORT ? await B.page.evaluate(() => window.__wsFrames || []) : [];
+const wsModeA = await A.page.evaluate(() => (window.OrwellWs && window.OrwellWs.mode && window.OrwellWs.mode()) || 'absent');
+const wsModeB = await B.page.evaluate(() => (window.OrwellWs && window.OrwellWs.mode && window.OrwellWs.mode()) || 'absent');
+const wsStatsOf = (frames) => {
+  const out = { chatSubscribes: 0, edgeSubscribes: 0, runStartedEdges: 0, binds: 0 };
+  for (const f of frames || []) {
+    let j; try { j = JSON.parse(f.d); } catch (_) { continue; }
+    if (f.dir === 'out' && j.t === 'subscribe' && j.ch === 'chat') out.chatSubscribes++;
+    if (f.dir === 'out' && j.t === 'subscribe' && (j.ch === 'state' || j.ch === 'hud')) out.edgeSubscribes++;
+    if (f.dir === 'out' && j.t === 'bind') out.binds++;
+    if (f.dir === 'in' && j.t === 'state' && j.d && j.d.reason === 'run-started') out.runStartedEdges++;
+  }
+  return out;
+};
+const wsStatsA = wsStatsOf(wsFramesA);
+const wsStatsB = wsStatsOf(wsFramesB);
+
 const checks = {
   aCountMatchesServer: visibleCountA === serverVisibleA,
   bCountMatchesServer: visibleCountB === serverVisibleB,
@@ -91,18 +150,31 @@ const checks = {
   noDupTextInA: dupA.length === 0,
   noDupTextInB: dupB.length === 0,
   sessionIdsShared: !!sessionIdA && sessionIdA === sessionIdB,
+  // WS mode only (vacuously true in fallback): the run rode the socket (no silent-fallback false
+  // green), the chat subscribes collapsed to attach-per-run, and no stale run-started edge churn.
+  wsTransportEngaged: !WS_TRANSPORT || (wsModeA === 'ws' && wsModeB === 'ws'),
+  wsChatSubscribesCollapsed: !WS_TRANSPORT ||
+    (wsStatsA.chatSubscribes <= WS_CHAT_SUB_MAX && wsStatsB.chatSubscribes <= WS_CHAT_SUB_MAX),
+  wsNoRunStartedChurn: !WS_TRANSPORT ||
+    (wsStatsA.runStartedEdges <= WS_RUNSTART_MAX && wsStatsB.runStartedEdges <= WS_RUNSTART_MAX),
 };
 const PASS = Object.values(checks).every(Boolean);
 
 const report = {
-  meta: { turn: TURN, sendWall, reasonA, reasonB, aSettleWall, bSettleWall, sessionIdA, sessionIdB },
+  meta: { turn: TURN, mode: MODE, sendWall, reasonA, reasonB, aSettleWall, bSettleWall, sessionIdA, sessionIdB },
   engine: { converged: JSON.stringify(e1.A) === JSON.stringify(e1.B), beat: [e1.A.beatSeq, e1.B.beatSeq] },
   counts: { visibleCountA, serverVisibleA, visibleCountB, serverVisibleB },
   duplicates: { A: dupA, B: dupB },
   transcriptDiff: domDiff.identical ? null : domDiff.firstDivergence,
+  ws: WS_TRANSPORT ? { modeA: wsModeA, modeB: wsModeB, A: wsStatsA, B: wsStatsB,
+                       bounds: { chatSubscribes: WS_CHAT_SUB_MAX, runStartedEdges: WS_RUNSTART_MAX } } : null,
   checks, PASS,
 };
 writeJson(OUT + 'mirror-toolturn-report.json', report);
+if (WS_TRANSPORT) {
+  writeJson(OUT + 'ws-frames-A.json', wsFramesA);
+  writeJson(OUT + 'ws-frames-B.json', wsFramesB);
+}
 writeJson(OUT + 'transcript-A.json', tA);
 writeJson(OUT + 'transcript-B.json', tB);
 writeJson(OUT + 'history-A.json', histA.raw);
@@ -120,6 +192,12 @@ if (!checks.transcriptsIdentical) console.log(`   first divergence: ${JSON.strin
 console.log(`no duplicated bubble text in A       → ${checks.noDupTextInA}${dupA.length ? '  DUPES: ' + JSON.stringify(dupA) : ''}`);
 console.log(`no duplicated bubble text in B       → ${checks.noDupTextInB}${dupB.length ? '  DUPES: ' + JSON.stringify(dupB) : ''}`);
 console.log(`both windows on the same session id  → ${checks.sessionIdsShared} (A=${sessionIdA} B=${sessionIdB})`);
+if (WS_TRANSPORT) {
+  console.log(`transport engaged (ws)               → ${checks.wsTransportEngaged} (A=${wsModeA} B=${wsModeB})`);
+  console.log(`chat subscribes collapsed (≤${WS_CHAT_SUB_MAX})       → ${checks.wsChatSubscribesCollapsed} (A=${wsStatsA.chatSubscribes} B=${wsStatsB.chatSubscribes})`);
+  console.log(`no stale run-started churn (≤${WS_RUNSTART_MAX})     → ${checks.wsNoRunStartedChurn} (A=${wsStatsA.runStartedEdges} B=${wsStatsB.runStartedEdges})`);
+  console.log(`   (edge subscribes A=${wsStatsA.edgeSubscribes} B=${wsStatsB.edgeSubscribes} · binds A=${wsStatsA.binds} B=${wsStatsB.binds})`);
+}
 console.log(`\nVERDICT: ${PASS ? 'PASS — no duplication/orphans across two windows on a tool-rich turn' : 'FAIL — see counts/dupes/transcript above'}`);
 console.log(`artifacts: ${OUT}`);
 

@@ -122,14 +122,28 @@ import * as modalManager from "./modalManager.js";
           justify-content: flex-start;
         }
         #orwell-finale .ofin-btn:hover { border-color: var(--accent, #e06c75); }
-        /* E67/C26 + F3: phones — a full-width top sheet whose POSITION the slot
-           engine's sheet host owns (no per-panel pins; two visible sheets stack,
-           never overlap). */
+        /* #894 (RESP-3/5, #780-3): the narrow-tier presentation is the kit's #893 bottom
+           sheet (sheet:true on the create() opts below) — edge-to-edge, detent-sized,
+           scroll-contained body. Two consumer-level geometry overrides ride on top, both
+           by #id specificity (the kit's presentation rules are class-scoped):
+             1. WIDTH — the base #orwell-finale width:240px rule above out-ranks the kit's
+                width:auto, so the sheet would render a narrow 240px slab; reset it so the
+                sheet goes full-width.
+             2. CLEAR THE COMPOSER (browser_smoke F3) — the kit pins the sheet bottom:0,
+                which would BURY the composer ("the conversation is the game"; the Finale
+                is non-modal and coexists with the composer for the vote-prefill). Lift the
+                sheet's bottom above the composer via the live --composer-clearance var
+                (init.js syncs it to the composer height + an 8px gap; the slot bottoms base
+                off the same var), so f.bottom = composer.top - 8, and cap the height so
+                even the full detent never overruns the top. The finalist content scrolls
+                inside the kit's .ow-body.
+           The docked-narrow case is unaffected (a docked window is in-flow; bottom/height
+           are inert on a static element). */
         @media (max-width: 768px) {
           #orwell-finale {
             width: auto !important; max-width: none !important;
-            border-radius: 0 0 12px 12px; border-left: none; border-right: none;
-            max-height: 42vh; overflow: auto;
+            bottom: var(--composer-clearance, 84px);
+            max-height: calc(100dvh - var(--composer-clearance, 84px) - 24px);
           }
         }
         /* #725: soften the inner var(--border) strokes (finalist cards, move buttons) to the
@@ -161,6 +175,18 @@ import * as modalManager from "./modalManager.js";
       // line owner flip to defaultDocked:true). Docked, it rides the rail's single
       // mobile drawer + content-driven visibility (it self-hides when not staging).
       dockable: true, defaultDocked: false,
+      // #894 (RESP-3/5, #780-3): on the narrow tier present as a bottom SHEET (the
+      // proven Cast recipe — orwellCast.js) instead of a floating window that opens
+      // top-left/clipped over the chat + composer. Non-modal windows opt in
+      // explicitly; docked still wins (the rail owns docked placement).
+      sheet: true,
+      // #573 gesture unification: minimize now DOCKS the finale into the control room.
+      // On the dock/undock re-home the kit keeps the SAME instance + content node but
+      // rebuilds the element; re-assert the finale's display for the new mode (docked →
+      // inline `flex` in the rail, floating → `block`) so a just-docked finale is visible
+      // immediately — its content CSS defaults to `display:none`, so without this it would
+      // dock invisibly and the rail would hide.
+      onDock: () => { try { window._orwellFinaleEnsure && window._orwellFinaleEnsure(); } catch (_) {} },
       content,
     });
     _win.open();
@@ -251,11 +277,14 @@ import * as modalManager from "./modalManager.js";
 
   function render(finale) {
     const el = ensureUI();
-    // 0054 Phase 2: docked, clear the inline display so the .ow-docked flex-column
-    // rule applies (an inline `block` would break the kit's docked layout — the rail
-    // shows it via content-driven visibility). Floating, show as a block as before.
+    // 0054 Phase 2 + #573 gesture unification: when docked, the finale lives in the
+    // control-room rail. Set an EXPLICIT inline `display:flex` (never "" — the finale's
+    // own `#orwell-finale{display:none}` ID rule out-ranks the `.ow-docked` class rule,
+    // so clearing the inline display would leave a docked finale invisible and hide the
+    // rail; inline `flex` beats the ID rule AND matches the .ow-docked flex-column layout).
+    // Floating shows as a block as before.
     const _wasHidden = !el.style.display || el.style.display === "none";
-    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "flex";
     else if (!isMinimized()) el.style.display = "block";
     // #780 (finale opens flush top-left, clipped): the finale's content CSS defaults to
     // `display:none`, so the slot restack at open() SKIPS it (an invisible entry is not
@@ -445,7 +474,9 @@ import * as modalManager from "./modalManager.js";
   // Seam for the headless gate (F3 and the finale's own F-2 wave): build + show on demand.
   window._orwellFinaleEnsure = () => {
     const el = ensureUI();
-    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "";
+    // #573: docked → inline `flex` beats the finale's own `#orwell-finale{display:none}` ID
+    // rule (a plain "" would fall through to it and leave the docked finale invisible).
+    if (_win && _win.isDocked && _win.isDocked()) el.style.display = "flex";
     else if (!isMinimized()) el.style.display = "block";
     // #780: re-anchor once visible (see render()) so the headless/explicit show lands on
     // the slot base rather than the clipped CSS-default 0,0.

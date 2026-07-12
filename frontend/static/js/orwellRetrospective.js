@@ -25,6 +25,20 @@
   // emoji. A film-clapper / playback glyph for "the season, watched back". Drives the
   // dock chip (the kit renders the titlebar from `title`, kept emoji-free above).
   const ICON = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='6' width='20' height='14' rx='2'/><path d='M2 10h20'/><circle cx='8' cy='15' r='2'/><circle cx='16' cy='15' r='2'/><path d='M2 6l3-3M8 6l3-3M14 6l3-3'/></svg>";
+  // #1371: on a rail-visible (wide) tier the retrospective DOCKS into the control-room rail by
+  // default (the existing `.gadget-rail-body > #orwell-retro { order: 8 }` slot) instead of floating
+  // the top-right slot window OVER the in-flow rail cards and down into the composer band — the
+  // reported occlusion (retro↔composer, retro↔status/presence, retro↔room-strip). On the narrow /
+  // no-rail tier the rail is a closed drawer, so it stays a floating, dismissible/draggable sheet,
+  // height-capped in the injected CSS below so it can never reach the composer. This is a tier-aware
+  // DEFAULT only: a user's own dock/undock choice persists and wins (the kit's loadDocked). It is
+  // resolved once at window-create time, mirroring the kit's own per-construct dock model (dock is
+  // not re-homed on a live viewport resize for ANY window — the primary steady-state occlusion at
+  // each tier is what's fixed; a rare resize-across-the-breakpoint case can be re-docked by hand).
+  const railTier = () => {
+    try { return !(window.matchMedia && window.matchMedia("(max-width: 768px)").matches); }
+    catch (_) { return true; }
+  };
   const ready = (fn) =>
     document.readyState === "loading"
       ? document.addEventListener("DOMContentLoaded", fn, { once: true })
@@ -64,6 +78,26 @@
         #orwell-retro .oretro-body { display: block; }
         @media (max-width: 768px) {
           #orwell-retro { width: auto !important; max-width: none !important; }
+          /* #1371: on the narrow / no-rail tier the retrospective floats as a top sheet — cap the
+             WINDOW so it can NEVER reach the bottom chrome. The room-strip (#orwell-notice-zone)
+             sits DIRECTLY above the composer, so the retro must clear the WHOLE above-composer zone,
+             not just the composer bar. The reserve = the composer band (--composer-clearance, synced
+             to the live composer height in init.js) + a top-banner (--on-banner-inset) + a 178px lump
+             = the slot's top chrome (~65px narrowTopBase) + a GENEROUS above-composer allowance
+             (~113px — the notice-zone is dynamic: the room-strip is ~61px, but a role-badge chip or a
+             transient 2nd notice card can grow it, and the composer must NEVER be occluded, so we
+             reserve well past the measured strip). The window becomes a flex column so the kit
+             .ow-body scrolls WITHIN the cap (nothing dropped — the receipts scroll). Scoped
+             :not(.ow-docked) so it only shapes a FLOATING retro (a docked one is rail-flow — the rail
+             owns its scroll). overflow:hidden is safe here: edge/corner resize is off on this tier
+             (kit mobileSkip 768). vh first, dvh second (dvh tracks the keyboard-shrunk mobile
+             viewport; vh is the no-dvh fallback). */
+          #orwell-retro:not(.ow-docked) {
+            display: flex; flex-direction: column; overflow: hidden;
+            max-height: calc(100vh - var(--composer-clearance, 84px) - var(--on-banner-inset, 0px) - 178px) !important;
+            max-height: calc(100dvh - var(--composer-clearance, 84px) - var(--on-banner-inset, 0px) - 178px) !important;
+          }
+          #orwell-retro:not(.ow-docked) .ow-body { flex: 1 1 auto; min-height: 0; max-height: none !important; }
         }
       </style>
       <div class="oretro-body" data-role="body"></div>`;
@@ -77,9 +111,11 @@
       // shared stack (the slot stacking offset is also viewport-clamped in orwellSlots).
       slot: "top-right", slotKey: "retro", role: "complementary",
       minimizable: true, closable: true, draggable: true,
-      // 0054 Phase 2: dockable into the control-room rail (default floating — a one-
-      // line owner flip to defaultDocked:true if the feature doc's lean is preferred).
-      dockable: true, defaultDocked: false,
+      // 0054 Phase 2: dockable into the control-room rail. #1371: default DOCKED on a rail-visible
+      // (wide) tier — the top-right float sat over the in-flow rail + composer — and floating on the
+      // narrow / no-rail tier (where the rail is a closed drawer; the CSS cap above keeps that float
+      // clear of the composer). A user's own dock/undock choice still persists and wins (loadDocked).
+      dockable: true, defaultDocked: railTier(),
       content,
       onClose: () => {
         // Dismissing the floating panel for the session (mirrors the old ow-dismiss).

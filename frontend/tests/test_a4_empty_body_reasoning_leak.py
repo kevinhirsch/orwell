@@ -10,7 +10,10 @@ bypassing BOTH the leak-scrub and the pre-emission outcome guard.
 This suite pins the model-aware repair:
   • a separate-reasoning-channel model (GLM) does NOT re-emit its CoT — it falls to the in-character
     recovery line instead;
-  • a DeepSeek/unknown model still re-emits (FEPY-2 preserved); and
+  • a DeepSeek-family model still re-emits (FEPY-2 preserved — the known answer-in-reasoning shape);
+  • an UNKNOWN model does NOT re-emit (P2-16, prompt audit: the default flipped to the safe False —
+    the comment's own "SAFE direction": a wrong True leaks raw CoT to the player, a wrong False only
+    costs a retry); and
   • a re-emit on a GAME turn is routed through the same scrub + outcome guard (the callsite wiring).
 
 Roles only — proper nouns inside strings exercise the code, never carry test intent.
@@ -33,9 +36,26 @@ def test_glm_reasoning_does_not_carry_the_answer():
         assert agent_loop._reasoning_carries_answer(m) is False, m
 
 
-def test_deepseek_and_unknown_reasoning_carry_the_answer():
-    for m in ("deepseek-v4-pro", "deepseek-chat", "deepseek-v3", "gpt-4o", "", None):
+def test_deepseek_reasoning_carries_the_answer():
+    # FEPY-2 preserved: the DeepSeek family is POSITIVELY known to route an empty-body answer into
+    # the reasoning channel (load-bearing for Flash).
+    for m in ("deepseek-v4-pro", "deepseek-chat", "deepseek-v3", "deepseek/deepseek-v4-flash"):
         assert agent_loop._reasoning_carries_answer(m) is True, m
+
+
+def test_unknown_model_reasoning_does_not_carry_the_answer():
+    # P2-16 (prompt audit): a model matching NO marker used to default True — re-emitting what may
+    # be raw chain-of-thought as the visible body. Flipped to the safe False: a wrong guess now
+    # costs one retry (the in-character recovery), never a CoT leak.
+    for m in ("gpt-4o", "mistral-large", "", None):
+        assert agent_loop._reasoning_carries_answer(m) is False, m
+
+
+def test_deepseek_true_reasoners_still_separate_channel():
+    # The separate-channel markers WIN over the answer-channel family match: deepseek-r1 /
+    # deepseek-reasoner are true reasoning models whose CoT must never be re-emitted.
+    for m in ("deepseek-r1", "deepseek-reasoner"):
+        assert agent_loop._reasoning_carries_answer(m) is False, m
 
 
 def test_other_separate_channel_reasoners_do_not_carry_the_answer():

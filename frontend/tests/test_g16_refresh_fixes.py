@@ -19,16 +19,26 @@ persists a per-window parked flag (`orwell-win-parked:<id>:<user>`, mirroring
 the slot-offset key scheme) on minimize(), clears it on a dock restore and on
 close/teardown, and open() mounts a persisted-parked window DIRECTLY into the
 minimized state (chip in the dock, panel hidden, no open animation — no flash).
-Post-H5 the kit windows are the FINALE and the CAST window: the finale's poll
-loop already gates on modalManager.isMinimized (no change needed); the cast
-flow's explicit toggle is gated so a boot-parked mount STAYS parked (the kit's
-own isMinimized() seam) while a within-page-life toggle still restores.
+Post-H5 the kit windows are the FINALE and the CAST window. The chip-park kit
+primitives (parkedKey / loadParked / saveParked, the boot-parked open() branch,
+_afterDockRestore) REMAIN — they still serve every NON-dockable kit window.
 
-These are wiring pins, NOT behavior coverage: the behavior (minimize → reload →
-re-open via the seam → still parked with its chip; chip restore → reload →
-open again; HUD collapse → reload → still collapsed) is exercised for real in
-frontend/scripts/browser_smoke.py (the G16 block, with the audit's sanctioned
-route mocks for a live-game /state + /status + /roster).
+#573 GESTURE UNIFICATION (window-system audit Direction B): the finale and cast
+are DOCKABLE windows, and a dockable window's minimize now IS the dock — ONE
+gesture, ONE destination (the control-room rail). So minimize() routes a dockable
+window through toggleDock() (the full window mounts into #gadget-rail-body as a
+static .ow-docked window) instead of parking a compact chip. The docked flag
+(`orwell-<id>-docked:<user>`, loadDocked/saveDocked) is the refresh-durable state
+for these windows, honored by the constructor on the next open. So the F2 pins for
+the finale/cast are migrated here to the DOCKED-refresh path (docked → reload →
+comes back docked → undock → reload → floats); the non-dockable chip primitives
+are still pinned above and exercised by the ow-smoke-window block in the smoke.
+
+These are wiring pins, NOT behavior coverage: the behavior (minimize → dock →
+reload → comes back docked; undock → reload → floats; HUD collapse → reload →
+still collapsed) is exercised for real in frontend/scripts/browser_smoke.py (the
+G16 block, with the audit's sanctioned route mocks for a live-game /state +
+/status + /roster).
 """
 import os
 import re
@@ -114,12 +124,18 @@ def test_sourcepin_f2_parked_key_mirrors_the_slot_offset_scheme():
     assert "function saveParked(id, on)" in js
 
 
-def test_sourcepin_f2_minimize_persists_and_restore_close_clear():
+def test_sourcepin_f2_minimize_routes_dockable_through_dock_and_persists_nondockable():
     js = _read("static", "js", "orwellWindow.js")
     min_body = _method_body(js, "minimize() {", "_afterDockRestore() {")
-    assert "saveParked(this.o.id, true)" in min_body, "minimize() must persist the parked flag"
+    # #573 gesture unification: a DOCKABLE window's minimize IS the dock (one gesture, one
+    # destination — the rail), routed through toggleDock() BEFORE any chip-park path.
+    assert "if (this.o.dockable) { this.toggleDock(); return; }" in min_body, \
+        "minimize() must route a dockable window through the dock (the #573 gesture unification)"
+    # A NON-dockable window still parks to the chip dock and persists the parked flag (unchanged).
+    assert "saveParked(this.o.id, true)" in min_body, \
+        "a non-dockable minimize() must still persist the parked flag"
     restore_body = _method_body(js, "_afterDockRestore() {", "restore() {")
-    assert "saveParked(this.o.id, false)" in restore_body, "a dock restore must un-park durably"
+    assert "saveParked(this.o.id, false)" in restore_body, "a dock (chip) restore must un-park durably"
     teardown_body = _method_body(js, "_teardown() {", "destroy() {")
     assert "saveParked(this.o.id, false)" in teardown_body, "close/teardown must clear the flag"
 
@@ -168,40 +184,49 @@ def test_sourcepin_f2_kit_exposes_isminimized_for_consumer_gates():
 # ── F2 — the kit windows' flows still gate correctly (finale + cast) ─────────
 
 
-def test_sourcepin_f2_finale_poll_loop_respects_the_parked_state():
-    # The kit-level fix works BECAUSE the finale's poll loop already gates its
-    # re-show on modalManager.isMinimized — pin that contract so a panel
-    # rewrite can't quietly re-open a parked window from its poll loop. (0054
-    # Phase 2 added a docked branch FIRST — docked clears the inline display so the
-    # rail's content-driven visibility owns it — but the FLOATING path still gates
-    # the re-show on !isMinimized() in both render and the ensure seam.)
+def test_sourcepin_f2_finale_docks_on_minimize_and_shows_docked():
+    # #573 gesture unification: the finale is a DOCKABLE window, so its minimize DOCKS it into
+    # the control-room rail (one gesture, one destination). render()/ensure must show the docked
+    # finale with an EXPLICIT inline `display:flex` — a plain "" would fall through to the
+    # finale's own `#orwell-finale{display:none}` ID rule (which out-ranks the .ow-docked class
+    # rule) and leave a docked finale invisible, hiding the rail. Floating still shows as a block.
     js = _read("static", "js", "orwellFinale.js")
     render_body = _method_body(js, "function render(finale) {", "async function refresh()")
-    assert 'else if (!isMinimized()) el.style.display = "block"' in render_body
-    # the docked branch precedes the parked gate (the rail owns docked visibility)
+    assert 'el.style.display = "flex"' in render_body, \
+        "a docked finale must be shown with inline flex (beats #orwell-finale display:none)"
+    assert 'else if (!isMinimized()) el.style.display = "block"' in render_body, \
+        "a floating finale still shows as a block"
+    # the docked branch gates on the kit's own docked read (the rail owns docked visibility)
     assert "_win.isDocked && _win.isDocked()" in render_body
-    # the ensure seam keeps the same gating contract (floating: !isMinimized re-show)
+    # the ensure seam keeps the same docked(flex)/floating(block) contract
     assert "window._orwellFinaleEnsure" in js
     assert 'else if (!isMinimized()) el.style.display = "block"' in js
-    # The finale window has no close (it exists while one is staging): when the
-    # finale ENDS, hidePanel un-parks through the real restore path — so no
-    # stale parked flag outlives the window it described.
+    # onDock re-asserts the finale's display on a dock/undock re-home (the kit rebuilds the
+    # element, whose content CSS defaults to display:none) so a just-docked finale is visible now.
+    assert "onDock:" in js and "_orwellFinaleEnsure" in js, \
+        "the finale must re-show itself on a dock/undock via onDock"
+    # The finale window has no close (it exists while one is staging): when the finale ENDS,
+    # hidePanel un-parks through the real restore path — so no stale minimized flag outlives it.
     hide_body = _method_body(js, "function hidePanel() {", "let _win = null;")
     assert "if (isMinimized())" in hide_body and "modalManager.restore(ID)" in hide_body
 
 
-def test_sourcepin_f2_cast_toggle_keeps_a_boot_parked_mount_docked():
+def test_sourcepin_f2_cast_toggle_reopens_a_boot_docked_mount_docked():
+    # #573 gesture unification: the cast is a DOCKABLE window, so its minimize DOCKS it. On a
+    # reload the seam re-opens it and the kit honors the persisted docked flag (loadDocked in the
+    # constructor). togglePanel must NOT force-show a boot-DOCKED mount as a floating block (an
+    # inline `block` breaks the .ow-docked flex-column rail layout) — it clears the inline display
+    # so the rail's content-driven visibility owns it; a floating mount still un-hides + restores.
     js = _read("static", "js", "orwellCast.js")
     toggle_body = _method_body(js, "function togglePanel(open) {", "window._orwellCastEnsure")
-    # A freshly-mounted window the kit parked stays parked (no display write —
-    # modalManager's launcher-agnostic observer would treat it as a restore)…
-    gate = toggle_body.find("_win.isMinimized && _win.isMinimized()")
-    assert gate != -1, "the toggle must consult the kit's minimized read for a fresh mount"
-    assert "!existed" in toggle_body, "only a FRESH mount stays parked"
+    # the DOCKED-refresh branch: a docked mount clears inline display so the .ow-docked layout applies
+    dgate = toggle_body.find("_win.isDocked && _win.isDocked()")
+    assert dgate != -1, "the toggle must consult the kit's docked read (the docked-refresh path)"
+    clear = toggle_body.find('el.style.display = ""')
+    assert clear != -1 and dgate < clear, "a docked mount clears inline display (the rail shows it)"
+    # a FLOATING mount still force-shows + restores/raises, exactly as before
     show = toggle_body.find('el.style.display = "block"')
-    assert show != -1 and gate < show, "the gate must precede the force-show"
-    # …while an explicit toggle on an already-live minimized window still
-    # restores, exactly as before (the sidebar Cast button stays a restore handle).
+    assert show != -1 and dgate < show, "the docked gate precedes the floating force-show"
     assert "_win.restore()" in toggle_body
 
 
@@ -216,14 +241,16 @@ def test_sourcepin_f2_no_per_panel_parked_persistence():
 
 
 def test_smoke_drives_both_fixes_for_real():
-    # The browser gate must drive the real thing on the CAST window: minimize →
-    # reload → re-open via the seam → PARKED (hidden + chip), chip restore →
-    # reload → OPEN; HUD collapse → reload → still collapsed under the key the
-    # panel writes.
+    # The browser gate must drive the real thing on the CAST window. #573 unification: the
+    # dockable cast's minimize DOCKS it, so the F2 cycle is now DOCKED-refresh — minimize →
+    # docks → reload → comes back DOCKED, undock → floats → reload → comes back OPEN (floating);
+    # HUD collapse → reload → still collapsed under the key the panel writes (F1 unchanged).
     smoke = _read("scripts", "browser_smoke.py")
     assert "G16 (G5 refresh-persistence audit, F1+F2)" in smoke
-    assert "orwell-win-parked:orwell-cast:" in smoke
-    assert "comes back PARKED" in smoke
+    # F2 — the dockable cast docks (not a chip) and the docked flag survives the reload
+    assert "orwell-orwell-cast-docked:" in smoke
+    assert "comes back DOCKED" in smoke
     assert "comes back OPEN" in smoke
+    # F1 — the status HUD collapse still survives the reload under its per-user+game key
     assert "still collapsed" in smoke
     assert "orwell-status-collapsed" in smoke

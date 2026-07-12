@@ -24,3 +24,7 @@ gradient-results/
 
 # read-only surfacing-agent hypothesis scratch (never committed; excluded from vitest run below)
 tests/scratch/
+
+# throwaway repro/render scratch (delegate agents write repros + before/after renders here; never committed)
+scratchpad/
+frontend/scratchpad/

@@ -36,6 +36,13 @@ pixel-compare entry, never a silent pass.
 Usage:
     cd frontend && python3 scripts/visual_regression.py --tier all --out /tmp/visual-run
 
+The expensive Tier-A capture (~120 shots) can be SHARDED across parallel CI legs (#1359) with
+`--shard-index I --shard-count N`: each leg replays the FULL fixture walk but captures only the
+Tier-A slots where `slot_index % N == I` (Tier B, cheap + walk-coupled, is captured entirely on
+shard 0). The union of all shards is exactly the single-job (`--shard-count 1`, the default) shot
+set — no shot dropped or double-captured; see `tier_a_shard_shot_ids` + the coverage-invariant
+test `tests/test_0113_shard_partition.py`.
+
 Playwright is imported LAZILY (inside functions, not at module import time) so this module —
 and every pure helper it defines — can be imported and unit-tested without chromium/playwright
 installed (see `tests/test_0113_visual_harness.py`, which imports only these pure pieces and
@@ -117,6 +124,59 @@ TIER_A_SURFACES: Dict[str, Dict[str, object]] = {
 #: The mid-week engine phase Tier A parks at (HOH already resolved, nominees named, real
 #: house texture on screen, the decision card live) — a representative "any given Tuesday".
 TIER_A_CANONICAL_BEAT = "nominations"
+
+
+# ── Tier-A shot-slot enumeration + shard partition (pure — no browser) ─────────────────────
+#
+# Tier A is the expensive half (~120 shots: 6 surfaces x 4 viewports x 5 themes). On a slow /
+# contended hosted runner even the 40-min cap can't absorb one job capturing all 120, so the CI
+# job runs as a PARALLEL matrix (`--shard-index I --shard-count N`) and each leg captures only
+# its slice. These three pure helpers are the single source of truth for the partition so the
+# sweep loop and the shard assignment can NEVER disagree — the coverage invariant (union of all
+# shards == the full unsharded set, shards pairwise disjoint, no shot dropped or double-captured)
+# is proven browser-free in `tests/test_0113_shard_partition.py`.
+
+
+def tier_a_shot_id(surface_id: str, vp_name: str, theme: str) -> str:
+    """The canonical Tier-A shot id, kept in ONE place so the sweep loop and the shard partition
+    agree on the exact string. The XFAIL registry (shot-id prefixes like
+    `tierA:gadget-rail:tablet-768`) and the baseline manifest both key on this — sharding must
+    NEVER change it."""
+    return f"tierA:{surface_id}:{vp_name}:{theme}"
+
+
+def tier_a_shot_slots() -> List[Tuple[str, str, int, int, str]]:
+    """The full ORDERED list of Tier-A capture slots — (surface_id, vp_name, w, h, theme) — over
+    every Tier-A surface x viewport x theme, in the SAME nested order `_tier_a_sweep_surfaces`
+    iterates (surfaces in `TIER_A_SURFACES` insertion order, then `TIER_A_VIEWPORTS`, then
+    `TIER_A_THEMES`). This is the list the shard partition indexes into: slot i is owned by shard
+    `i % shard_count`. It includes ALL 6 surfaces — the casting-moment surface AND the 5 midweek
+    surfaces — which are captured at different walk moments; because shard membership is keyed by
+    the (unique) shot id, it is independent of WHEN a given surface's sweep runs during the walk."""
+    slots: List[Tuple[str, str, int, int, str]] = []
+    for surface_id in TIER_A_SURFACES:
+        for vp_name, w, h in TIER_A_VIEWPORTS:
+            for theme in TIER_A_THEMES:
+                slots.append((surface_id, vp_name, w, h, theme))
+    return slots
+
+
+def tier_a_shard_shot_ids(shard_index: int, shard_count: int) -> "set[str]":
+    """The set of Tier-A shot ids THIS shard is responsible for: slot i (in `tier_a_shot_slots()`
+    order) belongs to shard `i % shard_count`. `shard_count == 1` ⇒ EVERY slot — byte-for-byte
+    the single-job behavior. The UNION over `shard_index in range(shard_count)` is exactly the
+    full unsharded set and the shards are pairwise disjoint (no shot dropped, none double-
+    captured) — the coverage invariant proven in `tests/test_0113_shard_partition.py`."""
+    if shard_count < 1:
+        raise ValueError(f"shard_count must be >= 1, got {shard_count}")
+    if not (0 <= shard_index < shard_count):
+        raise ValueError(f"shard_index must be in [0, {shard_count}), got {shard_index}")
+    return {
+        tier_a_shot_id(surface_id, vp_name, theme)
+        for i, (surface_id, vp_name, _w, _h, theme) in enumerate(tier_a_shot_slots())
+        if i % shard_count == shard_index
+    }
+
 
 #: Tier B's 7 target beats, in walk order. "finale" is not reached by the CURRENT committed
 #: golden fixture (0108's scope stops at the week-1 roll) — it is a legitimate, documented
@@ -294,12 +354,21 @@ class VisualWalk:
     right moments. Constructed with an already-booted `GoldenDriver` (mode="replay") and a
     live Playwright `Browser`. See the module docstring for the composition rationale."""
 
-    def __init__(self, driver, browser, out_dir: str, *, tier: str = "all") -> None:
+    def __init__(self, driver, browser, out_dir: str, *, tier: str = "all",
+                 shard_index: int = 0, shard_count: int = 1) -> None:
         assert tier in ("a", "b", "all")
         self.driver = driver
         self.browser = browser
         self.out_dir = out_dir
         self.tier = tier
+        # Shard the CAPTURE, never the walk (every shard replays the full fixture). Tier A is
+        # partitioned by shot id across `shard_count` legs; Tier B (cheap, walk-coupled) is
+        # captured ENTIRELY on shard 0. `shard_count == 1` (the default) ⇒ this shard owns every
+        # Tier-A shot and Tier B — i.e. today's single-job behavior, byte-for-byte.
+        self.shard_index = shard_index
+        self.shard_count = shard_count
+        self._tier_a_shot_ids = tier_a_shard_shot_ids(shard_index, shard_count)  # validates args
+        self._tier_b_enabled = (shard_index == 0)
         self.shots_dir = os.path.join(out_dir, "shots")
         os.makedirs(self.shots_dir, exist_ok=True)
         self.geometry_findings: Dict[str, list] = {}   # blocking findings per shot
@@ -406,17 +475,22 @@ class VisualWalk:
         for surf_id in surface_ids:
             surf = TIER_A_SURFACES[surf_id]
             hooks = [h for h in (surf.get("ensure_js"), surf.get("open_js")) if h]
+            captured = 0
             for vp_name, w, h in TIER_A_VIEWPORTS:
                 for theme in TIER_A_THEMES:
-                    shot_id = f"tierA:{surf_id}:{vp_name}:{theme}"
+                    shot_id = tier_a_shot_id(surf_id, vp_name, theme)
+                    if shot_id not in self._tier_a_shot_ids:
+                        continue  # another shard owns this slot (shard_count == 1 ⇒ none skipped)
                     try:
                         self._capture_one(shot_id, w, h, theme=theme, hooks=hooks)
+                        captured += 1
                     except Exception as e:  # noqa: BLE001 — a single shot failing must not sink the run
                         self.errors.append(f"{shot_id}: {e}")
-            self.tier_a_report.append({
-                "surface": surf_id, "status": "captured",
-                "viewports": [v[0] for v in TIER_A_VIEWPORTS], "themes": TIER_A_THEMES,
-            })
+            if captured:
+                self.tier_a_report.append({
+                    "surface": surf_id, "status": "captured", "shots_this_shard": captured,
+                    "viewports": [v[0] for v in TIER_A_VIEWPORTS], "themes": TIER_A_THEMES,
+                })
 
     def _run_tier_a_midweek_sweep(self) -> None:
         midweek = [s for s, v in TIER_A_SURFACES.items() if v["moment"] == "midweek"]
@@ -426,7 +500,12 @@ class VisualWalk:
     # ── Tier B ────────────────────────────────────────────────────────────────────────
 
     def _capture_beat(self, beat: str) -> None:
-        if self.tier not in ("b", "all"):
+        # Tier B is cheap (~8 walk-driven shots) and walk-coupled, so it is NOT partitioned — it
+        # is captured ENTIRELY on shard 0. Every shard still records the beat in `captured_beats`
+        # (the early return below) so the walk AND the Tier-A midweek phase-gate — which fires on
+        # `nominations` landing in `captured_beats` — proceed IDENTICALLY on all shards; only the
+        # screenshots are shard-0's.
+        if self.tier not in ("b", "all") or not self._tier_b_enabled:
             self.captured_beats.add(beat)  # still track for the phase-gate below
             return
         for vp_name, w, h in TIER_B_VIEWPORTS:
@@ -654,6 +733,14 @@ def run(args: argparse.Namespace) -> int:
     from scripts._golden_driver import GoldenDriver, fixture_models
     from src import golden_path as gp
 
+    # Validate the shard config BEFORE booting anything (a bad --shard-index/-count should fail
+    # fast, not after a full engine+FE boot). VisualWalk revalidates in its ctor as a belt.
+    if args.shard_count < 1 or not (0 <= args.shard_index < args.shard_count):
+        print(f"FAIL: invalid shard config --shard-index {args.shard_index} "
+              f"--shard-count {args.shard_count} (need shard_count >= 1 and "
+              f"0 <= shard_index < shard_count)")
+        return 2
+
     fixture = args.fixture or default_fixture()
     if not os.path.isfile(fixture):
         print(f"FAIL: no golden fixture at {fixture}\n{gp.REGENERATE_HINT}")
@@ -690,7 +777,8 @@ def run(args: argparse.Namespace) -> int:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             try:
-                walk = VisualWalk(driver, browser, args.out, tier=args.tier)
+                walk = VisualWalk(driver, browser, args.out, tier=args.tier,
+                                  shard_index=args.shard_index, shard_count=args.shard_count)
                 walk.run(turn_budget=args.turn_budget)
             finally:
                 browser.close()
@@ -708,6 +796,7 @@ def run(args: argparse.Namespace) -> int:
     xpasses = sorted(set(XFAIL) - matched_ids)
     geometry_report = {
         "format": 1, "tier": args.tier, "wall_seconds": wall,
+        "shard_index": args.shard_index, "shard_count": args.shard_count,
         "total_shots": len(walk.shots_meta),
         "total_findings": sum(len(v) for v in walk.geometry_findings.values()),
         "total_xfails": total_xfails,
@@ -732,7 +821,9 @@ def run(args: argparse.Namespace) -> int:
                       errors=walk.errors, geometry_xfails=walk.geometry_xfails)
 
     total_findings = geometry_report["total_findings"]
-    print(f"\n==== visual-regression: {len(walk.shots_meta)} shots · "
+    shard_tag = (f"shard {args.shard_index}/{args.shard_count} · "
+                 if args.shard_count > 1 else "")
+    print(f"\n==== visual-regression: {shard_tag}{len(walk.shots_meta)} shots · "
           f"{total_findings} geometry finding(s) · {total_xfails} xfail (known) · "
           f"{sum(1 for r in pixel_results if r.status == 'diff')} pixel diff(s) · "
           f"{sum(1 for r in pixel_results if r.status == 'baseline-missing')} no-baseline · "
@@ -759,6 +850,14 @@ def main() -> int:
     ap.add_argument("--turn-budget", type=int, default=90)
     ap.add_argument("--engine-port", type=int, default=8985)
     ap.add_argument("--fe-port", type=int, default=7985)
+    # Shard the (expensive) Tier-A capture across N parallel CI legs (#1359). Each leg replays the
+    # FULL fixture walk but captures only Tier-A slot i where `i % shard_count == shard_index`;
+    # Tier B (cheap, walk-coupled) is captured entirely on shard 0. Defaults (0/1) = capture
+    # everything, i.e. the single-job behavior. The union of all shards == the unsharded shot set.
+    ap.add_argument("--shard-index", type=int, default=0,
+                    help="this shard's index in [0, shard-count) — default 0")
+    ap.add_argument("--shard-count", type=int, default=1,
+                    help="total number of parallel Tier-A capture shards — default 1 (no sharding)")
     args = ap.parse_args()
     return run(args)
 

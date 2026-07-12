@@ -196,6 +196,15 @@
            same card. Vault-free: seeded from the public id/name only. */
         #orwell-cast .oc-ph.oc-monogram { width: 100%; height: 100%; opacity: 1; display: block; }
         #orwell-cast .oc-portrait { position: relative; } /* M2-2: anchors the role badge */
+        /* RESP-20 (#894): a portrait-LESS card must not dominate the mobile viewport. On the
+           narrow tier the designed-monogram placeholder is capped to a compact, centered
+           thumbnail — the docked rail can render a ≤240px 1-column tile, i.e. a viewport-filling
+           gradient block. Real generated portraits are NOT capped (they lack .oc-portrait-ph):
+           audit RESP-20 — "smaller placeholder tiles on narrow; reserve large tiles for real
+           images". The flag rides setPortrait, so a card that streams in its face un-caps itself. */
+        @media (max-width: 768px) {
+          #orwell-cast .oc-portrait.oc-portrait-ph { max-width: min(88px, 26vw); margin-inline: auto; }
+        }
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
@@ -218,14 +227,22 @@
            exists off-glass), a sensible compact size, the monochrome glyph, and the
            toggled/active states. Apple-restrained: a small neutral capsule, not a tinted CTA. */
         #orwell-cast .oc-pin {
-          cursor: pointer; font: inherit; font-size: .72rem; font-weight: 600; letter-spacing: -0.01em;
+          cursor: pointer;
+          /* #771 — a kit control uses the Apple UI SANS stack (exactly like every .ow-btn),
+             NOT the cast window's inherited monospace. The stray font:inherit pulled in the
+             window's ui-monospace face, so the pill read as a terminal chip amid the glass —
+             the single biggest "reads as off". Pin the sans family here so BOTH the glass tier
+             (.ow-btn already sets it) and the off-glass Normal tier are consistent. Routes
+             through the canonical --ow-ui-font token (#696/#709 coherence), never a bespoke stack. */
+          font-family: var(--ow-ui-font, sans-serif);
+          font-size: .75rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1;
           color: #16191f; background: rgba(255,255,255,.30);
           border: 1px solid color-mix(in srgb, #16191f 10%, transparent); border-radius: 999px;
-          padding: .32rem .68rem; min-height: 30px;
-          display: inline-flex; align-items: center; gap: .4rem;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 2px rgba(0,0,0,.10);
+          padding: .34rem .72rem .34rem .56rem; min-height: 30px;
+          display: inline-flex; align-items: center; gap: .38rem;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 1px 2px rgba(0,0,0,.10);
           transition: background-color .18s ease, box-shadow .18s ease,
-                      transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease;
+                      transform .14s cubic-bezier(.34,1.56,.64,1), filter .18s ease, color .18s ease;
         }
         #orwell-cast .oc-pin:hover { background: rgba(255,255,255,.42); transform: translateY(-1px); }
         #orwell-cast .oc-pin:active { transform: translateY(0) scale(.97); filter: brightness(.97); }
@@ -233,13 +250,22 @@
           outline: none;
           box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 0 0 2px var(--ow-ios-blue, #0a84ff);
         }
-        /* toggled: when the roster is currently pinned (aria-pressed), the control reads as
-           an engaged neutral plate — a brighter fill + an accent ring, the same "lit up,
-           filled in" toggled language the decision options use, never an accent label. */
+        /* toggled: when the roster is currently pinned (aria-pressed), the control reads as an
+           ENGAGED glass plate — "lit up, filled in" by LUMINOSITY (a brighter luminous veil) +
+           a thin system-blue ring, never an opaque dark slab with light text (#771: the old
+           92%-black plate + white monospace broke the glass character — that WAS the "reads as
+           off"). Accent lives on the RING only; the label keeps the dark chrome ink (#726
+           no-accent-on-text). The ring rides the box-shadow so it survives the frosted
+           border-softening override below. */
         #orwell-cast .oc-pin[aria-pressed="true"] {
-          background: color-mix(in srgb, #16191f 92%, transparent); color: #fff;
-          border-color: var(--ow-ios-blue, #0a84ff);
-          box-shadow: 0 0 0 1px var(--ow-ios-blue, #0a84ff), 0 1px 3px rgba(0,0,0,.22);
+          background:
+            linear-gradient(to bottom, rgba(255,255,255,0.30), transparent 70%),
+            rgba(255,255,255,0.52);
+          color: #16191f;
+          border-color: color-mix(in srgb, var(--ow-ios-blue, #0a84ff) 60%, transparent);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.7),
+                      0 0 0 1px color-mix(in srgb, var(--ow-ios-blue, #0a84ff) 55%, transparent),
+                      0 1px 3px rgba(0,0,0,.14);
         }
         #orwell-cast .oc-pin[aria-pressed="true"] .oc-pin-ic { opacity: 1; }
         /* The 44px coarse-pointer tap floor (WCAG 2.5.5) is owned in style.css (the RESP-1/2
@@ -410,6 +436,11 @@
     entry.portrait = url || null;
     entry.holder.textContent = "";
     if (!url) {
+      // RESP-20 (#894): flag the holder as portrait-LESS so the narrow tier can cap it
+      // to a compact thumbnail (a docked ≤240px rail otherwise gives a 1-column, ~240px
+      // viewport-filling gradient block). A real face (the img branch below) drops the
+      // flag, so a card that streams in its portrait snaps back to the full tile.
+      entry.holder.classList.add("oc-portrait-ph");
       // J2-15: until a portrait (0051) backfills, a single shared 👤 silhouette made the
       // "meet 15 distinct people" payoff read as interchangeable placeholders. Render a
       // per-houseguest monogram instead — the name's initial over a deterministic tint
@@ -443,6 +474,8 @@
     // transient miss (the file landing a beat after the manifest) heals next poll.
     img.onerror = () => setPortrait(entry, null, false);
     img.src = url;
+    // RESP-20 (#894): a real face keeps the FULL tile — drop the portrait-less cap flag.
+    entry.holder.classList.remove("oc-portrait-ph");
     entry.holder.appendChild(img);
     syncBadge(entry); // M2-2: the role badge composites on portraits and monograms alike
   }

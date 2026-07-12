@@ -1,0 +1,131 @@
+/* OrwellSettingsCard kit (#658, part of the #660 kit epic) — THE settings-section primitive.
+ *
+ * ONE source of truth for a Settings card's spacing / heading / chrome. The JS kit
+ * (orwellSettingsCard.js) either builds a fresh `.osc-card` (create) or upgrades an existing
+ * `.admin-card` in place (upgrade); either way the section reads as `.osc-card` > `.osc-head`
+ * (`.osc-icon` + `.osc-title`) + `.osc-body`.
+ *
+ * Loaded AFTER style.css so a single-class `.osc-card` rule wins the cascade over the legacy
+ * single-class `.admin-card` box on an upgraded card (equal specificity → later sheet wins), and
+ * the primitive becomes authoritative for card chrome even while `.admin-card` is kept for the
+ * peek / empty-tab / `.closest('.admin-card')` logic. A standalone `create()` card (no
+ * `.admin-card`) gets the identical look from these rules alone.
+ *
+ * Theme-agnostic base + a glass inflection under body.theme-frosted; responsive across
+ * desktop / tablet / mobile; honours the a11y trio (glass is never load-bearing for legibility).
+ */
+
+.osc-card {
+  box-sizing: border-box;
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--ow-radius-inner, 10px);
+  padding: var(--space-3, 12px);
+  margin: 0 0 var(--space-3, 12px);
+}
+.osc-card:last-child { margin-bottom: 0; }
+
+/* Header — icon + title on one baseline, a consistent gap, and a hairline underscore that
+ * separates the title from the body identically on every card. */
+.osc-card > .osc-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  margin: 0 0 var(--space-2, 8px);
+  padding: 0 0 var(--space-2, 8px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+/* Title — the `.osc-card .osc-title` compound (0,2,0) is authoritative over the legacy
+ * `.admin-card h2` (0,1,1) even though both may match an upgraded card's heading. */
+.osc-card .osc-title {
+  margin: 0;
+  font-size: var(--ow-fs-heading, 0.9375rem);
+  font-weight: var(--ow-fw-semibold, 600);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+}
+
+.osc-card .osc-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.6;
+}
+.osc-card .osc-icon > svg,
+.osc-card .osc-icon > img { display: block; }
+
+/* Body — a consistent vertical rhythm between stacked body blocks (a single-child body, e.g.
+ * a `.vis-toggles` list, is untouched). */
+.osc-card > .osc-body { display: block; min-width: 0; }
+.osc-card > .osc-body > * + * { margin-top: var(--space-2, 8px); }
+
+/* Dense variant — tighter padding for list / utility cards. */
+.osc-card.osc-dense { padding: var(--space-2, 8px) var(--space-3, 12px); }
+
+/* Danger variant — a system-red hairline; NO hue on text (HIG Color). */
+.osc-card.osc-danger {
+  border-color: color-mix(in srgb, var(--color-error, #e55) 55%, var(--border));
+}
+
+/* ── Form-row primitive (#1451, follow-on to #658) ───────────────────────────────────────────
+ * The row-level counterpart to the card: a label/description on one side and a control/toggle on
+ * the other. This MIRRORS the legacy `.settings-row` layout byte-for-byte (`style.css`) so that a
+ * migrated row carrying BOTH classes is pixel-neutral (identical declarations → same computed
+ * style regardless of cascade order), while a fresh kit-built `.osc-row` — one that a future
+ * consumer creates WITHOUT `.settings-row` — is self-sufficient from these rules alone. The kit's
+ * `row()` builder and `upgradeRow()`/`scanRows()` compose this so a Settings row is composed from
+ * the kit instead of hand-rolled per tab. Deliberately NO responsive / a11y overrides — the legacy
+ * `.settings-row` has none, and adding any here would diverge the two and break pixel-neutrality. */
+.osc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.osc-row--end { justify-content: flex-end; }
+.osc-row--between { justify-content: space-between; }
+
+/* Glass build — the card rides the ONE glass plane: a translucent veil + a luminous inset rim
+ * instead of the solid `--panel` slab (HIG: no glass-on-glass in the content layer). */
+body.theme-frosted .osc-card {
+  background: var(--ow-control-fill, color-mix(in srgb, var(--panel) 82%, transparent));
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255, 255, 255, 0.10));
+  backdrop-filter: var(--ow-btn-glass, blur(8px));
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(8px));
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────────────────────────
+ * Desktop is the default above. Tablet keeps the desktop card; mobile (the settings kit hosts
+ * as a bottom sheet ≤768px, #893) tightens padding + the heading so a card never crowds a
+ * narrow sheet. Uses the shared responsive breakpoints. */
+@media (max-width: 1024px) {
+  .osc-card { padding: var(--space-3, 12px); }
+}
+@media (max-width: 768px) {
+  .osc-card {
+    padding: var(--space-2, 10px) var(--space-3, 12px);
+    margin-bottom: var(--space-2, 10px);
+  }
+  .osc-card > .osc-head {
+    margin-bottom: var(--space-2, 8px);
+    padding-bottom: var(--space-2, 8px);
+  }
+  .osc-card .osc-title { font-size: var(--fs-sm, 0.8125rem); }
+}
+
+/* ── a11y trio — glass is never load-bearing for legibility ──────────────────────────────── */
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .osc-card {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .osc-card { border-color: var(--fg); }
+}

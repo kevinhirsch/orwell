@@ -153,3 +153,33 @@ def test_w6_every_keep_set_tool_has_a_diegetic_beat_label():
     from src.agent_tools import GAME_TOOL_KEEP
     missing = sorted(set(GAME_TOOL_KEEP) - labeled)
     assert not missing, f"keep-set tools with no diegetic beat label (D5/W6): {missing}"
+
+
+# --- #1385: turnIn — the ADR 0006 bedtime lever — is now agent-callable ---------------
+
+def test_turn_in_is_agent_callable():
+    # #1385: turnIn (the player's bedtime lever + the 0102 daily-recap trigger) was engine-wired but
+    # had NO FE surface, so the model could never call it — the sleep-economy player half was dead.
+    # Pin all four FE surfaces the drift gate checks so a revert is loud.
+    assert "turnIn" in _fe_schema_names()
+    assert "turnIn" in tool_schemas.ORWELL_GAME_TOOLS
+    assert "turnIn" in agent_tools.TOOL_TAGS
+    assert "turnIn" in agent_tools.GAME_TOOL_KEEP
+
+
+def test_turn_in_forwards_and_surfaces_daily_recap(monkeypatch):
+    # Boundary test: the FE only SURFACES turnIn — the ENGINE owns the night-roll AND the hidden rest
+    # penalty (the FE never authors the sleep effect). Prove the wrapper reaches the engine and returns
+    # the AdvanceView (incl. the Vault-free dailyRecap 0102) verbatim so the narrator can voice it.
+    seen = {}
+
+    # #1385 guard: turnIn is a mutating progression, so do_turn_in threads the 0065 sync-spine fields
+    # (expected_beat_seq CAS + at-most-once idempotency_key) — the mock must accept them like the engine tool.
+    async def fake(expected_beat_seq=None, idempotency_key=None, user=None):
+        seen["called"] = True
+        return {"event": None, "dailyRecap": {"day": 1, "highlights": ["a quiet day"], "surfaced": []}}
+
+    monkeypatch.setattr(orwell_engine, "turn_in", fake)
+    res = _run(tool_impl.do_turn_in("", owner="p"))
+    assert res.get("exit_code") == 0 and seen.get("called")
+    assert "dailyRecap" in res["output"] and "a quiet day" in res["output"]

@@ -91,6 +91,11 @@
     // chrome is neutralised — its fill/border/ink live in style.css (#orwell-dr-pill) so the
     // glass theme can swap the bulk to the ONE shared colourless light-glass material, keeping
     // only a WHISPER of rose as a thin edge. Only LAYOUT stays inline here (no rose fill).
+    // NOTE: that thin rose EDGE is a SANCTIONED DIEGETIC EXCEPTION to the general "no accent on
+    // chrome" rule — the confessional's in-world signature, owner-ruled and recorded in
+    // docs/decisions/PO-DECISIONS-LOG.md (2026-07-11). It is NOT a leak: it stays a bounded edge
+    // (never a fill), scoped to this one surface. Do not strip it in a glass-legibility sweep, and
+    // do not widen it. Pin: tests/test_738_glass_polish_8_13_22.py::test_dr_pill_keeps_a_bounded_rose_hint.
     pill.style.cssText = "display:none;align-items:center;gap:6px;margin:0 0 4px;" +
       "padding:3px 10px;border-radius:999px;width:fit-content;font-size:var(--fs-xs);";
     // UX-7: the label starts EMPTY — enterDRMode() injects DR_ENTRY_LABEL on every entry, which is
@@ -174,6 +179,17 @@
     if (!r.ok) throw new Error("HTTP " + r.status);
   }
 
+  // Announce a status line on the role="status" pill. Mutating textContent is what fires
+  // the aria-live region (UX-7); `live` picks the urgency — "polite" for the in-flight and
+  // success cues, "assertive" for a failure the player must act on (A11Y-4). A no-op when the
+  // pill (or its label span) isn't mounted, so callers stay guard-free.
+  function setPillStatus(pill, live, text) {
+    const label = pill && pill.firstElementChild;
+    if (!label) return;
+    pill.setAttribute("aria-live", live);
+    label.textContent = text;
+  }
+
   // Capture-phase interception: in DR mode the send is a confessional, never a chat
   // turn — the chat pipeline (and the agent) must not see it.
   function wireComposer() {
@@ -193,24 +209,21 @@
       // Enter). _drSubmitting gates re-entry; the pill text signals the recording is in flight.
       if (form._drSubmitting) return;
       form._drSubmitting = true;
-      const _label = pill && pill.firstElementChild;
-      if (_label) { pill.setAttribute("aria-live", "polite"); _label.textContent = "📔 Recording…"; }
+      // in-flight cue (polite: the recording is under way, not urgent)
+      setPillStatus(pill, "polite", "📔 Recording…");
       try {
         await submitDR(entry);
         box.value = "";
         box.dispatchEvent(new Event("input", { bubbles: true }));
         if (pill) {
-          pill.setAttribute("aria-live", "polite"); // success is non-urgent (reset if a prior error escalated)
-          pill.firstElementChild.textContent = "📔 Recorded ✓ — between you and the producers.";
+          // success is non-urgent (polite resets any prior error-escalated assertive)
+          setPillStatus(pill, "polite", "📔 Recorded ✓ — between you and the producers.");
           setTimeout(exitDRMode, 900);
         } else { exitDRMode(); }
       } catch (_) {
         // A11Y-4: a failed confessional is actionable — announce assertively so it isn't deferred
         // behind the chat stream and lost (the player thinks their strategy note was recorded).
-        if (pill) {
-          pill.setAttribute("aria-live", "assertive");
-          pill.firstElementChild.textContent = "📔 The Diary Room camera glitched — try again.";
-        }
+        setPillStatus(pill, "assertive", "📔 The Diary Room camera glitched — try again.");
       } finally {
         // F-NEW-8: release the in-flight gate so a retry (after an error) can submit again.
         form._drSubmitting = false;
@@ -235,8 +248,11 @@
     catch (_) { return false; }
   }
   let _gateTimer = null;
-  function startGatePoll() {
+  function stopGatePoll() {
     if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; }
+  }
+  function startGatePoll() {
+    stopGatePoll();
     // Re-arm the periodic gate poll ONLY while WS is inactive (byte-identical to before when off).
     if (!_wsActive()) _gateTimer = setInterval(() => { if (!document.hidden) refreshGate(); }, 30000);
   }
@@ -249,7 +265,7 @@
     startGatePoll();
     // WS Phase-1 (§4/§6): cancel the periodic poll the instant the socket goes live; resume
     // polling if it falls back to SSE (startGatePoll re-arms only while !_wsActive()).
-    window.addEventListener("orwell:ws-active", () => { if (_gateTimer) { clearInterval(_gateTimer); _gateTimer = null; } });
+    window.addEventListener("orwell:ws-active", stopGatePoll);
     window.addEventListener("orwell:ws-inactive", () => { refreshGate(); startGatePoll(); });
   }
 

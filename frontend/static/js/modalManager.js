@@ -161,20 +161,54 @@ const _LABELS = {
   'doc-panel':         { label: 'Document', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8' },
 };
 
+// #573 B — RAIL UNIFICATION (WAY-7 / J2-09/04/05): the ONE parked-window destination in the
+// GAME BUILD is the control-room gadget rail — so both a MINIMIZED window (its "Windows" chip)
+// and a DOCKED window (0054 Phase 2) now live in the single control room, closing the two-
+// destinations split the audit tracked. This is a THIN ALIAS: minimize/restore semantics are
+// unchanged (same chip, same ids, same #minimized-dock element) — only the chip strip's HOME
+// moves. The chip dock is homed as a SIBLING of #gadget-rail-body (below the scrolling gadgets
+// + the collapsed icon strip), NOT inside the body: the body is display:none when the rail
+// collapses, and its children are the rail's draggable/orderable GADGETS — a sibling stays out
+// of BOTH, so a parked chip is never hidden by a collapse and is never mistaken for a gadget.
+// The full inherited build (no rail) keeps the legacy nav-sidebar "Windows" cluster verbatim.
+// (Gesture unification — minimize == dock — is the next increment; the finale/cast chip-park
+// refresh-persistence gate (G16) still pins the chip path, so it stays intact here.)
+function _homeDock(dock) {
+  const rail = document.getElementById('gadget-rail');
+  if (rail) {
+    if (dock.parentElement !== rail) rail.appendChild(dock);   // the control room is the ONE dock home
+    return;
+  }
+  // FULL BUILD (no rail): the legacy nav-sidebar "Windows" cluster (E95 / ruling #10) — unchanged.
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) { if (dock.parentElement !== document.body) document.body.appendChild(dock); return; }
+  if (dock.parentElement === sidebar) return;                  // already homed in the sidebar
+  const userBar = sidebar.querySelector('.sidebar-user-bar');
+  if (userBar) sidebar.insertBefore(dock, userBar);            // above the user bar (bottom of the sidebar)
+  else sidebar.appendChild(dock);
+}
+
 function _ensureDock() {
   let dock = document.getElementById('minimized-dock');
-  if (dock) return dock;
-  dock = document.createElement('div');
-  dock.id = 'minimized-dock';
-  // E95 (ruling #10): minimized windows dock as rows in a "Windows" cluster at
-  // the bottom of the sidebar — never as chips parked over the chatbox.
-  dock.innerHTML = '<div class="minimized-dock-hd">Windows</div><div class="minimized-dock-rows"></div>';
-  const sidebar = document.getElementById('sidebar');
-  const userBar = sidebar && sidebar.querySelector('.sidebar-user-bar');
-  if (userBar) sidebar.insertBefore(dock, userBar);
-  else if (sidebar) sidebar.appendChild(dock);
-  else document.body.appendChild(dock);
+  if (!dock) {
+    dock = document.createElement('div');
+    dock.id = 'minimized-dock';
+    // E95 (ruling #10): minimized windows dock as rows in a "Windows" cluster — never as
+    // chips parked over the chatbox.
+    dock.innerHTML = '<div class="minimized-dock-hd">Windows</div><div class="minimized-dock-rows"></div>';
+  }
+  _homeDock(dock);   // #573 B: (re-)home into the control-room rail (game build) or the sidebar (full build)
   return dock;
+}
+
+// #573 B: the parked-chip set changed — let the gadget rail re-run its content-driven
+// visibility so a freshly-parked chip reveals the (otherwise-empty) control room, and the last
+// restored/closed chip lets it hide again. A DISTINCT event from the g15 game-changed freshness
+// signal (whose sole dispatcher stays platform.js); orwellGadgetRail.js listens for this and
+// never re-mints it. No-op in the full build (no rail listens). NB: the dock still re-renders ONLY
+// on a real dock mutation (minimize/restore/close) — this fires FROM _renderDock, not a poll (#752).
+function _notifyDockChanged() {
+  try { window.dispatchEvent(new CustomEvent('orwell:dock-changed')); } catch (_) {}
 }
 
 // Manual order users can rearrange via drag.
@@ -319,6 +353,7 @@ function _renderDock() {
     dock.style.removeProperty('display');
     const rows0 = dock.querySelector('.minimized-dock-rows');
     if (rows0) rows0.innerHTML = '';
+    _notifyDockChanged();   // #573 B: no chips left — let the rail re-hide if it was only showing for the dock
     return;
   }
 
@@ -412,6 +447,7 @@ function _renderDock() {
   // a brand-new chip is joining.
   _renderedChipIds.clear();
   for (const id of renderIds) _renderedChipIds.add(id);
+  _notifyDockChanged();   // #573 B: a chip parked — reveal the control room so it's never stranded
 }
 
 // (Removed #573 A0: ~700 lines of dead modalManager chip chain-physics —

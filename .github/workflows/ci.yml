@@ -306,6 +306,27 @@ jobs:
     needs: changes
     if: needs.changes.outputs.visual == 'true'
     runs-on: ubuntu-latest
+    # SHARDED across 4 PARALLEL matrix legs (#1359 — the durable fix for the 40-min timeout).
+    # Tier A (~120 shots: 6 surfaces x 4 viewports x 5 themes) was one job capturing all 120; on a
+    # slow/contended hosted runner that exceeded even the 40-min cap and got cancelled, spuriously
+    # failing FE PRs. Now each leg replays the SAME golden walk but captures only its ~30 Tier-A
+    # slots (`--shard-index I --shard-count 4`, slot i owned by shard i%4); Tier B (~8 cheap,
+    # walk-coupled shots) is captured entirely on shard 0. The UNION of the 4 legs == the single-
+    # job shot set — no shot dropped or double-captured (proven browser-free in
+    # frontend/tests/test_0113_shard_partition.py). Mirrors the heavy-sims/jury/gradient shard
+    # pattern (now correct again: the hosted-parallel runners are back, #1360).
+    #
+    # `fail-fast: false` — one leg's geometry finding (or a runner blip) must not cancel the other
+    # legs; each leg still gates independently. The job stays NAMED `visual-regression`, so
+    # `needs.visual-regression.result` in ci-gate is the AND across all 4 legs — ci-gate needs NO
+    # change (a leg failure ⇒ the aggregate job result is `failure` ⇒ ci-gate fails).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # 25 (down from the 40-min stopgap for the unsharded 120-shot run): each leg now does ~30
+    # Tier-A shots + the shared walk replay — roughly a quarter of the old capture work — which
+    # sits comfortably inside 25 min even on a 3–4x slow runner.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -352,14 +373,16 @@ jobs:
       - name: install playwright chromium
         if: steps.fixture.outputs.present == 'true'
         run: python3 -m playwright install --with-deps chromium
-      - name: run the visual-regression matrix (Tier A + Tier B)
+      - name: run the visual-regression matrix — shard ${{ matrix.shard }}/4 (Tier A sharded; Tier B on shard 0)
         id: run
         if: steps.fixture.outputs.present == 'true'
         working-directory: frontend
-        # Geometry findings make this step (and the job) fail via the script's own exit code;
+        # Geometry findings make this step (and the leg) fail via the script's own exit code;
         # a pixel diff never does. `continue-on-error` would also swallow a genuine crash, so
-        # instead the script's exit code IS the job's signal — no extra plumbing needed.
-        run: python3 scripts/visual_regression.py --tier all --out "$RUNNER_TEMP/visual-run"
+        # instead the script's exit code IS the leg's signal — no extra plumbing needed. This
+        # leg captures only its Tier-A slice (--shard-index/--shard-count); the geometry gate
+        # still fires per-shot on that slice, and the union of the 4 legs is the full matrix.
+        run: python3 scripts/visual_regression.py --tier all --shard-index ${{ matrix.shard }} --shard-count 4 --out "$RUNNER_TEMP/visual-run"
       - name: append the run summary to the job summary
         if: always() && steps.fixture.outputs.present == 'true'
         run: |
@@ -370,7 +393,9 @@ jobs:
         if: always() && steps.fixture.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: visual-regression-run
+          # Shard-unique so the 4 parallel legs don't collide on the artifact name (a duplicate
+          # name across matrix legs fails the upload). Each leg uploads its own ~30-shot slice.
+          name: visual-regression-run-${{ matrix.shard }}
           path: ${{ runner.temp }}/visual-run
           retention-days: 14
           if-no-files-found: ignore
@@ -655,7 +680,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40  # four gate legs (live SSE/WS + toolturn SSE/WS), each with bounded retries
     steps:
       - uses: actions/checkout@v4
         with:
@@ -718,6 +743,110 @@ jobs:
           done
           echo "::error::mirror-parity WS-transport leg failed all attempts (two windows diverged during streaming under WS, or the socket silently fell back)."
           exit 1
+      # ── tool-rich multi-round parity (H1/H2), BOTH transports (#1087) ─────────────────────────────
+      # The single-round live gate above never exercises the agent-loop MULTI-ROUND path — which is
+      # where the WS rebind→ring-replay churn regression lived (issue #1087: toolturn red on main
+      # while both live legs stayed green, because the gate wasn't in CI). The toolturn gate also
+      # asserts the WS frame-log collapse (one chat subscribe per attached run, no stale run-started
+      # edge churn), so a reintroduced replay loop fails loudly here, not in production.
+      - name: mirror-toolturn gate — SSE/poll transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2; do
+            echo "──── mirror-toolturn (SSE) attempt $attempt ────"
+            if MIRROR_TOOLTURN=1 MIRROR_WS_TRANSPORT=0 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-toolturn (SSE): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-toolturn (SSE): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-toolturn SSE leg failed all attempts (dup/orphan bubbles across a tool-rich turn under the fallback transport)."
+          exit 1
+      - name: mirror-toolturn gate — WebSocket transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2; do
+            echo "──── mirror-toolturn (WS) attempt $attempt ────"
+            if MIRROR_TOOLTURN=1 MIRROR_WS_TRANSPORT=1 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-toolturn (WS): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-toolturn (WS): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-toolturn WS leg failed all attempts (the #1087 rebind→ring-replay churn class: dup bubbles / subscribe churn on a tool-rich turn under WS)."
+          exit 1
+
+  # ── #1375 rendered a11y gate — axe-core + WCAG/APCA contrast over the staged matrix ──────────
+  #
+  # The sibling of fe-responsive (gap 3 of #651): boots the SAME engine-staged responsive matrix
+  # (ORWELL_MATRIX_ENGINE + ORWELL_MATRIX_FINISH=1 — chrome + game + endgame surfaces) but runs
+  # scripts/a11y_matrix.py, which injects the VENDORED axe-core (frontend/tests/vendor/axe.min.js —
+  # no CDN, no network) into each rendered surface and runs a rendered WCAG(4.5:1/3:1)+APCA contrast
+  # sweep that samples the true backdrop pixels behind text (glass/scrim/blur the source-pinned
+  # checks can't see). KNOWN violations are XFAIL'd (ratchet); an UNKNOWN one FAILS. PATH-GATED on
+  # `changes.frontend` (same as fe-responsive). NON-BLOCKING while it bakes (owner ruling): it still
+  # RUNS + reports its own status on FE PRs, but is deliberately NOT in `ci-gate`'s `needs`/results,
+  # so it never gates a merge. Fold it into ci-gate to flip it blocking once the ratchet is trusted.
+  a11y-matrix:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: install front-end deps
+        run: pip install -r frontend/requirements.txt
+      - name: resolve playwright version (cache key)
+        id: pw
+        run: |
+          pip install playwright
+          echo "version=$(pip show playwright | awk '/^Version:/ {print $2}')" >> "$GITHUB_OUTPUT"
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+      - name: install playwright chromium
+        run: python3 -m playwright install --with-deps chromium
+      # Stage a REAL engine (deterministic Echo narrator, key-free — same as fe-responsive) so the
+      # game + endgame surfaces are actually rendered + audited.
+      - name: build the engine (dist/main.js the matrix stages against)
+        run: |
+          npm ci
+          npm run build
+      - name: boot the engine
+        run: |
+          ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$RUNNER_TEMP/orwell-a11y-data" \
+            node dist/main.js > "$RUNNER_TEMP/orwell-a11y-engine.log" 2>&1 &
+          for i in $(seq 60); do
+            if curl -fsS http://127.0.0.1:8765/health > /dev/null 2>&1; then
+              echo "engine healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::engine did not become healthy"
+          cat "$RUNNER_TEMP/orwell-a11y-engine.log"
+          exit 1
+      - name: a11y matrix gate — axe + WCAG/APCA contrast, ENGINE-STAGED (#1375, gap 3 of #651)
+        env:
+          ORWELL_MATRIX_ENGINE: http://127.0.0.1:8765
+          ORWELL_MATRIX_FINISH: "1"
+        run: cd frontend && python3 scripts/a11y_matrix.py
+      - name: engine log (on failure)
+        if: failure()
+        run: cat "$RUNNER_TEMP/orwell-a11y-engine.log" || true
 
   # ── Unified required-check gate (deadlock-free on skip) ──────────────────────────
   #

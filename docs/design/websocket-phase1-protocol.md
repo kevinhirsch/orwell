@@ -252,6 +252,10 @@ handshake (§2.3), discriminated by `ch`/`cid`:
   `agent_runs.py:47`), i.e. the last `seq` the client is about to receive from the replay before the
   live tail begins. Together they tell the client exactly the `[fromSeq..headSeq]` window the replay
   covers, so it knows when the prefix ends and the live tail starts — no guessing, no race.
+- **`runId`** (additive, #1087) — the stable identity of the run this subscribe attached to
+  (`agent_runs.run_id`), present when `hasRun:true`. The client records it as its reconcile-by-id
+  anchor: a later ring-replayed `run-started` edge (§4.1) carrying the SAME id is a stale
+  re-delivery for a run already rendered and is ignored. Opaque — compared, never parsed.
 - **Ordering is mandatory:** the client MUST NOT begin rendering/ordering `event` frames until it has
   the `ack` for that `subscribe` `cid`; the server MUST NOT emit any `chat` `event` frame for a
   `subscribe` before its `ack`. (`hello`/`bind` already follow this ack-first rule, §2 — `subscribe`
@@ -417,9 +421,22 @@ rides the **`state` channel** as a distinguished edge (the invitation class from
   `subscribe{ch:"chat", fromSeq:0}` (§3.1) and mirrors from the buffer — the same attach an SSE
   `run-started` triggers today. A peer that already holds a standing `chat` subscription needs no action
   (it is already registered and receives the run's `event` frames live — §3.3 register-before-replay).
+- **`runId` (additive, #1087 — at-least-once edges need an identity):** the edge carries the run's
+  stable id (`agent_runs.run_id`, resolved by the server at frame-build time). `session_events`'
+  replay ring re-delivers a finished run's invitation to any fresh channel attach, and the client's
+  "am I tailing?" boolean cannot recognize it (the run's `done` already cleared it) — so the client
+  skips a `run-started` whose `runId` matches the run it already attached/rendered (recorded from the
+  §3.1 subscribe `ack`). An id-less edge (evicted run) falls back to the boolean-only behavior.
+- **Idempotent re-arm (#1087):** a `subscribe{ch:"state"|"hud"}` for a channel **already running for
+  the same canonical id on the same socket** is a server-side NO-OP (edge subscribes have no success
+  ack, so this is wire-identical) — a respawn would re-run `session_events.subscribe()` and replay the
+  ring back at a window that already consumed it (the rebind→ring-replay churn loop). A genuinely new
+  subscriber (fresh socket / first arm) still gets the §3.4b ring replay, and a canonical change
+  respawns to re-point the bridge. The client mirrors this: `rebind()` re-arms the edges only on a
+  canonical change (the same-id guard, `orwellWs.js`).
 - **Source:** the FE bridges `session_events`' `run-started`/`message-added` (`session_events.py:92`) to
   this `state` edge, exactly as it bridges `game-updated` (§4). Payload stays a **ping** (ids only — the
-  `runKey`, no body), Vault Wall intact.
+  `runKey`/`runId`, no body), Vault Wall intact.
 - **Not a new authority:** it is the socket form of the existing invitation push; the ring
   (`_RING_REPLAY_EVENTS`) stays for fallback mode (§10). Deterministic handshake attach (§10) covers a
   peer connecting *after* a run starts; this edge covers a peer already connected *when* it starts.

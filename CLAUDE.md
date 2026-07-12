@@ -260,9 +260,16 @@ the **live** folds happen in the adapters: `EngineCommandsAdapter.recordInteract
 event and folds its hidden impact, and `GameSessionAdapter` folds ceremony beats
 (`foldCeremonyConsequence`) and soul evolution (`evolveFromBeat`); `src/engine/consequence.ts` is
 the older 0023 module (off-screen-sim path). The orchestrator (`src/composition/orchestrator.ts`)
-persists each turn with a fail-closed integrity checkpoint (0031). Hold the line that made it
-work: **never ship an action that is narrated but never recorded** — it has no consequence and no
-memory.
+persists each turn with a fail-closed integrity checkpoint (0031). **The checkpoint splits faults by
+KIND (#1106):** only *state-integrity* faults (degradation / vault-leak / no-daily-event) advance the
+consecutive-fault streak that opens the corruption circuit at `BREAKER_THRESHOLD`; a *persist-failure*
+(a disk blip) is still fail-closed + typed + recorded but **never** advances or resets the streak (a
+sick disk must not light the God-Mode corruption alarm), and a read-only `audit` can never close the
+circuit — only a clean state-changing commit does. A supplementary off-screen tick whose save fails
+rolls back to the committed baseline and the **player turn still stands** (the tick is enrichment, not
+the turn); the capped fault ring survives clean commits so `sandboxHealth` can reconstruct a burst.
+Hold the line that made it work: **never ship an action that is narrated but never recorded** — it has
+no consequence and no memory.
 
 **The front-end error-corrects the model (`frontend/src/agent_loop.py`).** A real, recurring gap:
 the narration LLM reliably **under-calls** the engine tools — it won't `advanceGame` (the game
@@ -283,7 +290,16 @@ finalizes; a **`createCharacter` finalize fallback** starts the season when cast
 the player signals readiness; the advance stall-nudge **escalates to a forced `advanceGame` (L39b)** when
 the model ignores every rung; and a **premiere `markHouseguestMet` auto-belt** keeps the #380
 meet-everyone gate progressing. These guardrails fire only where the model SKIPS a call — the engine is
-fine; never engine-author content.
+fine; never engine-author content. **The whole belt family is inventoried in
+`docs/design/undercall-seam-structural.md`** (trigger / what the model skipped / failure-mode-if-broken,
+across the progression, consequence-loop, and game-start families), which also holds the *forced
+tool_choice* rung (a per-round wire directive that GUARANTEES a single-legal-lever closed-set beat —
+the live comp/ceremony beats and the casting finalize — gets called; never forces `submitDecision`,
+suppressed on open pendings/social holds) and the **belt-fire telemetry** (`orwell_sync_ledger.note_belt_fire`
+→ per-turn `beltsFired` → `get_belt_totals`). **The telemetry contract is success-gated, not
+attempt-counted: a belt fire means an APPLIED correction — the awaited helper produced a real update
+(a recorded scene, an applied move, an OBSERVED forced tool event) — never a mere selection or a
+no-op/failed extraction.** `frontend/tests/test_belt_telemetry.py` pins it.
 
 **Sync work must never flatten creative play (`docs/decisions/0005`).** Authority splits by
 *openness*, not by *layer*: the **closed set** (outcomes, eligibility, state truth, persistence,
@@ -351,6 +367,25 @@ them before touching the chat stream or the HUD.
   other consumers (doc-fence, TTS, persistence `dataset.raw`, background streams, `<think time=…>`).
   The **stall watchdog (`_startStallWatchdog`) is deliberately DISABLED** — the server-side stall
   detector + auto-continue loop-breaker supersede the old "still working?" banner; don't re-enable it.
+
+- **On narrow viewports, kit windows present as bottom SHEETS, not floating windows (#893).**
+  `frontend/static/js/orwellWindow.js` takes a `sheet: 'auto'|true|false` option (default `'auto'`),
+  resolved per-open like docked-vs-floating: on ≤768px **modal dialogs sheet automatically** and
+  non-modal windows opt in; crossing the breakpoint re-homes live windows through the same `_rehoming`
+  teardown/rebuild hinge the dock toggle uses. Sheet mode is a *presentation mode of the window kit
+  itself* (NOT a second window family — avoids F-CHROME-1 II) kept in gesture/visual lock-step with
+  the sibling `orwellSheet.js` (the detent fractions are a shared pin — never let them drift). Sheet
+  mode skips slots/drag/resize and mints **no** geometry key, so F5 holds and g15 stays silent.
+
+- **The send outbox is reload-durable, session-bound, and self-continuing (#891 P0s).** In
+  `frontend/static/js/chat.js` a queued/offline send persists to **sessionStorage** (per-tab by the
+  ADR 0008/0012 ruling — localStorage would let two tabs double-send) and stays until a server row
+  carrying its `clientMsgId` is observed. Non-obvious invariants, each a fixed regression: (1) a
+  restored item drains **only** while ITS `item.sessionId` is the selected session, and dedupe checks
+  `item.sessionId`'s history — never the current session's — or a restored item bleeds into the wrong
+  chat; (2) the drain is **self-continuing** — each dispatch settle re-schedules the flush if eligible
+  items remain, or a second queued item starves behind the single-flight guard. `selectSession`
+  (`sessions.js`) nudges the drain so a bound item dispatches on selection.
 
 - **Run the WHOLE FE suite before pushing FE changes.** `cd frontend && python3 -m pytest tests/`
   (venv at `frontend/.venv`). Many gates are source-pinned convention checks (g15, the reasoning

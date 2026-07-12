@@ -43,6 +43,15 @@ many parallel agents, not typing every edit myself.
   symlink (or `readlink -f`). I once killed two healthy agents off the false 117-byte read — never
   again. A genuinely stalled agent shows a stale transcript mtime; resume it with `SendMessage`
   (a completed/stalled agent gets "resumed from transcript").
+- **Keep the fan-out full — replenish to zero (owner directive, 2026-07-11).** Treat the open
+  backlog as a work queue and the concurrent-agent slots as a pool to keep *saturated*: as each
+  delegate finishes, review it → open the PR → merge on green → **immediately dispatch the next
+  backlog item into the freed slot**, and keep going until the lane is empty. Never let a slot idle
+  waiting for a whole batch to drain. The one hard serializer is the **golden re-record** (one
+  driver at a time — two corrupt the fixture): build golden-staling work in parallel but funnel its
+  re-records/merges **single-file**; golden-*neutral* work merges freely. With a second overseer
+  running, split lanes so the pools don't contend (I hold the golden fixture + the
+  narrator-prompt/streaming files; they hold the render/design-system lane).
 
 ## Hard-won lessons (the expensive ones — internalize these)
 1. **Diagnose before you revert.** I reverted PR #822 on a *hypothesis* that it broke chat; it
@@ -238,6 +247,24 @@ many parallel agents, not typing every edit myself.
     one read `core: 0/15000` mid-exhaustion); only a different principal gets a different pool. Related trap: commits that
     name an issue in the SUBJECT but carry no `Fixes #` keyword do NOT auto-close it — sweep for
     these locally and close manually with the fixing sha as evidence.
+
+24. **Concurrent delegates MUST be `isolation: "worktree"` — and a fresh worktree has no
+    `node_modules` (2026-07-11).** The operating model says it; I forgot it once and fired TWO
+    background build agents WITHOUT isolation. They shared the main checkout, `git checkout -B`'d
+    over each other (carrying one agent's uncommitted files onto the other's branch), and intermixed
+    into one corrupt working tree — caught by the **stop-hook's uncommitted-changes check, NOT a
+    test**. Recovery: stop both (`TaskStop`), confirm nothing escaped (`git ls-remote --heads origin
+    <branch>` — neither pushed), then `git checkout -f <my-branch> && git reset --hard && git clean
+    -fd`, `git branch -D` the corrupt locals, and re-dispatch WITH `isolation: "worktree"`. Two
+    corollaries for isolated ENGINE agents: (a) a fresh worktree has NO `node_modules`, so
+    `typecheck`/`test:arch`/`vitest` die with `esbuild: not found` — the brief must
+    `ln -s /home/user/orwell/node_modules node_modules` FIRST (never `npm install` per-worktree);
+    (b) the FE venv at `/home/user/orwell/frontend/.venv` works cross-worktree, so FE agents point
+    straight at it. On a **fresh remote container** the main checkout starts with NEITHER — a
+    one-time `npm install` + `python -m venv frontend/.venv && …/pip install -r
+    frontend/requirements.lock.txt` bootstrap seeds both, then every worktree symlinks/points at
+    them. A SOLO non-isolated agent is fine (the #1408 fix ran that way and pushed clean); the
+    collision is strictly the >1-concurrent-agents-in-the-shared-checkout case.
 
 ## Project conventions (the muscle memory)
 - **Stack:** TS engine (port 8765) + Python/FastAPI FE (`frontend/`, port 7000,

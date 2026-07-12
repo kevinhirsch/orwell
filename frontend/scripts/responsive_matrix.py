@@ -76,15 +76,11 @@ XFAIL = {
     # Add ONLY with a finding ID (a filed issue), remove when the finding lands — the
     # gate then ratchets the family to a hard assertion.
     #
-    # #1371 — the finished-season retrospective window (#orwell-retro, kit slot top-right,
-    # fixed z-502) floats OVER the gadget rail's docked cards on rail-visible tiers and
-    # reaches the composer at several tiers. ONE root cause, four collision families (#1371-a..d) —
-    # surfaced the first time the matrix ran ENGINE-STAGED + FINISHED in CI (#651 gap 1);
-    # pre-existing state, not a new regression. Remove all four entries when #1371 lands.
-    "#1371-a": "overlap:orwell-retro intersects the composer",
-    "#1371-b": "overlap:orwell-status intersects orwell-retro",
-    "#1371-c": "overlap:orwell-presence intersects orwell-retro",
-    "#1371-d": "overlap:orwell-retro intersects orwell-room-strip",
+    # #1371 (LANDED) — the finished-season retrospective (#orwell-retro) now DOCKS into the gadget
+    # rail on rail-visible tiers instead of floating the top-right slot window over the in-flow rail
+    # + composer, and is height-capped on the narrow / no-rail tier so it can never reach the
+    # composer. The four collision families (#1371-a retro↔composer, -b status↔retro, -c
+    # presence↔retro, -d retro↔room-strip) are now hard assertions — no XFAIL entry.
 }
 
 passes, failures, xfails, xpasses = [], [], [], []
@@ -584,6 +580,13 @@ def audit_banner(page, vp_name, width, height):
               document.querySelectorAll(sel).forEach(el => {
                 const cs = getComputedStyle(el);
                 if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                // #1371: a DOCKED kit window (.ow-docked) is rail-flow content inside the
+                // scrollable #gadget-rail-body — its raw layout box legitimately runs taller than
+                // the viewport (the rail scrolls), so it is NOT a floating window subject to the
+                // banner compression / under-banner rules. The rail itself (#gadget-rail, measured
+                // above) carries the fixed-chrome compression contract. Skip docked windows (mirrors
+                // the overlap sweep's _clipped_box philosophy — docked opts out of floating geometry).
+                if (sel === '.ow-window' && el.classList.contains('ow-docked')) return;
                 const r = el.getBoundingClientRect();
                 if (r.width < 2 || r.height < 2) return;
                 rows.push({ sel, top: r.top, bottom: r.bottom });
@@ -703,17 +706,34 @@ def mount_face_grid_card(page):
         return False
 
 
+def _set_retro_dismissed(page, on):
+    """POLL-PROOF retro isolation. #orwell-retro self-shows on its own 30s poll (render() →
+    showPanel), which RACES a bare display:none the matrix sets to isolate a decision card —
+    re-showing the retro mid-pass and manufacturing a false retro↔card overlap. The retro's render()
+    honors the `orwell-retro-dismissed` sessionStorage flag (its onClose sets it), so SETTING it keeps
+    the panel hidden THROUGH polls; CLEARING it (+ display:'') lets a pass show it again. Fail-soft."""
+    try:
+        if on:
+            page.evaluate("(()=>{try{sessionStorage.setItem('orwell-retro-dismissed','1')}catch(_){}; "
+                          "const e=document.getElementById('orwell-retro'); if(e)e.style.display='none';})()")
+        else:
+            page.evaluate("(()=>{try{sessionStorage.removeItem('orwell-retro-dismissed')}catch(_){}; "
+                          "const e=document.getElementById('orwell-retro'); if(e)e.style.display='';})()")
+    except Exception:
+        pass
+
+
 def mount_retro(page):
     """Build+show #orwell-retro via its headless seam (window._orwellRetroEnsure, mirrored from the
     other panels). On a finished season its own 30s poll fills the body (winner headline, highlights,
     the 44px 'Open the Vault' button); we wait for one tick so the tap sweep sees the real button.
     Returns True if the panel mounted visible. Fail-soft."""
     try:
+        # An earlier card pass may have SUPPRESSED the panel (dismissed flag + display:none) to
+        # isolate the card; clear that so the panel is its natural self for the retro measurement.
+        _set_retro_dismissed(page, False)
         page.evaluate("typeof window._orwellRetroEnsure === 'function' && window._orwellRetroEnsure()")
         page.wait_for_timeout(1500)
-        # The earlier card pass may have force-hidden the panel (display:none) to isolate the card;
-        # clear that so the panel is its natural self for the retro measurement. (Its own poll would
-        # restore it on the next 30s tick, but the matrix can't wait that long.)
         page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='')")
         el = page.query_selector("#orwell-retro")
         return bool(el and el.is_visible())
@@ -756,9 +776,10 @@ def main():
                 if (finished or endgame_pending) and vp_name in ("phone-390", "tiny-320"):
                     if mount_endgame_card(page, endgame_pending):
                         # On a finished season the retro panel may already be self-visible from its
-                        # own background poll; hide it for THIS pass so the live-card layout is
-                        # measured alone (the two are never simultaneous in a real game).
-                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='none')")
+                        # own background poll; suppress it for THIS pass so the live-card layout is
+                        # measured alone (the two are never simultaneous in a real game). Poll-proof
+                        # (the dismissed flag, not a bare display:none the 30s poll would undo).
+                        _set_retro_dismissed(page, True)
                         audit_page(page, vp_name + "+endgame-card", w, h, coarse, with_game)
                         remove_endgame_card(page)
                     if mount_retro(page):
@@ -775,11 +796,12 @@ def main():
                         # #651: same isolation rule as the endgame-card pass above — on a FINISHED
                         # season (ORWELL_MATRIX_FINISH) the retro panel is self-visible from its own
                         # poll, but a live decision card and the post-season retro never co-exist in
-                        # a real game; hide the retro for THIS pass so the synthetic card's layout is
-                        # measured alone, then restore it.
-                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='none')")
+                        # a real game; suppress the retro for THIS pass so the synthetic card's layout
+                        # is measured alone, then restore it. Poll-proof (dismissed flag) so the 30s
+                        # poll can't re-show the retro mid-pass and fake a retro↔card overlap.
+                        _set_retro_dismissed(page, True)
                         audit_page(page, vp_name + "+face-grid", w, h, coarse, with_game)
-                        page.evaluate("(document.getElementById('orwell-retro')||{}).style&&(document.getElementById('orwell-retro').style.display='')")
+                        _set_retro_dismissed(page, False)
                     remove_endgame_card(page)
 
                 # G6: the settings tab rail keeps its LEFT orientation in any

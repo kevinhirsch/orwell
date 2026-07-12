@@ -59,6 +59,12 @@ def test_advance_game_without_sync_fields_sends_empty_args():
     assert _CapturingClient.last_json == {"name": "advanceGame", "args": {}}
 
 
+def test_turn_in_without_sync_fields_sends_empty_args():
+    # #1385 / ADR 0006 — turnIn is a mutating progression; absent ⇒ byte-identical to the pre-0065 call.
+    _run(orwell_engine.turn_in(user="u"))
+    assert _CapturingClient.last_json == {"name": "turnIn", "args": {}}
+
+
 def test_submit_decision_without_sync_fields_sends_the_bare_decision():
     _run(orwell_engine.submit_decision({"kind": "veto-decision", "use": False}, user="u"))
     assert _CapturingClient.last_json == {"name": "submitDecision", "args": {"kind": "veto-decision", "use": False}}
@@ -89,6 +95,12 @@ def test_surface_information_without_sync_field_is_unchanged():
 def test_advance_game_threads_both_sync_fields():
     _run(orwell_engine.advance_game(expected_beat_seq=7, idempotency_key="k-1", user="u"))
     assert _args() == {"expectedBeatSeq": 7, "idempotencyKey": "k-1"}
+
+
+def test_turn_in_threads_both_sync_fields():
+    # #1385 / ADR 0006 — turnIn threads the CAS token + at-most-once key exactly like advanceGame.
+    _run(orwell_engine.turn_in(expected_beat_seq=51, idempotency_key="sleep-1", user="u"))
+    assert _args() == {"expectedBeatSeq": 51, "idempotencyKey": "sleep-1"}
 
 
 def test_submit_decision_merges_sync_fields_into_the_payload():

@@ -1,5 +1,6 @@
 import type {
   GameSession, CreateCharacterReq, GameStateView, MomentPromptReq, MomentPromptView,
+  RecallSceneMemoriesReq, RecallSceneMemoriesView,
   RunCompetitionReq, CompetitionResultView, PublicGameStatus,
   AdvanceView, SubmitDecisionReq, PendingDecisionView, NamedRef, SocialInitiative, PlayerTaglineView,
   FinaleView, EvictionView, MakeDealReq, DealView, FormAllianceReq, JoinAllianceReq, AllianceView, WhereaboutsView, HouseguestMoveResult,
@@ -49,6 +50,7 @@ import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAll
 import type { Alliance } from "../../engine/alliances";
 import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
 import type { ConfessionalContext } from "../../engine/confessionals";
+import { buildPullQuoteReel } from "../../engine/pullQuoteReel";
 import { rankApproaches, applyApproachCooldown } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
 import type { EvictionManner } from "../../engine/jury";
@@ -184,9 +186,11 @@ import {
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
+  competitionStagingData, validateCompetitionFiction,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
+import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
 import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
@@ -229,14 +233,20 @@ import { CONFIDENCE, type DisclosureTier } from "../../engine/confidenceConstant
 import {
   severityOf, leverageStrength, leverageDealBoost, dealAcceptance, exposeOutcome,
   tradeValue, tradeDealBoost, tradeOutcome, bluffBelieved,
-  type LeverageSignals, type TradeSignals,
+  type LeverageSignals, type TradeSignals, type BarterCandidate,
 } from "../../engine/leverage";
+import { SECRET_BARTER } from "../../engine/secretBarterConstants";
 import { LEVERAGE, SECRET_TRADE } from "../../engine/leverageConstants";
 import {
   rankPlayerBoundThreads, dripBudget, recencyFromAge, relationshipReads,
   type PlayerBoundThread, type RankedThread,
 } from "../../engine/secretPacing";
 import { SECRET_PACING } from "../../engine/secretPacingConstants";
+import {
+  composeShowrunnerNote, emphasisForThread, reweightThreadOrder, showrunnerNoteToProse,
+  type ShowrunnerNote, type ThreadSignal,
+} from "../../engine/showrunner";
+import { SHOWRUNNER } from "../../engine/showrunnerConstants";
 import { derivedLoyalty } from "../../engine/blocs";
 import type { ReserveTwist, TwistKind } from "../../engine/reserveTwists";
 import type { CeremonyState, SessionCore, TrackedSighting } from "../../engine/sessionSnapshot";
@@ -475,6 +485,61 @@ const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 const MYTH_MAKING_ENABLED_DEFAULT = process.env.ORWELL_MYTH_MAKING === "1";
 
 /**
+ * 0101 (#1401) — whether the AI SHOWRUNNER runs by DEFAULT. OFF unless `ORWELL_SHOWRUNNER=1`. A DEDICATED
+ * flag (sibling to `ORWELL_MYTH_MAKING`/`ORWELL_SECRET_PACING`) so calibration neutrality is provable in
+ * isolation: with it unset, `showrunnerTick` no-ops before composing anything (no note is stored) and
+ * `scheduleStoryThreads` sees no note ⇒ it iterates in the unchanged derive order at the unchanged
+ * `THREAD.surfaceProb` ⇒ the seeded `juryReach`/gradient/UAT spine is byte-identical to today. The
+ * showrunner is doubly-neutral BY CONSTRUCTION: it composes on a PURE scoring pass (no rng at all) and the
+ * scheduler it biases runs entirely on per-thread SIDE rngs (keyed by thread id, never the shared stream),
+ * so even the layer ON cannot perturb any competition/vote/eligibility roll. The calibration/UAT harness
+ * never sets it; the live deploy may. A test overrides per-session via `setShowrunnerEnabled`.
+ */
+const SHOWRUNNER_ENABLED_DEFAULT = process.env.ORWELL_SHOWRUNNER === "1";
+
+/**
+ * 0101/#1401 Phase-2 (#1455) — whether the OUTCOME-AFFECTING showrunner REWEIGHT runs by DEFAULT. OFF
+ * unless `ORWELL_SHOWRUNNER_REWEIGHT=1`. A DEDICATED sub-flag, DISTINCT from the Phase-1 `ORWELL_SHOWRUNNER`
+ * above, because — unlike Phase-1 (which only routes an emphasized surfaced thread's belief to the player,
+ * fold-free) — the reweight RE-ORDERS which simmering thread wins the scheduler's SCARCE per-tick slot, and
+ * a thread's activate/surface/resolve transitions FOLD hidden relationship weights that feed the
+ * competition/vote spine. So it necessarily PERTURBS the seeded outcome stream and CANNOT be
+ * outcome-neutral by construction — which is exactly why it ships behind its own flag, gated by the
+ * calibration heavy-sims (juryReach / gradient / UAT run ON) rather than an on/off SHA256 identity.
+ *
+ * WITH IT UNSET (the default), `scheduleStoryThreads` never re-orders (it iterates the unchanged derive
+ * order) ⇒ the seeded `juryReach`/gradient/UAT spine is BYTE-IDENTICAL to today AND to Phase-1 (proven by
+ * `showrunnerReweight.test.ts`'s off-vs-today SHA256, on top of the still-green `showrunnerOutcomeNeutral`).
+ * The reweight IMPLIES note composition (you cannot re-weight without a note): when ON it composes notes
+ * itself, so `ORWELL_SHOWRUNNER_REWEIGHT=1` alone yields the full arc-pacing showrunner. Read once at
+ * module load (like the sibling flags), with a PROCESS-GLOBAL static override (mirroring `secretPacing` /
+ * `seededTieSurfacing`) so the calibration ON-run flips it once for every session it plays.
+ */
+const SHOWRUNNER_REWEIGHT_ENABLED_DEFAULT = process.env.ORWELL_SHOWRUNNER_REWEIGHT === "1";
+
+/**
+ * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs by DEFAULT. OFF unless
+ * `ORWELL_SECRET_BARTER=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`/`ORWELL_MYTH_MAKING`) so
+ * calibration neutrality is provable in isolation: with it unset, `secretBarterTick` returns before
+ * drawing anything (the dedicated barter-rng stream never advances) and no secret changes hands ⇒ the
+ * seeded `juryReach`/gradient/UAT spine is byte-identical to today. The calibration/UAT harness never
+ * sets it; the live deploy may. Read once at module load (like the sibling flags); a test overrides
+ * per-session via `setSecretBarterEnabled`.
+ */
+const SECRET_BARTER_ENABLED_DEFAULT = process.env.ORWELL_SECRET_BARTER === "1";
+
+/**
+ * Issue #1397 — whether CHARACTER-MEDIATED gossip drift runs by DEFAULT. OFF unless `ORWELL_GOSSIP_DRIFT=1`.
+ * A DEDICATED flag (sibling of `ORWELL_MYTH_MAKING`) so calibration neutrality is provable in isolation:
+ * with it unset the orchestrator passes NO `voiceOf` to `diffuseGossip`, so the gossip distortion stays
+ * personality-AGNOSTIC — byte-identical to the pre-feature drift, and the seeded juryReach/gradient/UAT
+ * spine is unchanged. Read once at module load (like the sibling flags); a test overrides per-session via
+ * `setGossipDriftEnabled`. (Drift is re-weighted on a per-hop FORK regardless, so even ON the parent
+ * competition/vote/jury draw stream is byte-identical — the flag gates only whether VOICE colors the drift.)
+ */
+const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
+
+/**
  * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
  * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
@@ -659,6 +724,13 @@ export class GameSessionAdapter implements GameSession {
   private perConversationClockEnabled = PER_CONVERSATION_CLOCK_ENABLED_DEFAULT;
   private socialFatigueEnabled = SOCIAL_FATIGUE_ENABLED_DEFAULT;
   private multiNightFatigueEnabled = MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT;
+  /**
+   * Feature #1400 — generative competition design. DEFAULT OFF (its `ORWELL_GEN_COMPETITIONS` env
+   * default): when off, `competitionStagingView` returns null and `recordCompetitionFiction` refuses, so
+   * NO fiction is ever authored/stored ⇒ the deterministic 0042 library floor stands, byte-identical to
+   * the pre-feature model (the `genCompetitionNeutral` proof pins it). Flipped by a test's setter (below).
+   */
+  private genCompetitionsEnabled = genCompetitionsEnvDefault();
   /** The DEDICATED jury-house rng tick counter — jury-house draws fork off the game seed + this, NEVER the
    * orchestrator's shared society/competition/vote stream, so even with the layer ON the main house's seeded
    * outcomes stay in phase (only the hidden finale lean changes). Persisted so the stream is restart-stable. */
@@ -669,6 +741,9 @@ export class GameSessionAdapter implements GameSession {
    * UAT) is BYTE-IDENTICAL; the live deploy may enable it. A test flips it via `setMythMakingEnabled`.
    */
   private mythMakingEnabled = MYTH_MAKING_ENABLED_DEFAULT;
+  /** Issue #1397 — whether the RETELLER's public voice colors gossip drift (character-mediated distortion).
+   *  OFF by default; the orchestrator reads this to decide whether to hand `diffuseGossip` a `voiceOf`. */
+  private gossipDriftEnabled = GOSSIP_DRIFT_ENABLED_DEFAULT;
   /** The DEDICATED legend-rng tick counter — legend draws fork off the game seed + this, NEVER the
    *  orchestrator's shared society/competition/vote stream (the same isolation `juryHouseTickCount`
    *  uses), so even with the layer ON the main house's seeded outcomes stay in phase. Persisted so the
@@ -679,6 +754,39 @@ export class GameSessionAdapter implements GameSession {
   /** The watermark — the highest consumed notable-act's `GameEvent.ts` — so a used act is never
    *  re-selected into a second legend (0101). Monotonic (non-decreasing). */
   private legendLastActTick = 0;
+  /**
+   * 0101 (#1401) — the AI SHOWRUNNER. `showrunnerEnabled` gates the whole layer (DEFAULT OFF ⇒
+   * calibration byte-identical). `showrunnerNotes` is the Vault-held, APPEND-ONLY production bible (one
+   * note per (week, phase) beat — the once-per-beat dedupe mirrors the scheduler's own cadence);
+   * `showrunnerNoteCount` is its monotonic per-season count (a `SessionCoreCounts` dimension). Both reset
+   * only at a season boundary. ENGINE-ONLY / Vault-held — a note reaches NO player/admin projection and
+   * unseals only in the 0048 retrospective. NB: a note is composed on a PURE pass (no rng) and consumed by
+   * the scheduler's own side rngs, so the shared society/competition/vote stream is untouched ON or OFF. */
+  private showrunnerEnabled = SHOWRUNNER_ENABLED_DEFAULT;
+  private showrunnerNotes: ShowrunnerNote[] = [];
+  private showrunnerNoteCount = 0;
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the monotonic per-season count of off-screen ticks on which the reweight
+   * actually RE-ORDERED the scheduler (the producer's shortlist genuinely jumped a thread ahead of the
+   * derive order). A `SessionCoreCounts` dimension (++-only, reset only at a season boundary), so the ON
+   * calibration run can prove the layer is non-vacuous and the non-degradation checkpoint keeps it durable.
+   * Stays 0 whenever the reweight sub-flag is off ⇒ byte-shaped like a pre-Phase-2 save. */
+  private showrunnerReweightCount = 0;
+  /**
+   * 0099 (hidden half) — whether the off-screen NPC↔NPC SECRET BARTER runs. DEFAULT OFF: the
+   * calibration/UAT harness never enables it, so with it unset `secretBarterTick` returns before drawing
+   * anything and no secret changes hands ⇒ every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL;
+   * the live deploy may enable it. A test flips it via `setSecretBarterEnabled`.
+   */
+  private secretBarterEnabled = SECRET_BARTER_ENABLED_DEFAULT;
+  /** The DEDICATED secret-barter rng tick counter — barter draws fork off the game seed + this, NEVER the
+   *  orchestrator's shared society/competition/vote stream (the same isolation `legendTickCount` uses), so
+   *  even with the layer ON the main house's seeded outcomes stay in phase. Persisted so the stream is
+   *  restart-stable. */
+  private secretBarterTickCount = 0;
+  /** The monotonic count of secrets SPENT into the hidden economy this season (0099, sibling of
+   *  `legendCount`/`tradeCount`) — the knowledge layer only deepens as secrets change hands (++ only). */
+  private secretBarterCount = 0;
   /**
    * 0086 — every active houseguest's current DRIVE (motivation + intensity), keyed by id. Computed each
    * campaignTick (sticky — carried from the prior tick), engine-only + Vault-sealed, never projected. The
@@ -1127,6 +1235,19 @@ export class GameSessionAdapter implements GameSession {
   /** Wire the engine-only soul store (0041) so the live loop deepens souls + can recall (0024). */
   setSoul(soul: SoulProvider): void {
     this.soul = soul;
+  }
+
+  /**
+   * Feature #1394 — the Vault-free scene-memory recall closure, wired by the registry from the
+   * OUTWARD `VisibleStateService` (the player's witness-filtered projection) + the shared embedder.
+   * The provenance lives at the wiring site ON PURPOSE: this adapter never reaches the Vault or the
+   * raw event store for recall — it delegates to a closure that reads only the player projection.
+   * Unwired ⇒ recall returns `[]` (a standalone adapter / test with no live projection).
+   */
+  private sceneRecall?: (npcIds: readonly EntityId[], cue: string) => string[];
+
+  setSceneRecall(fn: (npcIds: readonly EntityId[], cue: string) => string[]): void {
+    this.sceneRecall = fn;
   }
 
   /** Reserve-twist slots for a new game (0016 knob: the admin sets the COUNT, never the content). */
@@ -2242,6 +2363,18 @@ export class GameSessionAdapter implements GameSession {
       // already class-naturalized by `storyThreadToRetrospectiveProse`.
       hiddenStory.push({ type: storyThreadLabel(t.premise), content: storyThreadToRetrospectiveProse(t, nameOf) });
     }
+    // 0101/#1401 — the SHOWRUNNER's production bible unseals HERE (0048), the same Wall exception as the
+    // threads above: each beat's producer note rendered readably from the IN-MEMORY notes — source NAMES
+    // (public facts) + the class/position rationale, emphasis described qualitatively (never a premise,
+    // never a raw number). Pre-finale this is unreachable (the retrospective gate returns null), so a note
+    // never crosses to a live player/admin surface (the Vault-held boundary test proves it).
+    const threadSourceName = (threadId: string): string => {
+      const t = this.storyThreads.find((x) => x.id === threadId);
+      return t ? nameOf(t.sourceId) : "a houseguest";
+    };
+    for (const snote of this.showrunnerNotes) {
+      hiddenStory.push({ type: "Producer's note", content: showrunnerNoteToProse(snote, threadSourceName) });
+    }
     // #847 — the deep profile's secrets / true-goals / weakness are ALSO the source of the secret
     // threads above (each thread is derived from one of them), so re-rendering the deep-profile blob would
     // print the same secret TWICE. The threads are the canonical, live (status-bearing) representation of
@@ -2317,6 +2450,14 @@ export class GameSessionAdapter implements GameSession {
     const playerConfessionals = (this.playerKnowledgeReader?.() ?? [])
       .filter((k) => k.pathway === NO_NPC_PATHWAY)
       .map((k) => k.content);
+    // #1396 — the weekly pull-quote reel: a curated, BY-WEEK montage of the most notable Diary-Room lines
+    // (the player's own AND the NPCs' confessionals). A PURE read-time selection over the SAME `events`
+    // log the hidden story above reads — it draws no rng, records nothing, and mutates no state, so the
+    // seeded spine is byte-identical whether or not it runs (`pullQuoteReelNeutral.test.ts`). It reaches
+    // the player ONLY here, at this one sanctioned unseal seam — the NPC lines never touch a per-turn
+    // surface (the Vault Wall, mandate #2; `pullQuoteReel.test.ts` sentinel). Names/ids resolved through
+    // the same `retroScrub` the rest of the unseal uses, so no raw id crosses.
+    const pullQuoteReel = buildPullQuoteReel(events, { nameOf, scrub: (c) => this.retroScrub(c) });
     return {
       winner: this.live.winner ? this.named(this.live.winner) : null,
       hiddenStory: coalesceDumpRows(ordered),
@@ -2324,6 +2465,7 @@ export class GameSessionAdapter implements GameSession {
       evictionVotes,
       ...(juryVotes ? { juryVotes } : {}),
       playerConfessionals,
+      pullQuoteReel,
     };
   }
 
@@ -2479,6 +2621,11 @@ export class GameSessionAdapter implements GameSession {
       ...(this.legendTickCount > 0 ? { legendTickCount: this.legendTickCount } : {}),
       ...(this.legendCount > 0 ? { legendCount: this.legendCount } : {}),
       ...(this.legendLastActTick > 0 ? { legendLastActTick: this.legendLastActTick } : {}),
+      // 0099 (hidden half) — the DEDICATED secret-barter rng tick counter + the monotonic count of secrets
+      // spent into the hidden economy, persisted so the isolated barter stream + the non-degradation count
+      // survive a restart (0007/0030). Absent ⇒ 0 on restore (byte-shaped as a pre-0099-barter save / off).
+      ...(this.secretBarterTickCount > 0 ? { secretBarterTickCount: this.secretBarterTickCount } : {}),
+      ...(this.secretBarterCount > 0 ? { secretBarterCount: this.secretBarterCount } : {}),
       // 0087: persist the hidden relationship-trajectory momentum + its recent-fold ring buffers, so a
       // multi-week arc RESUMES mid-curdle (0007/0030) and ACCUMULATES, never thins. Vault-class hidden state
       // (no player/admin-visible number) — already inside the never-outward snapshot. Absent ⇒ byte-shaped
@@ -2554,6 +2701,13 @@ export class GameSessionAdapter implements GameSession {
       // persisted so a driven thread stays driven and the cap is never re-opened by a reload.
       ...(Object.keys(this.nominationWeeks).length ? { nominationWeeks: cloneSession(this.nominationWeeks) } : {}),
       ...(this.surfacedThreadCount > 0 ? { surfacedThreadCount: this.surfacedThreadCount } : {}),
+      // 0101/#1401 — the showrunner's Vault-held production bible (append-only per beat) + its monotonic
+      // count, persisted so the season's producer notes survive a restart and only ever deepen (#4).
+      ...(this.showrunnerNotes.length ? { showrunnerNotes: cloneSession(this.showrunnerNotes) } : {}),
+      ...(this.showrunnerNoteCount > 0 ? { showrunnerNoteCount: this.showrunnerNoteCount } : {}),
+      // 0101/#1401 Phase-2 (#1455) — the monotonic reweight-fired count (a `SessionCoreCounts` dimension).
+      // Absent ⇒ 0 (byte-shaped like a pre-Phase-2 save / the reweight sub-flag off).
+      ...(this.showrunnerReweightCount > 0 ? { showrunnerReweightCount: this.showrunnerReweightCount } : {}),
       // 0091 — the per-season trigger-eruption count (the hard cap) + the dedicated trigger-rng tick counter,
       // persisted so the cap is never re-opened by a reload and the dedicated stream stays reproducible
       // (0007/0030). The per-trigger fired/lastFiredWeek flags ride on the byte-stable house above. Absent ⇒
@@ -2751,6 +2905,15 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = core.legendTickCount ?? 0;
     this.legendCount = core.legendCount ?? 0;
     this.legendLastActTick = core.legendLastActTick ?? 0;
+    // 0101/#1401: restore the showrunner's production bible + its monotonic count (absent on a pre-0101
+    // save / when the layer is off ⇒ []/0 — byte-identical to a pre-feature load).
+    this.showrunnerNotes = core.showrunnerNotes ? cloneSession(core.showrunnerNotes) : [];
+    this.showrunnerNoteCount = core.showrunnerNoteCount ?? 0;
+    this.showrunnerReweightCount = core.showrunnerReweightCount ?? 0; // Phase-2 (#1455) — absent ⇒ 0
+    // 0099 (hidden half): restore the dedicated secret-barter rng counter + the spent-secret count
+    // (absent on pre-0099-barter saves ⇒ 0).
+    this.secretBarterTickCount = core.secretBarterTickCount ?? 0;
+    this.secretBarterCount = core.secretBarterCount ?? 0;
     // 0086: restore live drives (absent on pre-0086 saves ⇒ none ⇒ re-derived on the next campaign tick).
     this.drives = core.drives ? new Map(Object.entries(core.drives) as [EntityId, Drive][]) : new Map();
     // 0096: restore the emergent-nemesis arc + its sustain history (absent on a pre-0096 save / when the
@@ -4121,6 +4284,8 @@ export class GameSessionAdapter implements GameSession {
       this.resetTieSurfacing(); // 0059 §5 — a fresh season: no tie discovered, the player-surface cap unspent
       this.resetSecretPacing(); // 0092 — a fresh season: the weekly drip cadence + anti-spam start clean
       this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+      this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+      this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
       this.prewarm = null; // consumed
     } else {
       // 0063 — the casting diversity floor: deal the engine-GUARANTEED diversity layer off a DEDICATED
@@ -4387,6 +4552,8 @@ export class GameSessionAdapter implements GameSession {
     this.resetTieSurfacing(); // 0059 §5 — a warmed/fresh cast carries no tie-surfacing history
     this.resetSecretPacing(); // 0092 — a warmed/fresh cast carries no secret-pacing drip history
     this.resetLegends(); // 0101 — a warmed/fresh cast has minted no legend, the cap unspent
+    this.resetSecretBarter(); // 0099 — a warmed/fresh cast has bartered no secret off-screen
+    this.resetShowrunner(); // 0101/#1401 — a warmed/fresh cast carries no producer notes yet
     this.persist(); // a warmed cast is durable pre-game state (0030)
     return {
       warmed: true, seed,
@@ -4750,6 +4917,8 @@ export class GameSessionAdapter implements GameSession {
     // 0092 — a fresh season: the secret-pacing weekly cadence + anti-spam start clean.
     this.resetSecretPacing();
     this.resetLegends(); // 0101 — a fresh season has minted no legend, the cap unspent
+    this.resetSecretBarter(); // 0099 — a fresh season has bartered no secret off-screen
+    this.resetShowrunner(); // 0101/#1401 — a fresh season's production bible is empty
     // Full-fidelity recall (L27b): the authored hidden detail is recorded into each NPC's AUTHORITATIVE
     // soul memory (engine-only — soul memory never crosses the wall, B65) so it (a) persists losslessly
     // with the house, (b) is counted toward non-degradation (0007), and (c) is re-indexed on restore by
@@ -4853,6 +5022,21 @@ export class GameSessionAdapter implements GameSession {
     this.legendTickCount = 0;
     this.legendCount = 0;
     this.legendLastActTick = 0;
+  }
+
+  /** 0101/#1401 — clear the showrunner's production bible + its monotonic count (a fresh season starts
+   *  with no producer notes). Reset only at a season boundary, never mid-season (non-degradation #4). */
+  private resetShowrunner(): void {
+    this.showrunnerNotes = [];
+    this.showrunnerNoteCount = 0;
+    this.showrunnerReweightCount = 0; // Phase-2 (#1455) — a fresh season has re-ordered nothing yet
+  }
+
+  /** 0099 (hidden half) — clear the off-screen secret-barter bookkeeping (a fresh season: no secret
+   *  spent, the dedicated barter stream starts from zero). */
+  private resetSecretBarter(): void {
+    this.secretBarterTickCount = 0;
+    this.secretBarterCount = 0;
   }
 
   private seedSeededRelationships(seed: number): void {
@@ -5368,12 +5552,33 @@ export class GameSessionAdapter implements GameSession {
 
     let activations = 0;
     let surfaces = 0;
-    // Seed-stable iteration order is the derive order (the array order); never re-sort. The per-thread
-    // side rng keys off the game seed + thread id + the live (week, phase) — so the roll is deterministic
-    // AND advances as the game's POSITION advances (a thread gets a fresh chance each beat the house
-    // moves to), never perturbing the main house stream (0007 §4.5). Within one (week, phase) repeated
-    // ticks reuse the same roll — natural restraint: a thread fires at most once per beat, not per tick.
-    for (const thread of this.storyThreads) {
+    // 0101/#1401 — the AI SHOWRUNNER's two effects on this loop, split by sub-flag:
+    //
+    //  • PHASE-1 (`ORWELL_SHOWRUNNER`, fold-free): the note NEVER re-orders this loop and NEVER changes a
+    //    surface/activate roll. Its ONLY Phase-1 effect is on the OPEN-SET, FOLD-FREE knowledge layer —
+    //    routing a surfaced emphasized thread's belief ALSO to the player (inside `surfaceThread`), which
+    //    moves no relationship edge and no outcome. Provably byte-identical (`showrunnerOutcomeNeutral`).
+    //
+    //  • PHASE-2 (`ORWELL_SHOWRUNNER_REWEIGHT`, #1455 — OUTCOME-AFFECTING, default OFF): the note RE-ORDERS
+    //    which thread the loop visits FIRST (`reweightedThreadOrder`), so an emphasized RIPE thread wins a
+    //    SCARCE per-tick slot (activation / surface — both capped at 1) or the season surfacing cap ahead of
+    //    a lower-priority thread that merely sits earlier in the derive order. Because the FOLD-PRODUCING
+    //    transitions (dormant→active, active→resolved, active→surfaced — all move the hidden relationship
+    //    layer that feeds the competition/vote spine) are slot-scarce, changing WHICH ripe thread wins the
+    //    slot changes which folds land this tick and thus perturbs the seeded stream. That is the sanctioned
+    //    reweight (ADR 0005: re-weight which OPEN-SET storyline surfaces) — it NEVER bypasses a cap, changes
+    //    a roll, relaxes an eligibility test (`triggerMet`/`sourceWindowClosed`), scales a fold magnitude, or
+    //    touches any CLOSED-SET decision (nomination/vote/eviction/competition). It is gated by the
+    //    calibration heavy-sims run ON, not by an on/off identity. OFF ⇒ `order` IS `this.storyThreads`.
+    //
+    // Either way the per-thread side rng keys off the game seed + thread id + the live (week, phase), so
+    // each thread's roll is deterministic and INVARIANT to iteration order (re-ordering never re-rolls a
+    // thread), advances as the game POSITION advances (§4.5), and never perturbs the main house stream
+    // (0007). Within one (week, phase) repeated ticks reuse the same roll — a thread fires at most once
+    // per beat, and the reweight order is stable within a beat (the note is fixed per beat).
+    const { order, reordered } = this.reweightedThreadOrder();
+    if (reordered) this.showrunnerReweightCount += 1; // monotonic — this tick genuinely re-prioritized a slot
+    for (const thread of order) {
       const side = new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:thread-scheduler:${thread.id}:${this.week}:${this.phase}`));
       if (thread.status === "dormant") {
         // §4.4 — a dormant thread whose window has closed (source evicted, or expireAfterWeeks elapsed
@@ -5403,6 +5608,9 @@ export class GameSessionAdapter implements GameSession {
         }
         // §4.2 / §5 — surface this tick (bounded roll, the season cap not yet spent, under the per-tick
         // surface cap). Surfacing is belief-level: NPC↔NPC gossip the common path, to-the-player rarer.
+        // The WHICH-thread + WHETHER-to-surface decision is byte-identical to the pre-showrunner scheduler
+        // (the roll is exactly `THREAD.surfaceProb`); the showrunner only re-weights the FOLD-FREE routing
+        // INSIDE `surfaceThread` (whether an emphasized surfaced thread reaches the PLAYER).
         if (surfaces < THREAD.maxSurfacesPerTick
           && this.surfacedThreadCount < THREAD.maxSurfacedPerSeason
           && side.next() < THREAD.surfaceProb) {
@@ -5475,10 +5683,50 @@ export class GameSessionAdapter implements GameSession {
       // The common case: hand the paraphrase to the 0038 gossip engine to diffuse NPC↔NPC.
       const origin = livingNpcs[rng.int(livingNpcs.length)]!;
       this.onThreadGossip(origin, rumor, thread.sourceId);
+      // 0101/#1401 — the SHOWRUNNER's ONE consumption effect: it makes sure the PLAYER catches the
+      // storylines the producers are leaning on. An EMPHASIZED thread that surfaced NPC-only ALSO reaches
+      // the player — an ADDITIVE, Vault-safe belief through the SAME anchored `surfaceInformationTo` seam,
+      // ON TOP of the byte-identical NPC gossip above. This is the pure OPEN-SET effect (which surfaced
+      // storyline the player hears): it seeds a player BELIEF only — it moves NO relationship edge, folds
+      // NOTHING, consumes NO rng, and leaves the NPC gossip / the WHICH-thread-surfaces decision / every
+      // activation+resolution FOLD byte-identical. So the closed set (competition / eligibility / vote) is
+      // byte-identical whether the showrunner is on or off (proven end-to-end by showrunnerOutcomeNeutral),
+      // while the player genuinely catches the season's emphasized arcs. Absent note / off ⇒ no-op.
+      if (this.showrunnerEmphasizes(thread.id) && this.onThreadSurfaceToPlayer) {
+        const belief = this.isPlayerConfidant(thread.sourceId)
+          ? this.confidantThreadRumor(thread, name)
+          : rumor;
+        this.onThreadSurfaceToPlayer(thread.sourceId, belief);
+      }
     }
     thread.status = "surfaced";
     thread.lifecycleWeek = this.week;
     this.surfacedThreadCount++;
+  }
+
+  /** 0101/#1401 — does the CURRENT showrunner note emphasize this thread (above the baseline multiplier)?
+   *  Used ONLY to route an emphasized surfaced thread's belief additionally TO THE PLAYER (open-set
+   *  knowledge; no fold, no rng, no outcome). False when the layer is off / no note / not on the shortlist. */
+  private showrunnerEmphasizes(threadId: string): boolean {
+    return emphasisForThread(this.currentShowrunnerNote(), threadId) > SHOWRUNNER.minEmphasis;
+  }
+
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the Phase-2 REWEIGHT ORDER for `scheduleStoryThreads`. When the reweight
+   * sub-flag is ON and the current note emphasizes ≥1 thread, return a re-prioritized VIEW of
+   * `this.storyThreads` (the pure `reweightThreadOrder` permutation: the note's top-`reweightSlots` emphases
+   * moved to the front in note order, everything else in the unchanged derive order) plus whether it
+   * actually differs from the derive order. Reweight OFF / no note / no emphasis / no change ⇒ returns
+   * `this.storyThreads` itself (identity), so the loop is byte-identical to today. NEVER mutates
+   * `this.storyThreads` (the persisted derive order + the OFF-path byte-identity depend on it) — the view
+   * is a fresh array of the SAME thread references (the loop's status mutations still land on the real
+   * objects). This ONLY changes visitation order; it can touch no cap, roll, eligibility, or magnitude. */
+  private reweightedThreadOrder(): { order: readonly StoryThread[]; reordered: boolean } {
+    if (!this.showrunnerReweightEnabled) return { order: this.storyThreads, reordered: false };
+    const perm = reweightThreadOrder(this.storyThreads.map((t) => t.id), this.currentShowrunnerNote(), SHOWRUNNER.reweightSlots);
+    const reordered = perm.some((idx, i) => idx !== i);
+    if (!reordered) return { order: this.storyThreads, reordered: false };
+    return { order: perm.map((idx) => this.storyThreads[idx]!), reordered: true };
   }
 
   /**
@@ -5692,6 +5940,7 @@ export class GameSessionAdapter implements GameSession {
     if (flags.secretPacing !== undefined) GameSessionAdapter.secretPacingOverride = flags.secretPacing;
     if (flags.seededTieSurfacing !== undefined) GameSessionAdapter.seededTieSurfacingOverride = flags.seededTieSurfacing;
     if (flags.mythMaking !== undefined) this.mythMakingEnabled = flags.mythMaking;
+    if (flags.showrunner !== undefined) this.showrunnerEnabled = flags.showrunner;
   }
 
   /** The CURRENT resolved state of every B2 behavioral flag (env default or override) — Vault-free,
@@ -5705,6 +5954,7 @@ export class GameSessionAdapter implements GameSession {
       juryHouse: this.juryHouseEnabled,
       seededTieSurfacing: this.seededTieSurfacingEnabled,
       mythMaking: this.mythMakingEnabled,
+      showrunner: this.showrunnerEnabled,
     };
   }
 
@@ -5752,6 +6002,11 @@ export class GameSessionAdapter implements GameSession {
   setSocialFatigueEnabled(on: boolean): void { this.socialFatigueEnabled = on; }
   /** Extension 3 — the compounding multi-night fatigue meter. Off by default. */
   setMultiNightFatigueEnabled(on: boolean): void { this.multiNightFatigueEnabled = on; }
+
+  /** #1400 — generative competition design (the model dresses the fixed roll). Off by default (env-gated). */
+  setGenCompetitionsEnabled(on: boolean): void { this.genCompetitionsEnabled = on; }
+  /** #1400 — the resolved on/off state of the generative-competition flag (for an admin/status read). */
+  genCompetitionsEnabledNow(): boolean { return this.genCompetitionsEnabled; }
 
   /**
    * 0066 Phase-2 (Extension 1) — advance the clock a SMALL step as the player lingers/plays WITHIN a beat.
@@ -6398,6 +6653,242 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the myth-making layer is live (0101) — exposed for the orchestrator's wiring symmetry/tests. */
   mythMakingEnabledNow(): boolean { return this.mythMakingEnabled; }
 
+  /**
+   * Feature 0101 (#1401) — the AI SHOWRUNNER pass. Runs ONCE per bounded off-screen tick, BEFORE
+   * `scheduleStoryThreads`, and writes a Vault-held "producer note" proposing which SIMMERING hidden story
+   * threads the next tick's 0060 surfacing should EMPHASIZE. It is the "the season has an arc" layer: a
+   * short shortlist of the most dramatic / most overdue / most board-topical threads, each with a bounded,
+   * boost-only `emphasis` multiplier (ADR 0005 — SHAPE only; the schema makes an outcome directive
+   * inexpressible; the engine keeps every magnitude and the hard 0060 caps still bind).
+   *
+   * MANDATE (both proven by the boundary tests):
+   *  • VAULT-HELD — the note is stored in `showrunnerNotes` (this engine-only session core, like
+   *    `storyThreads`), so it reaches NO player/admin projection; it unseals only in the 0048
+   *    retrospective (`buildVaultUnseal`).
+   *  • CLOSED-SET NEUTRAL — this pass draws NO rng at all (pure scoring), and the scheduler it biases runs
+   *    on per-thread SIDE rngs (keyed by thread id, never the shared stream). So with the flag ON *or* OFF
+   *    the seeded competition / eligibility / vote stream is BYTE-IDENTICAL. DEFAULT OFF ⇒ nothing composed.
+   *
+   * ONCE-PER-BEAT: a note already composed for the current (week, phase) is reused — the same cadence the
+   * scheduler rolls at — so the bible stays bounded (~one per ceremony beat), append-only, and stable
+   * within a beat (consumption is stable across the beat's aux ticks). NO `persist()` here: it rides the
+   * orchestrator's bounded tick, whose own commit exports + persists the snapshot (R3/spineHardening).
+   */
+  showrunnerTick(): void {
+    // EITHER sub-flag composes a note: Phase-1 (`showrunnerEnabled`) for the fold-free to-player routing,
+    // OR Phase-2 (`showrunnerReweightEnabled`), which cannot re-order the scheduler without a note. Both
+    // off ⇒ nothing composed (byte-identical to pre-0101).
+    if ((!this.showrunnerEnabled && !this.showrunnerReweightEnabled) || !this.house || this.storyThreads.length === 0) return;
+    const last = this.showrunnerNotes[this.showrunnerNotes.length - 1];
+    if (last && last.week === this.week && last.phase === this.phase) return; // one note per beat
+    const pos = this.seasonPosition();
+    // Score every SIMMERING (dormant/active) thread. Signals are all VAULT-FREE: `tension` from the
+    // engine's own both-way player↔source edges, `staleness` from the thread's `active`/`dormant` age,
+    // `salience` from the Vault-free board position (nominated / cornered / holding power) — NEVER a
+    // premise, NEVER a raw hidden number crosses into the note. Pure: this loop draws no rng.
+    const signals: ThreadSignal[] = [];
+    for (const t of this.storyThreads) {
+      if (t.status !== "dormant" && t.status !== "active") continue;
+      const reads = relationshipReads(this.rel.edge(PLAYER, t.sourceId), this.rel.edge(t.sourceId, PLAYER));
+      const weeksSince = Math.max(0, this.week - (t.lifecycleWeek ?? this.week));
+      const staleness = Math.min(1, weeksSince / SHOWRUNNER.stalenessSpanWeeks);
+      const salience = pos.nominees.has(t.sourceId) || pos.cornered.has(t.sourceId) || pos.powerHolders.has(t.sourceId) ? 1 : 0;
+      signals.push({ threadId: t.id, tension: reads.tension, staleness, salience });
+    }
+    if (signals.length === 0) return;
+    this.showrunnerNoteCount += 1;
+    this.showrunnerNotes.push(composeShowrunnerNote(signals, this.week, this.phase, this.showrunnerNoteCount));
+  }
+
+  /** The freshest producer note the scheduler should consult — or `undefined` when the layer is off / no
+   *  note yet (⇒ the scheduler falls back to the unchanged derive order + baseline `surfaceProb`). */
+  private currentShowrunnerNote(): ShowrunnerNote | undefined {
+    // The reweight IMPLIES note composition (you cannot re-weight without a note), so either sub-flag
+    // exposes the freshest note. Both off ⇒ undefined (the scheduler falls back to the derive order).
+    if (!this.showrunnerEnabled && !this.showrunnerReweightEnabled) return undefined;
+    return this.showrunnerNotes[this.showrunnerNotes.length - 1];
+  }
+
+  /** Turn the AI showrunner on/off (0101/#1401). Off by default — the calibration harness leaves it off
+   *  (with it off `showrunnerTick` composes nothing and the scheduler is byte-identical). */
+  setShowrunnerEnabled(on: boolean): void { this.showrunnerEnabled = on; }
+
+  /** Whether the showrunner layer is live — exposed for the orchestrator's wiring symmetry / tests. */
+  showrunnerEnabledNow(): boolean { return this.showrunnerEnabled; }
+
+  /**
+   * 0101/#1401 Phase-2 (#1455) — the PROCESS-GLOBAL override for the OUTCOME-AFFECTING reweight, mirroring
+   * `secretPacing`/`seededTieSurfacing` exactly (null ⇒ fall through to the env default). A static (not a
+   * per-instance) override so a calibration ON-run flips it ONCE for every session it plays, and so a live
+   * deploy that env-enables it needs no restart to toggle. A test resets it to `null` in `afterEach`/
+   * `afterAll` so it never leaks across files. */
+  private static showrunnerReweightOverride: boolean | null = null;
+
+  /** Set the process-global reweight override (true/false), or `null` to fall back to the env default. */
+  static setShowrunnerReweightEnabled(enabled: boolean | null): void {
+    GameSessionAdapter.showrunnerReweightOverride = enabled;
+  }
+
+  /** The resolved reweight state: the process-global override when set, else the `ORWELL_SHOWRUNNER_REWEIGHT`
+   *  env default. Off by default ⇒ the scheduler never re-orders (byte-identical to today AND to Phase-1). */
+  private get showrunnerReweightEnabled(): boolean {
+    if (GameSessionAdapter.showrunnerReweightOverride !== null) return GameSessionAdapter.showrunnerReweightOverride;
+    return SHOWRUNNER_REWEIGHT_ENABLED_DEFAULT;
+  }
+
+  /** Whether the Phase-2 reweight is live — exposed for the orchestrator's wiring symmetry / tests. */
+  showrunnerReweightEnabledNow(): boolean { return this.showrunnerReweightEnabled; }
+
+  /** The monotonic per-season count of ticks the reweight actually re-ordered the scheduler (0 when off /
+   *  never non-trivially re-ordered) — exposed so the ON calibration run can assert non-vacuousness. */
+  showrunnerReweightCountNow(): number { return this.showrunnerReweightCount; }
+
+  /** The Vault-held production bible so far (0101/#1401) — engine-only; exposed for the boundary tests
+   *  and the 0048 render. NEVER call from a player/admin projection (it IS the sealed producer notes). */
+  showrunnerNotesForUnseal(): readonly ShowrunnerNote[] { return this.showrunnerNotes; }
+
+  /**
+   * 0099 (hidden half) — the off-screen NPC↔NPC SECRET BARTER: once per bounded off-screen tick, an NPC
+   * holding learned secret(s) ABOUT houseguests SPENDS its TOP one — the (secret, recipient) pair a
+   * co-house recipient values MOST (issue #1438: the top-valued secret, never the lexicographically-first
+   * `factId`), so information becomes liquid in the hidden layer (secrets visibly move; a bond firms for no
+   * public reason; the player can be outmaneuvered in the economy). It REUSES the existing 0099 value core
+   * verbatim — `tradeValue` + the `SECRET_TRADE` rate/floor (`src/engine/leverage.ts`) — driven
+   * on a tick; it is NOT a new secrets system. The traded belief enters the recipient's HIDDEN knowledge
+   * through the existing NPC→NPC diffusion pathway (`transmitGossip` — a recorded `told-by:` event whose
+   * witness set is {giver, recipient} and EXCLUDES the player), and reaches the player ONLY if a later
+   * pathway (overhear/gossip, 0002/0094) terminates at them. Called once per off-screen tick by the
+   * orchestrator, AFTER the main-house society/gossip pass, passing the live `events`/`knowledge`.
+   *
+   * SELF-GATED (the `juryHouseTick`/`legendTick` discipline): a STRUCTURAL no-op (ZERO draws, no counter
+   * advance) unless the layer is enabled AND some holder actually holds a tradeable secret — so the
+   * calibration/UAT harness (which never enables it, and whose off-screen society mints only subject-LESS
+   * gossip/overhear beliefs) is byte-identical. Runs on a DEDICATED, isolated rng (forked off the game
+   * seed + this tick's OWN counter, NEVER the orchestrator's shared society/competition/vote stream), and —
+   * exactly like `legendTick` — folds NO relationship edge (only the hidden KNOWLEDGE layer changes), so
+   * the seeded competition/vote/jury spine is byte-identical whether the layer is OFF or ON. Bounded:
+   * ≤ `SECRET_BARTER.maxBartersPerTick` transfers over ≤ `SECRET_BARTER.maxHoldersPerTick` holders, in
+   * deterministic sorted order.
+   *
+   * Vault Wall (mandate #2): the barter is off-screen NPC content — the transfer event's witness set
+   * excludes the player, so it never lands on any player OR admin projection; it surfaces to the player
+   * only via an existing modeled pathway, never as a Vault read (`tests/unit/secretBarter.test.ts` sentinel).
+   */
+  secretBarterTick(events: EventStore, knowledge: KnowledgeService): void {
+    if (!this.secretBarterEnabled || !this.house) return;
+    void events; // the transfer records THROUGH `knowledge` (transmitGossip) — the store is the caller's contract
+    const npcs = this.livingIds().filter((id) => id !== PLAYER);
+    if (npcs.length < 2) return; // nobody to trade between
+    // A holder's TRADEABLE secrets: a learned belief ABOUT a still-active NPC houseguest (never themselves,
+    // never the player — a player-subject belief rides the ordinary PV1/gossip path, not a barter). Stable
+    // key order so the dedicated draw sequence is reproducible.
+    const tradeableOf = (holder: EntityId) =>
+      knowledge.knownTo(holder)
+        .filter((k) => {
+          const subj = k.subject;
+          return subj !== undefined && subj !== holder && subj !== PLAYER && this.isActiveNpc(subj);
+        })
+        .sort((a, b) => (a.factId ?? a.id).localeCompare(b.factId ?? b.id));
+    // Holders with something to spend, in deterministic order, capped for work. A tick with NOTHING to
+    // trade returns BEFORE advancing the dedicated stream — a true no-op (the byte-identity spine).
+    const holders = [...npcs].sort()
+      .filter((h) => tradeableOf(h).length > 0)
+      .slice(0, SECRET_BARTER.maxHoldersPerTick);
+    if (holders.length === 0) return;
+    // DEDICATED stream — zero touch to the orchestrator's shared per-user rng (the calibration spine).
+    this.secretBarterTickCount += 1;
+    const rng = new SeededRandom(hashSeed(`secret-barter:${this.gameSeed ?? ""}:${this.secretBarterTickCount}`));
+    let barters = 0;
+    for (const holder of holders) {
+      if (barters >= SECRET_BARTER.maxBartersPerTick) break;
+      // ONE seeded rate roll gates the holder this tick (the existing per-holder decision — drawn FIRST so
+      // the dedicated stream advances identically whether or not any secret qualifies). Then, over EVERY
+      // tradeable secret × its candidate recipients, keep the STRICT argmax of `tradeValue` above the floor
+      // (issue #1438): the holder spends its TOP-valued (secret, recipient), NOT the lexicographically-first
+      // `factId`. A holder with a single tradeable secret is byte-identical to the prior single-scan path.
+      const fires = rng.next() < SECRET_TRADE.barterRate;
+      let bestValue: number = SECRET_TRADE.barterValueFloor;
+      let bestSecret: ReturnType<typeof tradeableOf>[number] | undefined;
+      let bestRecipient: EntityId | undefined;
+      for (const secret of tradeableOf(holder)) {
+        const key = secret.factId ?? secret.id;
+        const subject = secret.subject!;
+        // Severity is the SUBJECT's PUBLIC headline-secret class (never its sealed text) — the SAME
+        // resolution the player-side trade uses (`resolveWieldedSecret`), reused, not re-invented.
+        const subjectNpc = this.house.npcs.find((n) => n.id === subject);
+        const severity = severityOf(subjectNpc ? this.headlineSecretOf(subjectNpc)?.kind : undefined);
+        // Candidate recipients: still-active NPCs, not the holder, not the secret's own subject, who do NOT
+        // already hold this belief (a barter WIDENS who knows). Deterministic order.
+        const candidates: BarterCandidate[] = npcs
+          .filter((r) => r !== holder && r !== subject
+            && !knowledge.knownTo(r).some((k) => (k.factId ?? k.id) === key))
+          .sort()
+          .map((r) => ({ recipient: r, signals: this.barterSignalsFor(r, subject, holder, severity) }));
+        // Score each candidate with the EXISTING 0099 `tradeValue` (no new value math); carry the running
+        // best over the floor across ALL of the holder's secrets, not just the first secret's recipients.
+        for (const c of candidates) {
+          const v = tradeValue(c.signals, rng);
+          if (v > bestValue) { bestValue = v; bestSecret = secret; bestRecipient = c.recipient; }
+        }
+      }
+      if (!fires || bestSecret === undefined || bestRecipient === undefined) continue;
+      // Transfer the chosen secret NPC→NPC through the EXISTING diffusion pathway (0002/0094): a recorded
+      // `told-by:` gossip event witnessed by {giver, recipient} — hidden (the player is not a witness),
+      // reaching the player only if a later pathway terminates at them. The belief keeps its lineage
+      // (`factId`), gains a hop, and carries the giver's own (bounded) certainty forward.
+      const chosenSubject = bestSecret.subject!;
+      knowledge.transmitGossip(
+        holder, bestRecipient,
+        {
+          content: bestSecret.content,
+          factId: bestSecret.factId ?? bestSecret.id,
+          originalContent: bestSecret.originalContent ?? bestSecret.content,
+          confidence: bestSecret.confidence ?? 1,
+          source: holder,
+          hops: (bestSecret.hops ?? 0) + 1,
+          ...(chosenSubject !== undefined ? { subject: chosenSubject } : {}),
+        },
+        `told-by:${holder}`,
+      );
+      this.secretBarterCount += 1; // monotonic — a secret has been spent into the hidden economy (non-degradation #4)
+      barters += 1;
+    }
+  }
+
+  /**
+   * 0099 (hidden half) — assemble the Vault-hidden `tradeValue` signals for an NPC↔NPC barter: the
+   * RECIPIENT's reads of the secret's SUBJECT (do they want leverage on / are they threatened by them?)
+   * plus the recipient's trust of the GIVER as the source (a distrusted source's offer is discounted —
+   * the `recipientTrustOfPlayer` field is the source-trust slot, which for a barter is the giver, not the
+   * player). Reuses the SAME `TradeSignals` shape the player-side trade fills — no new value math.
+   */
+  private barterSignalsFor(recipient: EntityId, subject: EntityId, giver: EntityId, severity: number): TradeSignals {
+    const toSubject = this.rel.edge(recipient, subject);
+    return {
+      severity,
+      recipientThreatOfSubject: toSubject.threat,
+      recipientAffinityForSubject: toSubject.affinity,
+      recipientTrustOfPlayer: this.rel.edge(recipient, giver).trust, // source-trust slot — the giver, for a barter
+    };
+  }
+
+  /** Turn the off-screen SECRET BARTER on/off (0099). Off by default — the calibration harness leaves it
+   *  off (with it off `secretBarterTick` returns before any draw ⇒ the seeded spine is byte-identical). */
+  setSecretBarterEnabled(on: boolean): void { this.secretBarterEnabled = on; }
+
+  /** Whether the off-screen secret-barter layer is live (0099) — exposed for the orchestrator's wiring
+   *  symmetry/tests. */
+  secretBarterEnabledNow(): boolean { return this.secretBarterEnabled; }
+
+  /** Turn CHARACTER-MEDIATED gossip drift on/off (issue #1397). Off by default — the calibration harness
+   *  leaves it off; even ON the drift rides a per-hop fork, so the seeded outcome draw stream is byte-
+   *  identical either way (the flag gates only whether the reteller's voice colors the belief content). */
+  setGossipDriftEnabled(on: boolean): void { this.gossipDriftEnabled = on; }
+
+  /** Whether voice-mediated gossip drift is live (issue #1397) — the orchestrator reads this to decide
+   *  whether to hand `diffuseGossip` a `voiceOf` resolver. */
+  gossipDriftEnabledNow(): boolean { return this.gossipDriftEnabled; }
+
   private archetypeOf(id: EntityId): string {
     return this.house?.npcs.find((n) => n.id === id)?.character.archetype ?? "floater";
   }
@@ -6828,11 +7319,25 @@ export class GameSessionAdapter implements GameSession {
    * `materializeDailyRecap` always returns one once the clock is running, so this is present on every
    * turn-in that actually fires; absent only when the whole call was a dormant no-op above).
    */
-  turnIn(): AdvanceView {
-    if (!this.house || !this.live) return this.advanceView(null);
-    if (!this.timeOfDayEnabled) return this.advanceView(null); // dormant unless the clock is running
-    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return this.advanceView(null);
-    return this.inOneCommit(() => {
+  turnIn(req: { expectedBeatSeq?: number; idempotencyKey?: string } = {}): AdvanceView {
+    // 0065 Part B — replay an already-ended night verbatim (wins even if beatSeq has since moved), so a
+    // retried/duplicate turnIn is REPLAYED, not re-executed: `playerTurnIn` never re-stamps `lastSleepDepth`
+    // from the reset wake hour (which would ERASE the earned late-night rest penalty). Checked before the
+    // CAS guard so a retry of a now-stale key still returns the cached success, not a spurious conflict.
+    if (req.idempotencyKey !== undefined) {
+      const cached = this.idempotencyCache.get(req.idempotencyKey);
+      if (cached) return cached;
+    }
+    // 0065 Part A — refuse a bedtime computed against a superseded board BEFORE any mutation.
+    this.guardBeatSeq(req.expectedBeatSeq);
+    // Every path below (the commit AND the no-op early returns) caches its view under the key, so a retry
+    // replays it verbatim and never re-ends the night.
+    const remember = (v: AdvanceView): AdvanceView =>
+      req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
+    if (!this.house || !this.live) return remember(this.advanceView(null));
+    if (!this.timeOfDayEnabled) return remember(this.advanceView(null)); // dormant unless the clock is running
+    if (this.live.finished || playerHasLeft(this.live, PLAYER)) return remember(this.advanceView(null));
+    return remember(this.inOneCommit(() => {
       const recap = this.materializeDailyRecap();
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
@@ -6840,7 +7345,7 @@ export class GameSessionAdapter implements GameSession {
       this.persist();
       const view = this.advanceView(null);
       return recap ? { ...view, dailyRecap: recap } : view;
-    });
+    }));
   }
 
   /**
@@ -8194,6 +8699,20 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
+   * Feature #1394 — recall the Vault-free witnessed moments involving the scene's houseguest(s),
+   * ranked by relevance to the cue. Delegates to the registry-wired `sceneRecall` closure, which reads
+   * ONLY the player's `VisibleStateService` projection — so nothing hidden can ever be returned. A pure
+   * READ (no beatSeq bump, no persist). Empty `withIds`/`cue`, no wired closure, or no relevant history
+   * ⇒ `{ moments: [] }` (the enrichment policy: recall absence is not a failure).
+   */
+  recallSceneMemories(req: RecallSceneMemoriesReq): RecallSceneMemoriesView {
+    const npcIds = (req.withIds ?? []).filter((id) => typeof id === "string" && id.length > 0);
+    const cue = typeof req.cue === "string" ? req.cue : "";
+    if (npcIds.length === 0 || cue.trim().length === 0 || !this.sceneRecall) return { moments: [] };
+    return { moments: this.sceneRecall(npcIds, cue) };
+  }
+
+  /**
    * The producer persona for this season — a REAL generated character (as deep as any houseguest, built
    * by the same `CharacterFactory` machinery) but OFF-CAMERA: no headshot, not one of the 16, never in
    * the roster/portraits/whereabouts. Seeded for reproducibility. The interview runs PRE-GAME (before
@@ -8319,6 +8838,57 @@ export class GameSessionAdapter implements GameSession {
     };
     this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { accepted: true, source: "web_search" };
+  }
+
+  /**
+   * Feature #1400 (READ) — the Vault-free "what to hand the model" projection for the currently-staging
+   * competition. Null unless generation is enabled AND a comp has RESOLVED its roll (the model dresses a
+   * decided result — nothing to hand it before the roll commits; the structural "no outcome-adjacent text
+   * before the roll" ordering). Projects ids → names and hands the fixed drop ORDER (public — the reveal
+   * tells it round by round anyway) + the 0042 library scaffold the model riffs ON. No number ever crosses.
+   */
+  competitionStagingView(): import("../../ports/GameSession").CompetitionStagingView | null {
+    if (!this.genCompetitionsEnabled || !this.house || !this.live) return null;
+    const data = competitionStagingData(this.live);
+    if (!data) return null;
+    const lib = data.def?.narrative;
+    return {
+      comp: data.comp,
+      type: data.type,
+      week: this.week,
+      ...(data.def ? { format: data.def.format } : {}),
+      participants: data.field.map((id) => ({ id, name: this.nameOf(id) })),
+      winner: { id: data.winner, name: this.nameOf(data.winner) },
+      dropOrder: data.dropOrder.map((id) => ({ id, name: this.nameOf(id) })),
+      library: {
+        name: data.def?.name ?? "",
+        premise: lib?.premise ?? "",
+        beats: lib ? [...lib.beats] : [],
+        winReads: lib?.winReads ?? "",
+      },
+      alreadyAuthored: data.alreadyAuthored, // the FE's persistent "author exactly once per comp" guard
+    };
+  }
+
+  /**
+   * Feature #1400 (WRITE-BACK) — record the model-authored competition fiction AFTER the roll commits. The
+   * pure `validateCompetitionFiction` is the HARD gate: it accepts the fiction ONLY when every elimination
+   * it names maps to the engine's fixed drop order EXACTLY (same ids, same order) — any mismatch is
+   * REJECTED and nothing is stored, so the deterministic 0042 library floor stands and the generated
+   * fiction can never rename who goes or in what order. On success the sanitized fiction lands on the live
+   * state (PRESENTATION ONLY — the reveal tells it round by round) and durably persists WITHOUT bumping the
+   * closed-set `beatSeq` (like the 0062 zeitgeist / 0058 profile write-backs): it perturbs no seeded roll.
+   */
+  recordCompetitionFiction(
+    req: import("../../ports/GameSession").RecordCompetitionFictionReq,
+  ): import("../../ports/GameSession").RecordCompetitionFictionResult {
+    if (!this.genCompetitionsEnabled) return { accepted: false, reason: "disabled" };
+    if (!this.house || !this.live) return { accepted: false, reason: "no-game" };
+    const result = validateCompetitionFiction(this.live, req);
+    if (!result.ok) return { accepted: false, reason: result.reason };
+    this.live.competitionFiction = result.fiction;
+    this.backgroundPersist(); // durable, but NOT a board beat — presentation-only, no beatSeq bump
+    return { accepted: true };
   }
 
   /**
@@ -8499,14 +9069,21 @@ export class GameSessionAdapter implements GameSession {
       if (peek) {
         // The drawn library def (0042): name + format + the Vault-free narrative scaffold — the
         // narrator dresses THIS competition. Flavor only; no stat, score, or ranking crosses.
+        // #1400: when the model authored + the engine VALIDATED fiction for THIS staged comp, surface
+        // the model-authored THEME as the comp name and its premise/winReads as the scaffold, so a fresh
+        // context (a restart) re-grounds the narrator in the authored staging instead of the library
+        // floor. PRESENTATION ONLY — the winner/format are unchanged; the per-drop fiction rides the
+        // comp-elimination beats, so the preview `beats` stay the generic library scaffold (no spoiler).
+        const f = this.live.competitionFiction;
+        const authored = f && f.comp === peek.beat && f.week === this.week ? f : undefined;
         return {
           started: true, type: peek.type, week: this.week, phase: this.phase,
           winner: this.named(peek.winner),
-          name: peek.def.name, format: peek.def.format,
+          name: authored?.theme ?? peek.def.name, format: peek.def.format,
           narrative: {
-            premise: peek.def.narrative.premise,
+            premise: authored?.premise ?? peek.def.narrative.premise,
             beats: [...peek.def.narrative.beats],
-            winReads: peek.def.narrative.winReads,
+            winReads: authored?.winReads ?? peek.def.narrative.winReads,
           },
         };
       }

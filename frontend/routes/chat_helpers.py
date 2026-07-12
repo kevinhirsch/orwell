@@ -400,6 +400,49 @@ def clear_social_runway(user) -> None:
     _RUNWAY_LEFT.pop(key, None)
     _RUNWAY_SIG.pop(key, None)
     _RUNWAY_LAST_DONE.pop(key, None)  # #1127: forget the lingered-through marker on reset/end
+    _DAY_BREAK_STEER.pop(key, None)   # P1-2: a reset also drops a pending day-break steer
+
+
+# ── P1-2 (#1361, the machinery half) — DAY-BREAK FE awareness ─────────────────────────────── #
+#
+# The engine's night-gate (#1320 / Phase 3a) emits a diegetic `day-break` beat between the weekly
+# ceremonies ("The house turns in for the night, and a new day dawns …"). The FE used to SWALLOW
+# it: `_pre_resolve_npc_ceremony` consumed the beat pre-framing, but a day-break never changes the
+# `(week:phase)` signature, so no runway was armed, no moment changed, and the beat's content was
+# simply lost — the model narrated straight past the night into the ceremony (the exact
+# fast-forward the night-gate exists to prevent). Two repairs, both steer-based (never
+# engine-authoring — the content voiced is the ENGINE's own `event.content`):
+#   (a) the consumed beat arms a NARRATION STEER (the `_ceremony_narration_steer` sibling in the
+#       agent loop) quoting the engine's transition line, appended to this turn's framing so the
+#       model voices the night→morning crossing as a real beat;
+#   (b) the turn is HELD on the engine's `social` moment and a ONE-TURN runway is armed for the
+#       same signature — so the new day gets one genuine social turn (the J-3 "social" moment
+#       suppression in `_forced_tool_choice_for_beat` keeps the wire force off it too) instead of
+#       being force-marched into the ceremony the same morning. Readiness cuts it short exactly
+#       like every other runway.
+# Stash keyed via `_runway_key` (auth-off safe); consumed (popped) by `apply_game_framing` on the
+# same turn; cleared by `clear_social_runway`. GOLDEN-NEUTRAL: the golden driver pins
+# `ORWELL_TIME_PER_CONVERSATION=0`, so the night-gate never fires under record/replay and this
+# framing never renders there.
+_DAY_BREAK_STEER: dict = {}
+_DAY_BREAK_SOCIAL_TURNS = 1  # held social turns after a consumed day-break (the new day's morning)
+
+
+def _day_break_narration_steer(content: str) -> str:
+    """The focused production note that makes the model VOICE the engine's `day-break` beat (the
+    night→morning crossing) instead of silently skipping to the next ceremony. Never authors the
+    transition — it quotes the engine's own `event.content` and steers the model to narrate THAT."""
+    line = (content or "").strip()
+    quoted = f' The engine transition you must voice: "{line}".' if line else ""
+    return (
+        "(Production note, not for the player.) The engine just crossed the night into a NEW DAY — "
+        "voice this transition as a real beat FIRST (the house winding down, lights out, the next "
+        "morning coming to life) before any other scene." + quoted + " Then play the new morning as "
+        "social texture — who is up first, the mood over coffee — and let the player act. Do not rush "
+        "into the day's ceremony or competition yourself unless the player asks to move on (the "
+        "engine drives it when the moment comes), and never invent an outcome the engine has not "
+        "returned."
+    )
 
 
 # ── The pending-decision BARRIER (a chat↔engine DESYNC class) ──────────── #
@@ -435,12 +478,14 @@ _PENDING_KIND_HINTS = {
         "submit them via submitDecision."
     ),
     "comp-round": (
-        "The competition is playing out in ELIMINATION ROUNDS (0006 staged-rounds). Voice WHO IS "
-        "STILL IN this round (the engine supplies the still-in field), then take the player's "
-        "approach for THIS ROUND ONLY — compete (keep going), throw (drop out), or play it safe — "
-        "and submit it via submitDecision (kind 'comp-round', intent=...). Their pick is committed "
-        "BEFORE the round resolves and is locked once it does; they will choose again as the field "
-        "narrows. Never resolve a winner yourself and never re-label a finished round."
+        "The competition is playing out in VISIBLE elimination rounds (0006 staged-rounds). Voice WHO IS "
+        "STILL IN (the engine supplies the still-in field), then take the player's approach for the "
+        "COMPETITION — compete (go for the win), throw (drop out), or play it safe — and submit it via "
+        "submitDecision (kind 'comp-round', intent=...). This approach is declared ONCE, up front, and "
+        "covers the whole comp: it is committed before the round resolves and locked once it does. The "
+        "later elimination rounds narrow the field as DRAMA over an already-decided result — they are "
+        "NOT a fresh choice each round, so never re-ask the player's approach as the field thins. Never "
+        "resolve a winner yourself and never re-label a finished round."
     ),
 }
 
@@ -498,7 +543,15 @@ def _pending_barrier_directive(pending) -> Optional[str]:
         "the next week, or skip ahead in time in ANY way. Narrating anything past this decision is "
         "a DESYNC from the engine and is not allowed.\n"
         f"Your ONLY job this turn is to bring the player to THIS decision in the fiction and take "
-        f"their explicit choice. {hint}"
+        f"their explicit choice. {hint}\n"
+        # Finding 13 (2026-07-11 prompt audit): the ONE decision-channel precedence rule, stated
+        # IDENTICALLY here and in BASE_GAME_MASTER_PROMPT so "WAIT for the card" / "take their explicit
+        # choice and submit" / "never infer from prose" can never read as three conflicting instructions.
+        "DECISION PRECEDENCE: a pending binding decision is settled ONLY by the player's OWN explicit "
+        "choice among its legal options — when they pick it on their decision card, or state one "
+        "unambiguously, take THAT choice and submit it with submitDecision; until they do, WAIT (never "
+        "narrate past the open decision) and never infer, guess, or invent a binding choice from "
+        "ambiguous prose."
     )
 
 
@@ -555,25 +608,31 @@ def _whereabouts_barrier_directive(whereabouts) -> Optional[str]:
 
 def _premiere_progress_directive(premiere) -> Optional[str]:
     """J3-13 (wayfinding) — surface the engine's meet-everyone progress as a CONSISTENT framing fact
-    during the premiere, so every redirect that gates the player at the HOH names the actual gap.
+    during the premiere, so a redirect toward power names the actual gap and a concrete next step.
 
-    The audit found the premiere redirect was INCONSISTENT: the best redirect ("Eleven met, five left:
-    …") named the count, but the veto/eviction redirects described a nearby scene without it, leaving
-    the player no action plan. The count never relied on the model REMEMBERING — `getGameState` already
-    carries the engine-tracked `premiere` progress (PremiereIntrosView). This hands the model that fact
-    every premiere turn so it can always answer "why hasn't HOH started, and who's left to meet".
+    #1387 / feature 0111 (finding 3, 2026-07-11 prompt audit): the first HOH is REACHABLE before every
+    formal introduction — a couple of GENUINE hot reads + nobody left invisible — so this NO LONGER
+    stonewalls a ready player behind an all-15 roll-call. It returns None the moment power is reachable
+    (or the meet-list is fully complete), and while power is NOT yet reachable it frames the gap
+    ASYMMETRICALLY: keep the player forming real reads, never grind through every introduction.
 
-    Vault-free by construction: only the public met/total counts + the still-to-meet NAMES (the same
-    observable roster facets `premiereIntros` exposes) — never a number about a houseguest, a soul, or a
-    standing. Returns None outside the premiere (no `premiere` field, or it is already complete), leaving
-    the turn framed exactly as before."""
+    The counts never rely on the model REMEMBERING — `getGameState` already carries the engine-tracked
+    `premiere` progress (PremiereIntrosView: metCount/total/hotReads/powerReachable). Vault-free by
+    construction: only public counts + the still-to-meet NAMES (the same observable facets
+    `premiereIntros` exposes) — never a number about a houseguest, a soul, or a standing. Returns None
+    outside the premiere (no `premiere` field) or once power is reachable, leaving the turn framed
+    exactly as before."""
     if not isinstance(premiere, dict):
         return None
-    if premiere.get("complete"):
+    # 0111 asymmetric gate: once the first HOH is REACHABLE (a couple of hot reads + nobody invisible),
+    # or the whole meet-list is complete, STOP redirecting — the model is free to start the game the
+    # instant the player is ready. This is the fix for the stonewalled-ready-player half of #1387.
+    if premiere.get("complete") or premiere.get("powerReachable"):
         return None
     try:
         total = int(premiere.get("total") or 0)
         met = int(premiere.get("metCount") or 0)
+        hot = int(premiere.get("hotReads") or 0)
     except (TypeError, ValueError):
         return None
     # Both counts include the player (they ARE met); the player's mental model is "of the 15 OTHERS,
@@ -590,15 +649,18 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
             nm = str((hg or {}).get("name") or "").strip() if isinstance(hg, dict) else ""
             if nm:
                 names.append(nm)
-    names_clause = (" Still to meet: " + _join_names(names) + "."
+    names_clause = (" Still to meet in motion: " + _join_names(names) + "."
                     if names else "")
     return (
-        "PREMIERE GATE (state this CONSISTENTLY whenever the player drifts toward HOH/nominations/veto/"
-        f"eviction): the first HOH cannot begin until the player has met all {npc_total} other "
-        f"houseguests. So far they have met {npc_met} of {npc_total}; {remaining} still to go.{names_clause} "
-        "If the player reaches for a ceremony beat, redirect them WARMLY back to meeting the house and "
-        "ALWAYS name how many are left (and who) so they have a concrete next step — never gate them "
-        "with a vague 'not yet'."
+        "PREMIERE PROGRESS (frame this WARMLY, never a hard gate, when the player drifts toward "
+        "HOH/nominations/veto/eviction before the house is ready): the first HOH is not reachable YET — "
+        "a couple of GENUINE hot reads still need to form through real engagement (a one-on-one, a beat "
+        "over the champagne toast or the bedroom pick), not by merely naming people. So far the player "
+        f"has met {npc_met} of {npc_total} and formed {hot} genuine read{'s' if hot != 1 else ''}; "
+        f"{remaining} still to meet in motion.{names_clause} If the player reaches for a ceremony beat, "
+        "don't hard-gate them — steer them warmly into actually engaging a couple more people (that is "
+        "what makes power reachable). You do NOT need every one of the 15 formally introduced first: the "
+        "stragglers get met in motion, during the mingle and the comp itself."
     )
 
 
@@ -2670,12 +2732,81 @@ def _render_presence_movement(prev: Optional[dict], cur: Optional[dict]) -> Opti
     )
 
 
+# ── Feature #1394 — narrator memory callbacks (default OFF) ──────────────────────────────────── #
+
+# How many recalled moments ride the framing at most (mirrors the engine's MEMORY_CALLBACK.k).
+_MEMORY_CALLBACK_MAX = 2
+
+
+def _memory_callbacks_enabled() -> bool:
+    """Feature #1394 — default OFF. Absent flag ⇒ the recall is NEVER fetched and the framing is
+    byte-identical (the floor contract). Read at call time (no restart), like the other runtime dials."""
+    raw = (os.getenv("ORWELL_MEMORY_CALLBACKS") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _scene_npc_ids(whereabouts) -> list:
+    """The houseguest ids co-present with the player right now (the presence seam) — who the player is
+    in a scene with. Reads only the Vault-free public {id,name} refs the whereabouts projection already
+    carries. [] when out of the house / pre-game / odd shape (⇒ no recall, no framing change)."""
+    if not isinstance(whereabouts, dict):
+        return []
+    out: list = []
+    for p in (whereabouts.get("present") or []):
+        if isinstance(p, dict):
+            pid = str(p.get("id") or "").strip()
+            if pid:
+                out.append(pid)
+    return out
+
+
+def _render_memory_callbacks(moments) -> Optional[str]:
+    """Feature #1394 — render the engine's recalled WITNESSED moments as "facts you MAY reference", or
+    None when there are none (recall absence is NOT a failure → no block → byte-identical framing). The
+    moments are Vault-free by construction (the engine reads only the player's visible projection)."""
+    if not isinstance(moments, list):
+        return None
+    clean = [str(m).strip() for m in moments if isinstance(m, str) and str(m).strip()][:_MEMORY_CALLBACK_MAX]
+    if not clean:
+        return None
+    lines = "\n".join(f"  • {m}" for m in clean)
+    return (
+        "MEMORY — real earlier moments the player SHARED with a houseguest here (recalled from the "
+        "record, never invented). A houseguest MAY reference one naturally if it fits the scene — "
+        "\"you told me at the veto you'd never write my name\" — grounding the callback in what actually "
+        "happened. Never force it, never contradict it, and never invent a moment that is not listed:\n"
+        + lines
+    )
+
+
 async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     """Fetch the engine delta since `last_seen_beat_seq` and render the additive 'Since your last
     turn' line — or None when there is no last-seen token (a fresh context — the full block stands),
-    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction."""
-    if user is None or not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
+    a `fullRefresh`, an empty delta, or any hiccup. Fail-open by construction.
+
+    P2-11 (prompt audit): this used to ALSO bail on `user is None`, which made the delta line DEAD
+    in the single-tenant posture (`AUTH_ENABLED=false` — the posture the owner actually runs): the
+    caller's last-seen token is keyed via `_beat_key`/`_desync_key` (the NAR-1/#1045 stable-key
+    family), so it resolves fine with no user, and `state_delta(user=None)` routes to the engine's
+    one "default" sandbox exactly like every sibling read. Every other belt got the stable-key fix;
+    this line was missed. Cross-user isolation is unweakened: a real user still passes their own
+    identity through unchanged."""
+    if not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
         return None  # no prior turn to diff against → leave today's full context untouched
+    # 0108: quiesce under the golden record/replay seam. The committed fixture was recorded while
+    # this line was dead (the old `user is None` bail — golden runs are AUTH_ENABLED=false), so its
+    # request keys hold framing WITHOUT any delta line; rendering one under replay would drift every
+    # later key off the recording (a hard GoldenReplayMiss). The delta content is also beatSeq-paced
+    # (the same tick-timing ±1 class as the dwell counters / movement cue that needed key-side
+    # neutralization, #1355), so keeping it out of BOTH record and replay keeps the seam
+    # deterministic. Drop this gate (plus a key-side neutralization mirroring _MOVEMENT_LINE_RE) at
+    # a deliberate re-record if fixture coverage of the delta line is wanted.
+    try:
+        from src import golden_path as _gp
+        if _gp.active():
+            return None
+    except Exception:
+        pass
     try:
         from src import orwell_engine
         delta = await orwell_engine.state_delta(last_seen_beat_seq, user=user)
@@ -2819,13 +2950,36 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # Observability (CLAUDE.md: "when debugging 'the game won't advance', look here"): the
         # pre-resolve is otherwise silent on success, so a staged eviction walking one beat per turn
         # is indistinguishable from a true stall in the logs. Record the beat we just committed.
-        _beat = ((adv or {}).get("event") or {}).get("content") if isinstance(adv, dict) else None
+        _adv_event = (adv or {}).get("event") if isinstance(adv, dict) else None
+        _beat_kind = str((_adv_event or {}).get("beat") or "") if isinstance(_adv_event, dict) else ""
+        _beat = (_adv_event or {}).get("content") if isinstance(_adv_event, dict) else None
         logger.info("[orwell] pre-resolve advanced %s for user=%s -> beat=%r", phase, user, _beat)
         # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5; never raises)
         _note_belt(user, "pre-resolve-npc-ceremony")
         refreshed = await _fetch_game_state(user, retry=retry)
         _refresh_beat_seq(user, refreshed)  # 0065: the post-advance state read also carries beatSeq
         new_state = refreshed if isinstance(refreshed, dict) else game_state
+
+        # P1-2 (#1361, the machinery half): the consumed beat was the night-gate's diegetic
+        # `day-break`. It never changes the `(week:phase)` signature, so without this branch the
+        # transition was silently SWALLOWED (no runway, no steer — the content lost) and the very
+        # next framing/force marched straight into the ceremony. Arm the narration steer quoting the
+        # engine's own transition line, and — unless the player explicitly asked to move on — hold
+        # THIS turn on the `social` moment and arm a ONE-TURN runway for the same signature, so the
+        # new day gets one genuine social turn before the ceremony is driven (see the module note at
+        # `_DAY_BREAK_STEER`). The "social" moment also suppresses the wire tool_choice force (J-3).
+        if _beat_kind == "day-break":
+            _DAY_BREAK_STEER[rkey] = _day_break_narration_steer(str(_beat or ""))
+            _note_belt(user, "day-break-steer")  # gap #3 telemetry (never raises)
+            if ready:
+                # The player asked to move the day along — voice the crossing, then let the normal
+                # framing (and the beat force, where live) drive the ceremony this same turn.
+                return new_state
+            _arm_runway(user, sig)  # same signature — a day-break never moves (week:phase)
+            _RUNWAY_LEFT[rkey] = _DAY_BREAK_SOCIAL_TURNS
+            logger.info("[orwell] day-break consumed at %s for user=%s — holding one social morning "
+                        "turn (P1-2 #1361)", phase, user)
+            return _hold_for_social(new_state)
 
         # ARM a fresh runway when the resolved beat landed the player in a NEW spectator ceremony
         # beat (a different week:phase, no new pending) — so the NEXT turns are theirs to socialize
@@ -3129,6 +3283,34 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _move_line
         except Exception as e:
             logger.warning("[orwell] presence-movement framing skipped for user=%s: %s", _gkey, e)
+        # P1-2 (#1361): the pre-resolve consumed a diegetic `day-break` beat THIS turn — append the
+        # armed narration steer so the model voices the night→morning crossing (the beat's content
+        # never changes the (week:phase) signature, so nothing else would surface it). Popped: the
+        # steer rides exactly one turn. Best-effort / fail-open like every framing line above.
+        try:
+            _db_steer = _DAY_BREAK_STEER.pop(_runway_key(user), None)
+            if _db_steer:
+                gm_prompt = gm_prompt + "\n\n" + _db_steer
+        except Exception as e:
+            logger.warning("[orwell] day-break steer framing skipped for user=%s: %s", _gkey, e)
+        # Feature #1394 — narrator memory callbacks (default OFF via ORWELL_MEMORY_CALLBACKS). When ON,
+        # recall 1–2 WITNESSED past moments involving the houseguest(s) the player is in a scene with
+        # (the presence seam), ranked against the player's message, and hand them to the narrator as
+        # "facts you MAY reference" ("you told me on day 3 you'd never write my name down"). The engine
+        # reads ONLY the player's Vault-free visible projection — never the Vault. Additive + fail-open;
+        # absent flag / no present NPC / no player message / no relevant history ⇒ NO block, so the
+        # framing is byte-identical to today (the floor contract). NOTE: enabling the flag adds this
+        # block to the moment-framing request digest ⇒ the golden fixture must be re-recorded (#1394).
+        if _memory_callbacks_enabled():
+            try:
+                _scene_ids = _scene_npc_ids(game_state.get("whereabouts"))
+                if _scene_ids and isinstance(player_msg, str) and player_msg.strip():
+                    _recall = await orwell_engine.recall_scene_memories(_scene_ids, cue=player_msg, user=user)
+                    _cb = _render_memory_callbacks((_recall or {}).get("moments")) if isinstance(_recall, dict) else None
+                    if _cb:
+                        gm_prompt = gm_prompt + "\n\n" + _cb
+            except Exception as e:
+                logger.warning("[orwell] memory-callback framing skipped for user=%s: %s", _gkey, e)
         # E94: an attachment on a game turn is the player SHOWING something in the scene.
         if has_attachments:
             gm_prompt = gm_prompt + "\n\n" + ATTACHMENT_SCENE_FRAMING

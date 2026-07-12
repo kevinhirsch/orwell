@@ -523,6 +523,27 @@ async def record_offscreen_scene_texture(event_id: str, content: str, user: str 
                        {"eventId": event_id, "content": content}, user=user)
 
 
+async def competition_staging_view(user: str | None = None) -> dict | None:
+    """Feature #1400 READ: the Vault-free 'what to hand the model' projection for the currently-staging
+    competition — ``{comp, type, week, format, participants, winner, dropOrder, library}``. The engine
+    hands the ALREADY-FIXED winner + drop order (the model dresses a decided result, it can never touch
+    it), so the FE can author a theme + per-round fiction MATCHED to it. ``None`` unless generative
+    competitions are enabled on the engine AND a comp has resolved its roll. Vault-free (names + the
+    public drop ORDER, never a score/number)."""
+    result = await _call("competitionStagingView", {}, user=user)
+    return result if isinstance(result, dict) else None
+
+
+async def record_competition_fiction(fiction: dict, user: str | None = None) -> dict:
+    """Feature #1400 WRITE-BACK: write the model-authored competition fiction BACK to the engine. The
+    engine VALIDATES (hard) that every elimination in ``fiction['eliminations']`` maps to the fixed drop
+    order EXACTLY; on any mismatch it is REJECTED and the deterministic 0042 library floor stands (the
+    model can never rename who goes or in what order). ``fiction`` carries ``{comp, week, theme, premise,
+    winReads?, eliminations: [{id, fiction}]}``. Presentation-only — never perturbs a seeded roll.
+    Returns ``{ accepted: bool, reason?: str }``."""
+    return await _call("recordCompetitionFiction", fiction, user=user)
+
+
 async def get_game_state(user: str | None = None, timeout: float | None = None) -> dict:
     """Current Vault-free game state for this user: phase, the player's card, the house roster.
 
@@ -543,6 +564,23 @@ async def get_moment_prompt(moment: str | None = None, user: str | None = None, 
     if moment:
         args["moment"] = moment
     return await _call("getMomentPrompt", args, user=user, timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
+
+
+async def recall_scene_memories(with_ids: list | None = None, cue: str | None = None,
+                                user: str | None = None, timeout: float | None = None) -> dict:
+    """Feature #1394 — the Vault-free WITNESSED past moments involving the houseguest(s) the player is
+    in a scene with ({with_ids}), ranked against the scene cue ({cue}), for the narrator to reference
+    ('you told me on day 3 you'd never write my name down'). The engine reads ONLY the player's visible
+    projection — witnessed/journal-visible events, NEVER the Vault. Returns { moments: [...] } — [] when
+    there is no relevant history (recall absence is not a failure). Framing-timeout by default, like
+    get_moment_prompt (it rides the same per-turn framing budget)."""
+    args: dict = {}
+    if with_ids:
+        args["withIds"] = list(with_ids)
+    if cue:
+        args["cue"] = cue
+    return await _call("recallSceneMemories", args, user=user,
+                       timeout=timeout if timeout is not None else _FRAMING_TIMEOUT)
 
 
 async def run_competition(comp_type: str | None = None, participant_ids: list | None = None, user: str | None = None) -> dict:
@@ -705,6 +743,26 @@ async def cancel_self_eviction(user: str | None = None) -> dict:
     """Self-eviction cancel (0061): the player decided to stay — clear the confirmation; they remain
     ACTIVE and in the house, unchanged."""
     return await _call("cancelSelfEviction", {}, user=user)
+
+
+async def turn_in(expected_beat_seq: int | None = None, idempotency_key: str | None = None, user: str | None = None) -> dict:
+    """ADR 0006 — the player's bedtime lever: the player CHOOSES to turn in for the night. The ENGINE
+    ends their night (folding the hidden, bounded rest penalty — never a number crosses the wall),
+    rolls the house to the next morning, and returns an AdvanceView that MAY carry a Vault-free
+    ``dailyRecap`` (0102) for the day that just closed. A no-op AdvanceView when the in-game clock
+    isn't running, the game is over, or the player has left.
+
+    0065 — a mutating PROGRESSION, so it threads the SAME optional sync-spine fields as ``advance_game``:
+    ``expected_beat_seq`` (Part A CAS; a stale token ⇒ 409 ``stale-beat``, refused before any mutation)
+    and ``idempotency_key`` (Part B at-most-once; a replayed key returns the original view WITHOUT
+    re-ending the night — so a retried/duplicate model call can't re-stamp the rest penalty). Both are
+    merged in ONLY when provided; absent ⇒ byte-identical to the pre-0065 call (the engine ignores any)."""
+    args: dict = {}
+    if expected_beat_seq is not None:
+        args["expectedBeatSeq"] = expected_beat_seq
+    if idempotency_key is not None:
+        args["idempotencyKey"] = idempotency_key
+    return await _call("turnIn", args, user=user)
 
 
 async def player_tagline(user: str | None = None) -> dict:

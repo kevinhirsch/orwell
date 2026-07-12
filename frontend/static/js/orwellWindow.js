@@ -122,6 +122,13 @@ function _sweepOrphanScrims() {
   for (const w of _modalStack) {
     if (w && w._scrim && w.el && w.el.isConnected) live.add(w._scrim);
   }
+  // A NON-modal sheet-scrim (scrim:true) is NOT on the modal stack, so protect any live
+  // registered window's scrim too — otherwise this sweep (which runs on every modal
+  // recompute AND at the top of dismissTop) would wrongly reap a valid non-modal backdrop.
+  // (_byId is the open-window registry; empty until the first open, so this is a no-op at load.)
+  for (const w of _byId.values()) {
+    if (w && w._scrim && w.el && w.el.isConnected) live.add(w._scrim);
+  }
   let scrims;
   try { scrims = document.querySelectorAll('.ow-scrim, [data-ow-scrim]'); } catch (_) { return; }
   scrims.forEach((s) => {
@@ -686,7 +693,7 @@ export class OrwellWindow {
    *         draggable=true, minimizable=true, closable=true, resizable=true,
    *         minWidth=240, minHeight=160,
    *         content (Node|string), focus=false, onClose, onMinimize, onRestore,
-   *         dockable=false, defaultDocked=false, onDock }
+   *         dockable=false, defaultDocked=false, onDock, sheet='auto', scrim=false }
    *
    * 0054 Phase 2 — DOCKED kit mode. A `dockable` window renders a dock/undock
    * toggle in its titlebar and persists the choice per user (`orwell-<id>-docked:
@@ -717,6 +724,12 @@ export class OrwellWindow {
    * geometry entirely (F5: the detent classes own the height — no geometry key
    * is ever minted), and crossing the breakpoint re-homes the window through
    * the same teardown+rebuild hinge the dock toggle uses.
+   *
+   * `scrim` (default false) — a NON-modal sheet may mount the sheet's dimming
+   * backdrop (the shared `.ow-scrim`) with `scrim:true` while staying non-modal
+   * (no aria-modal / focus-trap / inert background / modal z-tier): the backdrop
+   * rides one z BELOW the sheet window. Only honored while presenting as a sheet
+   * (the narrow tier). A modal window's scrim is implied by modal:true.
    */
   constructor(opts) {
     // A modal:true dialog (settings, etc.) must CENTER, not pin to the top-right HUD
@@ -736,6 +749,14 @@ export class OrwellWindow {
       // dialog presents as a bottom sheet on phones; true → this window sheets on
       // narrow even when non-modal (the Cast window opts in); false → never sheets.
       sheet: 'auto',
+      // scrim (default false): a NON-modal sheet may opt into the sheet's dimming backdrop
+      // (the shared .ow-scrim) with scrim:true — the scrim mounts, but the window STAYS
+      // non-modal: no aria-modal, no focus-trap, no inert background, no modal z-tier. The
+      // backdrop just rides one z below the sheet window (raise() layers it) so the sheet is
+      // never covered by its own dim. Only honored while the window presents AS a sheet (the
+      // narrow tier) — see the `this._sheet && this.o.scrim` gate in open(). A modal window's
+      // scrim is implied by modal:true (the full modal chrome), so scrim is redundant there.
+      scrim: false,
       dockable: false, defaultDocked: false, modal: false }, opts);
     if (!this.o.id || !this.o.title) throw new Error('OrwellWindow needs id + title');
     this.ac = new AbortController();
@@ -1209,6 +1230,14 @@ export class OrwellWindow {
     // Insert behind the (already-mounted) window so DOM order matches the z order.
     document.body.insertBefore(scrim, this.el);
     this._scrim = scrim;
+    // A NON-modal sheet with `scrim:true` mounts ONLY the dimming backdrop — no modal
+    // stack, no focus-trap, no inert background, no aria-modal. It stays non-modal; raise()
+    // (called right after in open()) layers this scrim one z BELOW the sheet window so the
+    // sheet is never covered by its own dim. The scrim is still torn down by _teardown →
+    // _unmountModalChrome (this._scrim removal is unconditional there) and is protected from
+    // the orphan sweep because _sweepOrphanScrims also treats any live registered window's
+    // scrim as legitimate (not just modal-stack entries).
+    if (!this.o.modal) return;
     if (_modalStack.indexOf(this) === -1) _modalStack.push(this);   // #870: become the top
     this._trapFocus();
     _recomputeModalStack();   // #870: inert page + lower modals; this one is the live top
@@ -1352,7 +1381,10 @@ export class OrwellWindow {
     }
     // J1-25: a modal window mounts its backdrop scrim + inerts the background + traps
     // focus BEFORE the raise (which pins it to the modal tier above the scrim).
-    if (this.o.modal) this._mountModalChrome();
+    // A NON-modal sheet that opted into `scrim:true` also mounts the scrim here — but
+    // _mountModalChrome mounts ONLY the dimming backdrop for it (no trap/inert/stack);
+    // raise() layers that scrim one z below the sheet window.
+    if (this.o.modal || (this._sheet && this.o.scrim)) this._mountModalChrome();
     this.raise();
     if (this.o.modal) this._focusIntoModal();
     else if (this.o.focus) this.el.focus({ preventScroll: true }); // #837: ring-free root, not the titlebar
@@ -1398,13 +1430,32 @@ export class OrwellWindow {
       // _owNextWindowZ in ui.js), which advances the SAME global tick the modal
       // ladder uses and renormalizes the open kit stack at the band ceiling.
       this.el.style.zIndex = String(nextWindowZ());
+      // A non-modal sheet scrim (scrim:true) rides just UNDER this window in the kit
+      // band, so the sheet is never covered by its own dimming backdrop (a non-modal
+      // scrim gets no modal z-tier). Re-run on every raise so click-to-front keeps the
+      // ordering. this._scrim here is ONLY the non-modal sheet-scrim case (a modal draws
+      // its z via the branch above; a plain window has no scrim).
+      if (this._scrim) {
+        const wz = parseInt(this.el.style.zIndex, 10);
+        this._scrim.style.zIndex = String((Number.isFinite(wz) ? wz : Z_BASE) - 1);
+      }
     }
     for (const w of _stack) w.el && w.el.classList.toggle('ow-focused', w === this);
   }
 
   minimize() {
     if (!this.el || this._docked) return;  // docked windows live in the rail, no chip dock
-    saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh
+    // #573 GESTURE UNIFICATION (window-system audit Direction B): a DOCKABLE window's minimize
+    // IS the dock — ONE gesture, ONE destination (the control-room rail). Route through the dock
+    // (mount the full window into the rail) instead of parking a compact chip in a separate
+    // "Windows" strip; the chip-park path below is now exclusively for NON-dockable kit windows.
+    // minimize() is only ever reached while FLOATING (the yellow control is gated on !_docked and
+    // we early-return above when docked), so this is always a plain float→dock re-home. Escape
+    // (dismissTop) and a remote-layout minimize both funnel here too, so a dockable window tucks
+    // into the rail consistently however it was triggered; restore is the dock's own undock (⇱)
+    // toggle — one gesture back out, the same single destination.
+    if (this.o.dockable) { this.toggleDock(); return; }
+    saveParked(this.o.id, true); // F2 (G16): parked means parked — survive a refresh (non-dockable)
     this._emit({ minimized: true });  // 0064/D1
     const i = _stack.indexOf(this);
     if (i !== -1) _stack.splice(i, 1);

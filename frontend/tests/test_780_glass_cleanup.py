@@ -17,9 +17,27 @@ fixed findings:
   • #1 (optional polish) Login presets not distinct / true to label. The mesh-gradient
     preset palettes are made distinct + name-true (sunset=warm, aurora=green/teal/violet,
     gold=warm gold, etc.).
+
+Cache-clean follow-up pins (2026-07-11, the #780-4/#780-5/#780-6 sweep):
+  • #4 (behavioural) An explicit SAVED glassTier must win over the dedicated `glass`
+    named-theme default — proven by EVALUATING resolveGlassTier/defaultGlassTierFor
+    (extracted from theme.js) in node, not just source-pinning them; and the first-paint
+    head-script in index.html resolves the saved tier BEFORE the per-theme glass default,
+    so a saved 'frosted'/'normal' never flashes glass-full on cold load.
+  • #5 The element-kit demo's wallpaper covers the FULL scroll height (no dark `--bg`
+    slab past the fold) — the demo overrides the app shell to a scrollable block with a
+    fixed full-bleed wallpaper.
+  • #6 The received-bubble (`.msg-ai`) backing over a busy MULTICOLOR wallpaper is a
+    NEUTRAL frost, not a per-bubble patchy plate — the saturate amplifier was dropped from
+    180% so a hostile wall no longer blooms through at a different hue per bubble.
 """
 import os
 import re
+import shutil
+import subprocess
+import tempfile
+
+import pytest
 
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -148,3 +166,114 @@ def test_login_presets_are_distinct_and_name_true():
     g1 = presets["gold"]["lbg-c1"]
     gr, gg, gb = int(g1[1:3], 16), int(g1[3:5], 16), int(g1[5:7], 16)
     assert gr >= gg and gg > gb, f"gold c1 {g1} should be warm gold, not teal/green"
+
+
+# ── #4 (behavioural) — saved frosted OVERRIDES the glass named theme ─────────────
+def _extract_fn(js, name):
+    """Pull a top-level `function <name>(...) { ... }` declaration (up to the first
+    line-start closing brace) out of theme.js so it can be evaluated standalone."""
+    m = re.search(r"function %s\([^)]*\)\s*\{.*?\n\}" % re.escape(name), js, re.S)
+    assert m, f"could not extract function {name} from theme.js"
+    return m.group(0)
+
+
+def test_saved_glass_tier_behaviorally_overrides_glass_named_theme():
+    """The audit's #4: a saved `glassTier: 'frosted'/'normal'` did NOT override the dedicated
+    `glass` named theme (both spot-checks resolved glass-full). Prove the fix BEHAVIOURALLY by
+    running the real resolveGlassTier/defaultGlassTierFor (lifted from theme.js) in node — an
+    explicit saved tier must win; only an unset tier falls to the per-theme default."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available to evaluate the theme resolution logic")
+    js = _read("static", "js", "theme.js")
+    harness = (
+        # a minimal THEMES the two functions read (glass ships glassTier:'full'; a house
+        # theme + a plain theme cover the non-glass branches) — roles only, no real palettes.
+        "const THEMES = { glass:{glassTier:'full',glass:true}, 'the-feed':{house:true}, dark:{} };\n"
+        + _extract_fn(js, "defaultGlassTierFor") + "\n"
+        + _extract_fn(js, "resolveGlassTier") + "\n"
+        + r"""
+const cases = [
+  // THE #780-4 CORE: a saved explicit tier beats the glass named-theme 'full' default.
+  ["saved frosted overrides the glass named theme", resolveGlassTier({name:'glass',glassTier:'frosted'},'glass'), 'frosted'],
+  ["saved normal overrides the glass named theme",  resolveGlassTier({name:'glass',glassTier:'normal'},'glass'),  'normal'],
+  // legacy back-compat bool still overrides the named-theme default.
+  ["legacy frosted:true overrides glass",  resolveGlassTier({name:'glass',frosted:true},'glass'),  'frosted'],
+  ["legacy frosted:false overrides glass", resolveGlassTier({name:'glass',frosted:false},'glass'), 'normal'],
+  // and ONLY an unset tier falls through to the per-theme default (glass -> full).
+  ["unset tier keeps the glass default full", resolveGlassTier({name:'glass'},'glass'), 'full'],
+  ["null record keeps the glass default full", resolveGlassTier(null,'glass'), 'full'],
+  // a non-glass theme: a saved tier still wins; its default is frosted.
+  ["saved full on a house theme wins", resolveGlassTier({name:'the-feed',glassTier:'full'},'the-feed'), 'full'],
+  ["house-theme default is frosted",   resolveGlassTier(null,'the-feed'), 'frosted'],
+];
+let bad = 0;
+for (const [d, got, exp] of cases) {
+  if (got !== exp) { bad++; console.log('FAIL ' + d + ': got=' + got + ' exp=' + exp); }
+}
+if (bad) process.exit(1); else console.log('ALL_PASS');
+"""
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".mjs", delete=False) as f:
+        f.write(harness)
+        path = f.name
+    try:
+        r = subprocess.run([node, path], capture_output=True, text=True, timeout=30)
+    finally:
+        os.unlink(path)
+    assert r.returncode == 0, (
+        "saved glassTier does not override the glass named theme:\n" + r.stdout + r.stderr
+    )
+    assert "ALL_PASS" in r.stdout
+
+
+def test_first_paint_head_script_resolves_saved_tier_before_glass_default():
+    """The cold-load head script in index.html paints the glass tier from the FIRST frame; it
+    must resolve a SAVED glassTier (and the legacy `frosted` bool) BEFORE it falls to the
+    per-theme default — otherwise a saved 'frosted'/'normal' would flash glass-full on load."""
+    html = _read("static", "index.html")
+    saved = html.index("t.glassTier === 'full' || t.glassTier === 'frosted' || t.glassTier === 'normal'")
+    legacy = html.index("t.frosted ? 'frosted' : 'normal'")
+    default = html.index("(_name === 'glass' || t.glass) ? 'full' : 'frosted'")
+    assert saved < legacy < default, (
+        "the first-paint tier resolution must read the saved glassTier, then the legacy bool, "
+        "and only THEN the per-theme glass default"
+    )
+
+
+# ── #5 — the element-kit demo wallpaper covers the full scroll height (no dark slab) ──
+def test_element_kit_demo_wallpaper_covers_full_scroll_height():
+    """The demo overrides the fixed-height app shell to a normal scrollable block whose
+    wallpaper covers the WHOLE scroll height, so no dark `--bg` slab shows past the fold."""
+    html = _read("static", "element_kit_demo.html")
+    # the app shell (height:100dvh; display:flex; overflow) is overridden to a scrollable block
+    assert "height: auto !important" in html
+    assert "display: block !important" in html
+    # and the wallpaper is a FIXED full-bleed background (covers the viewport at every scroll pos)
+    assert "fixed !important" in html
+    assert re.search(r"#__wp\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0", html, re.S), (
+        "the demo must carry a fixed full-bleed #__wp wallpaper layer"
+    )
+
+
+# ── #6 — the received-bubble backing is a neutral frost over a busy multicolor wall ──
+def _msg_ai_frost_block(css):
+    m = re.search(r"body\.theme-frosted\s+\.msg-ai\s*\{(.*?)\}", css, re.S)
+    assert m, "could not find the theme-frosted .msg-ai glass block"
+    return m.group(1)
+
+
+def test_msg_ai_backing_saturate_is_de_amplified_for_uniformity():
+    """#780-6: the 180% saturate amplified a hostile MULTICOLOR wallpaper into a per-bubble
+    patchy plate. It is dropped to a gentle pick-up (<=130%) so the backing reads as a
+    consistent neutral frost — while STILL a real translucent frost (blur + a saturate, never
+    a lens, and the floored scrim var is untouched)."""
+    block = _msg_ai_frost_block(_read("static", "style.css"))
+    m = re.search(r"backdrop-filter:\s*blur\([0-9.]+px\)\s*saturate\(([0-9]+)%\)", block)
+    assert m, ".msg-ai must keep a blur+saturate frost backdrop-filter"
+    sat = int(m.group(1))
+    assert sat <= 130, f".msg-ai saturate {sat}% must be de-amplified (<=130%) so a busy wall reads uniform"
+    assert sat >= 100, f".msg-ai saturate {sat}% must keep a gentle glass pick-up (>=100%)"
+    # still a frost, not a lens; the scrim FLOOR var is preserved (the legibility contract).
+    assert "url(#" not in block, ".msg-ai backing must stay a frost (no SVG refraction lens)"
+    assert "--ai-scrim-alpha" in block, "the floored scrim var must stay the legibility floor"

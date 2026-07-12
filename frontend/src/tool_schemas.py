@@ -1438,6 +1438,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "turnIn",
+            "description": "The player's bedtime lever (ADR 0006): the player CHOOSES to turn in for the night. Call it whenever the player says they are heading to bed / turning in / calling it a night — the player is NEVER auto-slept, so only this ends their night for real. It ends their night where it stands (an early night ⇒ rested for tomorrow's comp; outlasting the house into late-night ⇒ running on empty — a hidden, bounded rest effect the ENGINE folds, never a number) and rolls the house to the next morning. The result may carry a Vault-free dailyRecap (0102) — the day that just closed, plus an optional non-committal forward tease: voice it as a short in-fiction 'day in review' beat when present, and invent nothing when absent. Never narrate the player waking to a new morning without calling this. A no-op when the in-game clock isn't running.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "seasonRetrospective",
             "description": "POST-SEASON ONLY (0048): opens the Producer's Vault for the FINISHED season — off-screen scheming, confessionals, the twist that never fired. Returns nothing while a season is live; after the winner it is the payoff.",
             "parameters": {"type": "object", "properties": {}},
@@ -1461,7 +1469,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "whereabouts",
-            "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each ADJACENT room — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
+            "description": "Where the player stands in the house (0049): their room, who is in it, and who is in each room within SIGHTLINE (eyeshot — the open great room/yard or a hallway mouth; 0077 Phase 2) — names only. Call when the player lingers, mills around, or asks who's nearby; presence is engine ground truth, never invented.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -1483,7 +1491,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "premiereIntros",
-            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce before the first HOH, each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped; returns null outside the premiere.",
+            "description": "PREMIERE ONLY (#380): the meet-everyone progress — who the player has met and who is STILL to introduce (the stragglers are met in motion), each with their OBSERVABLE public persona (archetype/strategy/background/age/presentation/demeanor — never the soul, a number, or how the player feels). Drive the introductions from this so nobody is skipped — but first power is REACHABLE once a couple of hot reads form and nobody is invisible, WITHOUT every formal introduction first (0111); returns null outside the premiere.",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -1491,7 +1499,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "markHouseguestMet",
-            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met so all 15 NPCs are met before the first HOH. Returns the updated meet-everyone progress (null outside the premiere).",
+            "description": "PREMIERE ONLY (#380): mark a houseguest as INTRODUCED/met the instant they have introduced their public self. Idempotent; the engine tracks who's met. First power becomes REACHABLE once a couple of genuine hot reads form and nobody is left invisible (0111) — you do NOT need every one of the 15 formally introduced first; the stragglers get met in motion. Returns the updated meet-everyone progress (null outside the premiere).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1713,7 +1721,7 @@ FUNCTION_TOOL_SCHEMAS = [
                 "rejects creation without one). This is ALSO the restart door: to start a NEW season "
                 "after one has ENDED (a winner crowned) or that the player wants to abandon, call it "
                 "again with confirmRestart=true and the new player's details — that flag is REQUIRED "
-                "to play again; without it the call silently no-ops on any started season."
+                "to play again; without it the call is REFUSED with a reason (createRefused) on any started season."
             ),
             "parameters": {
                 "type": "object",
@@ -1931,6 +1939,9 @@ ORWELL_GAME_TOOLS = frozenset({
     "seasonRecap", "seasonRetrospective",
     # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
     "dailyRecap",
+    # ADR 0006 (#1385): the player's bedtime lever — ends their night, rolls the house to morning,
+    # folds the hidden rest penalty in the ENGINE, and delivers the dailyRecap (0102) inline on its result.
+    "turnIn",
     # B65: the knowledge-bounded per-NPC voicing projection.
     "npcVoice",
 })

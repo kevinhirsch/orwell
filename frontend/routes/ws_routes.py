@@ -425,6 +425,14 @@ async def ws_session(websocket: WebSocket) -> None:
         # Per-socket binding + channel tasks.
         sock: dict[str, Any] = {"canonical": None, "live": False, "beatSeq": None}
         channel_tasks: dict[str, asyncio.Task] = {}
+        # #1087: the canonical id each state/hud channel task was SPAWNED for. A same-socket
+        # re-subscribe for the SAME canonical is deduped to a no-op (see _handle_subscribe) — a
+        # respawn would run a fresh `session_events.subscribe()`, which REPLAYS the per-session
+        # event ring (ADR 0012 §3.4b) back at a window that already consumed it, feeding the
+        # client's gamechanged→rebind loop. A genuinely NEW socket (fresh window / reconnect after
+        # a drop) gets a fresh ws_session call — and therefore a fresh task + the ring replay that
+        # durability exists for.
+        channel_canonicals: dict[str, Any] = {}
 
         async def _heartbeat() -> None:
             try:
@@ -462,8 +470,11 @@ async def ws_session(websocket: WebSocket) -> None:
             start = max(0, from_seq)
             if start > head + 1:
                 start = head + 1
+            # `runId` (#1087): name the run this subscribe attaches to, so the client can later
+            # recognize a ring-replayed `run-started` edge for the SAME run as stale (reconcile-by-id).
             await send({"t": "ack", "ch": "chat", "cid": cid,
-                        "d": {"fromSeq": start, "headSeq": head, "hasRun": True}})
+                        "d": {"fromSeq": start, "headSeq": head, "hasRun": True,
+                              "runId": agent_runs.run_id(canonical)}})
             seq = start
             try:
                 async for raw in agent_runs.subscribe(canonical, from_seq=start):
@@ -492,7 +503,17 @@ async def ws_session(websocket: WebSocket) -> None:
                     bs = _beat_seq_of(st)
                     if bs is not None:
                         sock["beatSeq"] = bs
-                    await send({"t": ch, "ch": ch, "d": {"beatSeq": sock["beatSeq"], "reason": reason}})
+                    d: dict[str, Any] = {"beatSeq": sock["beatSeq"], "reason": reason}
+                    if reason == "run-started":
+                        # #1087 reconcile-by-id: stamp the CURRENT run's identity on the edge (the
+                        # publish sites stay payload-unchanged — the run registry is the identity
+                        # source). A ring-REPLAYED edge for a finished-but-buffered run resolves to
+                        # that same run's id, which is exactly what lets the client skip it; an
+                        # evicted run resolves to None and the client falls back to its boolean guard.
+                        rid = agent_runs.run_id(canonical)
+                        if rid is not None:
+                            d["runId"] = rid
+                    await send({"t": ch, "ch": ch, "d": d})
             except (asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
                 return
             except Exception:
@@ -581,6 +602,20 @@ async def ws_session(websocket: WebSocket) -> None:
                     return
                 _spawn_channel("chat", _run_chat_channel(cid, from_seq))
             elif ch in ("state", "hud"):
+                # #1087 idempotent same-socket re-arm: a subscribe for an edge channel that is ALREADY
+                # running for the SAME canonical id is a NO-OP (edge subscribes have no success ack, so
+                # this is protocol-identical). Respawning would tear the live bridge down and run a fresh
+                # `session_events.subscribe()`, which replays the per-session event ring (≤8 events,
+                # 180s) back at a window that already consumed it — the server half of the
+                # rebind→ring-replay churn loop. The replay durability (ADR 0012 §3.4b) is preserved
+                # where it matters: a genuinely new subscriber (fresh window, reconnect after a drop) is
+                # a NEW socket with a fresh channel_tasks map, and a canonical CHANGE (adoption /
+                # season-reset rebind) respawns to re-point the bridge.
+                existing = channel_tasks.get(ch)
+                if (existing is not None and not existing.done()
+                        and channel_canonicals.get(ch) == sock["canonical"]):
+                    return
+                channel_canonicals[ch] = sock["canonical"]
                 _spawn_channel(ch, _run_state_channel(ch))
             elif ch == "layout":
                 # §5 — per-device layout leg: subscribe the session bus and forward `layout-changed`

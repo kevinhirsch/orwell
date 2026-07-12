@@ -1,6 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
+import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 
 /**
  * Vault-free game-session port (onboarding + per-moment prompt injection).
@@ -210,6 +211,76 @@ export interface RecordWorldSnapshotResult {
   accepted: boolean;
   /** The resulting source: "web_search" once a real capture lands; "absent" when there was no game. */
   source: string;
+}
+
+/**
+ * Feature #1400 — the "what to hand the model" projection for the CURRENTLY-STAGING competition, so the
+ * FE can author a theme + premise + per-round fiction MATCHED to the engine's ALREADY-FIXED outcome. The
+ * winner and the full drop order are FIXED before this is ever non-null (the model dresses a decided
+ * result — it can never touch it). Vault-free by construction: names + the PUBLIC drop ORDER (the same
+ * order the reveal already tells the player round by round) + the public 0042 library scaffold — never a
+ * score, lean, or number. `null` unless generation is enabled AND a staged comp has resolved its roll.
+ */
+export interface CompetitionStagingView {
+  /** Which comp is staging: "hoh-competition" | "veto-competition". */
+  comp: string;
+  /** The governing competition type (endurance/memory/…). */
+  type: string;
+  week: number;
+  /** The drawn 0042 library format (endurance/puzzle/quiz/skill/crapshoot/social), when known. */
+  format?: string;
+  /** The full field that competed (names). */
+  participants: NamedRef[];
+  /** The FIXED winner (name) — decided up front; the fiction dresses this, it can never change it. */
+  winner: NamedRef;
+  /** The FIXED elimination order of the losers, earliest-out first (names) — author one line per entry, IN ORDER. */
+  dropOrder: NamedRef[];
+  /** The 0042 library scaffold the model riffs ON (and the deterministic floor when no fiction is authored). */
+  library: { name: string; premise: string; beats: string[]; winReads: string };
+  /**
+   * Whether VALIDATED fiction is ALREADY stored for this competition — the FE's persistent "author exactly
+   * once per comp" guard. The staged comp stays surfaced across every reveal round until it crowns, so the
+   * FE fires its authoring kickoff after every advance/decision; it MUST no-op once this is true (a
+   * re-author is a wasted utility call + an overwrite that makes later rounds render different staging than
+   * earlier ones). True the moment a fiction write-back lands; false again only when the comp crowns.
+   */
+  alreadyAuthored: boolean;
+}
+
+/**
+ * Feature #1400 — the FE-driven write-back of the model-authored competition fiction. The engine
+ * VALIDATES (hard) that `eliminations` names the SAME houseguests in the SAME order as the fixed drop
+ * order; on any mismatch it is REJECTED and the deterministic 0042 library floor stands (the model can
+ * never rename who goes or in what order). PRESENTATION ONLY — recorded AFTER the roll commits.
+ */
+export interface RecordCompetitionFictionReq {
+  /** Which comp this dresses — must match the currently-staging comp ("hoh-competition" | "veto-competition"). */
+  comp: string;
+  /** The week it was authored for — must match the live week (a staleness guard). */
+  week: number;
+  /** The invented competition theme/name. */
+  theme: string;
+  /** The staging premise (how it's set up + played). */
+  premise: string;
+  /** Optional "how a win reads" line. */
+  winReads?: string;
+  /** The per-elimination fiction, ORDERED — one entry per drop-order entry, naming the SAME ids in the SAME order. */
+  eliminations: Array<{ id: EntityId; fiction: string }>;
+}
+
+/** Whether the competition-fiction write-back was accepted; a Vault-free reason when it was not. */
+export interface RecordCompetitionFictionResult {
+  /** True iff the fiction validated against the fixed drop order and was stored (else the 0042 floor stands). */
+  accepted: boolean;
+  /**
+   * Why a write-back was refused (Vault-free): "disabled" (flag off) | "no-game" | "no-competition"
+   * (no comp staging) | "not-resolved" (the roll has not committed yet) | "comp-mismatch" |
+   * "week-mismatch" | "already-authored" (fiction is ALREADY stored for this (comp, week) — the
+   * engine-side exactly-once guard; a second write is refused, never overwrites) | "drop-order-mismatch"
+   * (the named eliminations did NOT match the fixed order — the core safety reject) | "empty-fiction".
+   * Absent on acceptance.
+   */
+  reason?: string;
 }
 
 /** The Vault-free projection of the running game the front-end may render. */
@@ -662,9 +733,9 @@ export interface CreateCharacterReq {
   seed?: number;
   /**
    * Explicit opt-in to REPLACE an already-started game (non-degradation guard, B36/audit A2). Without
-   * it, calling `createCharacter` on a started season is a no-op that returns the current state — so a
-   * stray/hallucinated/network call can never wipe an active game. A real restart sets this (the admin
-   * reset path) — it is NOT part of the player tool's documented schema.
+   * it, calling `createCharacter` on a started season is REFUSED with a reason (`createRefused`) and
+   * returns the current state UNCHANGED — so a stray/hallucinated/network call can never wipe an active
+   * game. A real restart sets this (the admin reset path) — it is NOT part of the player tool's documented schema.
    */
   confirmRestart?: boolean;
   /**
@@ -704,6 +775,26 @@ export interface MomentPromptView {
   moment: string;
   /** The composed system prompt to inject for this moment — base persona + beat fragment + Vault-free context. */
   systemPrompt: string;
+}
+
+/**
+ * Feature #1394 — narrator memory callbacks. The FE asks, before framing a player↔NPC scene, for the
+ * witnessed past moments involving the houseguest(s) the player is with, so the narrator can reference
+ * a real earlier beat ("you told me on day 3 you'd never write my name down"). Vault-free by
+ * construction: the adapter reads ONLY the player's visible projection (see the registry wiring).
+ */
+export interface RecallSceneMemoriesReq {
+  /** The houseguest(s) the player is in a scene with — the FE presence seam (`whereabouts.present` ids).
+   *  Recall is scoped to witnessed moments involving these NPCs. Absent/empty ⇒ no recall. */
+  withIds?: EntityId[];
+  /** The current scene cue to rank relevance against (the player's message). Absent/empty ⇒ no recall. */
+  cue?: string;
+}
+
+export interface RecallSceneMemoriesView {
+  /** 0–2 Vault-free witnessed moments to hand the narrator as "facts you may reference." Empty when
+   *  there is no relevant history (the enrichment policy: recall absence is NOT a failure). */
+  moments: string[];
 }
 
 export interface RunCompetitionReq {
@@ -1040,8 +1131,10 @@ export interface FirstImpressionView {
  * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
  * answer to "who has the player met, and who is still to introduce, before the first HOH?". The
  * narrator is HANDED this so it never has to REMEMBER who's been introduced (the real bug: the
- * model under-tracked and skipped people). `complete` is the structural gate — true once the player
- * has met all 15 NPCs (the player counts themselves); the first HOH should not begin until then.
+ * model under-tracked and skipped people). `complete` is the ALL-MET tally — true once the player has
+ * met all 15 NPCs (the player counts themselves). It is NOT the power gate: the first HOH is REACHABLE
+ * earlier, via `powerReachable` below (0111 — a couple of hot reads + nobody left invisible), WITHOUT
+ * every formal introduction first.
  *
  * Public by construction: it carries only names + the same observable persona facets the roster
  * already exposes. No Vault data, no numbers, no hidden state.
@@ -1349,6 +1442,16 @@ export interface RetrospectiveView {
    */
   playerConfessionals: string[];
   /**
+   * #1396 — the weekly Diary-Room PULL-QUOTE REEL: a curated montage of the season's most notable
+   * confessional lines, collected BY WEEK — the player's OWN Diary-Room lines (`player-diary`) AND the
+   * NPCs' confessionals (`npc-confessional`), each tagged with its source so the two channels stay
+   * explicit. The NPC lines are Vault content and reach this reel ONLY here, at the sanctioned unseal —
+   * exactly like `hiddenStory` / `evictionVotes` (mandate #2). Built ON `playerConfessionals` (0115),
+   * not replacing it: a pure, rng-free, calibration-neutral selection over already-recorded lines, so
+   * an empty reel leaves the rest of the retrospective byte-identical. Empty when no notable line exists.
+   */
+  pullQuoteReel: PullQuoteWeek[];
+  /**
    * The hidden story in CHRONOLOGICAL order (#852): pre-season setup first, then the live hidden
    * layer ordered by its time marker. Each row carries an optional `ts` (a monotonic marker — absent
    * on pre-game setup rows, which sort first); names humanized, no raw ids/slugs.
@@ -1422,6 +1525,9 @@ export interface BehavioralFlags {
   seededTieSurfacing?: boolean;
   /** 0101 — NPC myth-making (the house turns a rare, notable player act into a spreading legend). */
   mythMaking?: boolean;
+  /** 0101/#1401 — the AI showrunner (Vault-held producer notes that pace which simmering threads the
+   *  off-screen tick emphasizes; open-set only — never an outcome). */
+  showrunner?: boolean;
 }
 
 /** A player's answer to the current `PendingDecisionView`. */
@@ -1757,6 +1863,13 @@ export interface GameSession {
   /** The managed system prompt to inject for the current (or requested) moment. */
   getMomentPrompt(req: MomentPromptReq): MomentPromptView;
   /**
+   * Feature #1394 — recall the Vault-free witnessed moments involving the scene's houseguest(s),
+   * ranked by relevance to the cue, for the narrator's framing. A pure READ (never mutates). Vault-free
+   * by construction: it reads only the player's visible projection (the registry wires the source).
+   * Returns `{ moments: [] }` when nothing relevant exists — never an error (enrichment absence is fine).
+   */
+  recallSceneMemories(req: RecallSceneMemoriesReq): RecallSceneMemoriesView;
+  /**
    * Resolve a competition over the live house using the engine's OWN stats +
    * seeded temperature. Returns only the winner (name) — no stats/scores cross
    * the wall. The LLM may request this to drive the game; the ENGINE decides.
@@ -1795,8 +1908,14 @@ export interface GameSession {
    * into late-night ⇒ running on empty) and rolls the house to the next morning. The player is never
    * auto-slept; only this call retires them. A no-op when the clock isn't running, the game is over, or
    * the player has left. Returns the Vault-free view (the new morning + the player's own rest cue).
+   *
+   * 0065 — a mutating progression tool, so it takes the SAME optional sync-spine fields as `advanceGame`
+   * (`AdvanceGameReq`): `expectedBeatSeq` (Part A CAS — a stale token ⇒ typed `stale-beat`/409, refused
+   * before any mutation) and `idempotencyKey` (Part B at-most-once — a retried/duplicate turnIn REPLAYS
+   * the original view instead of re-ending the night, which would re-stamp the rest penalty). Absent ⇒
+   * byte-identical to the pre-0065 path (opt-in).
    */
-  turnIn(): AdvanceView;
+  turnIn(req?: AdvanceGameReq): AdvanceView;
   /**
    * The player makes a deal with a houseguest (0039) — a first-class tracked promise. Recorded as
    * a player-witnessed event (their knowledge); the engine reconciles it against later binding
@@ -2024,6 +2143,26 @@ export interface GameSession {
    * the fallback's value (a partial capture never thins the snapshot — non-degradation).
    */
   recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult;
+
+  /**
+   * Feature #1400 (READ) — the Vault-free "what to hand the model" projection for the currently-staging
+   * competition (comp/type/field/FIXED winner/FIXED drop order/0042 scaffold), so the FE can author a
+   * theme + per-round fiction MATCHED to the already-decided outcome. `null` unless generative
+   * competitions are enabled AND a staged comp has resolved its roll (the model dresses a decided
+   * result — there is nothing to hand it before the roll commits). Not a model lever (FE-driven infra).
+   */
+  competitionStagingView(): CompetitionStagingView | null;
+
+  /**
+   * Feature #1400 (WRITE-BACK) — the FE-driven write-back of the model-authored competition fiction
+   * (theme + premise + per-round elimination fiction). The engine VALIDATES (hard) that every
+   * elimination named maps to the fixed drop order EXACTLY; on any mismatch it is REJECTED and the
+   * deterministic 0042 library floor stands. On success the fiction is stored (Vault-free, persisted)
+   * and the reveal tells it round by round — PRESENTATION ONLY, so it can never perturb the winner, the
+   * drop order, or any seeded roll. Refused (accepted:false) when the flag is off, no comp is staging,
+   * the roll has not committed, or the drop order does not match. Not a model lever (FE-driven infra).
+   */
+  recordCompetitionFiction(req: RecordCompetitionFictionReq): RecordCompetitionFictionResult;
 
   /**
    * The deep-profile write-back seam (feature 0058 / L28b) — the FE-authored §3 profile is recorded

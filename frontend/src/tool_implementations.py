@@ -5060,6 +5060,14 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
             orwell_offscreen_texture.kickoff_enrich(owner)
         except Exception:  # pragma: no cover - defensive: enrichment must never break an advance
             pass
+        # #1400: an advance may resolve a staged competition (its roll commits up front). Fire-and-forget
+        # the FE-driven competition-fiction author — best-effort, never blocks the advance, a silent no-op
+        # when generation is off / no comp resolved / no utility model (the deterministic 0042 floor stands).
+        try:
+            from src import orwell_gen_competitions
+            orwell_gen_competitions.kickoff_fiction(owner)
+        except Exception:  # pragma: no cover - defensive: generation must never break an advance
+            pass
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -5106,6 +5114,14 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
             raise
         await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
+        # #1400: a comp-round approach RESOLVES the staged competition (its roll commits). Fire-and-forget
+        # the competition-fiction author — best-effort, never blocks; a silent no-op unless generation is
+        # on AND a comp resolved AND a utility model resolves (else the deterministic 0042 floor stands).
+        try:
+            from src import orwell_gen_competitions
+            orwell_gen_competitions.kickoff_fiction(owner)
+        except Exception:  # pragma: no cover - defensive: generation must never break a decision
+            pass
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
@@ -5118,6 +5134,41 @@ async def do_request_self_eviction(content: str, owner: Optional[str] = None) ->
     try:
         res = await orwell_engine.request_self_eviction(user=owner)
         orwell_engine.remember_pending(res, user=owner)  # surface the confirm card on reload too
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
+async def do_turn_in(content: str, owner: Optional[str] = None) -> Dict:
+    # ADR 0006 (#1385): the player's bedtime lever. The ENGINE ends the night and folds the hidden,
+    # bounded rest penalty (the FE never authors the sleep effect — the Vault Wall + the
+    # never-a-number-crosses invariant hold); we only surface the call. The result is an AdvanceView
+    # that MAY carry a Vault-free dailyRecap (0102) for the day that just closed — returned inline
+    # (the whole view, verbatim) so the narrator voices it, mirroring how the ceremony/eviction beats
+    # return their content on the advance result. A no-op AdvanceView when the in-game clock isn't running.
+    from src import orwell_engine
+    try:
+        # CON-2/CON-3: turnIn is a mutating PROGRESSION, so it carries the SAME sync-spine guard as
+        # advanceGame/submitDecision — attach the deterministic (game-key, action, last-seen beat)
+        # idempotency key + last-seen beatSeq so a retried/duplicate model call is REPLAYED, not
+        # re-executed (the engine never re-stamps the rest penalty on the second call).
+        _ebs, _ik = _model_progression_cas(owner, "turnIn")
+        try:
+            res = await orwell_engine.turn_in(
+                expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
+        except orwell_engine.EngineToolError as _e:
+            # A stale-beat 409 means a concurrent peer already moved the board — reconcile (refresh
+            # last-seen + stash the re-ground) and return the CURRENT state rather than forcing a second
+            # unintended night-end. Any other engine error falls through to the generic handler below.
+            from routes import chat_helpers as _ch
+            if _ch._is_stale_beat_error(_e):
+                await _ch._handle_stale_beat(owner, _e)
+                _cur = await orwell_engine.get_game_state(user=owner)
+                orwell_engine.remember_pending(_cur, user=owner)
+                return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
+            raise
+        await _refresh_after_model_progression(owner, res)  # CON-3: keep last-seen beatSeq fresh (turnIn mutates)
+        orwell_engine.remember_pending(res, user=owner)     # D3/E66: any pending survives a reload (no-op if none)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

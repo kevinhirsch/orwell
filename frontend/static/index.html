@@ -194,6 +194,18 @@
           // everything else defaults to the frosted (material-only) baseline.
           _tier = (_name === 'glass' || t.glass) ? 'full' : 'frosted';
         }
+        // #777 — device ceiling at FIRST PAINT: never START at Full Glass on a constrained
+        // device (coarse pointer OR a low-end viewport ≤ 768px). Full's Chromium SVG refraction
+        // is GPU-heavy on small/touch devices, so painting it on the first frame flashes Full
+        // before theme.js settles it back to Frosted. Mirror theme.js's ceiling (LOWEND_VIEWPORT_W
+        // = 768) so first paint opens AT Frosted. Wrapped so an old/limited matchMedia can never
+        // throw and stall first paint (dependency-free — runs before any module loads).
+        try {
+          var _constrained =
+            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+            ((window.innerWidth || document.documentElement.clientWidth || 0) <= 768);
+          if (_tier === 'full' && _constrained) _tier = 'frosted';
+        } catch (_e) {}
         var _house = !!t.house || !!(_name && _HOUSE[_name]);
         var _panel = (t.colors && t.colors.panel) || '';
         var _bgImage = t.bgImage || '';
@@ -361,6 +373,7 @@
   <link rel="stylesheet" href="/static/css/meshGradient.css">  <!-- the shared login/glass-theme aurora mesh (reused into #__wp by theme.js) -->
   <link rel="stylesheet" href="/static/css/game-trim.css?v=20260608">  <!-- Orwell: hide non-game tool surfaces -->
   <link rel="stylesheet" href="/static/css/eyeBlink.css">  <!-- #801: the shared hero-eye blink (look only; rhythm is eyeBlink.js) -->
+  <link rel="stylesheet" href="/static/css/orwellSettingsCard.css">  <!-- #658: THE settings-card kit — one card class + .osc-* family every Settings section composes (sibling to OrwellWindow/OrwellGadget) -->
   <link rel="modulepreload" href="/static/app.js">
   <link rel="modulepreload" href="/static/js/chat.js">
   <link rel="modulepreload" href="/static/js/ui.js">
@@ -2708,7 +2721,12 @@
 <script type="module" src="/static/js/chatRenderer.js"></script>
 <script type="module" src="/static/js/codeRunner.js"></script>
 <script type="module" src="/static/js/chatStream.js"></script>
-<script type="module" src="/static/js/chat.js?v=20260604s"></script>
+<!-- #1399: chat.js is loaded EXACTLY ONCE, via app.js's ES `import chatModule from './js/chat.js'`
+     (see /static/app.js) + the modulepreload above. It intentionally carries NO <script> tag here:
+     a tag at a DIFFERENT url (the old `chat.js?v=…`) is a SECOND module record ⇒ chat.js evaluates
+     TWICE ⇒ every module-level timer/listener/cache runs in duplicate. Do NOT re-add a chat.js
+     <script> tag. Cache-busting rides on the service worker (sw.js: /static/*.js is network-first
+     and chat.js is precached), NOT a `?v=` query — same as every other module in the app.js graph. -->
 <script type="module" src="/static/js/search-chat.js"></script>
 <script type="module" src="/static/js/theme.js"></script>
 <script type="module" src="/static/js/censor.js"></script>
@@ -2732,6 +2750,7 @@
 <script type="module" src="/static/js/orwellWindow.js"></script>  <!-- THE window kit (Lane F): one window class + .ow-* family every surface composes -->
 <script src="/static/js/orwellGadgetRail.js"></script>  <!-- 0054: control-room gadget rail (hosts the HUD gadgets; collapse/side-swap/mobile drawer) -->
 <script src="/static/js/orwellGadget.js"></script>  <!-- #640: THE gadget kit — one card class + .og-* family every rail gadget composes (sibling to OrwellWindow) -->
+<script src="/static/js/orwellSettingsCard.js"></script>  <!-- #658: THE settings-card kit — one card class + .osc-* family every Settings section composes (sibling to OrwellWindow/OrwellGadget). Loaded before settings.js's initAppearance migrates the Appearance tab onto it. -->
 <script src="/static/js/liquidGlass.js"></script>  <!-- Liquid glass: real SVG-refraction (feImage→feDisplacementMap, squircle edge) layered OVER the CSS blur-glass baseline. Chromium-ONLY progressive enhancement; no-op elsewhere (the CSS frost stands). Loads AFTER the window + gadget kits so the .ow-*/.og-* surfaces exist. -->
 <script src="/static/js/adaptiveGlass.js"></script>  <!-- Adaptive legibility: samples backdrop luminance behind each glass surface and scales the --panel veil opacity (translucent over dark, muted over bright) so --fg text stays legible over ANY background. Runs on every engine; sets background-color (composes with the refraction's backdrop-filter). -->
 <script src="/static/js/orwellScrollbars.js"></script>  <!-- Apple macOS OVERLAY scrollbars for the window kit (.ow-window .ow-body): the CSS gives the thin/rounded/translucent/overlay bar; this wires the auto-hide-on-idle + reveal-on-scroll/hover + hover-expand (toggles .ow-scrolling / .ow-scroll-hover). Loads AFTER the window kit so the .ow-body bodies exist; decorates new ones via MutationObserver. -->
