@@ -160,6 +160,28 @@ export function combinedRestDeficit(immediate: number, fatigueMeter: number): nu
   return clamp(immediate + FATIGUE.weight * fatigueMeter, 0, 1);
 }
 
+// --- Extension 4: EMERGENT NPC bedtimes — independent sleep debt (its own opt-in flag) -------------
+//
+// The fairness fix (owner ruling 2026-07-12): an NPC's sleep debt must be incurred on the SAME footing as
+// the player's — driven by how late THEY were up, not capped by the player's own bedtime. But we must NOT
+// re-introduce a flat archetype tax (a social/owl NPC always a touch tired): a night-owl lingers late ONLY
+// when they have late-night COMPANY (other natural owls still up) or the player kept the house up — and
+// beds down at the social floor on a dead night, paying nothing. So the debt is EARNED (you stayed up with
+// company), never structural. Pure + deterministic (company is a count off the same chronotype math). Off
+// (company 0 / clock off) ⇒ byte-identical to the pre-feature player-capped deficit.
+
+export interface AfterHoursConstants {
+  /**
+   * How many OTHER natural night-owls (active NPCs whose own bedtime runs past midnight) count as FULL
+   * late-night company. At/above this many, an owl lingers to their full chronotype bedtime (real debt);
+   * ALONE (0), they wind down to the social floor — midnight, or later if the player kept the house up —
+   * and carry no debt. Linear between. Tunable; ~3 reads as "a few people still up" in a 15-guest house.
+   */
+  companyFull: number;
+}
+
+export const AFTER_HOURS: AfterHoursConstants = { companyFull: 3 };
+
 // --- Extension 5: conversation durations (LOOSE — ADR 0005 for time) ------------------------------
 //
 // A scene's FELT duration is open-set: the LLM proposes how long it took; the engine COMMITS it BOUNDED

@@ -78,7 +78,7 @@ import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionFormat, CompetitionPhase } from "./competitionLibrary";
 import { GEN_COMPETITION_BOUNDS } from "./genCompetitionConstants";
 import {
-  phaseForHour, bedtimeDepthFor, restDeficitForDepth, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
+  phaseForHour, bedtimeDepthFor, restDeficitForDepth, emergentBedtimeHour, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
 } from "./timeOfDay";
 import { CLOCK } from "./sleepConstants";
 
@@ -1415,23 +1415,31 @@ export function playerRestDeficit(s: LiveSeasonState): number {
 }
 
 /**
- * An NPC's hidden sleep deficit (0..1) — ENG-NEW-1: keyed off the ACTUAL night, not static aptitude, in
- * the 24-hour model. An NPC is up to the EARLIER of their CHRONOTYPE bedtime HOUR and how late the night
- * actually RAN (`lastSleepDepth` — the clock-hour the house stayed up to, driven by the player's bedtime).
- * So a night-owl only pays when the night genuinely ran past midnight (the player kept the house up); a
- * lark bedding before midnight carries none; on a normal night everyone — owls included — carries
- * little/none, and the mental favorite wins their mental comp cleanly. GRADED + chronotype-aware, never a
- * trait penalty. `bedDepthOverride` (a clock-hour) lets the adapter inject the conflict-drained bedtime.
+ * An NPC's hidden sleep deficit (0..1) — keyed off the ACTUAL night, not static aptitude, in the 24-hour
+ * model. 0066 Extension 4 (the fairness fix, owner 2026-07-12) makes the NPC's night EMERGENT and
+ * INDEPENDENT of the player's bedtime: an NPC is up to their own `emergentBedtimeHour` — a night-owl
+ * lingers to their chronotype bedtime ONLY with late-night COMPANY (`company` = other natural owls still
+ * up), and beds down at the social floor (midnight, or later if the player kept the house up) ALONE. So an
+ * owl who genuinely stayed up (with company) pays their OWN debt whether or not the player did — while a
+ * lone owl on a dead night pays nothing (the debt is EARNED, never a flat archetype tax). `bedDepthOverride`
+ * (a clock-hour) lets the adapter inject the conflict-drained chronotype bedtime.
+ *
+ * `company` OMITTED (0) collapses the emergent bedtime to the social floor, whose DEFICIT is byte-identical
+ * to the pre-Extension-4 player-capped `min(bedHour, nightRanTo)` — so the seeded calibration spine and the
+ * `sleepEconomyFairness` gate are unmoved; the earned-debt behavior fires only when the adapter passes the
+ * live co-owl company count. No completed night yet ⇒ 0 (nobody is tired before the first night ends).
  */
 export function npcRestDeficit(
   s: LiveSeasonState,
   stats: { physical: number; social: number },
   id?: EntityId,
   bedDepthOverride?: number,
+  company = 0,
 ): number {
+  const nightEnd = s.lastSleepDepth ?? WAKE_HOUR;
+  if (nightEnd <= WAKE_HOUR) return 0; // no night has completed (or a fresh morning) ⇒ nobody carries debt
   const bedHour = bedDepthOverride ?? bedtimeDepthFor(stats, id);
-  const nightRanTo = s.lastSleepDepth ?? WAKE_HOUR;
-  return restDeficitForDepth(Math.min(bedHour, nightRanTo));
+  return restDeficitForDepth(emergentBedtimeHour(bedHour, company, nightEnd));
 }
 
 /** Record the evictee as out (evictionOrder + remove from the live house). Does NOT roll the week. */

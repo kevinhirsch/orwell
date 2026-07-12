@@ -3484,7 +3484,7 @@ export class GameSessionAdapter implements GameSession {
     if (!this.timeOfDayEnabled || !this.live?.timeOfDay) return 0;
     const immediate = id === PLAYER
       ? playerRestDeficit(this.live)
-      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id));
+      : npcRestDeficit(this.live, this.statsOf(id), id, this.effectiveBedDepth(id), this.lateCompanyFor(id));
     // Extension 3 (compounding multi-night meter): only ADD the accumulated meter when its own flag is
     // on; off ⇒ just the single-night immediate deficit (byte-identical to the Phase-1 comp term).
     if (!this.multiNightFatigueEnabled) return immediate;
@@ -3500,7 +3500,7 @@ export class GameSessionAdapter implements GameSession {
     if (!this.multiNightFatigueEnabled || !this.live || !this.house) return;
     const lastNight = (id: EntityId): number => id === PLAYER
       ? playerRestDeficit(this.live!)
-      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id));
+      : npcRestDeficit(this.live!, this.statsOf(id), id, this.effectiveBedDepth(id), this.lateCompanyFor(id));
     this.live.playerFatigue = accrueFatigue(this.live.playerFatigue ?? 0, lastNight(PLAYER));
     const next: Record<EntityId, number> = { ...(this.live.npcFatigue ?? {}) };
     for (const n of this.house.npcs) next[n.id] = accrueFatigue(next[n.id] ?? 0, lastNight(n.id));
@@ -3512,6 +3512,21 @@ export class GameSessionAdapter implements GameSession {
    *  early-evening hour. Drives both who is awake late (`awakeNow`) and their next-day sleep deficit,
    *  coherently. With Extension 2 off the conflict tally is never populated, so this is just the base
    *  chronotype bedtime hour ⇒ byte-identical. */
+  /** 0066 Extension 4 — the count of OTHER active NPCs who are natural night-owls tonight (their own
+   *  conflict-drained chronotype bedtime runs past midnight) and would be up as late company. Feeds the
+   *  EMERGENT bedtime (`npcRestDeficit`): an owl only lingers (and pays sleep debt) when they had company
+   *  to stay up with — alone on a dead night they wind down early and carry none (never a flat archetype
+   *  tax). The player is excluded (their staying-up is the separate `nightEnd`/social-floor extension).
+   *  Pure — reads the same deterministic chronotype math; no rng. */
+  private lateCompanyFor(id: EntityId): number {
+    let n = 0;
+    for (const other of this.presenceActive()) {
+      if (other === id || other === PLAYER) continue;
+      if (this.effectiveBedDepth(other) > CLOCK.midnightHour) n++;
+    }
+    return n;
+  }
+
   private effectiveBedDepth(id: EntityId): number {
     const base = bedtimeDepthFor(this.statsOf(id), id); // clock-HOUR (24-hour model)
     const conflicts = this.nightConflicts.get(id) ?? 0;
