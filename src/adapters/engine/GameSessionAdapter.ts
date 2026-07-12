@@ -114,11 +114,19 @@ export function isReasonableName(s: string): boolean {
  * malformed — the engine's seeded deterministic voice (the floor) then simply stands, exactly like a
  * dropped name/vocation. Pure and Vault-free by construction: voice is a PUBLIC, observable facet
  * (how a person talks), never a stat or hidden weight.
+ *
+ * #1395 — the OPTIONAL `catchphrases` (up to 3 short characteristic phrasings). Unlike the six dials +
+ * signature + lexicon (the required whole), catchphrases are a BONUS: present + well-formed ⇒ they fold
+ * in; absent/garbage ⇒ they are simply omitted (NEVER a whole-voice failure), so a model that authors a
+ * good core voice but no catchphrases still lands its voice. Same bounds/whole-or-nothing philosophy at
+ * the entry level (each phrase trimmed, collapsed, dropped if empty/over-long), capped small.
  */
 const AUTHORED_VOICE_DIAL_MAX = 80;
 const AUTHORED_VOICE_SIGNATURE_MAX = 200;
 const AUTHORED_VOICE_LEXICON_MAX_ENTRIES = 4;
 const AUTHORED_VOICE_LEXICON_ENTRY_MAX = 32;
+const AUTHORED_VOICE_CATCHPHRASE_MAX_ENTRIES = 3;
+const AUTHORED_VOICE_CATCHPHRASE_ENTRY_MAX = 48;
 export function sanitizeAuthoredVoice(v: unknown): VoiceProfile | null {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
   const raw = v as Record<string, unknown>;
@@ -142,7 +150,17 @@ export function sanitizeAuthoredVoice(v: unknown): VoiceProfile | null {
     .filter((x) => x.length > 0 && x.length <= AUTHORED_VOICE_LEXICON_ENTRY_MAX)
     .slice(0, AUTHORED_VOICE_LEXICON_MAX_ENTRIES);
   if (lexicon.length === 0) return null;
-  return { register, rhythm, energy, directness, humor, stressTell, signature, lexicon };
+  // #1395 — OPTIONAL catchphrases: fold a well-formed small set, omit otherwise (never fails the voice).
+  const catchphrases = Array.isArray(raw["catchphrases"])
+    ? (raw["catchphrases"] as unknown[])
+        .map((x) => (typeof x === "string" ? x.trim().replace(/\s+/g, " ") : ""))
+        .filter((x) => x.length > 0 && x.length <= AUTHORED_VOICE_CATCHPHRASE_ENTRY_MAX)
+        .slice(0, AUTHORED_VOICE_CATCHPHRASE_MAX_ENTRIES)
+    : [];
+  return {
+    register, rhythm, energy, directness, humor, stressTell, signature, lexicon,
+    ...(catchphrases.length > 0 ? { catchphrases } : {}),
+  };
 }
 
 /** Order-sensitive id-list equality (0065 Part E ceremony-diff): same length + same ids in order. */

@@ -67,10 +67,13 @@ _SYSTEM = (
     "with the houseguest's heritage/ethnicity in the skeleton (skin tone, hair, features that fit that "
     "background) — never a generic default; vary it widely across the cast,\n"
     '  "voice": the houseguest\'s IDIOLECT — how THIS person talks, all season: { "register", '
-    '"rhythm", "energy", "directness", "humor", "stressTell", "signature", "lexicon" }. The first six '
-    'are SHORT dial phrases (e.g. register "folksy", rhythm "rambling", humor "dry", stressTell '
-    '"over-explains"); "signature" is ONE prose sentence capturing the texture of their talk; '
-    '"lexicon" is an array of 2-3 habitual filler words/phrases. Ground the voice in the archetype, '
+    '"rhythm", "energy", "directness", "humor", "stressTell", "signature", "lexicon", "catchphrases" }. '
+    'The first six are SHORT dial phrases (e.g. register "folksy", rhythm "rambling", humor "dry", '
+    'stressTell "over-explains"); "signature" is ONE prose sentence capturing the texture of their talk; '
+    '"lexicon" is an array of 2-3 habitual filler words/phrases; "catchphrases" is an array of 2-3 '
+    'characteristic PHRASINGS this exact person falls back on — how THEY put things, grounded in their '
+    'job/archetype/age (e.g. "at the end of the day", "we move", "I did not come here to make friends") — '
+    'authentic verbal habits, NOT comedy bits. Ground the voice in the archetype, '
     "age, and backstory — sixteen mouths, not one; never a generic warm podcast voice. If the "
     "skeleton shows a seeded voice, treat it as the brief to sharpen, not a script to copy,\n"
     '  "secrets": an array of 2-3 real secrets that could play out,\n'
@@ -270,8 +273,12 @@ _PHYS_KEYS = ("heightBuild", "skinTone", "hair", "facialFeatures", "distinguishi
 # signature, plus a small `lexicon` list. Voice is IDENTITY — it is forwarded WHOLE or not at all (the
 # engine also enforces whole-or-nothing + bounds in `sanitizeAuthoredVoice`), so a partial/malformed
 # voice is omitted and the engine's seeded deterministic voice simply stands.
+# #1395: `catchphrases` is an OPTIONAL small set of characteristic phrasings — it rides on a well-formed
+# core voice but never gates it (present ⇒ folded, absent/garbage ⇒ simply dropped), mirroring the
+# engine's `sanitizeAuthoredVoice` bonus-field rule.
 _VOICE_DIAL_KEYS = ("register", "rhythm", "energy", "directness", "humor", "stressTell", "signature")
 _VOICE_LEXICON_MAX = 3
+_VOICE_CATCHPHRASE_MAX = 3
 
 # Bounded concurrency for `author_cast` (#5): author NPCs in parallel but never flood the utility
 # endpoint — at most this many authoring LLM calls are in flight at once.
@@ -483,8 +490,14 @@ def parse_authored_profile(text: str, houseguest_id: str) -> Optional[dict]:
         lex = voice.get("lexicon")
         lex_clean = ([str(x).strip() for x in lex if str(x).strip()][:_VOICE_LEXICON_MAX]
                      if isinstance(lex, list) else [])
+        # #1395: OPTIONAL catchphrases — a bonus on a well-formed core voice, never a gate. A clean small
+        # set is forwarded; anything missing/garbage is simply omitted (the engine drops it too).
+        cats = voice.get("catchphrases")
+        cats_clean = ([str(x).strip() for x in cats if str(x).strip()][:_VOICE_CATCHPHRASE_MAX]
+                      if isinstance(cats, list) else [])
         if len(dials) == len(_VOICE_DIAL_KEYS) and lex_clean:
-            out["voice"] = {**dials, "lexicon": lex_clean}
+            out["voice"] = {**dials, "lexicon": lex_clean,
+                            **({"catchphrases": cats_clean} if cats_clean else {})}
         else:
             logger.warning(
                 f"[cast-authoring] incomplete authored voice for {houseguest_id} — "
