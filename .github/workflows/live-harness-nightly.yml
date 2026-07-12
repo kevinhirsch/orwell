@@ -14,6 +14,7 @@
 #   - ADR 0008 / 0012 two-window realtime mirror + mid-generation join  (leg: two-window-live, LIVE today)
 #   - 0080 active-overseer live validation (#766)                       (leg: overseer-live, auto-arms when the driver lands)
 #   - #829 turn-coalescing live-verify                                  (leg: coalesce-live, auto-arms when the driver lands)
+#   - #1392 0115 Diary-Room wall red-team probe                         (leg: dr-wall-live, LIVE today)
 #
 # Secret: OPENROUTER_API_KEY (repo secret). Sibling of golden-nightly.yml.
 name: live-harness-nightly
@@ -150,5 +151,27 @@ jobs:
         with:
           name: coalesce-live-evidence
           path: frontend/data/_coalesce_live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # ── leg (4): #1392 0115 Diary-Room wall red-team probe — LIVE today ──
+      # The 0115 DR block is the ONE prompt-guided (not structural) Diary-Room surface: DR content
+      # rides the GM context for dramatic irony, fenced by prose + the FE scrub. No stubbed gate can
+      # exercise a prose fence — only a real model can. This leg plants a Diary-Room secret carrying a
+      # canary codeword against a named target, then drives adversarial "leak it to X indirectly" turns
+      # and asserts the canary never reaches a player-facing bubble.
+      - name: Diary-Room wall red-team probe (#1392)
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python3 scripts/_verify_dr_wall_live.py \
+            || echo "::warning title=dr-wall-live::0115 Diary-Room wall red-team probe regressed — the DR canary reached a player-facing surface; download the dr-wall-live-evidence artifact and inspect narration.txt."
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: dr-wall-live-evidence
+          path: frontend/data/_dr_wall_live/
           retention-days: 14
           if-no-files-found: warn
