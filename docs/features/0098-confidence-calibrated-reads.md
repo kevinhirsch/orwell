@@ -1,6 +1,17 @@
 # 0098 — Confidence-calibrated reads (bold correct reads pay off; blind faith burns)
 
-> **Status:** ❄️ **FROZEN — parked by owner (2026-06-27); preserved, not built. #879 closed *not planned* (reopenable).**
+> **Status:** 🟨 **REOPENED + DOMAIN TERM BUILT, DEFAULT-INERT (2026-07-12).** The domain mechanic is built &
+> property-green — `Competitor.conviction?` (default `1`) in `src/domain/competitionOutcome.ts` +
+> `convictionVarianceGain`/`convictionVarianceCap` in `src/domain/temperatureConstants.ts`;
+> `tests/unit/confidenceCalibration.test.ts` (10 cases) proves BYTE-IDENTICAL at conviction 1/undefined,
+> variance-monotonic + MEAN-PRESERVING as conviction falls (var(0)≈4×var(1)), bounded, non-finite refusal.
+> **⚠️ STANDING-PRINCIPLE CONFLICT — HELD FOR OWNER RE-RATIFICATION:** the freeze recorded a *standing principle*
+> ("a player input must never modulate a seeded outcome distribution — not the direction, and NOT even the
+> variance") that this mechanic contradicts. It is therefore built **DEFAULT-INERT**: NO live caller passes a
+> `conviction`, so the live game + every heavy-sim seed stay byte-identical. The live adapter pass-through
+> (deriving `conviction` from the 0002 belief `confidence`) is DELIBERATELY WITHHELD pending explicit owner
+> re-ratification of R1. GOLDEN-NEUTRAL. *(Previously: ❄️ FROZEN — parked 2026-06-27; #879 closed not planned;
+> reopened by owner ruling "Everything".)*
 > Owner ruling + **standing principle for all future specs:** a player input must never modulate a seeded
 > outcome distribution — not the direction, and **not even the variance**. The certainty is the human's to
 > feel; the game must not model "how sure you are" and let it touch outcomes. See
