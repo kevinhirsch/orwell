@@ -66,6 +66,11 @@ READ_ONLY_TOOLS = frozenset({
     "requestSelfEviction", "cancelSelfEviction", "confide",
     "preSeedCast", "preSeedNextSeason", "recordCastProfile", "recordCastIdentity",
     "recordWorldSnapshot", "recordOffscreenSceneTexture", "recordCompetitionFiction",
+    # 0116 (#1403): model-authored cast genesis — an FE-driven pre-game write-back (the
+    # producer-LLM proposes the 15-NPC skeleton; the engine validates + folds it, player-BLIND).
+    # It seals the pre-warmed cast pre-game and never moves the live player HUD → read-only here,
+    # matching its INFRA_LEVERS classification in registry.ts and its write-back siblings above.
+    "recordCastGenesis",
 })
 
 # `manageSandbox` is the ONE admin tool in the manifest (a sandbox reset / load moves the
