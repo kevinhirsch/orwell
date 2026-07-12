@@ -75,7 +75,7 @@ def test_delivery_state_helper_exists_and_reuses_existing_css():
 
 def test_failed_bucket_declared_persisted_and_restored():
     js = _read("static/js/chat.js")
-    assert "const _outboxFailed = []" in js, "the durable-failed bucket must exist"
+    assert "chatState._outboxFailed" in js, "the durable-failed bucket must exist (moved to the chatState singleton — #1414)"
     # persistence: failed items serialize with state:'failed'
     persist = js[js.index("function _persistOutbox()"):]
     persist = persist[:persist.index("function _restoreOutboxFromStorage")]
@@ -99,7 +99,7 @@ def test_confirm_and_dedupe_settle_the_bubble_delivered():
     js = _read("static/js/chat.js")
     confirm = js[js.index("function _outboxConfirmDelivery(clientMsgId)"):]
     confirm = confirm[:confirm.index("function _requeueOutboxItem")]
-    assert "[_outboxAwaitingConfirm, _sendOutbox, _outboxFailed]" in confirm, \
+    assert "[chatState._outboxAwaitingConfirm, chatState._sendOutbox, chatState._outboxFailed]" in confirm, \
         "a proven-delivered server row must be able to rescue even a 'failed' bubble"
     assert "_setDeliveryState(removed.bubbleEl, 'delivered')" in confirm, \
         "a confirmed delivery must settle the bubble to 'delivered'"

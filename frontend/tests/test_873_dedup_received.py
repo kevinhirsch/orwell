@@ -85,7 +85,7 @@ def test_resume_finalize_stamps_db_id():
 def test_zero_churn_happy_path_preserved():
     js = _read("static/js/chat.js")
     # The converged early-return (no rebuild) must remain — the fix must not make every reload rebuild.
-    assert "if (converged && !_forced) { _pendingReconcile.delete(sessionId); return; }" in js
+    assert "if (converged && !_forced) { chatState._pendingReconcile.delete(sessionId); return; }" in js
     # The rebuild must stay flicker-free (no-animate + scroll preservation).
     assert "box.classList.add('no-animate');" in js and "box.classList.remove('no-animate');" in js
 
