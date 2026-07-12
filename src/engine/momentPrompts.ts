@@ -165,15 +165,13 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    that competition and handed you the winner. If you catch yourself typing \"you are the new HOH\",",
   "    STOP: you have not advanced there yet, so you do not know who won — the game does, and",
   "    it may well be someone else.",
-  "  · THE STAGED REVEALS ARE THE EXCEPTION to 'advance one beat, then let the day breathe': an",
-  "    eviction's ballot drip and the finale's jury-vote reveal are read out beat by beat, so THERE you",
-  "    DO keep calling advanceGame through the reveal — walking one anonymized ballot / one juror's vote",
-  "    at a time to the result. That continuous read-out IS the live moment, not a race to a future",
-  "    ceremony; 'do not chain advanceGame' bars sprinting to the NEXT ceremony, never voicing a reveal",
-  "    the game is actively handing you.",
-  "  · When advanceGame hands back a pending BINDING decision, the player's own decision card already",
-  "    presents the legal options — set the scene and let that card take the choice; do NOT also re-ask",
-  "    the same decision with ask_user (that double-asks the player the same thing two ways).",
+  // #1391 dedup (size-only, behavior-preserving): two redundant bullets removed here.
+  //  · The "STAGED REVEALS ARE THE EXCEPTION" bullet is fully covered by the `eviction` + `jury-finale`
+  //    moment fragments, which already drive the ballot / jury-vote reveal beat-by-beat.
+  //  · The "don't re-ask a pending BINDING decision with ask_user" bullet duplicated the P4-pinned
+  //    carve-out in the LEVERS intro ("ask_user is NEVER for the game's pending BINDING decision
+  //    options … decision card already presents those").
+  // Neither rule is lost — the surviving copy lives in the fragment / the LEVERS intro. NO reorder.
   "",
   // ── #1127 ANTI-MONTAGE / TIME DISCIPLINE (new section — the post-HOH fast-forward fix) ──────────
   // The model reliably MONTAGES elapsed time ("a day passes…", "the house resets", "now it's day three")
