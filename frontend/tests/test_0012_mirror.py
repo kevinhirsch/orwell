@@ -531,7 +531,7 @@ def test_error_path_forces_reconcile_to_persisted_message():
     assert "typewriterInto(roundHolder.querySelector('.body'), errMsg);" in src
     assert "_streamHadError = true;" in src
     # the finally arms the one-shot forced rebuild for this session.
-    assert "if (_streamHadError) _forceRebuild.add(streamSessionId);" in src
+    assert "if (_streamHadError) chatState._forceRebuild.add(streamSessionId);" in src
 
 
 def test_force_rebuild_is_honored_and_self_guarded_in_soft_reload():
@@ -540,12 +540,12 @@ def test_force_rebuild_is_honored_and_self_guarded_in_soft_reload():
     hard fail that persisted NOTHING (server has fewer messages than rendered) keeps its live error
     bubble rather than the rebuild erasing it. The force is one-shot (consumed per reload)."""
     src = _read("static", "js", "chat.js")
-    assert "let _forced = _forceRebuild.delete(sessionId);" in src, "one-shot consume of the force flag"
+    assert "let _forced = chatState._forceRebuild.delete(sessionId);" in src, "one-shot consume of the force flag"
     assert "if (_forced && visible.length < renderedCount) _forced = false;" in src, \
         "self-guard: don't force-erase a live error bubble with no server replacement"
     assert "if (converged && !_forced)" in src, "forced reload bypasses the converged short-circuit"
     # if a live stream forces us to defer, the one-shot force must be RE-ARMED for the deferred flush.
-    assert "if (_forced) _forceRebuild.add(sessionId);" in src
+    assert "if (_forced) chatState._forceRebuild.add(sessionId);" in src
 
 
 def test_pre_stream_provider_error_persists_friendly_fallback_not_raw_error():

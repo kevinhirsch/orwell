@@ -75,8 +75,8 @@ def test_persistence_layer_exists_and_is_per_tab():
     # The storage CHOICE is load-bearing (per-tab, no cross-tab double-drain) — pin the rationale.
     assert "localStorage is shared across tabs" in js, \
         "the per-tab sessionStorage-vs-localStorage justification must stay documented in source"
-    assert "const _outboxAwaitingConfirm = []" in js, \
-        "dispatched-but-unconfirmed items must be tracked (persisted through the in-flight window)"
+    assert "chatState._outboxAwaitingConfirm" in js, \
+        "dispatched-but-unconfirmed items must be tracked (persisted through the in-flight window; moved to the chatState singleton — #1414)"
 
 
 def test_enqueue_persists_immediately():
@@ -118,9 +118,9 @@ def test_flush_gates_on_offline_and_dedupe_and_keeps_item_persisted_through_disp
     fn = js[js.index("function _flushSendOutbox()"):]
     fn = fn[:fn.index("// ── #891 P0: durability wiring")]
     # original #985 guards intact
-    assert "if (_flushingOutbox) return;" in fn
-    assert "if (isStreaming) return;" in fn
-    assert "_sendOutbox.shift()" in fn
+    assert "if (chatState._flushingOutbox) return;" in fn
+    assert "if (chatState.isStreaming) return;" in fn
+    assert "chatState._sendOutbox.shift()" in fn
     # the new gates
     offline_at = fn.index("_outboxOnline()")
     shift_at = fn.index("_sendOutbox.shift()")
@@ -146,7 +146,7 @@ def test_item_session_binding_gates_the_dispatch():
         "dispatch eligibility must bind an item to ITS recorded session (null ⇒ pre-session semantics)"
     assert "!it.needsDedupe" in fn, "a still-unverified item must never be eligible to dispatch"
     # held path: reset the flush guard, arm the retry, and return BEFORE any item is consumed
-    held_at = fn.index("if (_idx === -1) { _flushingOutbox = false; _armOutboxRetry(); return; }")
+    held_at = fn.index("if (_idx === -1) { chatState._flushingOutbox = false; _armOutboxRetry(); return; }")
     shift_at = fn.index("_sendOutbox.shift()")
     assert held_at < shift_at, "the hold must happen before an item is consumed"
     # the selectSession nudge exists, so a held item drains the moment its session is selected
