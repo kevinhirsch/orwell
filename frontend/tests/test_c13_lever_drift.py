@@ -81,6 +81,85 @@ def test_prompt_no_longer_advertises_resolveCompetition():
     assert "resolveCompetition" not in _prompt_levers()
 
 
+# --- Batch C gate #1 (2026-07-11 prompt audit): the drift scan must reach the MOMENT FRAGMENTS and
+# the base PROSE, not only the base `• name —` bullets `_prompt_levers()` parses. The bullet-only
+# parser missed two real drift classes the audit found: (a) a fragment that DIRECTS `call <lever>` for
+# a lever the FE never exposed (would have caught `peekCompetition`), and (b) a lever named in PROSE
+# rather than a bullet (`turnIn`). This scans the imperative call-references in both and requires each
+# to be an agent-callable FE tool schema.
+
+
+def _moment_prompts_ts() -> str:
+    with open(os.path.join(REPO, "src", "engine", "momentPrompts.ts"), encoding="utf-8") as f:
+        return f.read()
+
+
+def _base_prose_block() -> str:
+    ts = _moment_prompts_ts()
+    s = ts.index("BASE_GAME_MASTER_PROMPT")
+    e = ts.index('].join("\\n")', s)
+    return ts[s:e]
+
+
+def _moment_fragments_block() -> str:
+    ts = _moment_prompts_ts()
+    s = ts.index("export const MOMENT_PROMPTS")
+    e = ts.index("/** Map an engine phase", s)
+    return ts[s:e]
+
+
+def _referenced_levers(text: str) -> set[str]:
+    """camelCase levers the prompt DIRECTS the model to call — imperative `call X`, a function-call
+    `X(`, `with/via/using X`, or a parenthetical prose mention `(X)`. camelCase-only (drops English
+    words like 'call the'), and argument tokens are excluded so `createCharacter with
+    confirmRestart=true` yields `createCharacter`, never the arg `confirmRestart`."""
+    c: set[str] = set()
+    c |= set(re.findall(r"\bcall\s+([a-z][A-Za-z]+)", text))
+    c |= set(re.findall(r"\b([a-z][A-Za-z]+)\(", text))
+    c |= set(re.findall(r"\b(?:with|via|using)\s+([a-z][A-Za-z]+)", text))
+    c |= set(re.findall(r"\(([a-z][A-Za-z]+)\)", text))
+    c = {t for t in c if re.search(r"[a-z][A-Z]", t)}  # camelCase only (an internal uppercase)
+    c = {t for t in c if not re.search(re.escape(t) + r"\s*=", text)}  # drop args (foo=true)
+    return c
+
+
+def test_moment_fragments_reference_only_callable_levers():
+    schemas = _fe_schema_names()
+    refs = _referenced_levers(_moment_fragments_block())
+    assert refs, "extracted no lever references from the moment fragments — parser or prompt shape changed"
+    missing = sorted(r for r in refs if r not in schemas)
+    assert not missing, (
+        f"a moment fragment directs the model to call a lever the FE cannot: {missing} — "
+        "wire the tool (schema + dispatch) or stop naming it in the fragment "
+        "(this is exactly the class that let `peekCompetition` slip through the bullet-only scan)"
+    )
+
+
+def test_base_prose_references_only_callable_levers():
+    # Beyond the `• name —` bullets (covered by test_every_prompt_advertised_lever_is_agent_callable),
+    # the base prompt names levers in PROSE too (e.g. "(turnIn)"). Those must be callable as well.
+    schemas = _fe_schema_names()
+    refs = _referenced_levers(_base_prose_block())
+    assert refs, "extracted no lever references from the base prose — parser or prompt shape changed"
+    missing = sorted(r for r in refs if r not in schemas)
+    assert not missing, f"base prompt PROSE references levers the agent cannot call: {missing}"
+
+
+def test_prose_referenced_turnIn_is_now_in_scope_and_callable():
+    # The audit's `turnIn` exemplar: it is named in the base PROSE ("(turnIn)"), not as a bullet, so
+    # the bullet-only scan never checked it. Pin that the extended scan now SEES it AND it is callable.
+    assert "turnIn" in _referenced_levers(_base_prose_block())
+    assert "turnIn" in _fe_schema_names()
+
+
+def test_fragment_scan_has_teeth_against_a_noncallable_lever():
+    # Teeth check with the audit's exemplar `peekCompetition` (an engine-internal surfaced to the model
+    # only via `runCompetition`, never an agent tool): a synthetic fragment naming it as a `call` is
+    # extracted AND rejected by the callability bar — so a real one would fail the scans above.
+    assert "peekCompetition" not in _fe_schema_names()
+    assert "peekCompetition" in _referenced_levers("then call peekCompetition() to peek the winner")
+
+
 # --- the wrappers actually reach the engine ------------------------------------------
 
 def _run(coro):
