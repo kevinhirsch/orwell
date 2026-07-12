@@ -152,9 +152,15 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
    (`scaleImpactByValence`; threat is the inverted axis). Still **effectiveness, never a personality change**
    — the scene's nature is unchanged (a tired peacemaker does not start picking fights); a character conflict
    drains the houseguest in it to an earlier bedtime. Self-gated on the master clock ⇒ byte-identical to the
-   calibration spine when the clock is off. *(Fast-follow: the same asymmetric valence for the PLAYER's own
-   recorded scenes — `foldHiddenImpact`/`foldGenerativeConsequence` in `consequence.ts` — touches the seeded
-   fold internals, so it ships as its own calibration-gated change.)*
+   calibration spine when the clock is off. The SAME asymmetric valence also rides the **PLAYER's own
+   recorded scenes** (the `recordInteraction` seam): `EngineCommandsAdapter` reads the initiator's rest
+   deficit (`socialFoldValence`, wired in the registry) and scales the partner / generative / third-party
+   folds via `RelationshipModel.applyDirectedValence` / `scaleImpactByValence` (`consequence.ts`) — so a
+   sleep-deprived player is worse at charm and cuts deeper too. `NO_FATIGUE` (rested / clock-off) ⇒
+   byte-identical; the player-channel `commands:` rng stream never touches the seeded calibration spine
+   (`tests/unit/playerFatigueFold.test.ts` is the proof). Bystander observations and the player's own
+   reciprocal read are NOT fatigue-scaled (fatigue is the actor's outgoing EFFECTIVENESS, not a passer-by's
+   read or the player's own feeling).
 3. **A compounding multi-night fatigue meter** — `ORWELL_MULTI_NIGHT_FATIGUE`. An EMA of nightly deficits
    (`accrueFatigue`/`combinedRestDeficit`): consecutive late nights stack a deeper deficit; a rested night
    recovers. It adds (bounded) to both the comp fold and the social sway.
