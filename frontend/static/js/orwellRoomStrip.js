@@ -104,6 +104,23 @@
         align-items: center; gap: 3px; transition: opacity .6s ease;
       }
       #orwell-room-strip .ors-chip-leaving { opacity: .35; }
+      /* Transient-animation audit (dead leaving-fade): the chip's opacity .6s transition above
+         + the one-cycle "leaving" grace phase were designed to fade a departing occupant 1.0 → .35,
+         but render() used to rebuild EVERY chip as a fresh node each poll — a node born at .35 has
+         nothing to interpolate from, so the fade never fired. The keyed reconcile (render) now
+         TOGGLES .ors-chip-leaving on the PERSISTENT chip node, so the .6s fade actually runs. New
+         arrivals get a brief enter fade; reduced-motion strips both to an instant (static) state. */
+      #orwell-room-strip .ors-chip-enter {
+        animation: ors-chip-in .45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+      }
+      @keyframes ors-chip-in {
+        0%   { opacity: 0; transform: translateY(4px); }
+        100% { opacity: 1; transform: none; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #orwell-room-strip .ors-chip { transition: none; }
+        #orwell-room-strip .ors-chip-enter { animation: none; }
+      }
       #orwell-room-strip .ors-face-wrap {
         width: 40px; height: 40px; border-radius: 10px; overflow: hidden;
         box-shadow: 0 1px 3px rgba(0,0,0,.35);
@@ -174,6 +191,41 @@
 
   let _chipState = new Map(); // the room's chip map, carried across renders
 
+  // A stable visual signature for a chip's FACE — a change (portrait landed, turned in, role badge)
+  // means the face must be rebuilt; identity itself is carried by the reconcile key (c.key), so an
+  // unchanged occupant reuses its exact node (and decoded portrait) across polls.
+  function _chipSig(person, asleep, roles, rosterById) {
+    const rc = person && person.id != null ? rosterById.get(person.id) : null;
+    const role = roles ? (roles[person && (person.id != null ? person.id : person.name)] || (person && roles[person.name]) || "") : "";
+    return [(rc && rc.portrait) || "", (rc && rc.status) || "active", role, asleep ? "1" : "0"].join("|");
+  }
+  // Build a chip node (face + first-name label). Leaving/entrance state is applied by the reconcile
+  // on the PERSISTENT node so CSS transitions/animations fire; this only assembles the content.
+  function buildChip(person, asleep, roles, rosterById) {
+    const chip = document.createElement("div");
+    chip.className = "ors-chip";
+    const faceWrap = document.createElement("div");
+    faceWrap.className = "ors-face-wrap";
+    faceWrap.appendChild(faceFor(person, rosterById, roles, asleep));
+    chip.appendChild(faceWrap);
+    const label = document.createElement("span");
+    label.className = "ors-name";
+    label.textContent = firstName(person && person.name);
+    chip.appendChild(label);
+    return chip;
+  }
+  // Transient-animation audit: play a chip's enter fade once, then strip the marker (mirrors the
+  // finale/flashRow pattern). Reduced-motion is CSS-gated (animation:none); the setTimeout belt
+  // clears the class there since animationend never fires.
+  function _animateEnter(node) {
+    try {
+      node.classList.add("ors-chip-enter");
+      const clear = () => node.classList.remove("ors-chip-enter");
+      node.addEventListener("animationend", clear, { once: true });
+      setTimeout(clear, 1000);
+    } catch (_) {}
+  }
+
   // ctx: { room, present, roster, roles, asleep } — or null/incomplete to collapse the strip.
   function render(ctx) {
     const notice = ensureNotice();
@@ -211,30 +263,56 @@
       }
     }
 
-    const row = document.createElement("div");
-    row.className = "ors-row";
-    chips.forEach((c) => {
+    // Keyed chip reconcile (not a fresh `.ors-row` + `body.innerHTML = ""` rebuild every poll): keep
+    // a PERSISTENT row and reuse each chip node across polls, so (a) toggling .ors-chip-leaving on the
+    // surviving node lets the CSS `transition: opacity .6s` actually fire (the dead leaving-fade the
+    // transient-animation audit flagged), and (b) face <img>s are not re-decoded on the 25s poll.
+    let row = body.querySelector(".ors-row");
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "ors-row";
+      body.innerHTML = "";
+      body.appendChild(row);
+    }
+    const have = new Map();
+    Array.prototype.forEach.call(row.children, (node) => {
+      const k = node.getAttribute("data-ors-key");
+      if (k != null) have.set(k, node);
+    });
+    const want = new Set();
+    let ref = null;
+    for (let i = chips.length - 1; i >= 0; i--) {
+      const c = chips[i];
       const leaving = c.phase === "leaving";
       const asleep = asleepIds.has(c.person && c.person.id) || asleepIds.has(c.person && c.person.name);
-
-      const chip = document.createElement("div");
-      chip.className = "ors-chip" + (leaving ? " ors-chip-leaving" : "");
+      const sig = _chipSig(c.person, asleep, ctx.roles, rosterById);
+      want.add(c.key);
+      let chip = have.get(c.key);
+      let fresh = false;
+      if (!chip || chip.getAttribute("data-ors-sig") !== sig) {
+        // brand-new occupant, or a face-affecting change (portrait landed / turned in / role badge):
+        // (re)build the chip node — a genuine content change is the one time a face re-decode is right.
+        const old = chip;
+        fresh = !old;
+        chip = buildChip(c.person, asleep, ctx.roles, rosterById);
+        chip.setAttribute("data-ors-key", c.key);
+        chip.setAttribute("data-ors-sig", sig);
+        if (old && old.parentNode) old.parentNode.replaceChild(chip, old);
+        have.set(c.key, chip);
+      }
+      // TOGGLE the leaving state on the PERSISTENT node so the .6s fade interpolates from its current
+      // opacity — the whole point of the one-cycle "leaving" grace phase the diff already computes.
+      chip.classList.toggle("ors-chip-leaving", leaving);
       chip.title = titleFor(c.person, { asleep: asleep, leaving: leaving });
-
-      const faceWrap = document.createElement("div");
-      faceWrap.className = "ors-face-wrap";
-      faceWrap.appendChild(faceFor(c.person, rosterById, ctx.roles, asleep));
-      chip.appendChild(faceWrap);
-
-      const label = document.createElement("span");
-      label.className = "ors-name";
-      label.textContent = firstName(c.person && c.person.name);
-      chip.appendChild(label);
-
-      row.appendChild(chip);
-    });
-    body.innerHTML = "";
-    body.appendChild(row);
+      if (fresh && !leaving) _animateEnter(chip); // a brand-new arrival fades in (reduced-motion: instant)
+      // place the node directly before `ref` (its correct next sibling): insert a freshly-built chip
+      // (not yet a child) OR move one out of position; a correctly-placed reused chip is left alone.
+      // `before`/`append` (never insertBefore-on-the-composer-bar; anti-fragmentation gate).
+      if (chip.parentNode !== row || chip.nextSibling !== ref) { if (ref) ref.before(chip); else row.append(chip); }
+      ref = chip;
+    }
+    // occupants no longer in the diff (their leaving grace cycle has ended) drop out
+    have.forEach((node, k) => { if (!want.has(k)) node.remove(); });
   }
 
   async function tick() {
