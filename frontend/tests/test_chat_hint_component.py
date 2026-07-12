@@ -38,9 +38,11 @@ def test_chat_hint_module_exists_and_exports_api():
         assert f"function {fn}" in js, f"missing API fn: {fn}"
     # installed on window for non-module callers
     assert "window.OrwellChatHint" in js
-    # per-user dismiss key (E71 pattern)
+    # per-user dismiss key (E71 pattern) — derived through the shared fail-closed helper
+    # (R5/#1416: window.orwellUserKey returns null when there is no data-user, so the dismiss
+    # write is skipped rather than collapsing into a shared empty-user namespace).
     assert "orwell-chat-hint-dismissed:" in js
-    assert "document.body.dataset.user" in js
+    assert "window.orwellUserKey(" in js
 
 
 def test_chat_hint_ships_with_zero_active_tips():

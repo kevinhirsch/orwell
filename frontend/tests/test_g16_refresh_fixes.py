@@ -63,14 +63,14 @@ def _method_body(js, start_marker, end_marker):
 
 def test_sourcepin_f1_key_is_computed_before_the_panel_build():
     js = _read("static", "js", "orwellStatusPanel.js")
-    # One derivation for the per-user+game key…
+    # One derivation for the per-user+game key… now via the shared fail-closed helper (R5/#1416):
+    # window.orwellUserKey(playerName) → "playerName:user", or null when there is no data-user
+    # identity (so storageKey returns null and the collapse persistence is skipped, never a shared
+    # empty-user namespace). The player-name is the game discriminator; the helper appends ":user".
     assert "function computeGameKey(state)" in js
-    assert re.search(
-        r"function computeGameKey\(state\)\s*\{\s*"
-        r"return \(\(state && state\.player && state\.player\.name\) \|\| \"\"\) \+ \":\" \+\s*"
-        r"\(\(document\.body && document\.body\.dataset\.user\) \|\| \"\"\);",
-        js,
-    ), "computeGameKey must derive player-name:user — the E71 scheme the clicks write"
+    assert 'const name = (state && state.player && state.player.name) || ""' in js
+    assert "window.orwellUserKey(name)" in js, \
+        "computeGameKey must derive player-name:user via the shared helper — the E71 scheme the clicks write"
     # …assigned in render() BEFORE ensurePanel() runs its one-time restore read.
     render_body = _method_body(js, "function render(st) {", "function renderRoster(")
     assign = render_body.find("_gameKey = computeGameKey(st._state)")
@@ -86,10 +86,14 @@ def test_sourcepin_f1_key_is_computed_before_the_panel_build():
 
 def test_sourcepin_f1_restore_read_and_write_share_one_key():
     js = _read("static", "js", "orwellStatusPanel.js")
-    # The write (every header click) and the boot read both go through
-    # storageKey("orwell-status-collapsed") — never a bare or divergent key.
-    assert 'localStorage.setItem(storageKey("orwell-status-collapsed")' in js
-    assert 'localStorage.getItem(storageKey("orwell-status-collapsed"))' in js
+    # The write (every header click) and the boot read both derive their key from
+    # storageKey("orwell-status-collapsed") — never a bare or divergent key. R5/#1416: the derived
+    # key is null-guarded (fail-closed on absent data-user) via a local var before touching
+    # localStorage, so a null key is never string-coerced into a shared "null" namespace.
+    assert js.count('storageKey("orwell-status-collapsed")') >= 3  # onCollapse write + 2 restore reads
+    assert "localStorage.setItem(sk" in js       # the write goes through the guarded key
+    assert "localStorage.getItem(sk)" in js      # the reapply read goes through the guarded key
+    assert "localStorage.getItem(_sk)" in js     # the boot restore read goes through the guarded key
     assert "'orwell-status-collapsed'" not in js  # no second key spelling
     assert 'localStorage.getItem("orwell-status-collapsed' not in js  # no bare read
 

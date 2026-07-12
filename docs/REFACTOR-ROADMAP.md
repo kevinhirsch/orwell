@@ -33,8 +33,8 @@ Dependencies/sequencing · Verification.** Severity per the brief: **[LAUNCH-BLO
   auto-derived `gamechanged` set, stale-409 fold preservation) · **R2** collapse the duplicated
   live-vs-reload chat render paths · **R3** decompose the `chat.js` god-object + add the missing
   guardrail-lattice + FE-write-back test seams.
-- **Post-launch, medium:** **R4** movement/location grounding (ADR 0009) · **R5** per-user client-storage
-  isolation guard · **R6** the failure-mode UX (system-error notice, truncation affordance) · **R7** the
+- **Post-launch, medium:** **R4** movement/location grounding (ADR 0009) · ~~**R5** per-user client-storage
+  isolation guard~~ **(DONE, #1416)** · **R6** the failure-mode UX (system-error notice, truncation affordance) · **R7** the
   polish bundle.
 
 ---
@@ -124,15 +124,22 @@ Three independent, low-risk fixes to the FE↔engine sync spine (audit A-S5 / A-
   suspected resume-context name-drift "Luke Fleming"→"Lake Fleming") — confirm whether name grounding
   degrades specifically on the resumable-stream resume path.
 
-## R5 — Per-user client-storage isolation guard **[POST-LAUNCH · Wave 3]**
-- *Requirement (0021):* client-layer per-user isolation. *Current (audit A-data-user):* every per-user
-  localStorage key derives from `(document.body.dataset.user) || ""` — if the server ever omits
-  `data-user`, all keys collapse to a shared empty namespace (layout/persistence bleed; not the Vault).
-  *Target:* fail-closed when `data-user` is absent (skip per-user persistence rather than share a
-  namespace) + assert the attribute is always injected. *Risk:* low. *Effort:* small. *Verify:* a test
-  that an absent `data-user` does not write shared-namespace keys. **Also kill A-settingsModule** (the
-  `window.settingsModule.open()` dead fallback — `orwellOnboarding.js:283` references a never-assigned
-  global).
+## R5 — Per-user client-storage isolation guard **[DONE — #1416]**
+- *Requirement (0021):* client-layer per-user isolation. *Was (audit A-data-user):* every per-user
+  localStorage key derived from `(document.body.dataset.user) || ""` — if `data-user` was ever absent,
+  all keys collapsed to a shared empty namespace (layout/persistence bleed; not the Vault).
+- **Shipped:** the single shared helper **`window.orwellUserKey(name)`** (`static/js/orwellUserKey.js`,
+  loaded before the panels) returns a per-user key ONLY when `data-user` is a non-empty string, else
+  **null → callers skip persistence** (write NOTHING) rather than share the empty-user namespace. Every
+  non-fenced per-user localStorage keying site migrated onto it and null-guarded: `orwellGadget`,
+  `orwellGadgetRail`, `orwellNotice`, `orwellChatHint`, `orwellPremiereTutorial`, `orwellSlots`
+  (also fixes a latent module-load stale-`_user` cache), `orwellStatusPanel`. Per-tab `sessionStorage`
+  (send-outbox, composer draft) is out of scope by ADR 0008/0012. Fenced files left as follow-ups:
+  `orwellWindow.js` (3 sites: `orwell-win-parked:`, `orwell-*-docked:`, `orwell-slot-offset:` removal)
+  and `orwellCastPin.js` (`orwell-cast-pinned:`). *Verify:* `frontend/tests/test_r5_user_storage_guard.py`
+  (structural + a Node proof that an absent `data-user` writes NO shared-namespace key).
+- **A-settingsModule:** already dead-code-removed earlier (FEJS-2) — `orwellOnboarding.js` `openSettings()`
+  drops the never-assigned `window.settingsModule.open()` fallback; no `window.settingsModule` remains.
 
 ## R6 — Failure-mode UX **[POST-LAUNCH · Wave 4]**
 - *Requirement:* failures degrade *honestly* (the brief). The probe proved **no engine desync / crash /
@@ -217,7 +224,7 @@ adjacent items are handed off. Status per sub-item below.
 2. **Post-launch Wave 1:** **R1a/b/c** (independent, low-risk, high-leverage consistency hardening).
 3. **Wave 2:** **R2** (render unification) — *after/with* R0 (shared render/merge surface), then **R3**
    (decompose + test seams) which is easier once R2 lands one render path.
-4. **Wave 3:** **R4** (ADR 0009), **R5** (isolation guard).
+4. **Wave 3:** **R4** (ADR 0009), ~~**R5** (isolation guard)~~ **— R5 DONE (#1416)**.
 5. **Wave 4:** **R6** (failure UX), **R7** (polish).
 
 Dependency direction is already correct (engine imports nothing from the FE; Vault structurally walled)
