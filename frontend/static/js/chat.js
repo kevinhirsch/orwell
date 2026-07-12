@@ -100,6 +100,17 @@ import {
   _isSkippableUserPrompt, _isEmptyTurnNoSave, _msgSeq, _insertBySeq, _reorderBySeq,
   _visibleMsgCount, _expectedVisibleBubbleCount, _setReconcileDeps,
 } from './chatReconcile.js';
+// #1414 (R3 PR8): the SEVERABLE stream-presentation helpers (PARTIAL by design — the ~1,660-line
+// SSE `while(true)` dispatch STAYS in handleChatSubmit; it cannot be lifted without rewriting the
+// turn orchestrator's ~30 in-place-reassigned per-turn locals into `ctx.X`, the exact "gamble the
+// live stream" the roadmap forbids — see chatStreamLoop.js's header + the #1414 PR8 report). Only
+// the pure, closure-free, non-pinned helpers move: _ensureStreamLayout (the `.stream-content`
+// render target), _toolLabels + _thinkingLabel (the tool-aware spinner label), _showThinkingSpinner
+// (the transient dots bubble). They touch NO chat.js-internal state (deps: ui/spinner/document), so
+// there is NO _setStreamLoopDeps to wire. `_thinkingLabel` now takes `lastToolName` as an argument
+// (chat.js passes its `_lastToolName` local). None are on chatModule / called cross-file, so no
+// re-export. Imported here only, so #1399 single-eval holds.
+import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner } from './chatStreamLoop.js';
 
   // #1399: chat.js must be evaluated EXACTLY ONCE per page. It was previously loaded by two
   // different urls at once — app.js's bare `import './js/chat.js'` AND index.html's versioned
@@ -1492,18 +1503,8 @@ import {
       // _keepResearchOn removed — clarification state now persisted server-side via DB mode
       // Insert sources box as a stable DOM node that won't be replaced during streaming.
       // Returns the content container to use for innerHTML updates.
-      function _ensureStreamLayout(body) {
-        if (!body) return body;
-        // Sources are deferred to final render — don't insert during streaming
-        // Ensure a stable content div exists for text content
-        var contentDiv = body.querySelector('.stream-content');
-        if (!contentDiv) {
-          contentDiv = document.createElement('div');
-          contentDiv.className = 'stream-content';
-          body.appendChild(contentDiv);
-        }
-        return contentDiv;
-      }
+      // _ensureStreamLayout moved to ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top;
+      // called below (in _renderStream + the delta/tool handlers) exactly as before.
       const esc = uiModule.esc;
       // Remove thinking spinner helper
       _removeThinkingSpinner = () => {
@@ -1514,9 +1515,11 @@ import {
         }
       };
 
-      // Tool-aware thinking spinner
+      // Tool-aware thinking spinner: `_lastToolName` tracks the latest tool the model invoked and
+      // STAYS here (the tool handlers reassign it). The label map (_toolLabels), the label lookup
+      // (_thinkingLabel), the search icon, and the spinner mount (_showThinkingSpinner) all moved to
+      // ./chatStreamLoop.js (#1414 R3 PR8) — imported at module top; called below unchanged.
       let _lastToolName = '';
-      const _searchIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
       // C14 (immersion): the Big Brother engine tools render as quiet production
       // beats — a label, never raw camelCase names or JSON payloads in the player's
       // transcript. Applies wherever these names appear (they exist only in the game).
@@ -1529,54 +1532,10 @@ import {
       // _orwellToolBeats now lives in ./orwellToolBeats.js (single source of truth,
       // imported at module top, shared with the history-reload path in
       // chatRenderer.js so the live + reload renders cannot drift).
-      const _toolLabels = {
-        'web_search': _searchIcon + 'Searching',
-        'bash': 'Running',
-        'python': 'Running',
-        'create_document': 'Writing',
-        'update_document': 'Writing',
-        'read_document': 'Reading',
-        'edit_file': 'Editing',
-        'read_file': 'Reading',
-        'write_file': 'Writing',
-        'list_files': 'Browsing',
-        'image_gen': 'Generating',
-        'generate_image': 'Generating',
-        'manage_memory': 'Remembering',
-        'save_memory': 'Remembering',
-        'search_memory': 'Recalling',
-        'manage_session': 'Organizing',
-        'deep_research': 'Researching',
-        'list_models': 'Browsing',
-        'ui_control': 'Adjusting',
-      };
-      function _thinkingLabel() {
-        if (!_lastToolName) {
-          return 'Thinking';
-        }
-        // Check exact match first, then prefix match
-        const lower = _lastToolName.toLowerCase();
-        if (_toolLabels[lower]) return _toolLabels[lower];
-        for (const [key, label] of Object.entries(_toolLabels)) {
-          if (lower.includes(key) || key.includes(lower)) return label;
-        }
-        return 'Thinking';
-      }
-
-      function _showThinkingSpinner(label) {
-        if (document.querySelector('.agent-thinking-dots')) return;
-        const _thinkMsg = document.createElement('div');
-        _thinkMsg.className = 'msg msg-ai agent-thinking-dots';
-        const _thinkBody = document.createElement('div');
-        _thinkBody.className = 'body';
-        const _ts = spinnerModule.create(label || 'Thinking', 'right', 'wave');
-        _thinkBody.appendChild(_ts.createElement());
-        _ts.start(120);
-        _thinkMsg._spinner = _ts;
-        _thinkMsg.appendChild(_thinkBody);
-        document.getElementById('chat-history').appendChild(_thinkMsg);
-        uiModule.scrollHistory();
-      }
+      // _toolLabels, _thinkingLabel, and _showThinkingSpinner moved to ./chatStreamLoop.js
+      // (#1414 R3 PR8) — imported at module top. `_toolLabels` is used by the tool_start handler
+      // below (`_toolLabels[json.tool.toLowerCase()]`); `_thinkingLabel(_lastToolName)` +
+      // `_showThinkingSpinner` are driven by `_scheduleThinkingSpinner` below.
 
       // Auto-show thinking spinner after text stops streaming
       let _textPauseTimer = null;
@@ -1584,7 +1543,7 @@ import {
         if (_textPauseTimer) clearTimeout(_textPauseTimer);
         _textPauseTimer = setTimeout(() => {
           if (!document.querySelector('.agent-thinking-dots') && chatState.isStreaming) {
-            _showThinkingSpinner(_thinkingLabel());
+            _showThinkingSpinner(_thinkingLabel(_lastToolName));
           }
         }, 400);
       }
