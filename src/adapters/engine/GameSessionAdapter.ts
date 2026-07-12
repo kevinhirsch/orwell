@@ -51,8 +51,9 @@ import type { BindingAction, Deal } from "../../engine/deals";
 import { isPositiveObligation } from "../../domain/deal";
 import { AllianceStore, allianceTieBoost, allianceFavor, willingMembers, pickAllianceName, sameMembers, ALLIANCE } from "../../engine/alliances";
 import type { Alliance } from "../../engine/alliances";
-import { involvedConfessionals, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
-import type { ConfessionalContext } from "../../engine/confessionals";
+import { confessionalFor, involvedConfessionals, isBareGame, recordConfessionalToSoul, selectRecentForConfessional } from "../../engine/confessionals";
+import type { ConfessionalContext, ConfessionalDepth } from "../../engine/confessionals";
+import { CONFESSIONAL } from "../../engine/confessionalConstants";
 import { buildPullQuoteReel } from "../../engine/pullQuoteReel";
 import { rankApproaches, applyApproachCooldown } from "../../engine/conversation";
 import { DECISION } from "../../engine/decisionConstants";
@@ -460,6 +461,16 @@ const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE =
 const DEAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_DEAL_DEPTH === "1";
 
 /**
+ * 0122 — whether the DEEPER, DAILY confessional layer runs by DEFAULT (the five triggered facets +
+ * the once-per-in-game-day sweep where most living NPCs confess unless their game is bare). OFF unless
+ * `ORWELL_CONFESSIONAL_DEPTH=1`. A DEDICATED flag (sibling to `ORWELL_DEAL_DEPTH`/`ORWELL_STRATEGIC_CADENCE`)
+ * so calibration neutrality is provable in isolation: unset ⇒ no daily sweep runs, no depth context is
+ * passed, and every confessional is exactly 0040/0089/0090 ⇒ byte-identical. The sweep additionally gates
+ * on `perConversationClockLive()` (pinned off in the golden driver), so the golden fixture never stales.
+ */
+const CONFESSIONAL_DEPTH_ENABLED_DEFAULT = process.env.ORWELL_CONFESSIONAL_DEPTH === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -845,6 +856,10 @@ export class GameSessionAdapter implements GameSession {
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
   /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
   private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
+  /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
+  private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
+  /** 0122 — the last in-game day the daily confessional sweep ran, so it fires at most once per day. */
+  private lastConfessionalSweepDay = 0;
   /**
    * 0087 — the hidden MOMENTUM per directed pair, keyed `a->b`. VAULT-CLASS hidden engine state (mandate
    * #2): it appears on NO player- or admin-facing projection — it reaches the player only as the KINDS of
@@ -6228,6 +6243,12 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the deal-depth layer is live (0121). */
   dealDepthEnabledNow(): boolean { return this.dealDepthEnabled; }
 
+  /** Turn the 0122 deeper+daily confessional layer on/off. Off by default — the calibration harness leaves
+   *  it off (off ⇒ no daily sweep, no depth context ⇒ every confessional is byte-identical to 0040). */
+  setConfessionalDepthEnabled(on: boolean): void { this.confessionalDepthEnabled = on; }
+  /** Whether the deeper+daily confessional layer is live (0122). */
+  confessionalDepthEnabledNow(): boolean { return this.confessionalDepthEnabled; }
+
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
   strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
@@ -7591,7 +7612,11 @@ export class GameSessionAdapter implements GameSession {
     if (!this.timeOfDayEnabled) return remember(this.advanceView(null)); // dormant unless the clock is running
     if (this.live.finished || playerHasLeft(this.live, PLAYER)) return remember(this.advanceView(null));
     return remember(this.inOneCommit(() => {
+      const closingDay = this.live!.dayNumber ?? 1; // capture BEFORE materialize bumps it (0122 sweep key)
       const recap = this.materializeDailyRecap();
+      // 0122 — most living NPCs privately confess the day that just closed (deeper than 0040, bare games
+      // skipped). No-op unless the flag + in-game clock are live ⇒ byte-identical off. Records Vault-only.
+      this.sweepDailyConfessionals(closingDay);
       playerTurnIn(this.live!, PLAYER);
       this.accrueNightFatigue(); // the player chose bed — a genuine night-end; accrue before clearing conflicts
       this.rollNightConflicts();
@@ -8533,6 +8558,106 @@ export class GameSessionAdapter implements GameSession {
       this.soulObj(conf.npc)?.memory.push(conf.content);
       if (this.soul) recordConfessionalToSoul(this.soul, conf);
     }
+  }
+
+  /**
+   * Feature 0122 — the once-per-in-game-day confessional SWEEP, fired from `turnIn` (the day-close hook,
+   * beside 0102's daily recap) once the deeper-confessional layer AND the in-game clock are live. MOST
+   * living NPCs privately confess their day's read — DEEPER than the 0040 threat+trust snapshot (the
+   * triggered plan / standing / grudge / conversation-aftermath / adjacent-move facets, so the HOH &
+   * nominees get the deepest confessionals and a coasting houseguest a short one) — UNLESS their game is
+   * bare (`isBareGame`: no clear target/ally and no salient recent beat they witnessed ⇒ nothing to say).
+   * Recorded Vault-only (witnessed by the NPC alone, `hidden` — the wall is UNCHANGED from 0040) + folded
+   * to soul. A DEDICATED per-npc/day rng drives phrasing; the shared society/vote stream is never touched.
+   * The whole method is skipped when the flag or the per-conversation clock is off (calibration + golden
+   * both pin it off), so the seeded spine and the golden fixture are byte-identical.
+   */
+  private sweepDailyConfessionals(day: number): void {
+    const s = this.live;
+    if (!s || !this.house || !this.onPlayerEvent) return;
+    if (!this.confessionalDepthEnabled || !this.perConversationClockLive()) return;
+    if (day <= this.lastConfessionalSweepDay) return; // at most once per in-game day
+    this.lastConfessionalSweepDay = day;
+    const everyone = [this.house.player.id, ...this.house.npcs.map((n) => n.id)];
+    const allEvents = this.record?.events() ?? [];
+    const living = new Set(this.livingIds());
+    for (const n of this.house.npcs) {
+      const npc = n.id;
+      if (!living.has(npc)) continue; // the evicted don't confess
+      const recent = selectRecentForConfessional(allEvents, npc, allEvents.length, {
+        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional-daily-recent:${npc}:${day}`)),
+      });
+      const hasSalient = recent.some((f) => f.type !== "flavor");
+      if (isBareGame(npc, everyone, this.rel, hasSalient)) continue; // a bare game stays quiet this day
+      const voice = n.character.voice;
+      const conf = confessionalFor(npc, everyone, this.rel, {
+        player: PLAYER,
+        recentEvents: recent,
+        rng: new SeededRandom(hashSeed(`${this.gameSeed ?? ""}:confessional-daily:${npc}:${day}`)),
+        nameOf: (id) => this.nameOf(id),
+        ...(voice !== undefined ? { voice } : {}),
+        ...(this.soulObj(npc) ? { emotionalState: this.soulObj(npc)!.emotionalState } : {}),
+        depth: this.confessionalDepthFor(npc, allEvents),
+      });
+      // witnessSet = [the confessing NPC] → hidden (the player is never a witness, 0002 — same as 0040).
+      this.onPlayerEvent(conf.content, [conf.npc], "confessional");
+      this.soulObj(conf.npc)?.memory.push(conf.content);
+      if (this.soul) recordConfessionalToSoul(this.soul, conf);
+    }
+  }
+
+  /**
+   * Feature 0122 — build the Vault-safe depth inputs for one confessor from PUBLIC role/beat state + the
+   * confessor's OWN witnessed events (never another houseguest's hidden read). `role` is their public
+   * this-week standing (drives the plan + safe/exposed facets); `recentTalk` is the partner of the most
+   * recent conversation THEY witnessed (the aftermath facet); `adjacent` is a relation of theirs (their
+   * own top bond / top threat, only when it clears the floor) who is on the live public board.
+   */
+  private confessionalDepthFor(npc: EntityId, allEvents: readonly GameEvent[]): ConfessionalDepth {
+    const s = this.live!;
+    let role: ConfessionalDepth["role"] = "none";
+    if (s.hoh === npc) role = "hoh";
+    else if (s.vetoHolder === npc) role = "veto-holder";
+    else if ((s.nominees ?? []).some((id) => id === npc)) role = "nominee";
+    // recentTalk — the OTHER party of the most recent conversation this houseguest witnessed.
+    let recentTalk: EntityId | undefined;
+    for (let i = allEvents.length - 1; i >= 0; i--) {
+      const ev = allEvents[i]!;
+      if (ev.type === "conversation" && ev.witnessSet.includes(npc)) {
+        const partner = ev.initiator !== npc ? ev.initiator : ev.witnessSet.find((w) => w !== npc);
+        if (partner && partner !== npc) { recentTalk = partner; break; }
+      }
+    }
+    const adjacent = this.adjacentMoveFor(npc);
+    return { role, ...(recentTalk ? { recentTalk } : {}), ...(adjacent ? { adjacent } : {}) };
+  }
+
+  /**
+   * Feature 0122 — the confessor's most charged ADJACENT move: a relation of theirs (their own clear ally
+   * or clear target — over the FLOOR, so a coasting houseguest's arbitrary max-peer never triggers it) who
+   * is on the live PUBLIC board this week (the HOH, or a nominee). Public board × the confessor's own read
+   * — no hidden state of anyone else. Returns the first (most charged) match, else undefined.
+   */
+  private adjacentMoveFor(npc: EntityId): ConfessionalDepth["adjacent"] {
+    const s = this.live;
+    if (!s) return undefined;
+    const others = this.livingIds().filter((id) => id !== npc);
+    let ally: EntityId | undefined; let bestBond = -Infinity;
+    let target: EntityId | undefined; let bestThreat = -Infinity;
+    for (const o of others) {
+      const e = this.rel.edge(npc, o);
+      const bond = (e.trust + e.affinity) / 2;
+      if (bond > bestBond) { bestBond = bond; ally = o; }
+      if (e.threat > bestThreat) { bestThreat = e.threat; target = o; }
+    }
+    const clearAlly = ally !== undefined && bestBond >= CONFESSIONAL.depth.clearBond ? ally : undefined;
+    const clearTarget = target !== undefined && bestThreat >= CONFESSIONAL.depth.clearThreat ? target : undefined;
+    const noms = new Set(s.nominees ?? []);
+    if (clearAlly && s.hoh === clearAlly) return { relation: clearAlly, bond: "ally", beat: "won-power" };
+    if (clearAlly && noms.has(clearAlly)) return { relation: clearAlly, bond: "ally", beat: "nominated" };
+    if (clearTarget && s.hoh === clearTarget) return { relation: clearTarget, bond: "target", beat: "won-power" };
+    if (clearTarget && noms.has(clearTarget)) return { relation: clearTarget, bond: "target", beat: "nominated" };
+    return undefined;
   }
 
   /**

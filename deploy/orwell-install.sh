@@ -279,6 +279,12 @@ write_config() {
       # hidden off-screen scheming a touch more often (a slight, bounded variance — never a wild skew).
       # DEFAULT OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
       echo "ORWELL_STRATEGIC_CADENCE=1"
+      # Deeper, daily NPC confessionals (0122): the five triggered facets (plan / standing / grudge /
+      # conversation aftermath / adjacent move) + the once-per-in-game-day sweep where most living NPCs
+      # confess unless their game is bare. Vault-only (sealed from player + admin, unchanged from 0040).
+      # DEFAULT OFF in code (+ additionally gated on the live in-game clock, pinned off in the golden
+      # driver) so the seeded gates + golden fixture stay byte-identical; the deploy opts in here.
+      echo "ORWELL_CONFESSIONAL_DEPTH=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded
