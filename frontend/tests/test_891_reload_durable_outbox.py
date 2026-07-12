@@ -242,12 +242,14 @@ def test_honest_status_tag_exists_and_is_styled():
 
 
 def test_confirm_seam_and_single_send_path():
-    js = _read("static/js/chat.js")
+    # #1414 R3 PR7: the adopt pass (softReloadHistory) moved to chatReconcile.js.
+    recon = _read("static/js/chatReconcile.js")
     # delivery confirm rides the EXISTING adopt pass (softReloadHistory) — no new reconcile path
-    adopt_at = js.index("// 1) ADOPT PASS — no DOM churn.")
-    adopt_block = js[adopt_at:adopt_at + 1400]
+    adopt_at = recon.index("// 1) ADOPT PASS — no DOM churn.")
+    adopt_block = recon[adopt_at:adopt_at + 1400]
     assert "_outboxConfirmDelivery(cid)" in adopt_block, \
         "a server row carrying the clientMsgId must release the durable copy (adopt-pass seam)"
+    js = _read("static/js/chat.js")
     # the drain still dispatches through the ONE dispatcher → handleChatSubmit (no second send path).
     # #1414 R3 PR6: the outbox moved to chatOutbox.js; chat.js registers the SOLE production dispatch
     # (still a headless handleChatSubmit) through the _setOutboxDispatch seam at module-eval, and the
