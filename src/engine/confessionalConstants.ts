@@ -54,6 +54,21 @@ export const CONFESSIONAL = {
   //    it. Pure texture anchored to a FACT the confessor lived — it states no outcome the engine did
   //    not produce (a comp they "played", a ceremony that "left them on the block"), so a reactive
   //    confessional can never fabricate a result (mandate #3 / ADR 0005). ──
+  // ── 0122 depth/bare thresholds (relative to the live baseline trust/affinity 0.25, threat 0.1) ──
+  // A confessional's DEEP facets are TRIGGERED, not templated: a facet renders only when the
+  // confessor's engine-true read crosses one of these floors, so depth tracks the real game. These
+  // ORDER/GATE existing reads only — never a number shown, never a fold. `isBareGame` uses the two
+  // "clear" floors: an NPC with neither a clear target nor a clear ally nor a salient recent beat has
+  // nothing to say and stays quiet that day.
+  depth: {
+    /** A peer this houseguest reads as a real THREAT (their target has teeth) — well above the 0.1 floor. */
+    clearThreat: 0.2,
+    /** A peer this houseguest reads as a real BOND (a genuine ally) — a (trust+affinity)/2 above baseline. */
+    clearBond: 0.35,
+    /** A peer this houseguest holds a real GRUDGE against — trust dropped well below the 0.25 baseline. */
+    grudgeTrust: 0.18,
+  },
+
   gists: {
     competition: {
       initiator: "coming out of that competition",

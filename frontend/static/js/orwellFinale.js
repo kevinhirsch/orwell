@@ -93,6 +93,23 @@ import * as modalManager from "./modalManager.js";
         #orwell-finale .ofin-hd { opacity: .6; margin: .5rem 0 .25rem; letter-spacing: .03em; }
         #orwell-finale .ofin-reveal { margin: .2rem 0; opacity: .9; display: flex; align-items: center; flex-wrap: wrap; gap: .3rem; }
         #orwell-finale .ofin-reveal b { color: var(--fg, #9cdef2); }
+        /* Transient-animation audit (finale jury-reveal silent-pop): a newly-read vote row used to
+           mount via a wholesale revWrap.innerHTML rebuild every poll — so each fresh vote appeared
+           with NO entrance (the season's loudest beat landing as a silent text swap) and every prior
+           row + its two portrait faces re-decoded each cadence. The visual path now APPENDS only
+           genuinely-new rows and rides this short staged entrance (mirrors the orwellStatusPanel.js
+           TRANS-3 flashRow + the ow-ceremony-reveal recipe), so each read-out vote lands with earned
+           weight. Reduced-motion strips it to the original instant appearance. */
+        #orwell-finale .ofin-reveal.ofin-reveal-in {
+          animation: ofin-reveal-in .42s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+        }
+        @keyframes ofin-reveal-in {
+          0%   { opacity: 0; transform: translateY(5px); }
+          100% { opacity: .9; transform: none; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          #orwell-finale .ofin-reveal.ofin-reveal-in { animation: none; }
+        }
         /* M3-4: the finalist card + reveal-row face — the OrwellMonogram kit's designed
            portrait-or-monogram tile, sized small and never the interactive target on its own
            (this panel's move buttons are the affordances; the face is presentation only). */
@@ -261,6 +278,60 @@ import * as modalManager from "./modalManager.js";
     el.setAttribute("aria-hidden", "true");
     return el;
   }
+  // A reveal row's faces read _portraitById at BUILD time; the roster cache fills async, so a face
+  // can mount as a monogram fallback and then need refreshing once its portrait lands. This signature
+  // captures each person's portrait availability so an append-only row can be rebuilt ONLY when it
+  // actually changed (no per-poll churn) — the reveal-row counterpart of the finalist-card _finSig.
+  function _faceSig(ref) {
+    if (!ref) return "";
+    const c = ref.id != null ? _portraitById[String(ref.id)] : null;
+    return String(ref.id != null ? ref.id : nameOf(ref)) + "|" + ((c && c.portrait) || "") + "|" + ((c && c.status) || "active");
+  }
+  function _revFaceSig(r) {
+    return _faceSig(r && r.juror) + "!" + _faceSig(r && r.votedFor);
+  }
+  // Transient-animation audit: play the reveal-row entrance once, then strip the marker (a lingering
+  // class would re-fire on any later className touch). Mirrors orwellStatusPanel.js's flashRow — the
+  // setTimeout belt clears it under prefers-reduced-motion (where animationend never fires).
+  function _animateIn(node) {
+    try {
+      node.classList.add("ofin-reveal-in");
+      const clear = () => node.classList.remove("ofin-reveal-in");
+      node.addEventListener("animationend", clear, { once: true });
+      setTimeout(clear, 1200);
+    } catch (_) {}
+  }
+  // A stable identity for a finalist card so a poll reuses its node (and its decoded portrait) rather
+  // than rebuilding it — the face re-decodes ONLY when the portrait/status genuinely lands/changes.
+  function _finSig(f) {
+    const cached = f && f.id != null ? _portraitById[String(f.id)] : null;
+    return [String((f && f.id) || nameOf(f)), (cached && cached.portrait) || "", (cached && cached.status) || "active"].join("|");
+  }
+  // Build one reveal row (juror → voted-for, each with a face) — shared by the first-render sync and
+  // the append-only during-session path so the two never drift.
+  function _buildRevealRow(r) {
+    const line = document.createElement("div");
+    line.className = "ofin-reveal";
+    line.setAttribute("data-rev-facesig", _revFaceSig(r)); // so a later portrait landing can refresh this row (append-only rows aren't otherwise revisited)
+    // M3-4: each reveal row carries the juror's + the voted-for finalist's face (portrait, or the
+    // OrwellMonogram fallback) beside their name — built via DOM (not innerHTML) so the faces slot
+    // in at the right reading-order position; aria-hidden keeps them decorative.
+    const jFace = faceEl(r.juror);
+    if (jFace) line.appendChild(jFace);
+    const jB = document.createElement("b"); jB.textContent = nameOf(r.juror);
+    line.appendChild(jB);
+    line.appendChild(document.createTextNode(" votes for "));
+    const vFace = faceEl(r.votedFor);
+    if (vFace) line.appendChild(vFace);
+    const vB = document.createElement("b"); vB.textContent = nameOf(r.votedFor);
+    line.appendChild(vB);
+    return line;
+  }
+  // The VISUAL mirror of _lastRevealCount (which drives the aria-live announce). Kept separate so the
+  // two stay decoupled: the visual path appends new rows + animates them, the aria path announces.
+  // -1 = nothing mounted this page session yet; the first render syncs the already-read reveals
+  // WITHOUT an entrance (a reload mid-reveal must not replay every vote's animation).
+  let _shownRevealCount = -1;
   // -1 = not yet rendered this page load. The FIRST render (live OR after a refresh) syncs
   // the count WITHOUT announcing — otherwise a reload mid-finale re-announced every vote
   // already on screen through the aria-live region (reload-persistence audit). Only reveals
@@ -318,18 +389,54 @@ import * as modalManager from "./modalManager.js";
     // Finalists + a tally of the REVEALED votes only (never a pre-reveal total or the winner).
     const tally = {};
     for (const r of reveals) { const id = r.votedFor && r.votedFor.id; if (id) tally[id] = (tally[id] || 0) + 1; }
+    // Finalist cards: reconcile by finalist id (not a wholesale `finWrap.innerHTML` rebuild every
+    // poll) so the portrait face + card node survive — only the live tally text moves each reveal,
+    // and the face re-decodes ONLY when its portrait actually lands (see _finSig). This kills the
+    // per-cadence face churn the transient-animation audit flagged.
     const finWrap = document.getElementById("ofin-final");
-    finWrap.innerHTML = "";
-    for (const f of finalists) {
-      const card = document.createElement("div");
-      card.className = "ofin-fin";
-      const face = faceEl(f); // M3-4: the finale jury reveal rows carry faces
-      if (face) card.appendChild(face);
-      const b = document.createElement("b"); b.textContent = nameOf(f);
-      const t = document.createElement("span"); t.className = "ofin-tally"; t.textContent = String(tally[f.id] || 0);
-      t.setAttribute("aria-label", String(tally[f.id] || 0) + " votes"); // J5-14: the bare number has no accessible meaning
-      card.appendChild(b); card.appendChild(t); finWrap.appendChild(card);
+    const finHave = new Map();
+    Array.prototype.forEach.call(finWrap.children, (node) => {
+      const k = node.getAttribute("data-fin-key");
+      if (k != null) finHave.set(k, node);
+    });
+    const finWant = new Set();
+    let finRef = null;
+    for (let i = finalists.length - 1; i >= 0; i--) {
+      const f = finalists[i];
+      const key = String((f && f.id) || nameOf(f));
+      const sig = _finSig(f);
+      finWant.add(key);
+      let card = finHave.get(key);
+      if (!card || card.getAttribute("data-fin-sig") !== sig) {
+        const stale = card; // the prior card for this key (e.g. before its portrait landed), still in finWrap
+        card = document.createElement("div");
+        card.className = "ofin-fin";
+        card.setAttribute("data-fin-key", key);
+        card.setAttribute("data-fin-sig", sig);
+        const face = faceEl(f); // M3-4: the finalist card carries a face
+        if (face) card.appendChild(face);
+        const b = document.createElement("b"); b.textContent = nameOf(f);
+        const t = document.createElement("span"); t.className = "ofin-tally";
+        card.appendChild(b); card.appendChild(t);
+        finHave.set(key, card);
+        // REPLACE the stale node in place (its key is still wanted, so the cleanup below won't drop it) —
+        // else insertBefore(card, finRef) mounts the fresh card BESIDE the old one → duplicate finalist
+        // card on a signature change (portrait landing). Mirrors orwellCastPin/RoomStrip replaceChild.
+        if (stale && stale.parentNode) stale.parentNode.replaceChild(card, stale);
+      }
+      // the tally is the one thing that changes every reveal — update the persistent node's text only
+      const t = card.querySelector(".ofin-tally");
+      if (t) {
+        const n = String(tally[f.id] || 0);
+        if (t.textContent !== n) t.textContent = n;
+        t.setAttribute("aria-label", String(tally[f.id] || 0) + " votes"); // J5-14: the bare number has no accessible meaning
+      }
+      // insert a freshly-built card (not yet a child) OR move one out of position; a correctly
+      // placed reused card is left untouched (its portrait face is not re-decoded).
+      if (card.parentNode !== finWrap || card.nextSibling !== finRef) finWrap.insertBefore(card, finRef);
+      finRef = card;
     }
+    finHave.forEach((node, k) => { if (!finWant.has(k)) node.remove(); });
 
     // The reveal, in the order the engine read it (revealed votes only). New reveals
     // are ANNOUNCED politely (E67): the vote reading is the season's loudest moment.
@@ -349,24 +456,37 @@ import * as modalManager from "./modalManager.js";
     _lastRevealCount = reveals.length;
     const revWrap = document.getElementById("ofin-reveals");
     document.getElementById("ofin-reveal-hd").style.display = reveals.length ? "block" : "none";
-    revWrap.innerHTML = "";
-    for (const r of reveals) {
-      const line = document.createElement("div");
-      line.className = "ofin-reveal";
-      // M3-4: each reveal row carries the juror's + the voted-for finalist's face (portrait, or
-      // the OrwellMonogram fallback) beside their name — built via DOM (not innerHTML) so the
-      // faces slot in at the right reading-order position; aria-hidden keeps them decorative.
-      const jFace = faceEl(r.juror);
-      if (jFace) line.appendChild(jFace);
-      const jB = document.createElement("b"); jB.textContent = nameOf(r.juror);
-      line.appendChild(jB);
-      line.appendChild(document.createTextNode(" votes for "));
-      const vFace = faceEl(r.votedFor);
-      if (vFace) line.appendChild(vFace);
-      const vB = document.createElement("b"); vB.textContent = nameOf(r.votedFor);
-      line.appendChild(vB);
-      revWrap.appendChild(line);
+    // Reveal rows are APPEND-ONLY across the reveal stage (the engine reads votes in a fixed order),
+    // so reuse the rows already mounted — keeping their decoded faces — and add only genuinely-new
+    // votes. The first render of this page session syncs the already-read votes WITHOUT an entrance
+    // (a reload mid-reveal must not replay every animation); later polls animate each fresh vote in
+    // so the season's loudest beat lands with earned weight instead of a silent innerHTML pop.
+    if (_shownRevealCount < 0 || reveals.length < _shownRevealCount) {
+      // first sync this session, OR the set shrank/reset (a new season's finale) — rehydrate from
+      // scratch, no entrance (nothing "landed" this frame).
+      revWrap.innerHTML = "";
+      for (const r of reveals) revWrap.appendChild(_buildRevealRow(r));
+    } else if (reveals.length > _shownRevealCount) {
+      // votes read since the last render — append + animate only those.
+      for (let i = _shownRevealCount; i < reveals.length; i++) {
+        const line = _buildRevealRow(reveals[i]);
+        revWrap.appendChild(line);
+        _animateIn(line);
+      }
     }
+    _shownRevealCount = reveals.length;
+    // Append-only rows read _portraitById at BUILD time, but the roster cache fills async
+    // (_refreshRosterCache kicked from refresh()), so a row first mounted before its portrait landed
+    // would keep its monogram fallback forever — later same-length polls skip the block above. Refresh
+    // any EXISTING row whose face signature changed (a portrait landed): rebuild it in place, keyed so
+    // an unchanged row is never re-decoded (no churn) and with NO entrance (a portrait swap is not a
+    // new-vote beat). Positional: child i corresponds to reveals[i] (the engine's fixed read order).
+    Array.prototype.slice.call(revWrap.children).forEach((row, i) => {
+      const r = reveals[i];
+      if (!r || typeof row.getAttribute !== "function") return;
+      if (row.getAttribute("data-rev-facesig") === _revFaceSig(r)) return;
+      revWrap.replaceChild(_buildRevealRow(r), row);
+    });
 
     // The player's turn (composer-prefill shortcuts; the chat agent submits the binding decision).
     const playerIsFinalist = finalists.some((f) => f && f.id === PLAYER_ID);
