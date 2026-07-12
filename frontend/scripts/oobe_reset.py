@@ -12,13 +12,17 @@ What "API-key / LLM-provider config" means here (and where it lives):
   * ``app.db`` → table ``model_endpoints`` — the admin-configured providers: each row's
     ``base_url``, the (Fernet-encrypted) ``api_key``, model pools, image vs llm type, etc.
     This is the PRIMARY provider config in the modern build (src/endpoint_resolver.py).
-  * ``data/settings.json`` → the model/endpoint SELECTION keys are RESET to the OOB defaults
+  * ``data/settings.json`` → the model SELECTION keys are RESET to the OOB defaults
     (issue #860): a reset does NOT carry the previously-selected models — only operational flags
     (image_gen_enabled, image_quality, vision_enabled) survive. After the reset the defaults stand
     (narrator z-ai/glm-5.2 + utility qwen/qwen3.6-flash on OpenRouter — the ADR 0016 two-tier
-    pair, owner-confirmed 2026-07-09; portrait google/gemini-3.1-flash-image), and the
-    preserved endpoint(s) + key(s) keep the provider usable (resolution binds the empty default
-    endpoint to the first enabled endpoint — the preserved OpenRouter one).
+    pair, owner-confirmed 2026-07-09; portrait google/gemini-3.1-flash-image). The default-ENDPOINT
+    DESIGNATION (``default_endpoint_id``) is PRESERVED (2026-07-12 PROD-blocker fix): it is
+    validated against the carried rows and re-pointed at the sole enabled+keyed endpoint when it
+    was empty/dangling — the per-call-class resolver never had a "bind empty default to the first
+    enabled endpoint" behavior, so dropping the designation bricked game creation under the strict
+    0116 enrichment policy. Preserved endpoint rows are also RE-OWNED to shared (owner=NULL),
+    because the reset wipes every account and a stale owner stamp fails the resolver's scoping.
   * ``data/.app_key`` → the Fernet key that decrypts ``model_endpoints.api_key`` (and the
     other EncryptedText columns). Preserving the endpoints WITHOUT this key would leave the
     stored keys permanently undecryptable, so it is preserved as a FILE (see the shell
@@ -50,31 +54,69 @@ import re
 import sqlite3
 import sys
 
-# Reset semantics (issue #860, owner ruling 2026-06-25): a factory/OOBE reset preserves ONLY the
-# API key(s) + the provider endpoint record(s) (the model_endpoints rows, carried separately) — it
-# does NOT preserve the SELECTED MODELS. After a reset the model selections revert to the OOB
-# defaults (narrator z-ai/glm-5.2 + utility qwen/qwen3.6-flash on OpenRouter — the ADR 0016
-# two-tier pair; portrait google/gemini-3.1-flash-image), so a
-# stale/placeholder pick (e.g. the "sakana/fugu-ultra" the owner was stuck on) can never ride across
-# a reset. The provider's API key stays usable because the endpoint record + its encrypted key are
-# preserved, and `default_endpoint_id`/`image_endpoint_id` reverting to "" binds resolution to the
-# first enabled endpoint (the preserved OpenRouter one) — see DEFAULT_SETTINGS in src/settings.py.
+# Reset semantics (issue #860, owner ruling 2026-06-25; amended 2026-07-12): a factory/OOBE reset
+# preserves ONLY the API key(s) + the provider endpoint record(s) (the model_endpoints rows, carried
+# separately) — it does NOT preserve the SELECTED MODELS. After a reset the model selections revert
+# to the OOB defaults (narrator z-ai/glm-5.2 + utility qwen/qwen3.6-flash on OpenRouter — the ADR
+# 0016 two-tier pair; portrait google/gemini-3.1-flash-image), so a stale/placeholder pick (e.g. the
+# "sakana/fugu-ultra" the owner was stuck on) can never ride across a reset.
 #
-# We therefore preserve ONLY operational (non-model-selection) flags. Every model/endpoint SELECTION
-# key is deliberately DROPPED so it falls back to its DEFAULT_SETTINGS value on the next load.
+# 2026-07-12 (PROD blocker): the default-ENDPOINT DESIGNATION (`default_endpoint_id`) is NOT a model
+# selection and IS preserved. This module's earlier claim that "resolution binds the empty default
+# endpoint to the first enabled endpoint" was FALSE for the per-call-class utility resolution
+# (`src/endpoint_resolver.resolve_endpoint` had no such binding), so dropping the designation
+# bricked game creation under the strict 0116 enrichment policy ("no model resolved for the
+# cast-genesis/-identity/-authoring call class") until an operator re-picked a default by hand.
+# The designation is preserved when it points at a surviving row, re-pointed at the sole surviving
+# enabled+keyed LLM endpoint when it was empty/dangling, and dropped only when genuinely ambiguous
+# (2+ candidates — the runtime single-endpoint auto-default in endpoint_resolver stays the belt).
 PRESERVED_SETTINGS_KEYS = (
     "image_gen_enabled", "image_quality", "vision_enabled",
 )
 
 # The model/endpoint SELECTION keys that a reset RESETS to defaults (by NOT preserving them). Listed
 # explicitly so the source-pinned test can assert none of them survives a reset.
+# (`default_endpoint_id` moved OUT of this tuple 2026-07-12 — the designation is preserved above.)
 RESET_TO_DEFAULT_SELECTION_KEYS = (
-    "default_endpoint_id", "default_model", "default_model_fallbacks",
+    "default_model", "default_model_fallbacks",
     "utility_endpoint_id", "utility_model", "utility_model_fallbacks",
     "research_endpoint_id", "research_model",
     "vision_endpoint_id", "vision_model", "vision_model_fallbacks",
     "image_endpoint_id", "image_model",
 )
+
+
+def _is_truthy_flag(value) -> bool:
+    """SQLite-tolerant truthiness for a carried is_enabled cell (1 / "1" / True / "true")."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def preserved_default_designation(saved_settings: dict, endpoint_rows: list) -> dict:
+    """The default-endpoint DESIGNATION to carry across the reset (2026-07-12 fix).
+
+    * The prior `default_endpoint_id` survives when it points at a carried, enabled row.
+    * An empty/dangling designation is RE-POINTED at the sole carried enabled endpoint that has
+      an API key and is not image-only (exactly the runtime single-endpoint auto-default rule) —
+      so the post-reset store is explicit and nothing downstream has to guess.
+    * Two-plus candidates ⇒ no designation is written (never guess between providers; the
+      runtime auto-default then simply doesn't fire either, matching pre-reset ambiguity).
+    Model SELECTIONS are untouched by this — #860 still resets them to the OOB defaults."""
+    prior = ""
+    if isinstance(saved_settings, dict):
+        prior = str(saved_settings.get("default_endpoint_id") or "").strip()
+    enabled_rows = [r for r in (endpoint_rows or []) if _is_truthy_flag(r.get("is_enabled"))]
+    if prior and any(str(r.get("id")) == prior for r in enabled_rows):
+        return {"default_endpoint_id": prior}
+    candidates = [
+        r for r in enabled_rows
+        if str(r.get("api_key") or "").strip()
+        and str(r.get("model_type") or "llm") != "image"
+    ]
+    if len(candidates) == 1 and candidates[0].get("id"):
+        return {"default_endpoint_id": str(candidates[0]["id"])}
+    return {}
 
 
 def _frontend_dir() -> str:
@@ -226,6 +268,26 @@ def reset_frontend_store() -> dict:
     endpoints = export_model_endpoints(dbp)
     columns = list(endpoints[0].keys()) if endpoints else []
     preserved = export_preserved_settings(setp)
+
+    # 2026-07-12: carry the default-endpoint DESIGNATION (validated / re-pointed against the
+    # carried rows) — see preserved_default_designation. Read the raw prior settings directly;
+    # export_preserved_settings deliberately keeps only the operational flags.
+    try:
+        with open(setp, "r", encoding="utf-8") as f:
+            prior_settings = json.load(f)
+        if not isinstance(prior_settings, dict):
+            prior_settings = {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        prior_settings = {}
+    preserved.update(preserved_default_designation(prior_settings, endpoints))
+
+    # 2026-07-12: RE-OWN the preserved endpoint rows to shared (owner=NULL). The reset wipes
+    # every account (auth.json), so any owner stamp on a carried row is stale by construction —
+    # left in place it silently fails the resolver's owner scoping for every recreated user.
+    # NULL = the ModelEndpoint "legacy/shared, visible to every user" semantic.
+    if columns and "owner" in columns:
+        for row in endpoints:
+            row["owner"] = None
 
     rebuild_db_with_endpoints(dbp, endpoints, columns)
     write_preserved_settings(setp, preserved)
