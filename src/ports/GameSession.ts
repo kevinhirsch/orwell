@@ -573,7 +573,9 @@ export interface SecretLeverDescriptor {
 
 export interface MakeDealReq {
   with: EntityId;
-  kind: "safety" | "vote" | "final-two" | "target-other";
+  // 0121 — the two ACTIVE-obligation kinds (comp-throw / veto-save) are accepted only when the deal-depth
+  // layer is on (`makeDeal` refuses them otherwise); off ⇒ only the four defensive kinds, byte-identical.
+  kind: "safety" | "vote" | "final-two" | "target-other" | "comp-throw" | "veto-save";
   terms: string;
   /**
    * 0093 — OPTIONAL leverage: a secret the player holds ABOUT the deal partner (`with`), pressed to make

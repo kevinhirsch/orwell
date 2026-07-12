@@ -184,11 +184,13 @@ next HOH the morning after — strict order, no rest days, the daily-event invar
 seeded start-within-period** (comp ~3h / ceremony ~1h / eviction ~2h; a deterministic, no-shared-rng start
 offset within the period; spillover allowed; comps vary by type via the 0042 library); and **LOOSE
 conversation durations** (ADR 0005 for time — the LLM proposes the felt time, the engine commits it bounded
-to the type range, byte-identical to the type baseline when absent). The three Phase-2 sleep-cost extensions
-ride dedicated flags (`ORWELL_TIME_PER_CONVERSATION` / `ORWELL_SOCIAL_FATIGUE` / `ORWELL_MULTI_NIGHT_FATIGUE`),
-each byte-identical to the calibration spine when the master clock is off — proven per-extension. Per-conversation
-advance + social fatigue **default ON** (the pacing fix / #1419; `=0` escapes); the multi-night meter stays
-opt-in. **Social fatigue is ASYMMETRIC** (#1419, owner 2026-07-12 — "a bias for negative consequence"): a
-tired houseguest's WARMING social folds are dampened (harder to scheme) while SOURING folds are amplified
-(spats cut deeper) — reduced/altered EFFECTIVENESS on the same nature, never a personality change. Full
-detail: `docs/features/0066-in-game-time-and-sleep.md` §9–§10.
+to the type range, byte-identical to the type baseline when absent). The three flagged Phase-2 sleep-cost
+extensions ride dedicated opt-in flags (`ORWELL_TIME_PER_CONVERSATION` / `ORWELL_SOCIAL_FATIGUE` /
+`ORWELL_MULTI_NIGHT_FATIGUE`), each byte-identical to the calibration spine when off — proven per-extension.
+**Extension 4 (emergent, INDEPENDENT NPC bedtimes, owner 2026-07-12)** closes the last player↔NPC parity
+gap in the sleep economy: an NPC's sleep debt was capped at *the player's* bedtime, so only the player could
+truly trade sleep for scheming. Now an NPC's night is emergent — a night-owl lingers to their own chronotype
+bedtime with late-night COMPANY (or when the player kept the house up), and beds down early ALONE — so the
+debt is EARNED on the same footing as the player's, without a flat archetype tax. It rides the master clock
+(no separate flag) and is byte-identical to the old player-capped deficit when the co-owl company count is 0.
+Full detail: `docs/features/0066-in-game-time-and-sleep.md` §9–§10.

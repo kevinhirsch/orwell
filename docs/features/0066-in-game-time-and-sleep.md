@@ -128,46 +128,49 @@ flag:    ORWELL_TIME_OF_DAY (default off) gates every clock mutation + restOf
 
 ## 9. Phase-2 extensions — BUILT (#1125, 2026-06-28)
 
-> **RESOLVED + BUILT (owner, 2026-06-28): all three Phase-2 extensions, on the 24-hour model below.**
-> Each rides its OWN flag, byte-identical to the seeded calibration spine when the master clock is off
-> (a dedicated per-extension neutrality proof each), priority-ordered per the owner: per-conversation
-> clock advance first (pacing-only), then NPC next-day social fatigue, then the compounding multi-night
-> meter. Per-conversation advance + social fatigue now **default ON** (the fast-forward fix / #1419 —
-> `ORWELL_TIME_PER_CONVERSATION=0` / `ORWELL_SOCIAL_FATIGUE=0` escape); the multi-night meter stays
-> opt-in (`ORWELL_MULTI_NIGHT_FATIGUE`, default OFF). All self-gate on the master clock, so the
-> env-default split still holds (engine `ORWELL_TIME_OF_DAY` OFF for calibration; the FE session
-> default ON for real play, ruling #583). See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27/28).
+> **RESOLVED + BUILT (owner, 2026-06-28): the three flagged Phase-2 extensions, on the 24-hour model below;
+> plus Extension 4 (emergent NPC bedtimes, owner 2026-07-12).** Each of 1–3 rides its OWN opt-in flag,
+> byte-identical to the seeded calibration spine when off (a dedicated per-extension neutrality proof each),
+> priority-ordered per the owner: per-conversation clock advance first (pacing-only), then NPC next-day
+> social fatigue, then the compounding multi-night meter. **Extension 4** has no separate flag — it is the
+> *definition* of the NPC sleep deficit and rides the master clock, byte-identical when the clock is off (or
+> when the co-owl company count is 0). The env-default split stays (engine `ORWELL_TIME_OF_DAY` OFF for
+> calibration; the FE session default ON for real play, ruling #583). See `docs/decisions/PO-DECISIONS-LOG.md`
+> (2026-06-27/28).
 
 1. **Per-conversation clock advance** — `ORWELL_TIME_PER_CONVERSATION`. The clock advances as the player
    *lingers/plays* within a beat (the orchestrator's once-per-turn, debounced off-screen tick), so the
    day's finite scheming time is felt turn-by-turn. Pacing-only; it clamps at the bitter pre-dawn edge and
    never wraps the night without the player's own `turnIn` (ADR 0003 / the lull rule) — an engaged scene is
    never cut. The felt per-turn duration is the LOOSE, type-bounded conversation duration (§10, Extension 5).
-2. **NPC next-day social fatigue** — `ORWELL_SOCIAL_FATIGUE` (**default ON** since #1419, `=0` escapes; sleep
-   cost must reach social play, not just competitions). A tired houseguest's next-day social scenes fold
-   **asymmetrically** (#1419, owner ruling 2026-07-12 — "a bias for negative consequence"): a **WARMING**
-   fold (bonding, trust, charm) is **dampened** (`socialSwayScale` → the warm scale, floor ×0.4) so it is
-   *harder to scheme when you aren't sleeping*, while a **SOURING** fold (conflict, threat, souring) is
-   **amplified** (`soreSwayScale`, up to ×1.4) so *spats cut deeper*. Applied per-component by valence
-   (`scaleImpactByValence`; threat is the inverted axis). Still **effectiveness, never a personality change**
-   — the scene's nature is unchanged (a tired peacemaker does not start picking fights); a character conflict
-   drains the houseguest in it to an earlier bedtime. Self-gated on the master clock ⇒ byte-identical to the
-   calibration spine when the clock is off. The SAME asymmetric valence also rides the **PLAYER's own
-   recorded scenes** (the `recordInteraction` seam): `EngineCommandsAdapter` reads the initiator's rest
-   deficit (`socialFoldValence`, wired in the registry) and scales the partner / generative / third-party
-   folds via `RelationshipModel.applyDirectedValence` / `scaleImpactByValence` (`consequence.ts`) — so a
-   sleep-deprived player is worse at charm and cuts deeper too. `NO_FATIGUE` (rested / clock-off) ⇒
-   byte-identical; the player-channel `commands:` rng stream never touches the seeded calibration spine
-   (`tests/unit/playerFatigueFold.test.ts` is the proof). Bystander observations and the player's own
-   reciprocal read are NOT fatigue-scaled (fatigue is the actor's outgoing EFFECTIVENESS, not a passer-by's
-   read or the player's own feeling).
+2. **NPC next-day social fatigue** — `ORWELL_SOCIAL_FATIGUE`. A tired houseguest moves the needle LESS in
+   the next day's social scenes (`socialSwayScale` dampens the off-screen fold magnitude — effectiveness,
+   never a personality change), and a character conflict drains the houseguest in it to an earlier bedtime.
 3. **A compounding multi-night fatigue meter** — `ORWELL_MULTI_NIGHT_FATIGUE`. An EMA of nightly deficits
    (`accrueFatigue`/`combinedRestDeficit`): consecutive late nights stack a deeper deficit; a rested night
    recovers. It adds (bounded) to both the comp fold and the social sway.
+4. **EMERGENT, INDEPENDENT NPC bedtimes — the sleep-debt fairness fix** (owner ruling 2026-07-12; #TBD).
+   The original ENG-NEW-1 model capped an NPC's sleep debt at *the player's* bedtime (`min(chronotype,
+   nightRanTo)` where `nightRanTo` is when the player turned in) — so an NPC never accrued more debt than the
+   *player* chose to, and a player who bedded early left even natural night-owls fresh. That is a player-only
+   freedom: sleep debt did NOT apply on equal footing. **Fix:** an NPC's night is now EMERGENT
+   (`emergentBedtimeHour` in `timeOfDay.ts`) and INDEPENDENT of the player — a night-owl lingers to their own
+   chronotype bedtime ONLY with late-night **company** (`AFTER_HOURS.companyFull` = other natural owls still
+   up), or when the player kept the house up (the social floor rises past midnight); **alone on a dead night
+   they wind down to the social floor and pay nothing.** So an owl who genuinely stayed up (with company)
+   pays their OWN debt whether or not the player did — but a lone owl is NOT taxed for a trait (the debt is
+   **earned**, never structural). The adapter counts the live co-owl **company** (`lateCompanyFor`) and feeds
+   it to `npcRestDeficit`; **company omitted (0) collapses to the social floor, whose DEFICIT is byte-identical
+   to the old player-capped value** — so the seeded calibration spine and the `sleepEconomyFairness` gate are
+   unmoved. Rides the master clock (`timeOfDayEnabled`) like the rest of 0066; no separate flag (it is the
+   *definition* of the NPC deficit, not an add-on effect). *(This intentionally REVERSES the ENG-NEW-1 "no
+   owl tax on a normal night" stance where it conflicted with player↔NPC parity: an owl who stays up with
+   company is now legitimately a touch tired next comp, exactly as a player who stays up every night would be.)*
 
-All three are PURE (no rng — bedtimes are derived, the meter is a running average), so they add ZERO draws
-to the seeded competition/vote/jury stream; the per-extension proofs are `tests/unit/{perConversationClock,
-socialFatigue,multiNightFatigue}Neutral.test.ts`. Tunables live in the single `src/engine/sleepConstants.ts`.
+All four are PURE (no rng — bedtimes are derived, the meter is a running average, company is a deterministic
+count), so they add ZERO draws to the seeded competition/vote/jury stream; the proofs are `tests/unit/
+{perConversationClock,socialFatigue,multiNightFatigue}Neutral.test.ts` and `tests/unit/
+npcBedtimeIndependence.test.ts`. Tunables live in the single `src/engine/sleepConstants.ts`.
 
 ## 10. The 24-hour model (accepted amendment — owner, 2026-06-28; #1125)
 

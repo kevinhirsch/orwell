@@ -348,6 +348,17 @@ export const DEAL_IMPACTS = {
 } as const;
 
 /**
+ * 0121 — the LOYALTY-STREAK reward (deal-depth layer, `ORWELL_DEAL_DEPTH`). Consecutive kept deals with the
+ * SAME partner compound the honored fold: a "we've never broken faith" bond builds faster the longer you
+ * both hold the line. The multiplier is BOUNDED (never a runaway) and the WHOLE reward is off unless the
+ * deal-depth flag is on (off ⇒ the plain `DEAL_IMPACTS.honored`, byte-identical). A break resets the streak.
+ */
+export const DEAL_STREAK = {
+  step: 0.25,    // each consecutive kept deal adds this much to the honored-fold multiplier
+  maxMult: 2.0,  // capped — the reward compounds but never dominates
+} as const;
+
+/**
  * Deal-DURATION betrayal scaling (feature 0109 — the single tunable home for "when do you turn?").
  * A break's seeded betrayal-shock (BETRAYAL_SHOCK, applied by `DealLedger.applyBreak`) is multiplied
  * by a bounded scale derived from how much NEGOTIATED life the deal had left — NEVER inlined at the
