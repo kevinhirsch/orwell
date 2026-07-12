@@ -24,7 +24,11 @@ def test_e65_gamechanged_is_dispatched_from_the_tool_stream():
     # included, through THE one debounced dispatcher in platform.js. The full
     # dispatcher contract is pinned in test_g15_gamechanged.py.
     assert "window.orwellGameChanged" in CHAT
-    assert "'createCharacter'" in CHAT and "'manageSandbox'" in CHAT
+    # #1412 (R1b): the seam no longer hard-codes tool-name literals (the old
+    # `[…'createCharacter'…'manageSandbox'…].includes(json.tool)` array is gone) — it consumes the
+    # shared manifest lookup. Pin the manifest-driven dispatch (the tool set lives in platform.js
+    # ORWELL_MUTATING_TOOLS, pinned registry-equal by test_1412_mutating_manifest.py).
+    assert "window.orwellIsMutatingTool(json.tool)" in CHAT
 
 
 def test_e65_restart_opens_a_fresh_session():

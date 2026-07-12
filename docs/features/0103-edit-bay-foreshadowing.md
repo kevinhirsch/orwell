@@ -1,6 +1,16 @@
 # 0103 — Edit-bay foreshadowing (the show is telling you something)
 
-> **Status:** ❄️ **FROZEN — parked by owner (2026-06-27); preserved, not built. #885 closed *not planned* (reopenable).** Spoiler-adjacent in *feel* even though structurally Vault-safe; the 0102 daily-recap forward-nod already covers bounded foreshadowing. See `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27). The original proposal follows unchanged.
+> **Status:** 🟩 **REOPENED + ENGINE CORE BUILT (2026-07-12).** The pure fit/eligibility/budget/hint core is
+> built & unit-green — `src/engine/foreshadow.ts` (`foreshadowFit`, `rankForeshadowCandidates` dropping
+> `dormant` + no-public-surface + below-floor, `hintBudget` weekly+season caps, the Vault-safe `buildHint`,
+> `leadTimeFromWeeksOut`) + `src/engine/foreshadowConstants.ts`, `tests/unit/foreshadow.test.ts` (12 cases:
+> in-motion-only, needs-a-public-observation, cadence caps, the Vault-premise sentinel sweep, determinism).
+> GOLDEN-NEUTRAL (the base narrator prompt is untouched — the `editBayHint` context field ships with the
+> adapter wiring). **Follow-up lane (LARGE — not yet built):** the `GameSessionAdapter` off-screen-tick wiring
+> on a dedicated side-rng behind `ORWELL_FORESHADOW` (byte-identical when off), the read-only `editBayHint`
+> `momentPrompts` field, persistence of the cadence counters + hint→pathway link, the 0092/0102 coordination
+> (R3), and BDD wiring. *(Previously: ❄️ FROZEN — parked 2026-06-27; #885 closed not planned; reopened by owner
+> ruling "Everything". Spoiler-adjacent in feel though structurally Vault-safe; see `docs/decisions/PO-DECISIONS-LOG.md`.)* The original proposal follows unchanged.
 > Tracks **#885**. This is a *design proposal awaiting decisions*; nothing here is implemented. It is
 > the **anticipation companion** to **0092** (secret-pacing drip — the *payoff* arrives; 0103 plants
 > the *foreshadow* that makes the payoff land as "I knew it") and to the **weekly recap 0102** (its

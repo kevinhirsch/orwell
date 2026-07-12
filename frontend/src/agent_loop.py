@@ -32,6 +32,8 @@ from src.agent_tools import (
     function_call_to_tool_block,
     get_mcp_manager,
     FUNCTION_TOOL_SCHEMAS,
+    with_deal_depth_kinds,
+    current_deal_kinds,
     TOOL_TAGS,
     ToolBlock,
     MAX_AGENT_ROUNDS,
@@ -3056,6 +3058,14 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         # deal-signal hit rather than blindly taking the head (which could be a comp/eviction beat).
         _m = _DEAL_SIGNAL_RE.search(narration or "")
         scene = (narration[max(0, _m.start() - 600): _m.start() + 1200] if _m else (narration or "")[:1500])
+        # 0121 R2 — the kinds the extraction may pick track the engine's deal-depth flag (comp-throw/veto-save
+        # only when it is on); off ⇒ the original four ⇒ the prompt (and the golden path) are unchanged.
+        _kinds = current_deal_kinds()
+        _kinds_csv = ", ".join(_kinds)
+        _kind_desc = ("safety = won't nominate / will protect; vote = how to vote; final-two = go to the end "
+                      "together; target-other = agree to come after a third person")
+        if "comp-throw" in _kinds:
+            _kind_desc += "; comp-throw = throw a competition for them; veto-save = use the veto to save them"
         msgs = [
             {"role": "system", "content":
                 _EXTRACTION_UNTRUSTED_FENCE +
@@ -3063,12 +3073,10 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
                 "Brother scene. Reply IMMEDIATELY with ONLY a JSON object — no analysis, no thinking, "
                 "no prose, no code fence:\n"
                 '{"struck":<true|false>,"withId":"<the houseguest id from the roster>",'
-                '"kind":"<one of: safety, vote, final-two, target-other>",'
+                '"kind":"<one of: ' + _kinds_csv + '>",'
                 '"terms":"<one short clause of what was promised>"}\n'
                 "struck=true ONLY when BOTH sides explicitly AGREED to a concrete commitment. If it was "
-                "loose talk, a one-sided pitch, a 'maybe', or a refusal, struck=false. kind: safety = "
-                "won't nominate / will protect; vote = how to vote; final-two = go to the end together; "
-                "target-other = agree to come after a third person."},
+                "loose talk, a one-sided pitch, a 'maybe', or a refusal, struck=false. kind: " + _kind_desc + "."},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{scene}\n\nJSON:"},
@@ -3091,7 +3099,7 @@ async def _auto_record_deal(narration, last_user, house, endpoint_url, model, he
         if with_id not in valid:
             logger.info(f"[orwell] deal back-fill: withId {with_id!r} not on roster — skipped user={owner}")
             return False
-        kind = obj.get("kind") if obj.get("kind") in _DEAL_KINDS else "safety"
+        kind = obj.get("kind") if obj.get("kind") in set(_kinds) else "safety"
         terms = (obj.get("terms") or "").strip()[:200] or "a mutual protection deal"
         # 0065 Part A: attach the CAS token + refresh last-seen from the response. A single stale 409
         # (the board moved under us mid-turn) is reconciled-and-RETRIED (#591); a SECOND consecutive one
@@ -5076,6 +5084,12 @@ async def _stream_agent_loop_impl(
             _wants_mcp = any(kw in _last_content for kw in _MCP_KEYWORDS)
             all_tool_schemas = mcp_schemas if (_wants_mcp and mcp_schemas) else []
         agent_stream_timeout = int(get_setting("agent_stream_timeout_seconds", 300) or 300)
+
+        # 0121 R2 — when the engine's deal-depth layer is on, extend makeDeal's `kind` enum with the two
+        # active-obligation kinds (comp-throw/veto-save) at SEND time. Off (default, and the golden driver)
+        # ⇒ the same schemas ⇒ the 0108 golden fixture is byte-identical.
+        if all_tool_schemas:
+            all_tool_schemas = with_deal_depth_kinds(all_tool_schemas)
 
         _tool_names_sent = [t.get("function", {}).get("name") for t in (all_tool_schemas or []) if t.get("function")]
         logger.info(f"[agent-debug] round={round_num} model={model} _is_api_model={_is_api_model} tools_sent={len(_tool_names_sent)} tool_names={_tool_names_sent[:15]} relevant_tools={sorted(_relevant_tools)[:15] if _relevant_tools else 'ALL'}")

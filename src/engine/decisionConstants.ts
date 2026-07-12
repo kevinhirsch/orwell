@@ -71,6 +71,19 @@ export const DECISION = {
     /** Above this mutual trust the pact is a full final-two; below, a week-scoped safety deal. */
     finalTwoTrustMin: 0.72,
   },
+  /**
+   * 0123 — the NPC-initiated deal OFFER to the PLAYER (the NPC->player counterpart of `makeDeal`). A
+   * motivated houseguest floats the player a deal at a lull. Bounded + grounded so it reads as real play,
+   * not noise. Only ever acts when the `ORWELL_NPC_DEAL_OFFERS` layer is on ⇒ byte-identical when off.
+   */
+  playerOffer: {
+    /** Chance per eligible LULL advance (no pending, game live, cooldown clear) that an NPC floats an offer. */
+    prob: 0.22,
+    /** The NPC must have a REAL reason — max(bond, threat) toward the player must clear this floor. */
+    motivationMin: 0.45,
+    /** Above this BOND toward the player the offer is a final-two/alliance; otherwise a mutual-safety deal. */
+    finalTwoBond: 0.6,
+  },
 } as const;
 
 /**

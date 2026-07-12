@@ -1,12 +1,12 @@
 # 0121 — Deal depth: active-obligation kinds + reliability rewards
 
-> **Status:** **Engine complete** (both active-obligation kinds fire LIVE end-to-end — comp-throw at the
-> comp crown, veto-save at the veto ceremony — plus the loyalty-streak reward and the reliable-ally
-> protection reward). **Three items remain, specced in §7 for a later PR:** R1 the diffusing "keeps their
-> word" reputation reward, R2 the FE chat-extraction of the new kinds (blocked on a golden-fixture re-record
-> that needs a live model key, or a flag-gated schema), R3 the deploy opt-in. The flag `ORWELL_DEAL_DEPTH`
-> stays **default OFF and NOT in the deploy** until R1–R3 land, so nothing is half-wired in production
-> (off ⇒ the new kinds can't even be made ⇒ byte-identical).
+> **Status:** ✅ **COMPLETE.** Both active-obligation kinds fire LIVE end-to-end (comp-throw at the comp
+> crown, veto-save at the veto ceremony) + all three reliability rewards — loyalty streak, reliable-ally
+> protection, and (R1) the diffusing "keeps their word" reputation. R2 (the FE chat-extraction of the new
+> kinds) shipped **flag-gated off `/health.flags.dealDepth`** — no golden re-record needed (off ⇒ base four
+> ⇒ byte-identical). R3 opts the flag into the deploy (`ORWELL_DEAL_DEPTH=1` in `orwell-install.sh` +
+> `smoke.sh`), kept off in the golden driver. The flag stays **default OFF in code** so the seeded gates +
+> golden fixture stay byte-identical; the deploy turns the whole layer on.
 > **PO expansion of the 0039 review** (2026-07-12). 0039 made deals
 > first-class and engine-adjudicated, but (a) every kind is a *defensive* "don't move against me" promise,
 > and (b) keeping a deal is under-rewarded relative to breaking it (a modest trust/reliability build vs. a
@@ -116,9 +116,21 @@ ORWELL_DEAL_DEPTH (default OFF): gates ALL of the above ⇒ byte-identical when 
 - [x] **[Part 2b] Reliable-ally protection (reward 2):** delivered by the EXISTING reliability→nomination
       machinery — a proven-reliable partner outranks others as a nomination target (`relationships.ts`
       `bondStrength`/nom read) — and the streak's reliability build amplifies it. No new code needed.
-- [ ] **[R1 · later PR] Reputation that spreads (reward 1)** — see §7.
-- [ ] **[R2 · later PR] FE chat-extraction of the new kinds** — see §7.
-- [ ] **[R3 · later PR] Deploy opt-in (`ORWELL_DEAL_DEPTH=1`)** — see §7.
+- [x] **[R1] Reputation that spreads (reward 1)** — SHIPPED. A kept deal seeds a Vault-free "keeps their
+      word" reputation about the honorer that diffuses NPC→NPC (0038); every third party who hears it leans
+      slightly toward the honorer (`gossip.spreadReliableReputation` + `GOSSIP_HEARD.reliable`, wired via
+      `GameSessionAdapter.setDealReputationSink` + the `reconcileDeals` `reputation` hook). Gated on the
+      deal-depth flag ⇒ off is byte-identical (`tests/unit/dealReputation.test.ts`; juryReach unchanged). The
+      engine `dealDepth` flag is now surfaced on `/health` (`bootFlags`) for the FE flag-gate (R2).
+- [x] **[R2] FE chat-extraction of the new kinds** — SHIPPED (flag-gated, no re-record). The FE caches the
+      engine's `/health` `flags.dealDepth` (`orwell_engine.engine_flag`) and, when on, extends makeDeal's
+      `kind` enum + the deal-extraction prompt/validation with `comp-throw`/`veto-save` at SEND time
+      (`tool_schemas.with_deal_depth_kinds`/`current_deal_kinds`; `agent_loop`; `tool_implementations`). OFF
+      (the default, and the golden driver) ⇒ the schema is the identical base four ⇒ the 0108 golden fixture
+      is byte-identical (`frontend/tests/test_0121_deal_kinds.py`).
+- [x] **[R3] Deploy opt-in (`ORWELL_DEAL_DEPTH=1`)** — SHIPPED. Added to `deploy/orwell-install.sh`
+      (living-house block) + `deploy/smoke.sh` `SHIPPED_FLAGS`; the golden driver leaves it off, so the
+      fixture stays byte-identical.
 
 ## 6. Dependencies & traceability
 
@@ -135,7 +147,12 @@ Three items remain, each behind a real constraint — captured here so they are 
 an environment where the golden fixture can be regenerated. **All stay behind `ORWELL_DEAL_DEPTH` (default
 OFF) and must keep the seeded spine + golden replay byte-identical.**
 
-### R1 — Reputation that spreads (the third reward)
+### R1 — Reputation that spreads (the third reward) — ✅ SHIPPED
+
+> **Built.** `gossip.spreadReliableReputation` (diffuse the single-subject belief + the bounded
+> `GOSSIP_HEARD.reliable` lean on each third-party holder; the deal partner is excluded — they earned the
+> direct fold) ← `GameSessionAdapter.setDealReputationSink` ← the `reconcileDeals` `reputation` hook (the
+> ledger only fires it under the flag). Gated ⇒ off byte-identical. Gate: `tests/unit/dealReputation.test.ts`.
 
 **What:** a kept deal seeds a hidden *"keeps their word"* reputation belief about the honorer that
 **diffuses NPC→NPC** through the existing **0038** gossip layer; a houseguest who has heard it reads the

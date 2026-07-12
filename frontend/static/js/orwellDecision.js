@@ -36,6 +36,7 @@
     "final-eviction": "vote",
     "juror-vote": "vote",
     "goodbye-message": "vote", // E34: the chosen tone rides `vote` (options are the tones)
+    "deal-offer": "vote", // 0123: accept/decline of an NPC's floated deal rides `vote` (options are the two)
     "replacement": "replacement",
   };
   const COMP_INTENTS = ["compete", "throw", "play-safe"];
@@ -217,6 +218,13 @@
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
       #${CARD_ID} .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
       #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
+      /* WCAG 2.1.1 (Keyboard): the prompt + still-in roster are focusable regions (tabindex=0,
+         set in _build) so a keyboard/SR user can read the FULL prompt/roster — which caps to a
+         20vh scroll region on short viewports (the media block below) — before confirming a
+         binding move. Neutral iOS-blue ring, consistent with the window/gadget kits. */
+      #${CARD_ID} .odec-prompt:focus-visible, #${CARD_ID} .odec-stillin:focus-visible {
+        outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px;
+      }
       #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       /* #775 element-kit migration (owner request): the decision OPTION chips compose the kit's
          .ow-btn .ow-btn-prominent (a liquid-glass PROMINENT CTA). On the GLASS tiers the kit owns
@@ -406,11 +414,13 @@
       "juror-question": "Your jury question — ask the finalist",
       "juror-vote": "Your jury vote — crown a winner",
       "self-evict": "Self-eviction — leave the game?",
+      "deal-offer": "A houseguest's offer — accept or decline",
     }[kind] || "Your decision";
   }
 
   function confirmLabelFor(kind, binding) {
     if (kind === "self-evict") return "Confirm — leave the game (final)";
+    if (kind === "deal-offer") return "Confirm your answer"; // 0123: a light social choice, not a binding fate
     if (kind === "comp-round") return binding === false ? "Push through this round" : "Lock in your approach";
     return "Confirm — this is binding";
   }
@@ -531,6 +541,13 @@
     if (pending.prompt) {
       const p = document.createElement("div");
       p.className = "odec-prompt";
+      // WCAG 2.1.1 (Keyboard): on short viewports this caps to a 20vh scroll region (CSS media
+      // block), so a long ceremony/comp prompt runs below the fold with the Confirm row pinned.
+      // tabindex=0 + role=region lets a keyboard/SR user land on it and read the FULL prompt
+      // (arrows/PageDown/Space) before committing a binding move.
+      p.setAttribute("tabindex", "0");
+      p.setAttribute("role", "region");
+      p.setAttribute("aria-label", "decision prompt");
       let promptText = pending.prompt;
       if (willRenderStillIn) {
         promptText = promptText.replace(/\s*Still in with you:\s*[^.]+\.\s*/, " ").replace(/\s{2,}/g, " ").trim();
@@ -544,6 +561,11 @@
     if (willRenderStillIn) {
       const still = document.createElement("div");
       still.className = "odec-stillin";
+      // WCAG 2.1.1 (Keyboard): the roster also caps to a 20vh scroll region on short viewports.
+      // Focusable region so a keyboard/SR user can read WHO IS STILL IN before adapting a binding move.
+      still.setAttribute("tabindex", "0");
+      still.setAttribute("role", "region");
+      still.setAttribute("aria-label", "houseguests still in play");
       const names = pending.stillIn.map((r) => esc(r.name || String(r.id))).join(", ");
       const r = (typeof pending.round === "number" && pending.round > 0) ? `Round ${pending.round} — ` : "";
       still.innerHTML = `<strong>${r}Still in:</strong> ${names}`;

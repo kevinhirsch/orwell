@@ -65,6 +65,13 @@ READ_ONLY_TOOLS = frozenset({
     # off-screen texture write-backs, and cast pre-warm authoring.
     "requestSelfEviction", "cancelSelfEviction", "confide",
     "preSeedCast", "preSeedNextSeason", "recordCastProfile", "recordCastIdentity",
+    # 0116 (model-authored cast genesis): an FE-driven PRE-GAME cast-authoring write-back (the
+    # producer-LLM proposes the cast skeleton; the engine validates/clamps/folds), moving only the
+    # pre-warm cast the status HUD never renders — NOT a HUD-mutating lever, exactly like its sibling
+    # recordCastIdentity / recordCastProfile above. (Classified here to clear the #1412 drift guard,
+    # which an engine-only PR skips — the lever-drift trap — so it landed latent on main until an
+    # FE-touching PR ran fe-unit.)
+    "recordCastGenesis",
     "recordWorldSnapshot", "recordOffscreenSceneTexture", "recordCompetitionFiction",
     # 0116 (#1403): model-authored cast genesis — an FE-driven pre-game write-back (the
     # producer-LLM proposes the 15-NPC skeleton; the engine validates + folds it, player-BLIND).
