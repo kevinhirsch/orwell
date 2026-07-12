@@ -2053,7 +2053,10 @@ body.bg-pattern-perlin-flow {
     /* the floating mobile opener (hidden on desktop) */
     .gadget-rail-open {
       position: fixed; right: 12px; bottom: calc(var(--composer-clearance, 84px) + 8px); z-index: 46;
-      width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+      /* F4a: express the 44px HIG tap target via the token (was a bare 42px). Shown only on the
+         coarse-pointer tier, where the responsive-tokens floor already promotes it to 44 — so this
+         is source hygiene with no visual change, and it stays correct on non-coarse touch too. */
+      width: var(--tap-min); height: var(--tap-min); border-radius: 50%; border: 1px solid var(--border);
       background: var(--accent, #e06c75); color: var(--on-accent, #fff); font-size: 1.1rem; cursor: pointer;
       box-shadow: 0 4px 12px rgba(0,0,0,.3); display: none;
     }

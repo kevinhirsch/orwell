@@ -208,7 +208,7 @@
         #orwell-cast .oc-name { margin-top: .35rem; font-size: .78rem; line-height: 1.25; word-break: break-word; }
         #orwell-cast .oc-name b { color: var(--fg, #9cdef2); }
         #orwell-cast .oc-status {
-          margin-top: .15rem; font-size: .66rem; letter-spacing: .04em; opacity: .65; text-transform: uppercase;
+          margin-top: .15rem; font-size: var(--fs-2xs); letter-spacing: .04em; opacity: .65; text-transform: uppercase;
         }
         #orwell-cast .oc-hg.oc-out { opacity: .5; }
         /* L16: the ONLY monochrome state is EVICTION. An active OR jury houseguest

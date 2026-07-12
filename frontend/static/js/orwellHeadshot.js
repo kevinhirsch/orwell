@@ -97,7 +97,10 @@
          aria and stays operable; selection state shows in the preview thumbnail. */
       .ow-headshot-studio .hs-file-native { position: absolute; width: 1px; height: 1px;
         overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-      .ow-headshot-studio .hs-filebtn { display: inline-flex; align-items: center; align-self: flex-start; }
+      /* F3: the file-picker is a <label> (not a <button>), so the coarse-pointer tap floor in
+         responsive-tokens.css never reaches it — pin the 44px HIG tap target here (WCAG 2.5.5). */
+      .ow-headshot-studio .hs-filebtn { display: inline-flex; align-items: center; align-self: flex-start;
+        min-height: var(--tap-min); box-sizing: border-box; }
       /* SR-only live region for portrait status ("Generating…", "Upload failed", offline) — J1-27. */
       .ow-headshot-studio .hs-live { position: absolute; width: 1px; height: 1px; overflow: hidden;
         clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
