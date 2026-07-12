@@ -395,6 +395,7 @@ import * as modalManager from "./modalManager.js";
       finWant.add(key);
       let card = finHave.get(key);
       if (!card || card.getAttribute("data-fin-sig") !== sig) {
+        const stale = card; // the prior card for this key (e.g. before its portrait landed), still in finWrap
         card = document.createElement("div");
         card.className = "ofin-fin";
         card.setAttribute("data-fin-key", key);
@@ -405,6 +406,10 @@ import * as modalManager from "./modalManager.js";
         const t = document.createElement("span"); t.className = "ofin-tally";
         card.appendChild(b); card.appendChild(t);
         finHave.set(key, card);
+        // REPLACE the stale node in place (its key is still wanted, so the cleanup below won't drop it) —
+        // else insertBefore(card, finRef) mounts the fresh card BESIDE the old one → duplicate finalist
+        // card on a signature change (portrait landing). Mirrors orwellCastPin/RoomStrip replaceChild.
+        if (stale && stale.parentNode) stale.parentNode.replaceChild(card, stale);
       }
       // the tally is the one thing that changes every reveal — update the persistent node's text only
       const t = card.querySelector(".ofin-tally");

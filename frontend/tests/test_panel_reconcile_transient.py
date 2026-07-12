@@ -85,6 +85,12 @@ def test_finale_finalist_cards_are_keyed_and_reused():
     assert 'querySelector(".ofin-tally")' in FINALE, (
         "the tally updates the PERSISTENT node's text rather than rebuilding the card"
     )
+    # Greptile P1 (#1493): a signature change (e.g. a portrait landing after first render) must
+    # REPLACE the stale finalist node in place — else insertBefore mounts the fresh card BESIDE the
+    # old one (key still wanted, so cleanup keeps it) → duplicate finalist cards. Mirror castpin.
+    assert "replaceChild" in FINALE, (
+        "a changed finalist card replaces its stale predecessor in place (no duplicate card)"
+    )
 
 
 # ── orwellRoomStrip.js — persistent chips so the leaving-fade fires; gated arrival fade ──
