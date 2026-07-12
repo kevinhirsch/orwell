@@ -681,10 +681,10 @@ app.include_router(setup_chat_routes(
 ))
 
 # WebSocket Phase-1 (ADR 0017 / docs/design/websocket-phase1-protocol.md) — one multiplexed socket
-# per canonical session (browser ↔ FE). The route is always registered; the client only ATTEMPTS the
-# upgrade when the ORWELL_WS_TRANSPORT flag is on (default off in Phase 1 — the sibling client PR owns
-# negotiation), so this is a zero-risk addition that reuses the existing agent_runs / canonical-binding
-# helpers under the socket.
+# per canonical session (browser ↔ FE). The route is always registered; the client ATTEMPTS the
+# upgrade when the ORWELL_WS_TRANSPORT flag is on — default ON since 2026-07-10 (#1357); an explicit
+# off/0/false rolls back to the permanent SSE/poll fallback. The socket reuses the existing
+# agent_runs / canonical-binding helpers.
 from routes.ws_routes import setup_ws_routes
 app.include_router(setup_ws_routes())
 
@@ -885,9 +885,10 @@ def _serve_html_with_nonce(request: Request, file_path: str) -> HTMLResponse:
         # WebSocket Phase-1 transport (ADR 0017/0018) server→client flag injection.
         # orwellWs.js reads body[data-ws-transport] to decide whether to attempt the WS
         # upgrade; it's a GAME-build concern (the mirror/HUD it ports live only here).
-        # DEFAULT OFF: emit the attr ONLY when ORWELL_WS_TRANSPORT is truthy — unset ⇒
-        # attr ABSENT ⇒ byte-identical page ⇒ WS stays dormant on the SSE/poll stack.
-        # This makes the owner-gated rollout flippable by env, no code change needed.
+        # DEFAULT ON (since 2026-07-10, #1357): emit the attr whenever ws_transport_enabled()
+        # is true — unset ⇒ attr PRESENT ⇒ the client engages WS; an explicit off/0/false ⇒
+        # attr ABSENT ⇒ the page rolls back to the SSE/poll stack. Still flippable by env, no
+        # code change needed.
         if ws_transport_enabled():
             html = html.replace("<body", '<body data-ws-transport="1"', 1)
         # UX audit J1-02: the composer placeholder names the APP ("Message Orwell…"),

@@ -694,6 +694,16 @@ async def _health_snapshot(user: str | None) -> dict:
     except Exception:
         cast_authoring = None
 
+    # Owner directive 2026-07-11 — the enrichment policy + its LOUD failure ledger (strict mode's
+    # admin surface: every no-model refusal / retried-then-failed enrichment call lands here).
+    # Best-effort + Vault-free (call-class names, reasons, timestamps — never content).
+    try:
+        from src import enrichment_policy as _enrichment
+        enrichment = {"policy": _enrichment.current_policy(),
+                      "failures": _enrichment.failures(user)}
+    except Exception:
+        enrichment = None
+
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "engine": engine,
@@ -701,6 +711,7 @@ async def _health_snapshot(user: str | None) -> dict:
         "tiersAgree": tiers_agree,
         "images": images,
         "castAuthoring": cast_authoring,
+        "enrichment": enrichment,
         # Build + version (PR) for one-glance triage on the status page. version is the
         # PR-derived "vX.XX"; build is the deployed checkout's short commit SHA.
         "versions": _versions(),

@@ -30,9 +30,10 @@
   }
 
   // E71 per-user dismiss key — one account's dismissal never bleeds into another's.
+  // Fail-closed (R5/#1416): null when there is no data-user identity, so the local fallback write
+  // is skipped rather than written to a shared "" namespace (the synced layout store still carries it).
   function dismissKey() {
-    return "orwell-premiere-tutorial-dismissed:" +
-      ((document.body && document.body.dataset.user) || "");
+    return (window.orwellUserKey && window.orwellUserKey("orwell-premiere-tutorial-dismissed")) || null;
   }
   // #638: the SYNCED layout-store id for this popup's dismiss state (the source of truth that
   // survives reload, crosses devices, and mirrors between two windows). localStorage stays the
@@ -41,10 +42,13 @@
   var _syncedDismissed = false;
   function hasDismissed() {
     if (_syncedDismissed) return true;
-    try { return localStorage.getItem(dismissKey()) === "1"; } catch (_) { return false; }
+    var k = dismissKey();
+    if (!k) return false;
+    try { return localStorage.getItem(k) === "1"; } catch (_) { return false; }
   }
   function markDismissed() {
-    try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
+    var k = dismissKey();
+    if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
     // #638: fan the dismiss out as a synced, last-write-wins field via the 0064 layout seam.
     if (!_applyingSynced) {
       try {
@@ -62,7 +66,8 @@
     _syncedDismissed = true;
     _applyingSynced = true;   // suppress the re-emit while WE land a remote/seed dismiss
     try {
-      try { localStorage.setItem(dismissKey(), "1"); } catch (_) {}
+      var k = dismissKey();
+      if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
       var card = document.getElementById("orwell-premiere-tutorial");
       if (card) dismiss();      // mirror the close in this window (no re-emit — guarded)
       else removeTutorial();

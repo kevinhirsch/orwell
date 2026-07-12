@@ -46,15 +46,20 @@
 const TIPS = {};
 
 // ── per-user dismiss persistence (E71 key pattern) ───────────────────────────
+// Per-user key, fail-closed (R5/#1416): null when there is no data-user identity, so the dismiss
+// state is not written to a shared "" namespace rather than bleeding across accounts.
 function _dismissKey(key) {
-  return 'orwell-chat-hint-dismissed:' + key + ':' +
-    ((document.body && document.body.dataset.user) || '');
+  return (window.orwellUserKey && window.orwellUserKey('orwell-chat-hint-dismissed:' + key)) || null;
 }
 function _hasDismissed(key) {
-  try { return localStorage.getItem(_dismissKey(key)) === '1'; } catch (_) { return false; }
+  const k = _dismissKey(key);
+  if (!k) return false;
+  try { return localStorage.getItem(k) === '1'; } catch (_) { return false; }
 }
 function _markDismissed(key) {
-  try { localStorage.setItem(_dismissKey(key), '1'); } catch (_) {}
+  const k = _dismissKey(key);
+  if (!k) return;
+  try { localStorage.setItem(k, '1'); } catch (_) {}
 }
 
 function _isGameBuild() {

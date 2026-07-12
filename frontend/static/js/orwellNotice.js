@@ -331,14 +331,19 @@
   // localStorage is the per-device offline/seed fallback. The synthetic window id is
   // "notice:<id>" (windows use the bare id, gadgets "gadget:<id>", popups "popup:<id>").
   function syncId(id) { return "notice:" + id; }
+  // Per-user key, fail-closed (R5/#1416): null when there is no data-user identity, so the dismiss
+  // state is not written to a shared "" namespace (the synced layout store stays the source of truth).
   function dismissKey(id) {
-    return "orwell-notice-dismissed:" + id + ":" + ((document.body && document.body.dataset.user) || "");
+    return (window.orwellUserKey && window.orwellUserKey("orwell-notice-dismissed:" + id)) || null;
   }
   function loadDismissed(id) {
-    try { return localStorage.getItem(dismissKey(id)) === "1"; } catch (_) { return false; }
+    var k = dismissKey(id);
+    if (!k) return false;
+    try { return localStorage.getItem(k) === "1"; } catch (_) { return false; }
   }
   function saveDismissed(id, applyingRemote) {
-    try { localStorage.setItem(dismissKey(id), "1"); } catch (_) {}
+    var k = dismissKey(id);
+    if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
     // Emit through the SAME capture event the window + gadget kits use — no parallel sync.
     // Suppressed while APPLYING a remote change (no echo loop). orwellLayoutSync debounces a
     // PATCH /api/orwell/layout; absent module ⇒ localStorage-only, fail-open.
@@ -359,7 +364,10 @@
     var id = String(d.windowId).slice("notice:".length);
     if (d.state.dismissed === true) {
       // Remember it even if the notice isn't mounted right now, so a later show() honors it.
-      try { localStorage.setItem(dismissKey(id), "1"); } catch (_) {}
+      // R5/#1416: dismissKey(id) is null when there is no data-user — guard so the null key never
+      // reaches Web Storage (which would coerce it into a shared "null" namespace).
+      var k = dismissKey(id);
+      if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
       var n = _byId[id];
       if (n) n._applyRemoteDismiss();
     }

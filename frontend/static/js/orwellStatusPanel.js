@@ -45,8 +45,11 @@ import { onNarrowChange } from './platform.js';
   // closest stable public game discriminator the FE holds), so one account's
   // collapse/dismiss state never leaks into another's, or into season 2.
   let _gameKey = "";
+  // Fail-closed (R5/#1416): _gameKey is null when there is no data-user identity (computeGameKey
+  // returns null), so storageKey returns null and every collapse read/write below is SKIPPED
+  // rather than written to a shared empty-user namespace.
   function storageKey(base) {
-    return base + ":" + _gameKey;
+    return _gameKey ? base + ":" + _gameKey : null;
   }
 
   // F1 (G5 refresh-persistence audit / Lane G16): the collapse used to be
@@ -59,16 +62,19 @@ import { onNarrowChange } from './platform.js';
   // re-applies whenever the key changes (game change / season 2) — E71
   // scoping intact.
   function computeGameKey(state) {
-    return ((state && state.player && state.player.name) || "") + ":" +
-           ((document.body && document.body.dataset.user) || "");
+    // `name + ':' + user` via the shared per-user helper (R5/#1416) — null when no data-user.
+    const name = (state && state.player && state.player.name) || "";
+    return (window.orwellUserKey && window.orwellUserKey(name)) || null;
   }
   let _applyCollapsed = null;     // ensurePanel's setCollapsed, exposed for re-application
   let _collapseKeyApplied = null; // the _gameKey whose persisted collapse was last applied
   function reapplyPersistedCollapse() {
     if (!_applyCollapsed || _collapseKeyApplied === _gameKey) return;
     _collapseKeyApplied = _gameKey;
+    const sk = storageKey("orwell-status-collapsed");
+    if (!sk) return;
     try {
-      _applyCollapsed(localStorage.getItem(storageKey("orwell-status-collapsed")) === "1");
+      _applyCollapsed(localStorage.getItem(sk) === "1");
     } catch (_) {}
   }
 
@@ -290,7 +296,8 @@ import { onNarrowChange } from './platform.js';
       // E71: this panel owns a richer per-user+GAME collapse key than the kit's per-user one — so
       // it persists in the kit's onCollapse hook (fired on every header toggle), keyed to _gameKey.
       onCollapse: (on) => {
-        try { localStorage.setItem(storageKey("orwell-status-collapsed"), on ? "1" : ""); } catch (_) {}
+        const sk = storageKey("orwell-status-collapsed");
+        if (sk) { try { localStorage.setItem(sk, on ? "1" : ""); } catch (_) {} }
       },
     });
     const body = _gadget.ensure();
@@ -330,8 +337,9 @@ import { onNarrowChange } from './platform.js';
     // setter is just _gadget.setCollapsed; a header toggle, a boot restore, and a season re-apply
     // all flow through the one path (and persist the right key).
     const setCollapsed = (on) => _gadget.setCollapsed(!!on);
+    const _sk = storageKey("orwell-status-collapsed");
     try {
-      if (localStorage.getItem(storageKey("orwell-status-collapsed")) === "1") setCollapsed(true);
+      if (_sk && localStorage.getItem(_sk) === "1") setCollapsed(true);
     } catch (_) {}
     // F1: the read above ran under the key render() computed BEFORE this build;
     // expose the setter + record the key so a later key change re-applies.

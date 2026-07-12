@@ -1,0 +1,131 @@
+import type { Beat, LiveSeasonState } from "./liveSeason";
+import type { TimeOfDay } from "./timeOfDay";
+import { WAKE_HOUR, eventSpanHours } from "./timeOfDay";
+import { CLOCK } from "./sleepConstants";
+
+/**
+ * 0118 (in-game-time pivot, Phase 2) — THE DAY HAS A SHAPE. Each week's ceremonies sit at scheduled
+ * in-game times, the player is TOLD when the next one lands ("the comp is this afternoon"), and when the
+ * clock reaches that time the ceremony fires + gathers the whole house (the 0106 set-piece). This module
+ * is the pure, deterministic, Vault-free schedule: a beat→phase map and two reads over the live state.
+ *
+ * It is a PURE READ — it never mutates the seeded sim, so everything built on it is calibration-identical,
+ * and it is only ever SURFACED when the per-conversation clock is live (so golden replay, which pins that
+ * clock off, never sees it — no re-record). In-game time only; never a wall clock.
+ */
+
+/** The player-facing structural milestones the schedule telegraphs (the ceremonies, not presentation drops). */
+export type StructuralMilestone =
+  | "hoh-competition"
+  | "nominations"
+  | "veto-competition"
+  | "veto-ceremony"
+  | "eviction"
+  | "final-eviction"
+  | "finale";
+
+/**
+ * The scheduled in-game PHASE each ceremony lands in — the day's shape, tunable in one place. Comps in the
+ * AFTERNOON (the house has a morning to scramble first); ceremonies + evictions in the EVENING (the day
+ * builds to them). The player is told this ahead of time, so every run-up conversation is primed for the
+ * interruption. The day-position boundaries (which day each lands on) are owned by the existing night-gate
+ * (0066/#1320); this map is the WITHIN-day slot.
+ */
+export const DAY_SCHEDULE: Record<StructuralMilestone, TimeOfDay> = {
+  "hoh-competition": "afternoon",
+  "nominations": "afternoon",
+  "veto-competition": "afternoon",
+  "veto-ceremony": "afternoon",
+  "eviction": "evening",
+  "final-eviction": "evening",
+  "finale": "evening",
+};
+
+/** Readable names for the telegraphed milestones (narration priming + the HUD cue). Public, Vault-free. */
+export const MILESTONE_LABEL: Record<StructuralMilestone, string> = {
+  "hoh-competition": "HOH competition",
+  "nominations": "nomination ceremony",
+  "veto-competition": "Power of Veto competition",
+  "veto-ceremony": "veto ceremony",
+  "eviction": "eviction",
+  "final-eviction": "final eviction",
+  "finale": "finale",
+};
+
+const MILESTONE_BEATS: ReadonlySet<Beat> = new Set<Beat>(Object.keys(DAY_SCHEDULE) as Beat[]);
+
+/** The clock-HOUR (8..32) a day-phase begins at (mirrors the per-beat clock's phase bands). */
+function phaseStartHour(phase: TimeOfDay): number {
+  const p = CLOCK.phaseStartsHour;
+  switch (phase) {
+    case "morning": return p.morning;
+    case "afternoon": return p.afternoon;
+    case "evening": return p.evening;
+    case "night": return p.night;
+    case "late-night": return p.lateNight;
+  }
+}
+
+export interface NextMilestone {
+  /** The next ceremony the player is heading toward (the live loop's `beat`). */
+  beat: StructuralMilestone;
+  /** The in-game phase it is scheduled for — what the player is told ("this afternoon"). */
+  phase: TimeOfDay;
+  /** The clock-hour that phase begins at (the due threshold). */
+  targetHour: number;
+}
+
+/**
+ * The next scheduled milestone (the current structural beat), its telegraphed phase, and its target hour —
+ * or `null` when the game is not sitting on a milestone beat (pre-game, an inert/presentation beat, or the
+ * `complete` terminal). A pure read of the live loop state.
+ */
+export function nextMilestone(live: LiveSeasonState | null | undefined): NextMilestone | null {
+  const beat = live?.beat;
+  if (!beat || !MILESTONE_BEATS.has(beat)) return null;
+  const m = beat as StructuralMilestone;
+  const phase = DAY_SCHEDULE[m];
+  return { beat: m, phase, targetHour: phaseStartHour(phase) };
+}
+
+/**
+ * Has the in-game clock reached the scheduled milestone's time (⇒ the ceremony should fire + gather now)?
+ * The signal the FE's time-aware forced-advance nudge consults. `false` when there is no milestone or the
+ * clock hasn't started. A pure read — never mutates state, never draws rng.
+ */
+export function milestoneDue(live: LiveSeasonState | null | undefined): boolean {
+  const m = nextMilestone(live);
+  if (!m || live?.timeOfDay === undefined) return false;
+  const hour = live.nightDepth ?? WAKE_HOUR;
+  return hour >= m.targetHour;
+}
+
+/**
+ * 0119 (in-game-time pivot, Phase 3) — which duration CATEGORY a resolved beat belongs to. Comps run
+ * long, ceremonies are quick, evictions are in between; the finale is a long endgame event. Beats with no
+ * distinct duration (staged presentation drops, twists, the terminal) are absent ⇒ the caller keeps the
+ * flat per-beat default.
+ */
+const DURATION_CATEGORY: Partial<Record<Beat, "competition" | "ceremony" | "eviction">> = {
+  "hoh-competition": "competition",
+  "veto-competition": "competition",
+  "nominations": "ceremony",
+  "veto-ceremony": "ceremony",
+  "eviction": "eviction",
+  "final-eviction": "eviction",
+  "finale": "eviction",
+};
+
+/**
+ * 0119 — the in-game HOURS a resolved beat COSTS the day: a quick nomination/veto ceremony ~1h, a
+ * competition ~3h, an eviction/finale ~2h (from the shared `EVENT_DURATION` library, via `eventSpanHours`).
+ * `null` for a beat with no distinct felt duration ⇒ the caller keeps the flat per-beat default. Pure; no
+ * rng. The caller applies this ONLY when the per-conversation clock is live, so golden replay (that clock
+ * off) keeps the flat default and stays byte-identical — the different-events-cost-different-time layer is
+ * dormant exactly where the seeded/recorded streams must not move.
+ */
+export function beatFeltHours(beat: Beat | undefined): number | null {
+  if (!beat) return null;
+  const cat = DURATION_CATEGORY[beat];
+  return cat ? eventSpanHours(cat) : null;
+}

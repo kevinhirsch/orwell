@@ -635,9 +635,11 @@ gates), while **0111** (the Day-1 experience) and **0112** (LLM-call observabili
 (being built now)**; see `docs/features/README.md`. **Ship-gate F5** (realtime two-window mirror
 parity) is **fixed and wired as a required CI gate** (#1276, 2026-07-09) — no longer a launch blocker.
 A **WebSocket Phase-1 transport** (ADR 0017/0018; spec `docs/design/websocket-phase1-protocol.md`)
-landed **DORMANT behind `ORWELL_WS_TRANSPORT` (default off)** — the full client/server/layout stack is
-merged (#1283–#1287, #1293) but not turned on (the live turn-on + two-window verification cadence is
-the owed Phase-2 item). The **Apple-HIG audit (#694)** shipped all findings bar F-CHROME-1, and the
+landed and is **turned ON** — **default-ON behind `ORWELL_WS_TRANSPORT` since 2026-07-10 (#1357**; an
+explicit off/0/false rolls back to the permanent SSE/poll fallback, which stays a required blocking CI
+leg) — the full client/server/layout stack is merged (#1283–#1287, #1293) and ADRs 0017/0018 are
+**Accepted**. The owed Phase-2 item is now the live two-window verification cadence
+(`live-harness-nightly.yml`). The **Apple-HIG audit (#694)** shipped all findings bar F-CHROME-1, and the
 **#660 game-build window-kit migration** is done (the Theme-window drag, #1289, was the last game-build
 residual); the **#738 Liquid-Glass legibility/a11y batch** is substantially shipped (residual tracked
 in issue #738). The 2026-07-07 **FE↔BE integration gap review**

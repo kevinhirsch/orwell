@@ -202,10 +202,12 @@ def test_reorder_persists_to_localstorage_and_syncs():
     save = re.search(r"function saveOrder\(ids\)\s*\{(.*?)\n  \}", js, re.S)
     assert save, "saveOrder must exist"
     body = save.group(1)
-    assert "lsSet(_orderKey()" in body                 # per-user localStorage fallback
+    assert "var k = _orderKey()" in body               # per-user key derived fresh
+    assert "if (k) lsSet(k" in body                    # per-user localStorage fallback, null-guarded
     assert "orwell:window-layout" in body              # the synced source of truth (#637)
-    # the order key is per-user (so two users on one device don't collide)
-    assert 'return "orwell-gadget-order:"' in js
+    # the order key is per-user via the shared fail-closed helper (R5/#1416): null when there is no
+    # data-user, so two users on one device don't collide (and no shared empty-user namespace write).
+    assert 'window.orwellUserKey("orwell-gadget-order")' in js
 
 
 # ── #797 — gadget content insets ride the --ow-space-* scale (clean, even) ────

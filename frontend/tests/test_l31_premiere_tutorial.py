@@ -41,9 +41,11 @@ def test_l31_is_game_build_gated():
 
 def test_l31_per_user_dismiss_persists_once():
     js = _read("static", "js", "orwellPremiereTutorial.js")
-    # per-user key (E71 pattern) persisted in localStorage; shown once per account
-    assert "orwell-premiere-tutorial-dismissed:" in js
-    assert "document.body.dataset.user" in js
+    # per-user key (E71 pattern) persisted in localStorage; shown once per account — derived
+    # through the shared fail-closed helper (R5/#1416: window.orwellUserKey returns null with no
+    # data-user, so the local fallback write is skipped rather than shared under an empty namespace).
+    # The helper appends ":<user>" itself, so the base name has no trailing colon.
+    assert 'window.orwellUserKey("orwell-premiere-tutorial-dismissed")' in js
     assert "localStorage.setItem" in js and "localStorage.getItem" in js
     assert "hasDismissed()" in js
     # #642: the guide composes the OrwellNotice kit — the dismiss control is the kit's corner ×

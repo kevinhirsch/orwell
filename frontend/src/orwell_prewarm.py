@@ -135,6 +135,11 @@ def reset_user_season(user: Optional[str]) -> None:
         orwell_cast_authoring.reset_attempts(user)
     except Exception as e:
         logger.info("[prewarm] reset_user_season: reset_attempts failed: %s", e)
+    try:  # strict enrichment policy: a new season scrubs the prior season's failure ledger too
+        from src import enrichment_policy
+        enrichment_policy.clear_failures(user)
+    except Exception as e:
+        logger.info("[prewarm] reset_user_season: clear_failures failed: %s", e)
     try:
         reset(user)
     except Exception as e:
@@ -164,6 +169,15 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
         res = await engine.pre_seed_cast(user=user)
     except Exception as e:  # best-effort: a pre-seed failure must never block onboarding
         logger.info("[prewarm] pre_seed_cast failed: %s", e)
+        # STRICT enrichment policy (owner directive 2026-07-11): the failed warm is LOUD — an ERROR +
+        # an admin-visible ledger entry. Soft: the legacy info line only, byte-identical.
+        try:
+            from src import enrichment_policy
+            if enrichment_policy.is_strict():
+                enrichment_policy.record_failure(
+                    user, "cast-prewarm", "the engine cast pre-seed failed", detail=str(e))
+        except Exception:
+            pass
         return {"warmed": False, "count": 0}
     if not isinstance(res, dict) or not res.get("warmed"):
         return {"warmed": False, "count": 0, "refused": (res or {}).get("refused")}
@@ -242,6 +256,14 @@ async def warm_next_season(user: Optional[str] = None, *, engine=None, authoring
         res = await engine.pre_seed_next_season(user=user)
     except Exception as e:  # best-effort: a warm failure must never disturb the finale
         logger.info("[prewarm] pre_seed_next_season failed: %s", e)
+        # STRICT enrichment policy: loud + ledgered (the finale is never disturbed either way).
+        try:
+            from src import enrichment_policy
+            if enrichment_policy.is_strict():
+                enrichment_policy.record_failure(
+                    user, "cast-prewarm", "the engine next-season pre-seed failed", detail=str(e))
+        except Exception:
+            pass
         return {"warmed": False, "count": 0}
     if not isinstance(res, dict) or not res.get("warmed"):
         return {"warmed": False, "count": 0, "refused": (res or {}).get("refused")}

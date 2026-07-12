@@ -62,6 +62,14 @@ if not _current_db_url or _AUTO_TEST_DB_MARKER in _current_db_url:
 # exercise the gate explicitly.
 os.environ.setdefault("ORWELL_ALLOW_FLOOR_START", "1")
 
+# Owner directive 2026-07-11 — the enrichment policy defaults to STRICT in production (loud failures,
+# creation refusals on an unwired class; src/enrichment_policy.py). The FE suite stubs the LLM
+# everywhere and its many fail-soft contracts ("absent ⇒ byte-identical deterministic floor") must
+# stay green untouched, so the whole suite pins the LEGACY `soft` policy via the env seed — exactly
+# like the floor-start hatch above. The dedicated strict tests (test_enrichment_policy.py) set the
+# `enrichment_policy` setting / env explicitly to exercise `strict`.
+os.environ.setdefault("ORWELL_ENRICHMENT_POLICY", "soft")
+
 # Replace `core` with a lightweight package stub pointing at the real core/ dir, so
 # `import core.auth` / `import core.middleware` load those files WITHOUT executing
 # `core/__init__.py`. Idempotent across the session.
@@ -134,3 +142,9 @@ def _reset_cast_authoring_ledger() -> None:
         for attr in ("_attempt_ledger", "_gaveup_logged", "_LAST_AUTHORING_BACKFILL_AT"):
             with contextlib.suppress(AttributeError):
                 getattr(mod, attr).clear()
+    # The enrichment-policy failure ledger is process-global too (owner directive 2026-07-11) —
+    # same cross-file bleed class as the authoring ledgers above; reset it per test when loaded.
+    ep = sys.modules.get("src.enrichment_policy")
+    if ep is not None:
+        with contextlib.suppress(AttributeError):
+            ep._FAILURES.clear()

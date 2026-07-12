@@ -358,15 +358,21 @@
   // it and persists under 'orwell-gadget-order:<user>'. After any reorder the collapsed strip
   // re-derives, so the strip order follows the rail order. Reordering never touches a gadget's
   // own content or focus.
+  // Per-user key, fail-closed (R5/#1416): null when there is no data-user identity, so the order
+  // is not persisted to a shared "" namespace (the synced 0064 layout store, keyed server-side by
+  // the authed session, remains the cross-device source of truth regardless).
   function _orderKey() {
-    return "orwell-gadget-order:" + ((document.body && document.body.dataset.user) || "");
+    return (window.orwellUserKey && window.orwellUserKey("orwell-gadget-order")) || null;
   }
   function loadOrder() {
-    try { var v = JSON.parse(lsGet(_orderKey()) || "null"); return Array.isArray(v) ? v : []; }
+    var k = _orderKey();
+    if (!k) return [];
+    try { var v = JSON.parse(lsGet(k) || "null"); return Array.isArray(v) ? v : []; }
     catch (_) { return []; }
   }
   function saveOrder(ids) {
-    lsSet(_orderKey(), JSON.stringify(ids));   // offline/seed fallback (per-device)
+    var k = _orderKey();
+    if (k) lsSet(k, JSON.stringify(ids));   // offline/seed fallback (per-device)
     // #637: the SYNCED value is the source of truth — persist the order through the 0064 layout
     // store (LWW, fanned out via `layout-changed`) so it crosses devices and mirrors between two
     // windows. localStorage stays as the offline fallback the synced value lands into.
@@ -385,7 +391,8 @@
     if (JSON.stringify(cur) === JSON.stringify(ids)) { applyOrder(); return; }  // already in step
     _applyingSyncedOrder = true;
     try {
-      lsSet(_orderKey(), JSON.stringify(ids));
+      var k = _orderKey();
+      if (k) lsSet(k, JSON.stringify(ids));
       applyOrder();
       syncStrip();
     } finally { _applyingSyncedOrder = false; }

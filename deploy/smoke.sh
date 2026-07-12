@@ -37,7 +37,7 @@ SMOKE_DATA_DIR="$(mktemp -d /tmp/orwell-smoke-data-XXXXXX)"
 # the one true end-to-end gate actually exercises the shipped runtime (a regression reachable only
 # when a living-house layer is active would otherwise stay invisible). Matches orwell-install.sh's
 # write_config(); every layer is calibration-neutral-when-off and heavy-sim'd ON.
-SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1)
+SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1 ORWELL_STRATEGIC_CADENCE=1)
 
 start_engine() { # optional $1 = a shared token to enforce (B67/B71)
   env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" "${SHIPPED_FLAGS[@]}" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
@@ -216,8 +216,10 @@ if python3 -c "import uvicorn, httpx, fastapi" >/dev/null 2>&1; then
   mkdir -p frontend/data  # a fresh checkout has none
   # AUTH_ENABLED=false + LOCALHOST_BYPASS=true (the boot_smoke convention): this stage proves the
   # FE<->engine seam under engine auth — the FE's own account system has its own tests.
+  # ORWELL_ENRICHMENT_POLICY=soft (2026-07-11): the smoke wires no LLM, and the strict enrichment
+  # policy (the prod default) would refuse the /new-game creation this stage drives — pin legacy soft.
   ( cd frontend && env ORWELL_ENGINE_MCP_URL="$BASE" ORWELL_ENGINE_TOKEN="$SMOKE_TOKEN" \
-      AUTH_ENABLED=false LOCALHOST_BYPASS=true \
+      AUTH_ENABLED=false LOCALHOST_BYPASS=true ORWELL_ENRICHMENT_POLICY=soft \
       python3 -m uvicorn app:app --host 127.0.0.1 --port "$FE_PORT" >/tmp/orwell-smoke-fe.log 2>&1 & echo $! > /tmp/orwell-smoke-fe.pid )
   FE_PID="$(cat /tmp/orwell-smoke-fe.pid)"
   fe_up=0

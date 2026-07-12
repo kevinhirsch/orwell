@@ -1056,6 +1056,11 @@ async function initTokenEconomySettings() {
   const pinThreshold = el('set-tokenPinThreshold');
   const tieringToggle = el('set-contextTieringToggle');
   const providerJson = el('set-openrouterProvider');
+  // Owner directive 2026-07-11: the cast-authoring routing + temperature knobs and the enrichment
+  // policy switch — runtime-editable beside the sibling per-class budgets (reasoning/max-tokens).
+  const castAuthorSource = el('set-castAuthorSource');
+  const castAuthorTemp = el('set-castAuthorTemp');
+  const enrichmentPolicy = el('set-enrichmentPolicy');
   const msg = el('set-tokenEconomyMsg');
   // ADR 0016: a synced mirror of the "Narration" reasoning select, surfaced in the Default Chat Model
   // card so the narrator's reasoning effort is editable where you pick the narrator (not only here).
@@ -1089,6 +1094,16 @@ async function initTokenEconomySettings() {
     if (spendAlert) spendAlert.value = s.token_spend_alert_usd ? String(s.token_spend_alert_usd) : '';
     if (pinThreshold) pinThreshold.value = s.token_pin_threshold_tokens ? String(s.token_pin_threshold_tokens) : '';
     if (tieringToggle) tieringToggle.checked = !!s.context_tiering_enabled;
+    if (castAuthorSource) {
+      castAuthorSource.value = (s.cast_authoring_model_source === 'utility') ? 'utility' : 'narration';
+    }
+    if (castAuthorTemp) {
+      castAuthorTemp.value = (s.cast_authoring_temperature != null && s.cast_authoring_temperature !== '')
+        ? String(s.cast_authoring_temperature) : '';
+    }
+    if (enrichmentPolicy) {
+      enrichmentPolicy.value = (s.enrichment_policy === 'soft') ? 'soft' : 'strict';
+    }
     if (providerJson) {
       providerJson.value = (s.openrouter_provider && typeof s.openrouter_provider === 'object'
         && Object.keys(s.openrouter_provider).length)
@@ -1131,6 +1146,20 @@ async function initTokenEconomySettings() {
   }
   maxTokensEls.forEach(([elx]) => { if (elx) elx.addEventListener('change', saveMaxTokens); });
 
+  // Owner directive 2026-07-11: cast-authoring model routing / hot temperature / enrichment policy.
+  if (castAuthorSource) castAuthorSource.addEventListener('change', () => {
+    post({ cast_authoring_model_source: castAuthorSource.value === 'utility' ? 'utility' : 'narration' });
+  });
+  if (castAuthorTemp) castAuthorTemp.addEventListener('change', () => {
+    const raw = (castAuthorTemp.value || '').trim();
+    if (!raw) { post({ cast_authoring_temperature: 1.1 }); return; }  // blank ⇒ the shipped default
+    const t = parseFloat(raw);
+    if (!Number.isFinite(t) || t < 0 || t > 2) { setMsg('temperature must be 0–2', false); return; }
+    post({ cast_authoring_temperature: t });
+  });
+  if (enrichmentPolicy) enrichmentPolicy.addEventListener('change', () => {
+    post({ enrichment_policy: enrichmentPolicy.value === 'soft' ? 'soft' : 'strict' });
+  });
   if (spendAlert) spendAlert.addEventListener('change', () => post({ token_spend_alert_usd: parseFloat(spendAlert.value) || 0 }));
   if (pinThreshold) pinThreshold.addEventListener('change', () => post({ token_pin_threshold_tokens: parseInt(pinThreshold.value, 10) || 0 }));
   if (tieringToggle) tieringToggle.addEventListener('change', () => post({ context_tiering_enabled: tieringToggle.checked }));

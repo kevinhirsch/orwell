@@ -364,8 +364,9 @@ def test_gadget_rail_order_syncs_through_the_layout_store():
     # and it applies a synced order arriving from the seed OR a peer window (the same-device mirror)
     assert "orwell:layout-seed" in src and "orwell:layout-changed" in src
     assert "applySyncedOrder" in src
-    # localStorage stays as the offline/seed fallback
-    assert "_orderKey" in src and "lsSet(_orderKey()" in src
+    # localStorage stays as the offline/seed fallback — the per-user key is derived through the
+    # shared fail-closed helper (R5/#1416) and the write is null-guarded (skipped when no data-user).
+    assert "_orderKey" in src and "if (k) lsSet(k" in src
 
 
 def test_panel_side_syncs_through_the_layout_store():
