@@ -16,11 +16,13 @@ on:
     - cron: "17 6 * * *"
   workflow_dispatch: {}
 
-# Minimal token scope: the job only checks out the repo and uploads an artifact (the
-# artifact API needs no repo write). Nothing here writes back to the repo, so read-only
-# `contents` is all it needs — avoids the overly-broad default token.
+# `contents: write` (2026-07-13, owner directive "get main green"): the job now COMMITS the
+# refreshed fixture back to the triggering branch — but ONLY after the key-free replay gate
+# proves the fresh fixture green twice (the same verification a human does before committing
+# the artifact). A failed record or a failed replay never writes anything; the artifact
+# upload remains the audit trail either way.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: golden-nightly
@@ -45,8 +47,7 @@ jobs:
           fi
       - uses: actions/checkout@v4
         if: steps.key.outputs.present == 'true'
-        with:
-          persist-credentials: false
+        # persist-credentials stays ON (the default) so the verified-fixture commit-back can push.
       - uses: actions/setup-node@v4
         if: steps.key.outputs.present == 'true'
         with:
@@ -112,8 +113,39 @@ jobs:
               else:
                   print("no invariant drift between the committed replay and the live run")
           EOF
-      - uses: actions/upload-artifact@v4
+      - name: verify the FRESH fixture replays green key-free, then commit it back
         if: steps.key.outputs.present == 'true'
+        env:
+          # The replay gate must run KEY-FREE (R2: no provider reach) — mask the secret.
+          OPENROUTER_API_KEY: ""
+        run: |
+          set -e
+          FRESH=/tmp/golden-nightly/golden_path_glm-5.2.jsonl
+          COMMITTED=frontend/tests/golden/golden_path_glm-5.2.jsonl
+          if [ ! -s "$FRESH" ]; then
+            echo "::warning title=golden-nightly::no fresh fixture produced — nothing to commit"; exit 0
+          fi
+          if [ -f "$COMMITTED" ] && cmp -s "$FRESH" "$COMMITTED"; then
+            echo "fixture unchanged — nothing to commit"; exit 0
+          fi
+          cp "$FRESH" "$COMMITTED"
+          # The same gate a human runs before committing: the key-free replay, twice, digest-compared.
+          if (cd frontend && python3 scripts/golden_path_replay.py --runs 2); then
+            git config user.name "golden-nightly[bot]"
+            git config user.email "golden-nightly@users.noreply.github.com"
+            git add "$COMMITTED"
+            git commit -m "chore(golden): commit the replay-verified refreshed fixture (golden-nightly)" \
+              -m "Recorded live against z-ai/glm-5.2 + qwen/qwen3.6-flash; key-free replay --runs 2 PASSED before this commit. Relights golden-path/visual-regression/theme-consistency."
+            git pull --rebase origin "${GITHUB_REF_NAME}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+            echo "::notice title=golden-nightly::refreshed fixture committed — the golden/vr/theme gates relight on the next runs."
+          else
+            git checkout -- "$COMMITTED" || true
+            echo "::error title=golden-nightly::fresh fixture FAILED the key-free replay gate — NOT committed (artifact uploaded for inspection)."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.key.outputs.present == 'true'
         with:
           name: golden-nightly-fixture
           path: /tmp/golden-nightly/
