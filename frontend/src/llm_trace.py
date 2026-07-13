@@ -245,13 +245,29 @@ def record_llm_call(
     response: Optional[dict] = None,
     ok: bool = True,
     duration_ms: int = 0,
+    call_class: Optional[str] = None,
 ) -> None:
-    """Persist one full request→response record (ring + on-disk archive)."""
+    """Persist one full request→response record (ring + on-disk archive).
+
+    2026-07-13 (prod debug-bundle audit): each record also carries TOP-LEVEL ``finishReason``
+    and ``callClass`` triage fields — the terminal stop reason used to be buried inside
+    ``response`` and the ADR-0010 call class was not recorded at all, so an operator scanning
+    the ring/bundle could not spot an empty ``finish_reason=stop`` utility completion without
+    digging. ``call_class`` is threaded explicitly by the non-streaming chokepoint; when the
+    caller passes none (the streaming path has no class parameter), it falls back to the 0112
+    per-turn observability context, and stays ``None`` when genuinely unknown."""
     if not enabled():
         return
     try:
         response = response or {}
         messages = messages or []
+        if call_class is None:
+            # The 0112 correlation context (set by the agent loop on game turns when
+            # observability is enabled) — best-effort; unknown stays None, never guessed.
+            try:
+                call_class = _current_context().get("call_class")
+            except Exception:
+                call_class = None
         req = _scrub({
             "model": model,
             "requestedModel": requested_model or model,
@@ -276,6 +292,10 @@ def record_llm_call(
             "ok": bool(ok),
             "durationMs": int(duration_ms),
             "model": model,
+            # Top-level triage fields (2026-07-13): the terminal stop reason (also inside
+            # `response`, kept there for back-compat) and the ADR-0010 call class. None = unknown.
+            "finishReason": resp.get("finishReason"),
+            "callClass": str(call_class) if call_class else None,
             "request": req,
             "response": resp,
         }
@@ -300,12 +320,18 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict) -> None:
         res_summary = (("[reasoning] " + _clip(reasoning, 800) + "\n") if reasoning else "") + _clip(resp.get("text") or "", 1600)
         if resp.get("error"):
             res_summary = "[error] " + _clip(json.dumps(resp.get("error")), 600)
+        # 2026-07-13: surface the call class + terminal stop reason in the glanceable summary line
+        # (records that predate the top-level fields simply omit them — .get, never KeyError).
+        cls = record.get("callClass")
+        kind_label = f"{record['kind']}[{cls}]" if cls else str(record["kind"])
+        finish = record.get("finishReason") or resp.get("finishReason")
+        finish_suffix = f" · finish={finish}" if finish else ""
         log_rings.LLMIO.push({
             "ts": record["ts"],
             "level": "INFO" if record["ok"] else "ERROR",
             "logger": "llm-io",
-            "msg": f"{record['kind']} · {record['model']} {verb} {record['durationMs']}ms · "
-                   f"in {in_chars} out {out_chars} chars{tool_suffix}",
+            "msg": f"{kind_label} · {record['model']} {verb} {record['durationMs']}ms · "
+                   f"in {in_chars} out {out_chars} chars{finish_suffix}{tool_suffix}",
             "args": req_summary,
             "result": res_summary,
         })

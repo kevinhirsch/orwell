@@ -56,9 +56,11 @@ def test_init_reads_and_writes_every_token_economy_key():
 def test_keys_present_in_default_settings():
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["reasoning_budget"] == {
-        # narration "low" (was "medium"): ADR 0016 — GLM-4.7's interleaved thinking needs a small budget
-        # to decide its tool calls. "off" = genuine disable (reasoning:{enabled:false}).
-        "narration": "low", "utility-extraction": "off",
+        # narration "off" (owner ruling 2026-07-13, perf audit F-PY-1): the "low"/"medium" effort levels
+        # are INERT on OpenRouter (llm_core drops effort, sends the computed sub-budget) so the model
+        # still bursts ~4096 pre-token reasoning ("it hangs then streams"). Only "off" resolves to an
+        # active reasoning:{enabled:false} that STOPS the burst. Supersedes the ADR-0016 "low" seed.
+        "narration": "off", "utility-extraction": "off",
         # #1007: background-authoring is "off" — structured JSON extraction, not a reasoning task.
         "casting": "medium", "background-authoring": "off",
     }

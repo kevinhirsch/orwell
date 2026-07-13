@@ -99,7 +99,7 @@ def test_preserves_providers_and_wipes_everything_else(monkeypatch, tmp_path):
     # settings.json carries ONLY the operational flags + the default-ENDPOINT designation
     # (2026-07-12 fix — `default_endpoint_id` survives, still pointing at the carried ep1 row);
     # model SELECTIONS and user settings are gone (#860 — the selections revert to
-    # DEFAULT_SETTINGS on load: glm-5.2 narrator, gemini-3.1-flash-image portraits). The stale
+    # DEFAULT_SETTINGS on load: glm-4.7 narrator, gemini-3.1-flash-image portraits). The stale
     # sakana/fugu-ultra pick does NOT survive.
     with open(settings, encoding="utf-8") as f:
         kept = json.load(f)

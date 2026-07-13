@@ -18,11 +18,19 @@ HARD boundaries: the ENGINE's deterministic-floor code is untouched — this is 
 only; the narrator call path (already load-bearing/loud) is out of scope.
 
 Resolution order (read per-request — no restart, mirroring the token-policy knobs):
-  1. the runtime-editable settings key ``enrichment_policy`` ("soft" | "strict");
-  2. the env seed ``ORWELL_ENRICHMENT_POLICY`` (pinned "soft" by the FE test suite's conftest, the
-     golden driver, and the smoke/browser/responsive harnesses — the stubbed lanes must keep the
-     legacy fail-soft contracts byte-identical);
+  1. the env seed ``ORWELL_ENRICHMENT_POLICY`` — the HARNESS PIN (set "soft" by the FE test
+     suite's conftest, the golden driver, and the smoke/browser/responsive harnesses — the stubbed
+     lanes must keep the legacy fail-soft contracts byte-identical);
+  2. the runtime-editable settings key ``enrichment_policy`` ("soft" | "strict");
   3. the code default: ``strict``.
+
+The env seed moved ABOVE the settings key on 2026-07-13 (owner ruling, live prod debug-bundle
+audit) when the shipped ``DEFAULT_SETTINGS`` seed became an EXPLICIT ``"strict"``: settings.py's
+defaults merge into every ``get_setting`` read, so a store that never persisted the key would
+otherwise resolve the merged "strict" at the settings tier and silently kill the harness pin
+(flipping every stubbed lane strict). Prod deployments never set the env var, so the
+runtime-editable settings key remains authoritative there — the env tier is purely the
+test/harness seam it always was.
 """
 from __future__ import annotations
 
@@ -62,8 +70,16 @@ def _key(user: Optional[str]) -> str:
 
 
 def current_policy() -> str:
-    """The resolved enrichment policy: settings key → env seed → the ``strict`` default.
-    Defensive throughout — a malformed value at any tier falls through to the next."""
+    """The resolved enrichment policy: env seed (the harness pin) → settings key → the
+    ``strict`` default. Defensive throughout — a malformed value at any tier falls through
+    to the next. (Env-first since 2026-07-13: the shipped settings seed is an explicit
+    "strict" that merges into every ``get_setting`` read, so the settings tier can no longer
+    distinguish an operator's choice from the shipped default — the env seed must therefore
+    win, or the stubbed lanes' "soft" pin would be silently shadowed. Prod never sets the
+    env var, so the runtime-editable settings key stays authoritative there.)"""
+    v = str(os.environ.get(ENV_VAR, "") or "").strip().lower()
+    if v in VALID_POLICIES:
+        return v
     try:
         from src.settings import get_setting
         v = str(get_setting("enrichment_policy", "") or "").strip().lower()
@@ -71,9 +87,6 @@ def current_policy() -> str:
             return v
     except Exception:
         pass
-    v = str(os.environ.get(ENV_VAR, "") or "").strip().lower()
-    if v in VALID_POLICIES:
-        return v
     return DEFAULT_POLICY
 
 

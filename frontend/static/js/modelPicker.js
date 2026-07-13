@@ -101,16 +101,38 @@ function _isImageModelId(mid) {
   return false;
 }
 
-// First non-image, non-offline model across the cached endpoints — the
-// arbitrary auto-pick floor. Returns {url, mid, endpointId} or null.
-// NEVER selects an image model (ties to the per-model filter above) so the
-// composer can't auto-resolve to e.g. gemini-2.5-flash-image.
+// A model id that is NOT chat-capable for a NON-image reason — embeddings / tts /
+// whisper / rerank / moderation / etc. CLIENT mirror of the server's
+// `endpoint_resolver._NON_CHAT_MODEL` class set (keep in sync). Image models are handled
+// separately by `_isImageModelId`; this catches the rest, so the composer's auto-pick can
+// never land on e.g. `text-embedding-ada-002` when it appears before a real chat model.
+function _isNonChatModelId(mid) {
+  const lower = String(mid || '').toLowerCase();
+  const NON_CHAT = [
+    'text-embedding', 'embedding', 'tts-', 'whisper', 'moderation',
+    'rerank', 'reranker', 'clip', 'stable-diffusion',
+  ];
+  return NON_CHAT.some((kw) => lower.includes(kw));
+}
+
+// A model id the composer may auto-select: a real CHAT model — never an image model
+// (`_isImageModelId`) NOR a non-image non-chat model (`_isNonChatModelId`: embedding/tts/
+// rerank/…). Mirrors the server's chat-capability rule (session_routes `_is_chat_capable`).
+function _isChatCapableModelId(mid) {
+  if (!mid) return false;
+  return !_isImageModelId(mid) && !_isNonChatModelId(mid);
+}
+
+// First CHAT-CAPABLE, non-offline model across the cached endpoints — the arbitrary
+// auto-pick floor. Returns {url, mid, endpointId} or null. NEVER selects an image model
+// NOR a non-chat model (embedding/tts/rerank/…) so the composer can't auto-resolve to a
+// model that can only 400 a chat completion (the client mirror of the server-side gap).
 function _firstChatPick(items) {
   for (const item of (items || [])) {
     if (item.offline) continue;
     const models = (item.models || []).concat(item.models_extra || []);
     for (const mid of models) {
-      if (_isImageModelId(mid)) continue;
+      if (!_isChatCapableModelId(mid)) continue;
       return { url: item.url, mid, endpointId: item.endpoint_id };
     }
   }
@@ -144,6 +166,30 @@ function _resolveDefaultPick(items) {
       const any = (items || []).find(item =>
         !item.offline && (item.models || []).concat(item.models_extra || []).includes(dc.model));
       if (any) return { url: any.url, mid: dc.model, endpointId: any.endpoint_id };
+    }
+    // 2026-07-13 (the arbitrary-default class, mirroring the server's #1550/#1551 ruling): an
+    // EMPTY/UNPROBED catalog must never kick the configured default over to the first-listed model
+    // (the "luna" bug — a fresh box whose endpoint hasn't cached its model list yet). When the
+    // default's OWN endpoint is present + online AND its visible catalog is EMPTY, trust the
+    // configured default (we can't disprove it — some providers don't list every model, and the
+    // server keeps the default on a possibly-stale cache too, never swapping the narrator).
+    //
+    // But NEVER auto-select an UNOFFERABLE model (Greptile P1): we are in the `exists === false`
+    // branch, so any NON-EMPTY catalog necessarily EXCLUDES dc.model — returning it would pin a
+    // model the endpoint doesn't offer. A non-empty catalog that excludes the default (a
+    // stale/renamed default) falls through to the first-chat floor instead. Only an
+    // empty/unprobed own-endpoint honors the configured default; a genuinely-missing endpoint
+    // falls through too.
+    if (dc.endpoint_id) {
+      const ownEp = (items || []).find(item =>
+        !item.offline && String(item.endpoint_id || '') === String(dc.endpoint_id));
+      if (ownEp) {
+        const ownModels = (ownEp.models || []).concat(ownEp.models_extra || []);
+        if (ownModels.length === 0) {
+          return { url: ownEp.url, mid: dc.model, endpointId: ownEp.endpoint_id };
+        }
+        // Non-empty catalog excluding dc.model ⇒ fall through (never pin an unofferable model).
+      }
     }
   }
   return _firstChatPick(items);

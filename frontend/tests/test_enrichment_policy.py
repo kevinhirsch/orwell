@@ -41,13 +41,25 @@ def _no_setting(monkeypatch):
                         lambda key, default=None: "" if key == "enrichment_policy" else default)
 
 
-# ── policy resolution: settings → env → the STRICT default ──────────────────────────────
+# ── policy resolution: env seed (the harness pin) → settings → the STRICT default ────────
+# (Env-first since the 2026-07-13 owner ruling: the shipped DEFAULT_SETTINGS seed is now an
+# EXPLICIT "strict" that merges into every get_setting read, so the settings tier can no longer
+# distinguish an operator's persisted choice from the shipped default — the env seed must win or
+# the stubbed lanes' "soft" pin would be silently shadowed. Prod never sets the env var.)
 
 def test_default_policy_is_strict(monkeypatch):
     _no_setting(monkeypatch)
     monkeypatch.delenv("ORWELL_ENRICHMENT_POLICY", raising=False)
     assert ep.current_policy() == "strict"
     assert ep.is_strict() is True
+
+
+def test_shipped_settings_seed_is_an_explicit_strict():
+    """Owner ruling 2026-07-13 (prod debug-bundle audit): the shipped default is a VISIBLE
+    'strict' in the settings seed — never an empty string that resolves strict only by code
+    default (intent must be readable in every store snapshot)."""
+    from src.settings import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["enrichment_policy"] == "strict"
 
 
 def test_env_seed_soft_wins_over_the_default(monkeypatch):
@@ -63,20 +75,33 @@ def test_garbage_env_falls_back_to_strict(monkeypatch):
     assert ep.current_policy() == "strict"
 
 
-def test_settings_key_wins_over_the_env(monkeypatch):
+def test_env_seed_wins_over_the_settings_key(monkeypatch):
+    """The env seed is the HARNESS PIN and sits ABOVE the settings tier (2026-07-13): with the
+    explicit 'strict' shipped in DEFAULT_SETTINGS (merged into every read), a lane pinned soft
+    via the env must stay soft even though the settings tier reads 'strict'."""
     import src.settings as settings_mod
     monkeypatch.setattr(settings_mod, "get_setting",
                         lambda key, default=None: "strict" if key == "enrichment_policy" else default)
     monkeypatch.setenv("ORWELL_ENRICHMENT_POLICY", "soft")
-    assert ep.current_policy() == "strict"
+    assert ep.current_policy() == "soft"
 
 
-def test_garbage_setting_falls_through_to_the_env(monkeypatch):
+def test_settings_key_wins_when_no_env_is_set(monkeypatch):
+    """Prod shape: no env seed ⇒ the runtime-editable settings key is authoritative (an
+    operator's 'soft' persists and wins over the code default)."""
+    import src.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "get_setting",
+                        lambda key, default=None: "soft" if key == "enrichment_policy" else default)
+    monkeypatch.delenv("ORWELL_ENRICHMENT_POLICY", raising=False)
+    assert ep.current_policy() == "soft"
+
+
+def test_garbage_setting_falls_through_with_no_env(monkeypatch):
     import src.settings as settings_mod
     monkeypatch.setattr(settings_mod, "get_setting",
                         lambda key, default=None: "loud" if key == "enrichment_policy" else default)
-    monkeypatch.setenv("ORWELL_ENRICHMENT_POLICY", "soft")
-    assert ep.current_policy() == "soft"
+    monkeypatch.delenv("ORWELL_ENRICHMENT_POLICY", raising=False)
+    assert ep.current_policy() == "strict"
 
 
 def test_the_suite_itself_runs_pinned_soft():

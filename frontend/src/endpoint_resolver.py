@@ -314,19 +314,37 @@ def resolve_endpoint(
     if not ep_id and fallback_url and fallback_model:
         return fallback_url, fallback_model, fallback_headers
 
-    # Unset Utility means "same as Default Chat Model".
+    # Unset Utility ENDPOINT means "ride the Default Chat endpoint" — but the configured
+    # utility MODEL stays authoritative when set (2026-07-13, the arbitrary-default audit):
+    # ADR 0016's two-tier pair ships `utility_model` (qwen/qwen3.6-flash) with
+    # `utility_endpoint_id` deliberately "" so it binds to the same OpenRouter endpoint as
+    # the narrator. The old line overwrote the MODEL with `default_model` too, so the
+    # shipped utility tier silently never resolved out of the box (every utility lane ran
+    # on the narrator model). Only an EMPTY utility_model now inherits the default model.
     if setting_prefix == "utility" and not ep_id:
         ep_id = _stg("default_endpoint_id")
-        model = _stg("default_model")
+        if not model:
+            model = _stg("default_model")
 
-    # Fall back to utility model for task/research/auto-naming if not specifically configured.
-    # If Utility itself is unset, the block above makes that resolve to Default Chat.
+    # Fall back through the Utility tier for a non-utility prefix (task/research/faithfulness/
+    # auto-naming) whose own endpoint isn't configured. The configured UTILITY MODEL stays
+    # authoritative (2026-07-13, the arbitrary-default audit — Greptile P1 repro): ADR 0016 ships
+    # `utility_model=qwen/qwen3.6-flash` with `utility_endpoint_id` deliberately "" so the utility
+    # tier RIDES the Default Chat ENDPOINT. The old inner line overwrote the MODEL with
+    # `default_model` too whenever `utility_endpoint_id` was empty, so every utility-tier fallback
+    # (extraction belts, faithfulness judge, task/research naming) silently ran the expensive
+    # NARRATOR model instead of the cheap qwen tier. Now, when the utility endpoint is unset we
+    # borrow the DEFAULT endpoint but KEEP the configured utility_model — only an EMPTY utility_model
+    # inherits `default_model`. The `default` prefix keeps its OWN model (already set above): it must
+    # never route through the utility model (that would resolve the narrator prefix to qwen).
     if not ep_id and setting_prefix != "utility":
         ep_id = _stg("utility_endpoint_id")
-        model = _stg("utility_model")
+        if setting_prefix != "default":
+            model = _stg("utility_model")
         if not ep_id:
             ep_id = _stg("default_endpoint_id")
-            model = _stg("default_model")
+            if not model:
+                model = _stg("default_model")
 
     db = SessionLocal()
     try:

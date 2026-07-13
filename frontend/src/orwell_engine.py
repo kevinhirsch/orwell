@@ -1087,10 +1087,91 @@ async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict
     return await _admin_call("manageSandbox", args, user=user)
 
 
+# ── the engine PLAY-CLOCK, mirrored for LABELING only (2026-07-13 prod bundle audit) ──────────
+# The engine's runtime `Clock` is a pure fixed-epoch `LogicalClock` (real-time purge 2026-07-10):
+# it starts at 2026-01-01T00:00:00Z and advances ONE step per committed mutation — it NEVER reads
+# wall time. sandboxHealth stamps (`lastAdvanceAt`, `faults[].when`) are therefore PLAY-CLOCK
+# values that merely LOOK like epoch-milliseconds; rendering them as a wall-clock date ("Jan
+# 2026") is a mislabel (the live bundle audit hit exactly this). These constants mirror
+# `src/composition/runtime.ts` (LOGICAL_CLOCK_EPOCH_MS / LOGICAL_CLOCK_STEP_MS) so the FE can
+# derive "beat N" for display — labeling only, never fed back to the engine.
+PLAY_CLOCK_EPOCH_MS = 1_767_225_600_000
+PLAY_CLOCK_STEP_MS = 60_000
+
+
+def _play_clock_beat(ms) -> int | None:
+    """The committed-mutation count ("beat") a raw play-clock stamp encodes, or None.
+    Fail-soft: a bool / None / non-numeric / non-finite (``inf``/``nan`` → OverflowError or
+    ValueError on ``int()``) stamp returns None rather than raising."""
+    if isinstance(ms, bool):
+        return None
+    try:
+        n = int(ms)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return max(0, (n - PLAY_CLOCK_EPOCH_MS) // PLAY_CLOCK_STEP_MS)
+
+
+def label_play_clock(health) -> dict:
+    """Relabel the PLAY-CLOCK stamps in an engine ``sandboxHealth`` record so no FE surface
+    (admin status tool result, health page, debug bundle) renders them as wall time.
+
+    ``lastAdvanceAt`` (a raw LogicalClock ms) is replaced by ``lastAdvancePlayClock`` —
+    ``{"beat": N, "playClockMs": <raw>, "label": "play-clock beat N"}`` — and each fault's
+    ``when`` becomes ``whenPlayClock`` in the same shape. A ``playClock`` legend rides along
+    whenever a stamp was relabeled. Purely presentational and fail-soft: a non-dict / already-
+    labeled / stamp-free payload passes through unchanged. FE rendering only — the engine's
+    clock and its wire shape are untouched."""
+    if not isinstance(health, dict):
+        return health
+    out = dict(health)
+    relabeled = False
+
+    def _labeled(ms) -> dict:
+        beat = _play_clock_beat(ms)
+        return {"beat": beat, "playClockMs": ms,
+                "label": f"play-clock beat {beat}" if beat is not None else "play-clock"}
+
+    if "lastAdvanceAt" in out:
+        raw = out.pop("lastAdvanceAt")
+        out["lastAdvancePlayClock"] = _labeled(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+        relabeled = True
+    faults = out.get("faults")
+    if isinstance(faults, list):
+        new_faults = []
+        for f in faults:
+            # Mirror the top-level branch: for EVERY dict fault carrying a `when` key, always POP
+            # the raw wall-clock-looking key and set `whenPlayClock` to the labeled value when
+            # numeric, else None. A non-numeric / date-like `when` must NEVER survive (that would
+            # defeat the "never render as a date" invariant this feature enforces). Non-dict faults
+            # and faults with no `when` pass through unchanged.
+            if isinstance(f, dict) and "when" in f:
+                f = dict(f)
+                raw = f.pop("when")
+                f["whenPlayClock"] = (
+                    _labeled(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+                )
+                relabeled = True
+            new_faults.append(f)
+        out["faults"] = new_faults
+    if relabeled:
+        out["playClock"] = {
+            "epochMs": PLAY_CLOCK_EPOCH_MS,
+            "stepMs": PLAY_CLOCK_STEP_MS,
+            "note": ("fixed-epoch LogicalClock (one beat per committed mutation) — "
+                     "NOT wall time; never render as a date"),
+        }
+    return out
+
+
 async def sandbox_health(user: str | None = None) -> dict:
     """God Mode: Vault-free sandbox health for THIS user's sandbox (B58) — week/phase, last advance,
-    integrity status, recent faults, circuit state. Metadata only, never game content or the Vault."""
-    return await _admin_call("sandboxHealth", {}, user=user)
+    integrity status, recent faults, circuit state. Metadata only, never game content or the Vault.
+
+    2026-07-13: the engine's play-clock stamps are relabeled here (``label_play_clock``) — the ONE
+    seam every FE consumer of this read shares (the admin ``sandboxHealth`` tool, the health page,
+    the debug bundle) — so a LogicalClock value is never displayed as a wall-clock date."""
+    return label_play_clock(await _admin_call("sandboxHealth", {}, user=user))
 
 
 async def advance_to_finale(user: str | None = None) -> dict:

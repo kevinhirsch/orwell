@@ -433,7 +433,20 @@ async function _refreshAfterEndpointChange(deletedEndpointId) {
 }
 
 async function _selectAddedModelInChat(endpoint) {
-  const modelId = endpoint && Array.isArray(endpoint.models) ? endpoint.models[0] : '';
+  const models = (endpoint && Array.isArray(endpoint.models)) ? endpoint.models : [];
+  let modelId = models[0] || '';
+  // 2026-07-13 (the arbitrary-default class): the just-added endpoint used to auto-select its
+  // FIRST listed model into the chat picker — on a fresh OpenRouter add that was whatever the
+  // catalog led with (e.g. openai/gpt-5.6-luna-pro), not the shipped narrator. Prefer the
+  // CONFIGURED default chat model whenever the new endpoint serves it; the first-listed id
+  // stays only as the floor for endpoints that don't serve the configured default.
+  try {
+    const r = await fetch('/api/default-chat', { credentials: 'same-origin' });
+    if (r.ok) {
+      const dc = await r.json();
+      if (dc && dc.model && models.includes(dc.model)) modelId = dc.model;
+    }
+  } catch (_) {}
   if (!modelId) return;
   try {
     if (window.modelsModule && window.modelsModule.refreshModels) {

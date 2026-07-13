@@ -1634,6 +1634,43 @@ def setup_model_routes(model_discovery):
             _st_raw = (supports_tools or "").strip().lower()
             _st = True if _st_raw in ("true", "1", "yes") else (False if _st_raw in ("false", "0", "no") else None)
             _pinned = _normalize_model_ids(pinned_models)
+            # ── Game-build OOB curation (owner ruling 2026-07-13, prod debug-bundle audit) ─────
+            # A fresh provider endpoint auto-discovers the WHOLE accessible catalog into
+            # cached_models, and every un-hidden id presents as enabled — the owner's box showed
+            # "22 models randomly enabled" with resolution grabbing an arbitrary first one. On a
+            # game build, when the freshly-probed catalog serves the game's narrator, curate the
+            # enabled set to the GAME'S models — pin {default_model, utility_model, image_model}
+            # (the shipped trio: z-ai/glm-4.7 / qwen/qwen3.6-flash / google/gemini-3.1-flash-image)
+            # and seed everything else HIDDEN. Reversible (the endpoint's model manager unhides) and
+            # fail-open: an explicit pinned_models form value, a non-game build, an empty probe, or
+            # a catalog that doesn't serve the narrator (an unknown/local provider) ⇒ no curation,
+            # byte-identical behavior.
+            _hidden_seed: list = []
+            if not _pinned and model_ids:
+                try:
+                    from src.settings import game_build_enabled as _gbe, get_setting as _gs_cur
+                    if _gbe() and (model_type or "llm").strip() != "image":
+                        _game_trio = [
+                            (_gs_cur("default_model", "") or "").strip(),
+                            (_gs_cur("utility_model", "") or "").strip(),
+                            (_gs_cur("image_model", "") or "").strip(),
+                        ]
+                        _served_game = [m for m in dict.fromkeys(_game_trio)
+                                        if m and m in model_ids]
+                        _narrator = _game_trio[0]
+                        if _narrator and _narrator in _served_game:
+                            _pinned = _served_game
+                            _hidden_seed = [m for m in model_ids if m not in set(_served_game)]
+                            logger.info(
+                                "[model-endpoints] game-build curation: pinned the game models %s "
+                                "on new endpoint %s and hid the other %d discovered ids "
+                                "(reversible in the model manager)",
+                                _served_game, base_url, len(_hidden_seed))
+                except Exception as _cur_e:
+                    # Fail-open (curation must never block adding an endpoint) but LOUD: a real
+                    # curation regression would otherwise be invisible at debug level.
+                    _hidden_seed = []
+                    logger.warning(f"game-build curation skipped (fail-open): {_cur_e}")
             # Stamp owner so the picker only shows this endpoint to the admin
             # who added it. Pass `shared=true` to mark it null-owner (visible
             # to all users), preserving the pre-fix "everyone sees everything"
@@ -1654,6 +1691,7 @@ def setup_model_routes(model_discovery):
                 model_refresh_timeout=refresh_timeout,
                 cached_models=json.dumps(model_ids) if model_ids else None,
                 pinned_models=json.dumps(_pinned) if _pinned else None,
+                hidden_models=json.dumps(_hidden_seed) if _hidden_seed else None,
                 supports_tools=_st,
                 owner=_owner_val,
             )
@@ -1672,20 +1710,25 @@ def setup_model_routes(model_discovery):
             if not settings.get("default_endpoint_id") and not _ep_is_image:
                 from src.endpoint_resolver import _first_chat_model
                 settings["default_endpoint_id"] = ep.id
-                # Honor the configured/OOB default chat model (e.g. deepseek-v4-pro) when THIS
-                # endpoint actually serves it — so adding the OpenRouter feed binds the default to
-                # the intended model rather than whatever the provider happens to list first.
-                # Only fall back to the first chat model when the configured one isn't in the
-                # catalog (so the default is never a model this provider can't serve).
+                # 2026-07-13 (owner ruling, the arbitrary-default class — live prod evidence): the
+                # CONFIGURED default chat model is NEVER overwritten here. The old branch swapped
+                # `default_model` to `_first_chat_model(model_ids)` whenever the just-probed catalog
+                # didn't show it — but a fresh/failed/partial probe (empty or truncated model_ids,
+                # the exact OOBE shape) then silently PERSISTED an arbitrary first-listed model
+                # (openai/gpt-5.6-luna-pro) — or wiped the default to "" — in place of the shipped
+                # narrator. The configured default wins even when it is absent from a fresh/empty
+                # list; a genuinely-unserved default self-heals at READ time instead, where
+                # /api/default-chat re-derives ONLY on a confirmed-fresh in-process list
+                # (#1550/#1551). Only an EMPTY configured default is seeded from the catalog.
                 _desired = (settings.get("default_model") or "").strip()
-                _serves = bool(_desired) and any(
-                    _desired.lower() == str(mid).lower()
-                    or _desired.lower() in str(mid).lower()
-                    or str(mid).lower() in _desired.lower()
-                    for mid in (model_ids or [])
-                )
-                if not _serves:
+                if not _desired:
                     settings["default_model"] = _first_chat_model(model_ids) or ""
+                elif model_ids and _desired not in model_ids:
+                    logger.info(
+                        "[model-endpoints] configured default_model %r is not in the probed "
+                        "catalog of the new default endpoint %s — KEEPING the configured default "
+                        "(never swapping to a first-listed model; the read-time fresh-list "
+                        "self-heal owns a genuinely-unserved default)", _desired, ep.id)
                 _save_settings(settings)
             _invalidate_models_cache()
             _local_probe_cache["data"] = None
@@ -1699,7 +1742,9 @@ def setup_model_routes(model_discovery):
             "base_url": base_url,
             "has_key": bool(api_key.strip()),
             "api_key_fingerprint": _api_key_fingerprint(api_key),
-            "models": _merge_model_ids(model_ids, _pinned),
+            # The response reflects the persisted row: with game-build curation the hidden seed
+            # filters the catalog down to the pinned game models (no curation ⇒ identical merge).
+            "models": _visible_models(model_ids, _hidden_seed or None, _pinned),
             "pinned_models": _pinned,
             "online": bool(model_ids) or bool(_pinned) or bool(ping.get("reachable")),
             "status": "online" if (model_ids or _pinned) else ("empty" if ping.get("reachable") else "offline"),

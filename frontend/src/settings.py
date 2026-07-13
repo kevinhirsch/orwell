@@ -168,13 +168,24 @@ DEFAULT_SETTINGS = {
     # get_setting("reasoning_budget", {}) → token_policy.resolve_token_policy();
     # edit per class at runtime via the Token Economy settings card or POST /api/settings.
     "reasoning_budget": {
-        # ADR 0016: "low" (was "medium") for the GLM narrator (GLM-4.7 at the ruling; GLM-5.2 since
-        # the 2026-07-07 two-tier amendment — same family, same posture). GLM's tool-calling rides on
-        # INTERLEAVED THINKING — it reasons before each tool call/action — so a small reasoning budget
-        # is what lets it DECIDE which engine tool to call ("off" would strip that mechanism and regress
-        # "call the tool when we need to"; "low" keeps it at modest cost/latency). Runtime-editable from
-        # the Default Chat Model settings card (and the Token Economy card) — both write this key.
-        "narration": "low",
+        # OWNER RULING 2026-07-13 (perf audit F-PY-1): "off" (was "low"; "medium" before ADR 0016).
+        # The owner's #1 "it HANGS then streams" complaint — a live narration turn generated ~4096
+        # reasoning tokens BEFORE the first visible word. On OpenRouter the "low"/"medium" effort
+        # levels are INERT for narration: llm_core._apply_reasoning_budget DROPS `effort` and sends the
+        # computed max_tokens sub-budget instead (OpenRouter 400s if BOTH `effort` and
+        # `reasoning.max_tokens` are sent — see llm_core ~L728), so the model still bursts its default
+        # pre-token reasoning. Only "off" resolves to an active reasoning:{"enabled": false} on the
+        # wire, the sole value that actually STOPS the pre-token burst. This SUPERSEDES the prior
+        # ADR-0016 "low" rationale (keep a small budget for GLM's interleaved tool-decision thinking):
+        # the forced tool_choice at closed-set beats (`force_tool_choice_at_beats`) + the agent-loop
+        # under-call belts already GUARANTEE the engine calls, so disabling narration reasoning does
+        # NOT regress "call the tool when we need to". A real DEFAULT change (never an admin toggle):
+        # an instance that never set reasoning_budget.narration explicitly resolves "off" on update
+        # (settings.json merges DEFAULT_SETTINGS wholesale). Runtime-editable from the Default Chat
+        # Model settings card (and the Token Economy card) — both write this key. NOTE: shifts the
+        # golden request digest (narration reasoning field changes) — accepted per owner #1527 (the
+        # golden trio is non-blocking; the re-record is a separate owed task; golden files untouched).
+        "narration": "off",
         "utility-extraction": "off",
         "casting": "medium",
         # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
@@ -206,6 +217,12 @@ DEFAULT_SETTINGS = {
     # dict is what lets that default actually take effect; adding a literal int back here would
     # reintroduce the bug. An admin who wants a real ceiling can still set one at runtime via the Token
     # Economy settings card / POST /api/settings — that stays a genuine, in-band, intentional override.
+    # Reviewed again 2026-07-13 (prod debug-bundle audit): all FOUR token_policy.CALL_CLASSES were
+    # considered for an explicit seed entry here — narration and casting STAY ABSENT ON PURPOSE
+    # (their code default is None ⇒ the model-aware cap; the source-pinned gates
+    # tests/test_620_626_tails.py::test_narr6_casting_max_tokens_seed_stays_absent and
+    # tests/test_narration_maxtokens_no_truncate.py §4 enforce the absence). This dict deliberately
+    # carries ONLY the two classes with literal caps.
     "max_tokens_budget": {
         "utility-extraction": 1500,
         # #1007: 1200 → 3000 to MATCH the token_policy class default (_DEFAULT_MAX_TOKENS). This
@@ -234,11 +251,17 @@ DEFAULT_SETTINGS = {
     # Owner directive 2026-07-11 — the ENRICHMENT runtime policy: "strict" (failures are LOUD: an
     # unwired class refuses game creation with a clear class-naming error; failed calls are retried
     # then ledgered on /api/admin/status) or "soft" (the legacy fail-soft behavior, byte-for-byte:
-    # silent skip ⇒ deterministic floor). "" (the seed default) = unset ⇒ resolve from the env seed
-    # ORWELL_ENRICHMENT_POLICY, else "strict". The FE test suite, the golden driver, and the smoke /
-    # browser / responsive harnesses pin the env to "soft" so every stubbed lane keeps the legacy
-    # contracts. Resolution lives in src/enrichment_policy.py (read per-request — no restart).
-    "enrichment_policy": "",
+    # silent skip ⇒ deterministic floor). Shipped default: an EXPLICIT "strict" (owner ruling
+    # 2026-07-13, live prod debug-bundle audit — the old "" seed resolved strict only by code
+    # default, so intent was invisible in store snapshots; same resolved policy, now visible).
+    # Because DEFAULT_SETTINGS merges into every read, the env seed ORWELL_ENRICHMENT_POLICY now
+    # takes precedence OVER the settings tier (resolution: env seed → settings key → code default
+    # "strict" — src/enrichment_policy.py, read per-request, no restart): the env seed exists ONLY
+    # as the harness pin — the FE test suite's conftest, the golden driver, and the smoke / browser /
+    # responsive harnesses pin it to "soft" so every stubbed lane keeps the legacy fail-soft
+    # contracts byte-identical, and a merged shipped default must never shadow that pin. Prod never
+    # sets the env, so the runtime-editable settings key stays authoritative there.
+    "enrichment_policy": "strict",
     # ADR 0010 / feature 0069 — the soft per-game spend-alert threshold in USD.
     # 0.0 = alert off. Compared against the running per-session cost total via
     # orwell_token_ledger.check_soft_alert (strictly-over semantics).
@@ -273,13 +296,16 @@ DEFAULT_SETTINGS = {
     "task_model": "",
     "default_endpoint_id": "",
     # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
-    # setup); z-ai/glm-5.2 is the out-of-box selected model (chat box + narrator + onboarding all
-    # read this resolved default) — the 2026-07-07 two-tier owner decision (ADR 0016 amendment,
-    # confirmed as the OOB pair 2026-07-09; the M0-1 golden fixture + golden-nightly record on the
-    # same pair). `default_endpoint_id` stays empty so resolution binds it to the
-    # first enabled endpoint (the OpenRouter one the setup wizard creates); the setup wizard also
-    # writes the endpoint id explicitly once it exists.
-    "default_model": "z-ai/glm-5.2",
+    # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
+    # read this resolved default) — OWNER RULING 2026-07-13 (live prod debug-bundle audit): back to
+    # the ADR 0016 narrator/utility default GLM-4.7 (the 2026-07-07 glm-5.2 two-tier retarget is
+    # reverted for the SHIPPED default; persisted stores keep whatever they carry — the owner flips
+    # his box in the UI). NOTE the committed golden fixture stays recorded on glm-5.2 EXPLICITLY
+    # (`scripts/golden_path_record.py --model`, its own flag) — the golden gate is model-pinned by
+    # fixture, not by this seed, so this default does NOT stale it. `default_endpoint_id` stays
+    # empty so resolution binds it to the first enabled endpoint (the OpenRouter one the setup
+    # wizard creates); the setup wizard also writes the endpoint id explicitly once it exists.
+    "default_model": "z-ai/glm-4.7",
     # Ordered fallback chain for the default chat model. Each entry is
     # {"endpoint_id": "...", "model": "..."}. If the primary model fails
     # before producing output (endpoint offline / errors), the chat
@@ -292,8 +318,11 @@ DEFAULT_SETTINGS = {
     # (locally served in prod; deepseek/deepseek-v4-flash is the cloud alternate). NOTE it reasons by
     # default (~266 reasoning tokens on a trivial call) — the per-class reasoning budgets below
     # ("off" for the JSON classes) are the cost lever. It is its OWN key (utility_model), so it does
-    # NOT inherit the narrator swap. `utility_endpoint_id` stays "" so it binds to the first enabled
-    # endpoint (the OpenRouter one the setup wizard creates).
+    # NOT inherit the narrator swap. `utility_endpoint_id` stays "" so it rides the Default Chat
+    # ENDPOINT (the OpenRouter one the setup wizard creates) — since 2026-07-13
+    # (endpoint_resolver): only the ENDPOINT is inherited when unset; this configured utility
+    # MODEL stays authoritative (it used to be silently overwritten by `default_model`, so the
+    # shipped qwen tier never actually resolved out of the box).
     "utility_model": "qwen/qwen3.6-flash",
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
