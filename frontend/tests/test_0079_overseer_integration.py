@@ -11,14 +11,32 @@ overseer's hands and already act during the turn). Name-agnostic — roles only.
 import os
 
 
-def test_overseer_disabled_by_default(monkeypatch):
+def _isolate_settings(monkeypatch, tmp_path):
+    """Point the settings store at a tmp (nonexistent) file + drop the TTL cache, so resolution is
+    deterministic — no stray real settings.json from a sibling xdist test can shadow the env path."""
+    from src import settings as _s
+    monkeypatch.setattr(_s, "SETTINGS_FILE", str(tmp_path / "settings.json"))
+    monkeypatch.setattr(_s, "_settings_cache", None)
+
+
+def test_overseer_active_by_default(monkeypatch, tmp_path):
+    """Owner ruling 2026-07-13: with NOTHING configured, the runtime overseer ships ACTIVE (was OFF).
+    Only the truly-UNSET default changed — every explicit dial still wins (see the tests below)."""
     from src import overseer
+    _isolate_settings(monkeypatch, tmp_path)
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
-    assert overseer.overseer_enabled() is False
+    monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
+    assert overseer.overseer_mode() == "active"
+    assert overseer.overseer_enabled() is True
 
 
-def test_overseer_enabled_only_for_truthy_flag(monkeypatch):
+def test_overseer_truthy_env_is_shadow_explicit_falsey_still_off(monkeypatch, tmp_path):
+    """The legacy ORWELL_OVERSEER env flag: truthy ⇒ shadow (enabled); an EXPLICIT non-truthy value
+    (0/false/off/…) ⇒ off (disabled) — an operator's explicit off still wins over the new active
+    default. (A truly-UNSET config gets active — that is test_overseer_active_by_default.)"""
     from src import overseer
+    _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
     for truthy in ("1", "true", "TRUE", "yes", "on"):
         monkeypatch.setenv("ORWELL_OVERSEER", truthy)
         assert overseer.overseer_enabled() is True, truthy

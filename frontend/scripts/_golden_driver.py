@@ -351,6 +351,20 @@ class GoldenDriver:
                       # byte-deterministic with the legacy fail-soft call shapes, so the driver pins
                       # the LEGACY `soft` policy (exactly like the floor-start hatch above).
                       ORWELL_ENRICHMENT_POLICY="soft",
+                      # PIN the runtime overseer (0080) + faithfulness judge (0081) OFF for the golden
+                      # seam. Owner ruling 2026-07-13 flipped BOTH dials to `active` by DEFAULT — but
+                      # `active` is LIVE-only: it fires extra deterministic overseer corrections (added
+                      # engine tool calls) and per-claim faithfulness JUDGE LLM calls, both of which the
+                      # committed fixture (recorded overseer/faithfulness-off) never contains. Left on,
+                      # RECORD bakes in non-deterministic corrections + spends money on the judge tier, and
+                      # REPLAY makes un-recorded calls → a fixture MISS. Pinning them off makes the seam
+                      # byte-reproducible against the committed fixture — exactly like the enrichment=soft
+                      # pin above. A fresh re-record (nightly / a deliberate re-cut) can drop these to
+                      # capture the active-overseer/-judge pacing. ORWELL_DISABLE_IMAGE_GEN is belt-and-
+                      # suspenders (image gen is already inert here — the driver configures no image model).
+                      ORWELL_OVERSEER_MODE="off",
+                      ORWELL_FAITHFULNESS_MODE="off",
+                      ORWELL_DISABLE_IMAGE_GEN="1",
                       # CI-load resilience (slow/contended gh-runner): the heavy advanceGame turn
                       # (premiere→week1 — staged HOH setup + off-screen tick + folds) can blow the 30s
                       # default FE→engine timeout, so the FE's engine call ReadTimeouts, chat_stream

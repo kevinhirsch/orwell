@@ -7422,7 +7422,8 @@ async def _stream_agent_loop_impl(
         except Exception as _ovd_err:  # fail-soft: telemetry never hurts a turn
             logger.debug(f"[overseer-debug] live emit skipped: {_ovd_err}")
 
-        # 0079 — the runtime loop overseer (opt-in, default OFF via the admin toggle / ORWELL_OVERSEER).
+        # 0079 — the runtime loop overseer (DEFAULT ACTIVE since the owner ruling 2026-07-13; still
+        # fully controllable via the admin dial / ORWELL_OVERSEER_MODE, and an explicit `off` disables).
         # One holistic, Vault-free, post-turn diagnosis of the engine<->LLM loop. The symptom-gate is
         # SPARSE (a healthy turn trips nothing). On a symptom it runs the REASONING tier (LlmOverseer
         # over the user's utility model) for a wide-eyed root-cause read, FAIL-SOFT to the deterministic
@@ -7430,7 +7431,8 @@ async def _stream_agent_loop_impl(
         # It does NOT pull levers here: the inline guardrails above ARE the overseer's deterministic
         # hands (they already nudged / advanced / backfilled this turn), so the post-turn tier is the
         # intelligent DIAGNOSIS + audit layer over them — re-acting here would double-fire or override
-        # the tuned pacing grace. Fail-soft throughout; off by default ⇒ the loop runs exactly as before.
+        # the tuned pacing grace. Fail-soft throughout; a healthy turn still logs nothing (sparse gate),
+        # and with no model resolved the deterministic verdict keeps the loop byte-identical.
         try:
             from src.overseer import (overseer_enabled, should_assess, Signals,
                                       DeterministicOverseer, LlmOverseer)
