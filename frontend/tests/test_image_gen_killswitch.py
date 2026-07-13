@@ -30,7 +30,17 @@ _PROMPTS = [
 
 
 def _run(coro):
-    return asyncio.run(coro)
+    # Run on a dedicated loop and RESTORE a fresh current loop afterward. `asyncio.run()`
+    # sets the thread's current event loop to None on exit, which poisons sibling tests that
+    # use the legacy `asyncio.get_event_loop().run_until_complete(...)` pattern when they land
+    # on the same pytest-xdist worker process (they'd hit "There is no current event loop").
+    # Keeping a valid current loop keeps this file a good citizen in the parallel suite.
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 @pytest.fixture
