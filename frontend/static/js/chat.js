@@ -79,6 +79,7 @@ import { editUserMessage, resendUserMessage, regenerateFrom, forkFrom, deleteMes
 // #1399 single-eval holds; sessions.js's selectSession drain-nudge rides the chatModule re-export.
 import {
   _enqueueSend, _flushSendOutbox, _restoreOutboxFromStorage, _outboxConfirmDelivery,
+  _outboxTrackInflightSend, _outboxReleaseInflightSend, _outboxHasBlockingSendFor,
   _requeueOutboxItem, _isNetworkSendFailure, _dedupeOutboxAgainstServer, _setDeliveryState,
   _markSendFailedById, _retryFailedSend, _persistOutbox, _updateOutboxStrip, _outboxOnline,
   _armOutboxRetry, _setQueuedTag, _outboxPeekStorage, _setOutboxDispatch, _setOutboxDeps,
@@ -655,6 +656,32 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         return;
       }
     } catch (_) { /* gate unavailable → never block the chat */ }
+
+    // ── #891 order-stability: per-session FIFO across a reload. A fresh composer send must never
+    // jump AHEAD of an older, still-undispatched send for the same session — the restored outbox
+    // (reload mid-hang) drains on its own schedule (boot restore at 600ms+ → dedupe → dispatch), so
+    // an idle-looking composer can hide a queue that is still owed the earlier turns. When such items
+    // exist (in memory, or still un-restored in sessionStorage during the boot window), the fresh
+    // send JOINS the queue behind them instead of dispatching directly; the self-continuing drain
+    // then dispatches everything in original send order. Scope mirrors the queue/offline branches:
+    // plain composer chat only — headless machinery, slash commands, setup input, and
+    // attachment-carrying sends (their upload needs the inline path) keep the direct route.
+    if (!chatState.isStreaming && !_headless) {
+      const _fifoInput = uiModule.el('message');
+      const _fifoText = _fifoInput ? (_fifoInput.value || '') : '';
+      const _fifoTrim = _fifoText.trim();
+      if (_fifoTrim && !isCommand(_fifoTrim) &&
+          slashCommands.getSetupMode && !slashCommands.getSetupMode() &&
+          !fileHandlerModule.getPendingCount() &&
+          !(_pendingRegenAttachments && _pendingRegenAttachments.length) &&
+          _outboxHasBlockingSendFor(sessionModule.getCurrentSessionId())) {
+        _enqueueSend(_fifoText);
+        _armOutboxRetry();
+        // Nudge the drain: the restore's own kick may already have run and parked on backoff.
+        try { setTimeout(() => { try { _flushSendOutbox(); } catch (_) {} }, 0); } catch (_) {}
+        return;
+      }
+    }
 
     // --- Send-path entry: block re-clicks between submit and stream start ---
     if (chatState._sendInFlight) return;
@@ -1392,6 +1419,24 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         catch { return ''; }
       })();
 
+      // ── #891 order-stability: durable in-flight record for a PLAYER-VISIBLE send ──────────
+      // A direct composer send previously had NO durable record while its POST was in flight — a
+      // reload during a long-hanging request (server wedge) lost the message entirely, and a queued
+      // sibling then restored and dispatched FIRST (send-order inversion). Register the turn in the
+      // outbox's awaiting-confirm bucket (persisted 'state:inflight' — the exact lifecycle a flushed
+      // queued send already has) right before the transport dispatch, covering the whole hang window
+      // on BOTH the WS up-frame and the SSE POST. Released when a server row carrying the
+      // clientMsgId is observed (the adopt pass → _outboxConfirmDelivery — the stream-end finally
+      // always runs one reconcile), folded by the network-requeue/mark-failed paths, or explicitly
+      // released on a client-visible refusal below. Idempotent: a flushed outbox send is already
+      // tracked, so this no-ops for it. Scope: a visible user bubble only (headless machinery text
+      // must never restore as a player turn), no attachments (a restored re-send can't carry them),
+      // never incognito (its row never persists — a reload must not resurrect it).
+      const _incogChk = el('incognito-toggle');
+      if (_userMsgEl && !ids.length && !(_incogChk && _incogChk.checked)) {
+        try { _outboxTrackInflightSend(_clientMsgId, msg, streamSessionId, _userMsgEl); } catch (_) {}
+      }
+
       // ── WebSocket Phase-1 up-frame (ADR 0017 §3.5) ──────────────────────────
       // When the socket is live, the turn goes UP as a `turn` frame instead of the
       // SSE POST. The engine hop, the queue-don't-cancel policy, and the casting
@@ -1422,6 +1467,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           // Pre-stream refusal (stale-beat / forbidden / not-bound, §3.5): fall soft —
           // drop the pinned round, release the lock, and reconcile from history. A
           // stale-beat reconcile lets the player retry with the fresh beatSeq (0065).
+          // #891 order-stability: the send was REFUSED before any server write — release the
+          // durable in-flight record so a later reload can't resurrect a turn the player must
+          // consciously retry (stale-beat semantics).
+          try { _outboxReleaseInflightSend(_clientMsgId); } catch (_) {}
           _wsResetRound();
           if (clearResponseTimeout) clearResponseTimeout();
           try { if (spinner) spinner.destroy(); } catch (_) {}
@@ -1441,6 +1490,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       
       if (!res.ok) {
         clearResponseTimeout();
+        // #891 order-stability: the server REFUSED this send with a client-visible error (rendered
+        // below) — no row was written for it. Release the durable in-flight record so a later reload
+        // can't resurrect a turn the player already saw fail (they retry consciously).
+        try { _outboxReleaseInflightSend(_clientMsgId); } catch (_) {}
         if (res.status === 404) {
           // Session was deleted (e.g. by AI) — reload and go to welcome
           holder.remove();
@@ -5363,6 +5416,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     _outboxFailed: chatState._outboxFailed,               // #891 F-A7: durable terminally-failed items (browser gate)
     _restoreOutboxFromStorage,   // #891: boot restore of the persisted queue (browser gate)
     _outboxConfirmDelivery,      // #891: server-row-observed delivery confirm (browser gate)
+    _outboxTrackInflightSend,    // #891 order-stability: durable in-flight record for a direct send (browser gate)
+    _outboxReleaseInflightSend,  // #891 order-stability: release a refused send's durable record (browser gate)
+    _outboxHasBlockingSendFor,   // #891 order-stability: per-session FIFO gate for fresh sends (browser gate)
     _setDeliveryState,           // #891 F-A7: per-bubble delivery-state projection (browser gate)
     _markSendFailedById,         // #891 F-A7: mark a send terminally failed + durable (browser gate)
     _retryFailedSend,            // #891 F-A7: user-tapped Retry on a failed bubble (browser gate)

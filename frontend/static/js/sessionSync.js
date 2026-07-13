@@ -199,7 +199,7 @@
 
   // ADR 0008: coalesce a burst of events into one reconcile (softReloadHistory is idempotent).
   var _recTimers = {};
-  function scheduleReconcile(id) {
+  function scheduleReconcile(id, delayMs) {
     var cm = chat();
     if (!cm || !cm.softReloadHistory) return;
     if (_recTimers[id]) return;                 // already scheduled — fold this event in
@@ -211,7 +211,35 @@
       if (gameBuildOn() && id === canonicalSession()) {
         convergeView(id).then(function () { try { cm.softReloadHistory(id); } catch (_) {} });
       }
-    }, 120);
+    }, typeof delayMs === 'number' ? delayMs : 120);
+  }
+
+  // #891 (F4) order-stability: RATE-LIMIT the fell-behind recovery. On a healthy stream a busSeq hole /
+  // `resync` sentinel is rare, so the first one reconciles promptly (the normal 120ms coalesce). But on
+  // an ERRATIC stream (a wedged/overloaded server: dropped events, overflowing subscriber queues,
+  // reconnects replaying a ring with holes) EVERY arriving event can reveal a fresh hole — and each
+  // un-throttled gap reconcile is a full /api/history fetch (softReloadHistory fetches BEFORE its
+  // hasActiveStream deferral). That burst of reloads mid-send is exactly the window where a rebuild can
+  // interleave with in-flight optimistic bubbles. So gap/resync-triggered reconciles get a per-session
+  // COOLDOWN: within it, further gap events fold into ONE reconcile scheduled at the cooldown boundary
+  // (still through the ONE coalesced scheduleReconcile seam — never a second reload path). Correctness
+  // floor unchanged: the reconcile still happens (once), the panels' poll still stands, and the normal
+  // message-added path keeps its prompt 120ms coalesce.
+  var _GAP_RECONCILE_COOLDOWN_MS = 5000;
+  var _lastGapReconcileAt = {};
+  function scheduleGapReconcile(id) {
+    // A reconcile is ALREADY scheduled for this session (gap- or message-added-triggered) — it will
+    // cover this hole too; fold into it WITHOUT advancing the cooldown stamp (advancing on every
+    // event would push the recovery out indefinitely under sustained churn — starvation).
+    if (_recTimers[id]) return;
+    var now = Date.now();
+    var last = _lastGapReconcileAt[id] || 0;
+    // The soonest this recovery may FIRE: promptly (the normal 120ms coalesce) when outside the
+    // cooldown, else at the cooldown boundary after the previously-scheduled gap reconcile.
+    var due = Math.max(now + 120, last + _GAP_RECONCILE_COOLDOWN_MS);
+    var wait = due - now;
+    _lastGapReconcileAt[id] = due;
+    scheduleReconcile(id, wait);
   }
 
   function handle(type, data) {
@@ -225,7 +253,7 @@
     // the sentinel), so the stream stays contiguous and we don't re-detect the same hole. Fail-open: a
     // missing reload seam / unversioned events behave exactly as today.
     var _isBoardPing = (type === 'game-updated' || type === 'layout-changed');
-    if (id && (type === 'resync' || _busGap(id, data))) { scheduleReconcile(id); }
+    if (id && (type === 'resync' || _busGap(id, data))) { scheduleGapReconcile(id); }
     if (id && !_isBoardPing) { _noteBusSeq(id, data); }
     if (type === 'resync') return;               // the sentinel carries no board/chat payload of its own
     // Board/layout pings are not chat — handle them before the chat-session gate (they ride the

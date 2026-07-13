@@ -245,6 +245,87 @@ export function _setOutboxDeps(deps) {
     } catch (_) { /* storage unavailable — the in-memory queue still works for this page */ }
   }
 
+  /** #891 order-stability: register a DIRECT (composer-dispatched, non-queued) player send as a
+   *  durable in-flight record the moment it dispatches. The queued→dispatched path already persists
+   *  its item ('state:inflight' via _outboxAwaitingConfirm), but a direct send had NO record at all —
+   *  so a reload during a long-hanging POST lost the message entirely, and a QUEUED sibling restored
+   *  and dispatched FIRST while the original's zombie POST could still land later (a permanent
+   *  send-order inversion). Tracking it here gives a direct send the exact #891 lifecycle a flushed
+   *  send has: persisted until a server row carrying its clientMsgId is observed; a reload mid-flight
+   *  restores it (needsDedupe-armed, at-most-once) AHEAD of the still-queued items — _persistOutbox
+   *  serializes awaiting-confirm FIRST, so the restore re-queues in original dispatch order.
+   *  Idempotent per clientMsgId (a flushed outbox send is already tracked — no double record). */
+  function _outboxTrackInflightSend(clientMsgId, text, sessionId, bubbleEl) {
+    if (!clientMsgId || typeof text !== 'string' || !text) return false;
+    for (const arr of [chatState._outboxAwaitingConfirm, chatState._sendOutbox, chatState._outboxFailed]) {
+      if (arr.some((it) => it && it.clientMsgId === clientMsgId)) return false; // already tracked
+    }
+    chatState._outboxAwaitingConfirm.push({
+      clientMsgId,
+      text,
+      sessionId: sessionId || null,
+      ts: Date.now(),
+      retries: 0,
+      needsDedupe: false,
+      coalesce: false,
+      bubbleEl: bubbleEl || null,
+    });
+    _persistOutbox();
+    return true;
+  }
+
+  /** #891 order-stability: release a tracked in-flight record whose send was REFUSED client-visibly
+   *  (an !res.ok streamed refusal, a WS pre-stream refusal). The user saw the failure surface and the
+   *  turn never became a server row — keeping the record would re-send it after a reload. Distinct
+   *  from _outboxConfirmDelivery (which asserts the row LANDED): this only drops the durable copy;
+   *  the bubble's error chrome is owned by the caller's error path. */
+  function _outboxReleaseInflightSend(clientMsgId) {
+    if (!clientMsgId) return;
+    let hit = false;
+    const i = chatState._outboxAwaitingConfirm.findIndex((it) => it && it.clientMsgId === clientMsgId);
+    if (i >= 0) { chatState._outboxAwaitingConfirm.splice(i, 1); hit = true; }
+    if (hit) _persistOutbox();
+  }
+
+  /** #891 order-stability (FIFO across a reload): is there an OLDER, still-undispatched send this
+   *  session must drain BEFORE a fresh composer send may dispatch? True when the in-memory queue
+   *  holds an item bound to `sessionId` (or session-less — eligible everywhere), OR — the boot
+   *  window before the restore has run — when the persisted record still holds a drainable item for
+   *  it. A fresh send arriving while this is true must join the queue (per-session FIFO), never jump
+   *  ahead of a restored-but-unconfirmed older turn. Failed items never block (they only move on an
+   *  explicit Retry); awaiting-confirm items never block in-page (they were already dispatched —
+   *  their server order is settled). */
+  function _outboxHasBlockingSendFor(sessionId) {
+    const sameLane = (sid) => !sid || !sessionId || sid === sessionId;
+    if (chatState._sendOutbox.some((it) => it && sameLane(it.sessionId))) return true;
+    if (!chatState._outboxRestoreDone) {
+      const rec = _outboxPeekStorage();
+      const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
+      if (items.some((it) => it && it.clientMsgId && typeof it.text === 'string' && it.text &&
+                             it.state !== 'failed' && sameLane(it.sessionId))) return true;
+    }
+    return false;
+  }
+
+  /** #891 order-stability (the sticky-duplicate hole): is this confirmed item's bubble a REDUNDANT
+   *  copy? True when the bubble itself was never adopted (no dbId) while the AUTHORITATIVE render of
+   *  the same clientMsgId — a history-rendered row, stamped with its data-db-id — is already in the
+   *  DOM. Settling such a copy 'delivered' leaves two visible bubbles for one server row, and the
+   *  pending shape (clientMsgId, no dbId) keeps it excluded from the divergence count so every
+   *  rebuild RESCUES it — a permanent duplicate ("old messages hanging out"). The redundant copy must
+   *  be removed, not settled. */
+  function _isRedundantConfirmedBubble(bubbleEl, clientMsgId) {
+    try {
+      if (!bubbleEl || !clientMsgId) return false;
+      if (bubbleEl.dataset && bubbleEl.dataset.dbId) return false;  // adopted — it IS the authoritative render
+      const stamped = document.querySelectorAll('.msg[data-db-id]');
+      for (let i = 0; i < stamped.length; i++) {
+        if (stamped[i] !== bubbleEl && stamped[i].dataset.clientMsgId === clientMsgId) return true;
+      }
+    } catch (_) { /* fail-open: never remove on doubt */ }
+    return false;
+  }
+
   /** #891: restore the persisted queue after a reload — repaint pending bubbles, mark every restored
    *  item `needsDedupe` (at-most-once: the pre-send history check drops already-delivered rows), and
    *  kick the drain. Idempotent (runs once per page); scheduled past the boot renders so the bubbles
@@ -274,12 +355,35 @@ export function _setOutboxDeps(deps) {
     const items = (rec && Array.isArray(rec.items)) ? rec.items : [];
     let restored = 0;
     let restoredFailed = 0; // #891 F-A7: durable-failed items repaint but never auto-drain
+    // #891 order-stability: only paint a restored bubble into the view of ITS OWN session (or a
+    // pre-session item's — it is eligible everywhere). A restored item bound to ANOTHER session keeps
+    // its record + drain semantics but paints nothing here — the drain's session gate holds it, and
+    // the dispatch paints a fresh bubble when its session is actually selected. Painting into a
+    // foreign session's DOM was a cross-session visual bleed.
+    const _curSid = (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
+    const _paintable = (sid) => !sid || sid === _curSid;
+    // #891 order-stability (the sticky-duplicate hole): the boot history render may ALREADY show a
+    // bubble for this clientMsgId. Repainting a second pending bubble creates a duplicate the
+    // divergence check is structurally blind to (pending shape ⇒ excluded ⇒ rescued by every rebuild).
+    // Adopt the existing element instead; if it is db-id-stamped the row PROVABLY landed — the item is
+    // delivered, so release it here (the trailing _persistOutbox normalizes storage).
+    const _existingByCid = (cid) => {
+      try {
+        const all = document.querySelectorAll('.msg');
+        for (let i = 0; i < all.length; i++) {
+          if (all[i].dataset && all[i].dataset.clientMsgId === cid) return all[i];
+        }
+      } catch (_) {}
+      return null;
+    };
     for (const it of items) {
       if (!it || typeof it.clientMsgId !== 'string' || !it.clientMsgId) continue;
       if (typeof it.text !== 'string' || !it.text) continue;
       if (chatState._sendOutbox.some((x) => x.clientMsgId === it.clientMsgId) ||
           chatState._outboxAwaitingConfirm.some((x) => x.clientMsgId === it.clientMsgId) ||
           chatState._outboxFailed.some((x) => x.clientMsgId === it.clientMsgId)) continue;
+      const existingEl = _existingByCid(it.clientMsgId);
+      if (existingEl && existingEl.dataset.dbId) continue; // row landed — proven delivered, release
       // #891 F-A7: a persisted `state:'failed'` item restores into the DURABLE-FAILED bucket — its
       // bubble repaints as 'failed' + Retry, and it is NOT re-queued for the auto-drain (retries were
       // exhausted; only an explicit Retry, or a proven-delivered server row, moves it).
@@ -293,9 +397,9 @@ export function _setOutboxDeps(deps) {
           needsDedupe: false,
           coalesce: false,
           failed: true,
-          bubbleEl: null,
+          bubbleEl: existingEl || null,
         };
-        _paintOutboxBubble(failedItem);
+        if (!failedItem.bubbleEl && _paintable(failedItem.sessionId)) _paintOutboxBubble(failedItem);
         _setDeliveryState(failedItem.bubbleEl, 'failed');
         chatState._outboxFailed.push(failedItem);
         restoredFailed++;
@@ -312,9 +416,9 @@ export function _setOutboxDeps(deps) {
         // have reached the server), so it re-enters the queue OUTSIDE the aggregation lane —
         // per-item drain, per-item dedupe, never folded (matches the design note at the top).
         coalesce: false,
-        bubbleEl: null,
+        bubbleEl: existingEl || null,
       };
-      _paintOutboxBubble(item);
+      if (!item.bubbleEl && _paintable(item.sessionId)) _paintOutboxBubble(item);
       chatState._sendOutbox.push(item);
       restored++;
     }
@@ -339,7 +443,12 @@ export function _setOutboxDeps(deps) {
       const i = arr.findIndex((it) => it && it.clientMsgId === clientMsgId);
       if (i >= 0) {
         const removed = arr.splice(i, 1)[0];
-        if (removed && removed.bubbleEl) _setDeliveryState(removed.bubbleEl, 'delivered');
+        // #891 order-stability: if the AUTHORITATIVE render of this row is already on screen and this
+        // bubble was never adopted, settling it 'delivered' would leave a permanent duplicate the
+        // divergence check can't see — remove the redundant copy instead.
+        if (removed && removed.bubbleEl && _isRedundantConfirmedBubble(removed.bubbleEl, clientMsgId)) {
+          try { removed.bubbleEl.remove(); } catch (_) {}
+        } else if (removed && removed.bubbleEl) _setDeliveryState(removed.bubbleEl, 'delivered');
         hit = true;
       }
     }
@@ -455,7 +564,11 @@ export function _setOutboxDeps(deps) {
           // authoritative row renders (same clientMsgId), so nothing is lost and nothing doubles.
           const i = chatState._sendOutbox.indexOf(it);
           if (i >= 0) chatState._sendOutbox.splice(i, 1);
-          if (it.bubbleEl) _setDeliveryState(it.bubbleEl, 'delivered');
+          // #891 order-stability: when the authoritative row is ALREADY rendered (db-id-stamped) and
+          // this bubble was never adopted, it is a redundant duplicate — remove it, don't settle it.
+          if (it.bubbleEl && _isRedundantConfirmedBubble(it.bubbleEl, it.clientMsgId)) {
+            try { it.bubbleEl.remove(); } catch (_) {}
+          } else if (it.bubbleEl) _setDeliveryState(it.bubbleEl, 'delivered');
         }
       }
     }
@@ -928,6 +1041,9 @@ export {
   _flushSendOutbox,
   _restoreOutboxFromStorage,
   _outboxConfirmDelivery,
+  _outboxTrackInflightSend,
+  _outboxReleaseInflightSend,
+  _outboxHasBlockingSendFor,
   _requeueOutboxItem,
   _isNetworkSendFailure,
   _dedupeOutboxAgainstServer,
