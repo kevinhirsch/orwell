@@ -1,7 +1,31 @@
 #!/usr/bin/env bash
 #
 # orwell-restore.sh (B72/ops A8) — restore a backup made by orwell-backup.sh.
-# Stops the services, untars BOTH data dirs over the app, fixes ownership, restarts.
+#
+# Stops the services, then ATOMICALLY REPLACES the engine + front-end data subtrees with the
+# backup's, then restarts. "Atomically replace" — not "extract over" — is deliberate and
+# load-bearing (data-safety audit 2026-07-13):
+#
+#   * P0 — engine saves are monotonic-versioned files (data/saves/<user>/vNNNNNN.json) and the
+#     engine's loadLatest() returns the HIGHEST version. Extracting an OLDER backup ON TOP of a
+#     newer live tree left the newer saves in place, so the restore SILENTLY DID NOT roll the game
+#     back; multi-file components (portraits) were UNIONED, reintroducing stale-cast faces. So we
+#     MOVE the live subtrees ASIDE first (never rm -rf — a timestamped .pre-restore-<ts> sibling is
+#     kept for rollback) and only THEN extract, so what lands is exactly the backup, nothing merged.
+#     On ANY extraction failure the moved-aside tree is moved back (fail-safe).
+#
+#   * P1 — a backup carries data/.env (ports, tokens, and the PUBLIC-EXPOSURE / TLS / GIT_TOKEN
+#     profile: ORWELL_PUBLIC, ALLOWED_HOSTS/ORIGINS, SECURE_COOKIES, ORWELL_BIND_HOST, ORWELL_TLS_*)
+#     but NOT the matching OS state (cloudflared/Caddy/cap-drop-in). Restoring an OLDER .env would
+#     silently revert exposure/TLS/token while the OS services keep running → host-header/Origin
+#     rejections, HTTPS cookie mismatch, broken auto-update. DECISION (the safe one): KEEP THE LIVE
+#     data/.env — game state rolls back, host CONFIG does not. The backup's .env is preserved inside
+#     the move-aside dir if ever needed. If there was no live .env at all, the backup's stands and we
+#     print a loud note to re-run the public-deploy / HTTPS apply.
+#
+#   * Archive validation — refuse anything whose members are not exactly under data/ or
+#     frontend/data/, so a stray `orwell restore /path/anything.tar.gz` can't drop arbitrary files
+#     under the app tree.
 #
 # Usage: orwell-restore.sh <backup.tar.gz>
 set -euo pipefail
@@ -26,17 +50,101 @@ if [[ -z "$BACKUP" ]] && tui_active; then
   fi
   __args=(); for __f in "${__list[@]}"; do __args+=("$__f" "$(date -r "$__f" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '')"); done
   wt_menu BACKUP "Choose a backup to restore:" "${__args[@]}" || { echo "cancelled."; exit 0; }
-  wt_yesno "Restore from:\n${BACKUP}\n\nThis STOPS the services and OVERWRITES the current engine + front-end data with the backup, then restarts." --defaultno || { echo "cancelled."; exit 0; }
+  wt_yesno "Restore from:\n${BACKUP}\n\nThis STOPS the services and REPLACES the current engine + front-end game data with the backup, then restarts.\n\n(Your host config — data/.env: ports, tokens, public-exposure & TLS — is KEPT, not reverted.)" --defaultno || { echo "cancelled."; exit 0; }
 fi
 
 [[ -n "$BACKUP" && -f "$BACKUP" ]] || { echo "usage: orwell-restore.sh <backup.tar.gz>" >&2; exit 1; }
 
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+# ── Validate the archive is an orwell backup BEFORE touching anything ───────────────────────────
+# Every member must live under data/ or frontend/data/ (a bare intermediate frontend/ dir is
+# tolerated). Anything else ⇒ refuse, so a wrong-tarball restore can never drop files under the app.
+MEMBERS="$(tar -tzf "$BACKUP" 2>/dev/null)" || die "cannot read '${BACKUP}' as a gzip tar archive."
+[[ -n "$MEMBERS" ]] || die "archive '${BACKUP}' is empty — refusing to restore."
+while IFS= read -r __m; do
+  [[ -z "$__m" ]] && continue
+  case "$__m" in
+    data|data/|data/*) : ;;
+    frontend|frontend/|frontend/data|frontend/data/|frontend/data/*) : ;;
+    *) die "archive '${BACKUP}' contains unexpected member '${__m}' — not an orwell backup (expected only data/ and frontend/data/). Refusing to extract." ;;
+  esac
+done <<< "$MEMBERS"
+
+# Which top-level subtrees does this archive actually carry? Replace EXACTLY those — no more.
+SUBTREES=()
+if grep -qE '^data(/|$)' <<< "$MEMBERS"; then SUBTREES+=("data"); fi
+if grep -qE '^frontend/data(/|$)' <<< "$MEMBERS"; then SUBTREES+=("frontend/data"); fi
+[[ ${#SUBTREES[@]} -gt 0 ]] || die "archive '${BACKUP}' carries neither data/ nor frontend/data/ — nothing to restore."
+
+# ── Stop services so nothing writes while we swap ──────────────────────────────────────────────
 have_systemd=0
 command -v systemctl >/dev/null 2>&1 && have_systemd=1
 [[ "$have_systemd" -eq 1 ]] && systemctl stop orwell-frontend orwell-engine 2>/dev/null || true
 
-tar -xzf "$BACKUP" -C "$APP_DIR"
+# ── Move-aside → extract → (fail-safe) rollback ────────────────────────────────────────────────
+STAMP="$(date +%Y%m%d-%H%M%S)"
+ASIDE="$(mktemp -d "${APP_DIR%/}/.pre-restore-${STAMP}-XXXXXX")" || die "cannot create move-aside dir under ${APP_DIR}."
+MOVED=()  # subtrees that actually existed live and were moved into ASIDE
+
+move_aside() {
+  local rel src dst
+  for rel in "${SUBTREES[@]}"; do
+    src="${APP_DIR%/}/${rel}"
+    [[ -e "$src" ]] || continue
+    dst="${ASIDE}/${rel}"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    MOVED+=("$rel")
+  done
+}
+
+# Fail-safe: undo a partial/failed restore — drop any partially-extracted target subtree, then
+# move the preserved live copy back, leaving the box exactly as it was pre-restore.
+rollback_aside() {
+  local rel live saved
+  for rel in "${MOVED[@]}"; do
+    live="${APP_DIR%/}/${rel}"
+    saved="${ASIDE}/${rel}"
+    [[ -e "$live" ]] && rm -rf -- "$live"
+    if [[ -e "$saved" ]]; then
+      mkdir -p "$(dirname "$live")"
+      mv "$saved" "$live"
+    fi
+  done
+}
+
+move_aside
+
+if ! tar -xzf "$BACKUP" -C "$APP_DIR"; then
+  echo "WARN: extraction FAILED — rolling back to the pre-restore state." >&2
+  rollback_aside
+  # rollback_aside moved every saved subtree back to live; ASIDE now holds only empty scaffolding.
+  # Remove it ONLY if it contains no files (never delete a real copy that a mv left behind).
+  if [[ -n "$(find "$ASIDE" ! -type d -print -quit 2>/dev/null)" ]]; then
+    echo "NOTE: kept pre-restore copy at ${ASIDE} (it still holds files)." >&2
+  else
+    rm -rf -- "$ASIDE" 2>/dev/null || true
+  fi
+  die "restore failed; original data was restored from the move-aside. No changes kept."
+fi
+
+# ── P1: keep the LIVE data/.env (host config: exposure / TLS / GIT_TOKEN) — do NOT silently ──────
+#        revert it to the backup's older copy. The live one was moved into ASIDE with the rest of
+#        data/, so restore it back over the just-extracted (older) one.
+if [[ " ${MOVED[*]:-} " == *" data "* ]]; then
+  if [[ -f "${ASIDE}/data/.env" ]]; then
+    cp -p "${ASIDE}/data/.env" "${APP_DIR%/}/data/.env"
+    echo "kept live data/.env (ports, tokens, public-exposure & TLS profile) — NOT reverted to the backup's copy."
+  elif grep -qxE 'data/\.env/?' <<< "$MEMBERS"; then
+    echo "WARN: no live data/.env existed; the backup's data/.env is now in place — re-run your" >&2
+    echo "      public-deploy / HTTPS apply if its exposure / TLS / GIT_TOKEN values differ." >&2
+  fi
+fi
+
 id -u orwell >/dev/null 2>&1 && chown -R orwell:orwell "${APP_DIR}/data" "${APP_DIR}/frontend/data" 2>/dev/null || true
 
 [[ "$have_systemd" -eq 1 ]] && systemctl start orwell-engine orwell-frontend 2>/dev/null || true
 echo "restore complete from ${BACKUP}"
+echo "previous data moved aside to: ${ASIDE}"
+echo "  (kept for rollback — delete it once you've verified the restored game looks right)"
