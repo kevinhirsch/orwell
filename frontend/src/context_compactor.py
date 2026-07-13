@@ -5,11 +5,13 @@ Auto-compacts conversation history when approaching context window limits.
 Summarizes older messages via the same LLM, preserving key context.
 """
 
+import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional
 
-from src.model_context import get_context_length, estimate_tokens
+from src.model_context import get_context_length_async, estimate_tokens
 from src.llm_core import llm_call_async
 from src.endpoint_resolver import resolve_endpoint
 from core.models import ChatMessage
@@ -301,6 +303,137 @@ def trim_for_context(messages: List[Dict], context_length: int, reserve_tokens: 
     return result
 
 
+def _safe_int_env(name: str, default: int) -> int:
+    """Read an int env var, fail-soft: blank/unset/malformed ⇒ `default` (clamped to ≥1)."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(1, int(raw.strip()))
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r — using default %s", name, raw, default)
+        return default
+
+
+# F-PY-2: background-compaction bookkeeping. `_compaction_in_flight` keeps at most ONE background
+# summarization per session (a second over-threshold turn while the first is still summarizing just
+# rides trim_for_context, then benefits when the first lands). `_background_tasks` holds strong refs
+# so the fire-and-forget tasks are not garbage-collected before they complete.
+_compaction_in_flight: set = set()
+_background_tasks: set = set()
+# Global ceiling on concurrent BACKGROUND compactions across ALL sessions, so a burst of
+# over-threshold turns can't spawn unbounded summarization tasks. Env-tunable; default 4.
+_MAX_CONCURRENT_BG_COMPACTIONS = _safe_int_env("ORWELL_MAX_BG_COMPACTIONS", 4)
+# Created lazily inside the running loop (and rebound if the loop changes — e.g. across isolated
+# test loops) so a module-level asyncio primitive never binds to the wrong event loop.
+_global_compaction_sem: "Optional[asyncio.Semaphore]" = None
+_global_compaction_sem_loop = None
+
+
+def _get_global_compaction_sem() -> "asyncio.Semaphore":
+    global _global_compaction_sem, _global_compaction_sem_loop
+    loop = asyncio.get_running_loop()
+    if _global_compaction_sem is None or _global_compaction_sem_loop is not loop:
+        _global_compaction_sem = asyncio.Semaphore(_MAX_CONCURRENT_BG_COMPACTIONS)
+        _global_compaction_sem_loop = loop
+    return _global_compaction_sem
+
+
+def _stable_repr(v) -> str:
+    """A value-stable string for any message field (str / None / multimodal list / tool_calls)."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    try:
+        return json.dumps(v, sort_keys=True, default=str)
+    except Exception:  # noqa: BLE001 — a weird shape still needs SOME stable key
+        return repr(v)
+
+
+def _message_content_key(m) -> tuple:
+    """A (role, content, tool_calls) CONTENT fingerprint of one history message — dict OR ChatMessage.
+    Compared by VALUE, so an in-place edit (edit_message mutates the SAME object's `content`) is
+    detected; object-identity comparison would miss it."""
+    if isinstance(m, dict):
+        role, content, tool_calls = m.get("role"), m.get("content"), m.get("tool_calls")
+    else:
+        role = getattr(m, "role", None)
+        content = getattr(m, "content", None)
+        tool_calls = getattr(m, "tool_calls", None)
+    return (role, _stable_repr(content), _stable_repr(tool_calls))
+
+
+def _prefix_content_digest(messages) -> tuple:
+    """A value-comparable digest of a message range: a tuple of per-message content keys. A length
+    change, a reorder/replace, OR an in-place content edit all change it."""
+    return tuple(_message_content_key(m) for m in messages)
+
+
+def _schedule_background_compaction(session, split_point: int, system_msg_count: int,
+                                    summarize_fn: Callable) -> None:
+    """Fire the summary LLM call + history rewrite as a fail-soft background task (F-PY-2).
+
+    The current turn has already returned its (uncompacted, trim-guaranteed-to-fit) messages; this
+    persists a compacted `session.history` for FUTURE turns without blocking the first token. One in
+    flight per session, bounded globally by a semaphore; any error is swallowed (compaction is an
+    optimization, never load-bearing — trim_for_context is the correctness floor)."""
+    sid = getattr(session, "id", None)
+    if sid is not None and sid in _compaction_in_flight:
+        return  # already summarizing this session — don't stack a second call
+    # DATA-INTEGRITY (mandate #4 non-degradation): snapshot a CONTENT digest of the message range this
+    # compaction will SUMMARIZE + REPLACE (`session.history[:effective_split]`). Serializing
+    # compactions (the in-flight set) does NOT protect against OTHER writers (delete-messages /
+    # truncate_session / replace_messages / edit_message) mutating history while the summary is in
+    # flight — that leaves split_point/system_msg_count pointing at the wrong range and
+    # `_update_session_history` would OVERWRITE the newer edit (lost data). We digest by VALUE, not
+    # object identity, because `history_routes.edit_message` mutates a message's `content` IN PLACE
+    # (same object) — an identity check would miss it. `_run` re-derives the digest just before
+    # applying; if it differs, it ABANDONS fail-soft (the next over-threshold turn re-compacts).
+    effective_split = system_msg_count + split_point
+    try:
+        prefix_digest = _prefix_content_digest((getattr(session, "history", None) or [])[:effective_split])
+    except Exception:  # noqa: BLE001 — an odd history shape ⇒ can't validate ⇒ skip safely
+        return
+    if sid is not None:
+        _compaction_in_flight.add(sid)
+
+    async def _run() -> None:
+        try:
+            async with _get_global_compaction_sem():
+                summary = await summarize_fn()
+                if not summary:
+                    return
+                # Re-validate the summarized prefix is UNCHANGED since capture. A normal tail append
+                # (this turn's own assistant message) leaves the prefix digest identical → apply; any
+                # edit to the summarized range (delete/truncate/replace/in-place content edit) makes the
+                # digest differ → abandon, don't clobber. Length + reorder + content are all covered.
+                cur = getattr(session, "history", None) or []
+                if _prefix_content_digest(cur[:effective_split]) != prefix_digest:
+                    logger.debug(
+                        "Background compaction abandoned for session %s — history changed under it", sid)
+                    return
+                _update_session_history(session, split_point, summary,
+                                        system_msg_count=system_msg_count)
+                logger.info("Background compaction persisted for session %s", sid)
+        except Exception as e:  # noqa: BLE001 — a background optimization must never surface
+            logger.warning("Background compaction failed for session %s: %s", sid, e)
+        finally:
+            if sid is not None:
+                _compaction_in_flight.discard(sid)
+
+    try:
+        task = asyncio.create_task(_run())
+    except RuntimeError:
+        # No running loop (maybe_compact is async, so this should not happen) — release the guard
+        # and skip; trim_for_context already kept THIS turn safe.
+        if sid is not None:
+            _compaction_in_flight.discard(sid)
+        return
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 async def maybe_compact(
     session,
     endpoint_url: str,
@@ -313,7 +446,9 @@ async def maybe_compact(
 
     Returns (messages, context_length, was_compacted).
     """
-    context_length = get_context_length(endpoint_url, model)
+    # F-PY-3 (perf audit): resolve the context window off the event loop (short-TTL memoized) so a
+    # slow /models or /slots probe on this endpoint can't stall every concurrent user's turn.
+    context_length = await get_context_length_async(endpoint_url, model)
     used = estimate_tokens(messages)
     pct = (used / context_length) * 100 if context_length else 0
 
@@ -369,21 +504,53 @@ async def maybe_compact(
         {"role": "user", "content": convo_text},
     ]
 
+    async def _summarize() -> Optional[str]:
+        try:
+            return await llm_call_async(
+                compact_url,
+                compact_model,
+                summary_messages,
+                temperature=0.2,
+                max_tokens=SUMMARY_MAX_TOKENS,
+                headers=compact_headers,
+                timeout=30,
+            )
+        except Exception as e:  # noqa: BLE001 — degrade gracefully; a summary failure is never fatal
+            logger.error(f"Compaction summary failed: {e}")
+            # Keep the conversation intact rather than silently dropping the older half. None signals
+            # the caller nothing was summarized; trim_for_context handles length either way.
+            return None
+
+    # F-PY-2 (perf audit): DO NOT block the first token on the summary LLM call. The old path
+    # awaited a 30s-ceiling summarization BEFORE narration ("hang, then it streams"). `trim_for_context`
+    # (the caller runs it immediately after) ALREADY hard-guarantees the returned messages fit the
+    # window, so skipping the summary for THIS turn is safe — the older half is trimmed (not
+    # summarized) just this once. We kick the summarization in the BACKGROUND so it persists a
+    # compacted history that shortens EVERY later turn; `was_compacted=False` is correct (nothing was
+    # summarized into THIS turn's messages, so the caller emits no "compacted" cue for it).
+    #
+    # Non-degradation / race-safety (single asyncio event loop): `_update_session_history` and the
+    # turn's own user/assistant appends are each synchronous (no internal await → they never
+    # partially interleave), and the background pass preserves the recent tail
+    # (`session.history[split:]`) — so whichever order they land in, the just-appended turns are
+    # retained; nothing is lost.
+    #
+    # Under the golden record/replay seam KEEP the old blocking behavior so the fixture's summary
+    # call stays in its recorded position (byte-identical record and replay).
+    _golden = False
     try:
-        summary = await llm_call_async(
-            compact_url,
-            compact_model,
-            summary_messages,
-            temperature=0.2,
-            max_tokens=SUMMARY_MAX_TOKENS,
-            headers=compact_headers,
-            timeout=30,
-        )
-    except Exception as e:
-        logger.error(f"Compaction summary failed: {e}")
-        # Degrade gracefully: keep the conversation intact rather than
-        # silently dropping the older half. was_compacted=False signals the
-        # caller nothing was summarized; trim_for_context handles length.
+        from src import golden_path as _gp
+        _golden = _gp.active()
+    except Exception:  # noqa: BLE001 — golden probe is best-effort; absence ⇒ not golden
+        _golden = False
+
+    if not _golden:
+        _schedule_background_compaction(session, split_point, len(system_msgs), _summarize)
+        return messages, context_length, False
+
+    # Golden (or explicitly-blocking) path: summarize inline and apply to THIS turn's messages.
+    summary = await _summarize()
+    if summary is None:
         return messages, context_length, False
 
     summary_msg = {

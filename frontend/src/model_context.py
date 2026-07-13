@@ -5,8 +5,11 @@ Query and cache model context window sizes from OpenAI-compatible APIs.
 Provides token estimation for context usage tracking.
 """
 
+import asyncio
 import logging
+import os
 import sys
+import time
 from typing import Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
@@ -81,7 +84,31 @@ def _is_local_endpoint(url: str) -> bool:
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_CONTEXT = 128000
-REQUEST_TIMEOUT = 5
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float env var, FAIL-SOFT: a blank/unset/malformed value (e.g. "5s", stray whitespace)
+    falls back to `default` with a warning instead of raising at IMPORT time — a bad env var must
+    never crash app startup."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r — using default %s", name, raw, default)
+        return default
+
+
+# F-PY-3 (perf audit): a SHORT timeout on the /models + /slots probes so one slow/hung upstream
+# can't drag out the (now off-loaded) context-size lookup. Env-tunable; default 5s.
+REQUEST_TIMEOUT = _env_float("ORWELL_MODEL_PROBE_TIMEOUT", 5.0)
+# F-PY-3: a short-TTL memo over the whole (blocking) resolution so a slow endpoint is probed at most
+# once per TTL window instead of on every turn. This complements the permanent `_context_cache`
+# below (which deliberately SKIPS local/default results so a restarted local server is re-read) —
+# the TTL layer still shields those hot paths from re-probing an upstream that's momentarily slow.
+# Env-tunable; default 60s.
+_CONTEXT_TTL_SECONDS = _env_float("ORWELL_MODEL_CONTEXT_TTL", 60.0)
 
 # Known context windows for major API models (used as fallback when /models
 # endpoint doesn't report context_length).
@@ -209,6 +236,67 @@ KNOWN_CONTEXT_WINDOWS = {
 # Cache
 # ---------------------------------------------------------------------------
 _context_cache: Dict[Tuple[str, str], int] = {}
+
+# F-PY-3: short-TTL memo for the async path — value + monotonic expiry per (endpoint, model).
+_context_ttl_cache: Dict[Tuple[str, str], Tuple[int, float]] = {}
+# F-PY-3 (single-flight): concurrent COLD callers on the same key share ONE probe instead of each
+# launching a duplicate thread against the same slow upstream. The value is a real asyncio.Task; it is
+# removed from the map exactly once by its own done-callback (success / failure / cancel) so the next
+# window re-probes cleanly and a cancelled caller can never orphan the entry.
+_context_inflight: Dict[Tuple[str, str], "asyncio.Task"] = {}
+
+
+async def get_context_length_async(endpoint_url: str, model: str) -> int:
+    """Async, event-loop-safe wrapper over :func:`get_context_length`.
+
+    F-PY-3 (perf audit): the sync resolution does blocking ``httpx.get`` probes to the endpoint's
+    ``/models`` and ``/slots``. Called directly from async request paths (e.g. ``maybe_compact``),
+    those synchronous probes run ON the event loop — so ONE slow upstream stalls EVERY concurrent
+    user's turn, not just the one whose context is being sized. This wrapper (1) serves a short-TTL
+    memo when fresh (so a slow endpoint is probed at most once per window), (2) COALESCES concurrent
+    cold misses on the same key onto a single probe, and (3) off-loads the blocking resolution to a
+    worker thread via ``asyncio.to_thread`` so the event loop stays free.
+
+    Fail-soft: any error in the off-loaded call degrades to ``DEFAULT_CONTEXT`` rather than
+    propagating (the caller's own guards already treat a missing size as the default)."""
+    key = (endpoint_url, model)
+    now = time.monotonic()
+    hit = _context_ttl_cache.get(key)
+    if hit is not None and hit[1] > now:
+        return hit[0]
+
+    # Single-flight over a real TASK that every caller awaits under `shield`. This is deliberately
+    # NOT a shared Future written by the first caller: if that first caller were CANCELLED mid-probe,
+    # its CancelledError (a BaseException) skips the fail-soft `except Exception`, and a per-caller
+    # `finally` would drop the map entry WITHOUT resolving the future — hanging every concurrent
+    # awaiter FOREVER. With a Task, the shared work is owned by the loop (not any one caller): a
+    # cancelled/timed-out caller can't stop it, `shield` keeps THIS caller's cancellation from
+    # cancelling it for the others, and the map is cleaned + the ttl cache populated exactly once in
+    # the task's done-callback (success / failure / cancel). Awaiters never wait on an orphan.
+    task = _context_inflight.get(key)
+    if task is None:
+        task = asyncio.ensure_future(asyncio.to_thread(get_context_length, endpoint_url, model))
+        _context_inflight[key] = task
+
+        def _on_done(t: "asyncio.Task", k=key) -> None:
+            _context_inflight.pop(k, None)
+            # Cancel/failure ⇒ don't cache; awaiters fall back to DEFAULT_CONTEXT. `t.cancelled()` is
+            # checked first so `t.exception()` (which would raise on a cancelled task) is never reached.
+            if t.cancelled() or t.exception() is not None:
+                return
+            _context_ttl_cache[k] = (t.result(), time.monotonic() + _CONTEXT_TTL_SECONDS)
+
+        task.add_done_callback(_on_done)
+
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if task.cancelled():
+            return DEFAULT_CONTEXT   # the SHARED probe was cancelled → fail-soft, never hang
+        raise                        # THIS caller was cancelled → propagate; the task runs on for others
+    except Exception as e:  # noqa: BLE001 — the shared probe itself failed → fail-soft default
+        logger.debug("get_context_length_async failed for %s: %s", model, e)
+        return DEFAULT_CONTEXT
 
 
 def get_context_length(endpoint_url: str, model: str) -> int:
