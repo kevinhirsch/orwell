@@ -52,6 +52,29 @@ from src.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
+# ── CI/operator image-spend KILL-SWITCH (belt-and-suspenders) ──────────────────────────────
+# `ORWELL_DISABLE_IMAGE_GEN` is a HARD, environment-level off switch for ALL portrait/image
+# generation. Set it in any context that holds a real, keyed image-capable provider but must
+# PROVABLY never spend on images — the keyed nightly CI workflows (golden-nightly /
+# live-harness-nightly, which drive a full `createCharacter` casting flow), the golden
+# record/replay driver, or an operator smoke run. When set, `image_generation_available` reports
+# graceful absence (the roster/onboarding correctly expect no portraits — no error surface) AND
+# every generation entry point early-returns a no-op BEFORE any settings read, catalog probe, or
+# provider POST, so even a direct/forced call can't reach the image API (defense in depth).
+# Fail-soft: an absent/malformed/empty value is treated as NOT set (normal behavior).
+_IMAGE_GEN_KILL_SWITCH_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def image_gen_disabled() -> bool:
+    """True when the ``ORWELL_DISABLE_IMAGE_GEN`` env kill-switch is set to a truthy value
+    (``1``/``true``/``yes``/``on``, case-insensitive). Any other/absent/malformed value ⇒ False
+    (normal behavior). This is the CI/operator image-spend kill-switch — see the block comment."""
+    try:
+        return os.environ.get("ORWELL_DISABLE_IMAGE_GEN", "").strip().lower() in _IMAGE_GEN_KILL_SWITCH_TRUTHY
+    except Exception:  # pragma: no cover - defensive: an env read must never break a read path
+        return False
+
+
 # Base dir for all per-user portrait sets (co-located with the FE data store so the
 # existing factory-reset scrub of data/ removes it; game-reset clears it explicitly).
 PORTRAITS_DIR = Path(DATA_DIR) / "portraits"
@@ -646,6 +669,11 @@ def image_generation_available(user: Optional[str]) -> bool:
     We only report unavailable when generation is disabled or there is genuinely no usable
     endpoint.
     """
+    # CI/operator image-spend kill-switch — checked FIRST, before any settings read or catalog
+    # probe: a hard env off switch takes precedence over any settings/endpoint state, so keyed CI
+    # reports graceful absence (the roster/onboarding correctly expect no portraits, no error).
+    if image_gen_disabled():
+        return False
     from src.ai_interaction import _resolve_model, has_image_capable_endpoint, IMAGE_AUTODETECT_CANDIDATES
 
     enabled, model_spec, _ = _image_settings(user)
@@ -886,6 +914,11 @@ async def _generate_one(prompt: str, user: Optional[str],
     prepended (it would fight the variety directive) — the reference image alone carries the
     person, the variety directive carries the differentiation from the rest of the cast.
     """
+    # CI/operator image-spend kill-switch — the DEEPEST defense: even a direct `_generate_one`
+    # call (bypassing the availability gate and `generate_and_store`) makes NO provider POST when
+    # set, so keyed CI can provably never spend on images. Checked before any provider resolve.
+    if image_gen_disabled():
+        return None
     import httpx
     from src.ai_interaction import _resolve_model, IMAGE_AUTODETECT_CANDIDATES
 
@@ -1411,6 +1444,14 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     """
     if not isinstance(prompts, list) or not prompts:
         return {"generated": 0, "skipped": 0, "total": 0}
+
+    # CI/operator image-spend kill-switch (belt-and-suspenders): a hard env off switch short-circuits
+    # the whole pipeline BEFORE any settings read, availability probe, or provider POST — so even a
+    # direct/forced call generates nothing and can never reach the image API. See `image_gen_disabled`.
+    if image_gen_disabled():
+        logger.info("[portraits] image generation disabled via ORWELL_DISABLE_IMAGE_GEN — no-op")
+        total = len(prompts)
+        return {"generated": 0, "skipped": total, "total": total}
 
     # Cross-season hygiene (root cause #1/#3): if a DIFFERENT cast now occupies this user's
     # portrait slots (the engine reuses role ids like `npc:3` every season), last season's
@@ -2077,6 +2118,11 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
     apply an available upload/avatar (silent no-op when none exists — zero provider calls). And a
     genuine NPC `no-prompt` is logged ONCE per houseguest, then quiesced until the engine state
     changes (a prompt appears / the slot is discarded/scrubbed) — never a per-sweep spam loop."""
+    # CI/operator image-spend kill-switch (defense in depth): skip the whole funnel — no engine
+    # prompt fetch, no generation — before any work when the env off switch is set.
+    if image_gen_disabled():
+        n = len(missing_ids or [])
+        return {"generated": 0, "skipped": n, "total": n}
     from src import orwell_engine
 
     try:
