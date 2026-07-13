@@ -12,8 +12,6 @@ import type { RelationshipDisposition } from "./relationshipConstants";
  * PURE + stateless + deterministic: same edges + same loyalty reads ⇒ same blocs.
  */
 export const BLOC = {
-  /** BB-plausible bloc sizes: pairs through five-person voting blocs. */
-  maxSize: 5,
   /** How hard the bloc term bends a decision read, scaled by the bloc's loyalty strength. */
   termWeight: 0.5,
   /** Below this derived loyalty a member is defection-prone (their own incentives dominate). */
@@ -78,9 +76,10 @@ const mutualBond = (rel: RelationshipModel, a: EntityId, b: EntityId): number =>
 
 /**
  * Detect the house's current blocs from the live relationship graph. Greedy clustering over the
- * strongest mutual bonds (bounded to `BLOC.maxSize`), then per-member DEFECTION: a low-loyalty
- * member with a stronger outside bond peels off BEFORE any formal betrayal event. Deterministic:
- * edges are ranked by strength with a stable id tiebreak.
+ * strongest mutual bonds — bounded ONLY by the clique requirement (no artificial size cap): a bloc
+ * grows as large as the mutual trust genuinely supports, so a real majority alliance can form. Then
+ * per-member DEFECTION: a low-loyalty member with a stronger outside bond peels off BEFORE any
+ * formal betrayal event. Deterministic: edges are ranked by strength with a stable id tiebreak.
  */
 export function detectBlocs(deps: BlocDeps): Bloc[] {
   const { rel, active } = deps;
@@ -100,11 +99,13 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
   }
   edges.sort((x, y) => y.w - x.w || (x.a + x.b).localeCompare(y.a + y.b));
 
-  // 2) Greedy size-capped, CLIQUE-LIKE growth: the strongest bonds seed the blocs, and a member
-  // joins only if mutually bonded with EVERY current member — a bloc cannot span two houseguests
-  // who distrust each other just because they share a friend (that is two blocs, not one). This
-  // is also what makes fracture work: a betrayal that collapses one internal edge excludes the
-  // betrayer from the next read even when a common friend remains.
+  // 2) Greedy CLIQUE growth (no size cap): the strongest bonds seed the blocs, and a member joins
+  // only if mutually bonded with EVERY current member — a bloc cannot span two houseguests who
+  // distrust each other just because they share a friend (that is two blocs, not one). The clique
+  // requirement is the ONLY limiter on size, so a bloc is exactly as large as the mutual trust
+  // supports — a genuine majority alliance forms when (and only when) everyone in it trusts everyone
+  // else. This is also what makes fracture work: a betrayal that collapses one internal edge excludes
+  // the betrayer from the next read even when a common friend remains.
   const qualifies = (m: EntityId, cluster: ReadonlySet<EntityId>): boolean =>
     [...cluster].every((x) => bond(m, x) >= threshold);
   const blocOf = new Map<EntityId, Set<EntityId>>();
@@ -114,11 +115,11 @@ export function detectBlocs(deps: BlocDeps): Bloc[] {
     if (!ba && !bb) {
       const s = new Set([a, b]);
       blocOf.set(a, s); blocOf.set(b, s);
-    } else if (ba && !bb && ba.size < BLOC.maxSize && qualifies(b, ba)) {
+    } else if (ba && !bb && qualifies(b, ba)) {
       ba.add(b); blocOf.set(b, ba);
-    } else if (bb && !ba && bb.size < BLOC.maxSize && qualifies(a, bb)) {
+    } else if (bb && !ba && qualifies(a, bb)) {
       bb.add(a); blocOf.set(a, bb);
-    } else if (ba && bb && ba !== bb && ba.size + bb.size <= BLOC.maxSize) {
+    } else if (ba && bb && ba !== bb) {
       const crossOk = [...ba].every((m) => qualifies(m, bb));
       if (crossOk) for (const m of bb) { ba.add(m); blocOf.set(m, ba); }
     }

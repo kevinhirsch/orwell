@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectBlocs, blocTerm, blocFor, derivedLoyalty, BLOC } from "../../src/engine/blocs";
+import { detectBlocs, blocTerm, blocFor, derivedLoyalty } from "../../src/engine/blocs";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
@@ -36,12 +36,17 @@ describe("detection (derived, bounded, deterministic)", () => {
     expect(blocs[0]!.cohesion).toBeCloseTo(0.7, 5); // the weakest internal mutual bond
   });
 
-  it("blocs are bounded to plausible sizes and recompute identically from the same edges", () => {
+  it("a bloc grows to a true clique with NO artificial size cap, and recomputes identically", () => {
     const rel = new RelationshipModel(0.5);
     const ids = Array.from({ length: 8 }, (_, i) => npc(i + 1));
     for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) bond(rel, ids[i]!, ids[j]!, 0.9);
     const blocs = detectBlocs({ rel, active: ids });
-    for (const b of blocs) expect(b.members.length).toBeLessThanOrEqual(BLOC.maxSize);
+    // Eight all-trusting houseguests form ONE eight-person majority bloc — the old five-person cap is gone.
+    expect(blocs).toHaveLength(1);
+    expect(blocs[0]!.members).toHaveLength(8);
+    // The clique requirement is now the ONLY (organic) bound: even the weakest internal bond
+    // (`cohesion`) clears the threshold, so every member is mutually bonded with every other.
+    expect(blocs[0]!.cohesion).toBeGreaterThanOrEqual(0.5);
     expect(JSON.stringify(detectBlocs({ rel, active: ids }))).toBe(JSON.stringify(blocs)); // same edges ⇒ same blocs
   });
 
@@ -49,6 +54,20 @@ describe("detection (derived, bounded, deterministic)", () => {
     const rel = new RelationshipModel(0.5);
     const e = rel.edge(npc(1), npc(2)); e.trust = 0.95; e.affinity = 0.95; // unrequited
     expect(detectBlocs({ rel, active: [npc(1), npc(2)] })).toEqual([]);
+  });
+
+  it("a bloc that spans the WHOLE active house has no shared target (now reachable without the cap)", () => {
+    // With the size cap gone, a fully-bonded house forms one all-encompassing bloc — there is no
+    // outsider left to target. sharedTarget must be null, and the bloc term still shields a mate
+    // (a null shared target never matches a real houseguest, so it neither throws nor phantom-targets).
+    const rel = new RelationshipModel(0.5);
+    const ids = Array.from({ length: 6 }, (_, i) => npc(i + 1));
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) bond(rel, ids[i]!, ids[j]!, 0.9);
+    const blocs = detectBlocs({ rel, active: ids }); // every active houseguest is in the one bloc
+    expect(blocs).toHaveLength(1);
+    expect(blocs[0]!.members).toHaveLength(6);
+    expect(blocs[0]!.sharedTarget).toBeNull();                // no outsider ⇒ no shared enemy
+    expect(blocTerm(blocs, ids[0]!, ids[1]!)).toBeLessThan(0); // still shields a mate, null target unmatched
   });
 });
 

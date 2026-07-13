@@ -118,7 +118,7 @@ The **[index](#index)** below is the single source of truth for per-feature stat
 | 0040 | [NPC confessionals](./0040-npc-confessionals.md) | BDD | ✅ Built |
 | 0041 | [Character evolution & arc (the linchpin)](./0041-character-evolution-and-arc.md) | BDD | ✅ Built |
 | 0042 | [Competition library](./0042-competition-library.md) | BDD | ✅ Built |
-| 0043 | [Emergent bloc behavior](./0043-emergent-bloc-behavior.md) | BDD | ✅ Built |
+| 0043 | [Emergent bloc behavior](./0043-emergent-bloc-behavior.md) | BDD | ✅ Built · amended (PO 2026-07-13: removed the 5-person size cap — clique requirement is the only limiter; juryReach re-confirmed in band) |
 | 0044 | [Strategic nomination & vote refinements](./0044-strategic-nomination-and-vote-refinements.md) | BDD | ✅ Built |
 | 0045 | [Endgame structure (Final 5 → Final 2)](./0045-endgame-structure.md) | BDD | ✅ Built |
 | 0046 | [Player eviction & the juror's seat](./0046-player-eviction-and-jury.md) | BDD | ✅ Built |

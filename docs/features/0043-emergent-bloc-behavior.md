@@ -1,6 +1,10 @@
 # 0043 — Emergent multi-party bloc behavior
 
-> **Status:** **Built** (B32, green 2026-06-10). _Big Brother_ is **bloc politics** — three- and four-person alliances coordinate
+> **Status:** **Built** (B32, green 2026-06-10). **PO amendment 2026-07-13:** the artificial five-person
+> size cap (`BLOC.maxSize`) was **removed** — the clique requirement (every member mutually bonded with every
+> other) is now the *only* limiter, so a genuine majority alliance forms when the trust supports it. Calibration-
+> safe: `juryReach` re-confirmed in band (large all-trust cliques are rare enough not to move the seeded
+> distribution). _Big Brother_ is **bloc politics** — three- and four-person alliances coordinate
 > nominations and votes and shatter on betrayal. Today the engine has **no multi-party construct at all**:
 > relationships are **pairwise** edges (`relationships.ts`), and `allianceActive(a, b)` is just a *bilateral*
 > threshold read — so NPCs never move *together*. This feature adds an **emergent bloc read**: transient
@@ -31,7 +35,7 @@ persisted never**. The bloc is an emergent property of the edges, not a thing th
 ## 3. Scope
 
 **In:** an **emergent bloc detector** `detectBlocs(rel, active)` that clusters houseguests by **mutual bond
-crossing a threshold** at decision time (bounded to plausible BB bloc sizes), returning **transient** blocs
+crossing a threshold** at decision time (bounded only by the clique requirement — no artificial size cap, so a genuine majority alliance can form when the trust supports it; PO ruling 2026-07-13), returning **transient** blocs
 each carrying derived `{ members, sharedTarget (top aggregate threat outside the bloc), cohesion,
 loyaltyStrength }`; a per-character **loyalty read** (dispositional, from the static `CHARACTER`, modulated
 by the evolving soul — 0041) whose member-wise aggregate is the bloc's **loyalty strength** (§4); a **bloc
@@ -48,7 +52,10 @@ math itself (reused — 0017/0026).
 ## 4. Design
 
 - **Detection.** `detectBlocs(rel, active)` builds an undirected "mutual-bond" graph (edge iff both
-  directions' bond ≥ threshold) and greedily forms clusters bounded to size ~2–5 (BB-plausible). Each bloc
+  directions' bond ≥ threshold) and greedily forms clusters bounded **only by the clique requirement**
+  (every member mutually bonded with every other) — **no artificial size cap** (PO ruling 2026-07-13): a bloc
+  is exactly as large as the mutual trust supports, so a real majority alliance forms when the whole group
+  genuinely trusts each other. Each bloc
   derives a **shared target** = the highest **aggregate threat** the members hold toward someone outside the
   bloc, and a **cohesion** = the weakest internal bond. Pure, seeded, **stateless** — same edges ⇒ same blocs.
 - **Loyalty (the ethereal↔static dial — product feedback 2026-06-10).** Without a loyalty dimension every
@@ -118,7 +125,8 @@ real bloc politics — coordinated targeting and dramatic collapses — without 
 - **New** `src/engine/blocs.ts` — `detectBlocs(rel, active): Bloc[]`, PURE + stateless. Build the
   mutual-bond graph from `RelationshipModel.edge(a,b)` (`relationships.ts` L81; `EdgeSignals
   {trust,affinity,threat}`) — an undirected edge iff both directions' bond `(trust+affinity)/2` ≥ the
-  `allianceThreshold` (already a model field, L63; reuse it). Greedy-cluster to size ~2–5. Each `Bloc`
+  `allianceThreshold` (already a model field, L63; reuse it). Greedy-cluster with **no size cap** — the
+  clique requirement is the only limiter (PO ruling 2026-07-13). Each `Bloc`
   derives `{ members, sharedTarget (max aggregate threat outside the bloc), cohesion (weakest internal bond),
   loyaltyStrength (weakest-weighted aggregate of the members' derived loyalty — CHARACTER disposition ×
   soul state, §4) }`. Loyalty + defection constants live as named constants in `blocs.ts` alongside the
