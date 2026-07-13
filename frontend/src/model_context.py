@@ -240,9 +240,10 @@ _context_cache: Dict[Tuple[str, str], int] = {}
 # F-PY-3: short-TTL memo for the async path — value + monotonic expiry per (endpoint, model).
 _context_ttl_cache: Dict[Tuple[str, str], Tuple[int, float]] = {}
 # F-PY-3 (single-flight): concurrent COLD callers on the same key share ONE probe instead of each
-# launching a duplicate thread against the same slow upstream. The future is removed on completion
-# (success OR failure) so the next window re-probes cleanly.
-_context_inflight: Dict[Tuple[str, str], "asyncio.Future"] = {}
+# launching a duplicate thread against the same slow upstream. The value is a real asyncio.Task; it is
+# removed from the map exactly once by its own done-callback (success / failure / cancel) so the next
+# window re-probes cleanly and a cancelled caller can never orphan the entry.
+_context_inflight: Dict[Tuple[str, str], "asyncio.Task"] = {}
 
 
 async def get_context_length_async(endpoint_url: str, model: str) -> int:
@@ -264,30 +265,38 @@ async def get_context_length_async(endpoint_url: str, model: str) -> int:
     if hit is not None and hit[1] > now:
         return hit[0]
 
-    # Single-flight: if a probe for this key is already running, await ITS result instead of
-    # launching a second one. Fail-soft to the default if the shared probe errored.
-    inflight = _context_inflight.get(key)
-    if inflight is not None:
-        try:
-            return await inflight
-        except Exception:  # noqa: BLE001 — a shared probe failure still degrades to the default
-            return DEFAULT_CONTEXT
+    # Single-flight over a real TASK that every caller awaits under `shield`. This is deliberately
+    # NOT a shared Future written by the first caller: if that first caller were CANCELLED mid-probe,
+    # its CancelledError (a BaseException) skips the fail-soft `except Exception`, and a per-caller
+    # `finally` would drop the map entry WITHOUT resolving the future — hanging every concurrent
+    # awaiter FOREVER. With a Task, the shared work is owned by the loop (not any one caller): a
+    # cancelled/timed-out caller can't stop it, `shield` keeps THIS caller's cancellation from
+    # cancelling it for the others, and the map is cleaned + the ttl cache populated exactly once in
+    # the task's done-callback (success / failure / cancel). Awaiters never wait on an orphan.
+    task = _context_inflight.get(key)
+    if task is None:
+        task = asyncio.ensure_future(asyncio.to_thread(get_context_length, endpoint_url, model))
+        _context_inflight[key] = task
 
-    fut: "asyncio.Future" = asyncio.get_running_loop().create_future()
-    _context_inflight[key] = fut
+        def _on_done(t: "asyncio.Task", k=key) -> None:
+            _context_inflight.pop(k, None)
+            # Cancel/failure ⇒ don't cache; awaiters fall back to DEFAULT_CONTEXT. `t.cancelled()` is
+            # checked first so `t.exception()` (which would raise on a cancelled task) is never reached.
+            if t.cancelled() or t.exception() is not None:
+                return
+            _context_ttl_cache[k] = (t.result(), time.monotonic() + _CONTEXT_TTL_SECONDS)
+
+        task.add_done_callback(_on_done)
+
     try:
-        try:
-            ctx = await asyncio.to_thread(get_context_length, endpoint_url, model)
-        except Exception as e:  # noqa: BLE001 — never let a context probe break the turn
-            logger.debug("get_context_length_async failed for %s: %s", model, e)
-            ctx = DEFAULT_CONTEXT
-        _context_ttl_cache[key] = (ctx, time.monotonic() + _CONTEXT_TTL_SECONDS)
-        if not fut.done():
-            fut.set_result(ctx)
-        return ctx
-    finally:
-        # Drop the in-flight entry (success or failure) so the next cold caller probes afresh.
-        _context_inflight.pop(key, None)
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if task.cancelled():
+            return DEFAULT_CONTEXT   # the SHARED probe was cancelled → fail-soft, never hang
+        raise                        # THIS caller was cancelled → propagate; the task runs on for others
+    except Exception as e:  # noqa: BLE001 — the shared probe itself failed → fail-soft default
+        logger.debug("get_context_length_async failed for %s: %s", model, e)
+        return DEFAULT_CONTEXT
 
 
 def get_context_length(endpoint_url: str, model: str) -> int:

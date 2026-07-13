@@ -339,6 +339,37 @@ def _get_global_compaction_sem() -> "asyncio.Semaphore":
     return _global_compaction_sem
 
 
+def _stable_repr(v) -> str:
+    """A value-stable string for any message field (str / None / multimodal list / tool_calls)."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    try:
+        return json.dumps(v, sort_keys=True, default=str)
+    except Exception:  # noqa: BLE001 — a weird shape still needs SOME stable key
+        return repr(v)
+
+
+def _message_content_key(m) -> tuple:
+    """A (role, content, tool_calls) CONTENT fingerprint of one history message — dict OR ChatMessage.
+    Compared by VALUE, so an in-place edit (edit_message mutates the SAME object's `content`) is
+    detected; object-identity comparison would miss it."""
+    if isinstance(m, dict):
+        role, content, tool_calls = m.get("role"), m.get("content"), m.get("tool_calls")
+    else:
+        role = getattr(m, "role", None)
+        content = getattr(m, "content", None)
+        tool_calls = getattr(m, "tool_calls", None)
+    return (role, _stable_repr(content), _stable_repr(tool_calls))
+
+
+def _prefix_content_digest(messages) -> tuple:
+    """A value-comparable digest of a message range: a tuple of per-message content keys. A length
+    change, a reorder/replace, OR an in-place content edit all change it."""
+    return tuple(_message_content_key(m) for m in messages)
+
+
 def _schedule_background_compaction(session, split_point: int, system_msg_count: int,
                                     summarize_fn: Callable) -> None:
     """Fire the summary LLM call + history rewrite as a fail-soft background task (F-PY-2).
@@ -350,17 +381,18 @@ def _schedule_background_compaction(session, split_point: int, system_msg_count:
     sid = getattr(session, "id", None)
     if sid is not None and sid in _compaction_in_flight:
         return  # already summarizing this session — don't stack a second call
-    # DATA-INTEGRITY (mandate #4 non-degradation): snapshot the identity of the message range this
-    # compaction will SUMMARIZE + REPLACE (`session.history[:effective_split]`), holding references
-    # so no id can be reused. Serializing compactions (the in-flight set) does NOT protect against
-    # OTHER writers (delete-messages / truncate_session / replace_messages) mutating history while the
-    # summary is in flight — that leaves split_point/system_msg_count pointing at the wrong range and
-    # `_update_session_history` would OVERWRITE the newer edit (lost data). `_run` re-checks this
-    # prefix just before applying; if it changed, it ABANDONS fail-soft (the next over-threshold turn
-    # re-compacts) rather than clobbering.
+    # DATA-INTEGRITY (mandate #4 non-degradation): snapshot a CONTENT digest of the message range this
+    # compaction will SUMMARIZE + REPLACE (`session.history[:effective_split]`). Serializing
+    # compactions (the in-flight set) does NOT protect against OTHER writers (delete-messages /
+    # truncate_session / replace_messages / edit_message) mutating history while the summary is in
+    # flight — that leaves split_point/system_msg_count pointing at the wrong range and
+    # `_update_session_history` would OVERWRITE the newer edit (lost data). We digest by VALUE, not
+    # object identity, because `history_routes.edit_message` mutates a message's `content` IN PLACE
+    # (same object) — an identity check would miss it. `_run` re-derives the digest just before
+    # applying; if it differs, it ABANDONS fail-soft (the next over-threshold turn re-compacts).
     effective_split = system_msg_count + split_point
     try:
-        prefix_snapshot = list((getattr(session, "history", None) or [])[:effective_split])
+        prefix_digest = _prefix_content_digest((getattr(session, "history", None) or [])[:effective_split])
     except Exception:  # noqa: BLE001 — an odd history shape ⇒ can't validate ⇒ skip safely
         return
     if sid is not None:
@@ -373,12 +405,11 @@ def _schedule_background_compaction(session, split_point: int, system_msg_count:
                 if not summary:
                     return
                 # Re-validate the summarized prefix is UNCHANGED since capture. A normal tail append
-                # (this turn's own assistant message) leaves the prefix identical → apply; any edit to
-                # the summarized range (delete/truncate/replace) makes it differ → abandon, don't clobber.
+                # (this turn's own assistant message) leaves the prefix digest identical → apply; any
+                # edit to the summarized range (delete/truncate/replace/in-place content edit) makes the
+                # digest differ → abandon, don't clobber. Length + reorder + content are all covered.
                 cur = getattr(session, "history", None) or []
-                cur_prefix = cur[:effective_split]
-                if (len(cur_prefix) != len(prefix_snapshot)
-                        or any(a is not b for a, b in zip(cur_prefix, prefix_snapshot))):
+                if _prefix_content_digest(cur[:effective_split]) != prefix_digest:
                     logger.debug(
                         "Background compaction abandoned for session %s — history changed under it", sid)
                     return

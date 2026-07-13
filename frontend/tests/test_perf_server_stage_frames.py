@@ -248,6 +248,73 @@ def test_get_context_length_async_coalesces_concurrent_misses(monkeypatch):
     assert calls["n"] == 1, "concurrent cold callers must share ONE underlying probe"
 
 
+def test_get_context_length_async_cancelled_first_caller_does_not_hang_others(monkeypatch):
+    # Greptile P1 repro: the FIRST cold caller is cancelled mid-probe. A naive shared-future would
+    # orphan the entry (CancelledError skips the fail-soft except; the finally drops it unresolved),
+    # hanging the concurrent awaiter forever. With the Task+shield design the shared probe runs on and
+    # the awaiter still resolves.
+    import threading
+    gate = threading.Event()
+    calls = {"n": 0}
+
+    def slow(url, model):
+        calls["n"] += 1
+        gate.wait(3.0)   # hold the shared probe so we can cancel the first caller while it's in flight
+        return 999
+
+    monkeypatch.setattr(mc, "get_context_length", slow)
+    mc._context_ttl_cache.clear()
+    mc._context_inflight.clear()
+
+    async def _scenario():
+        t1 = asyncio.create_task(mc.get_context_length_async("http://cancelme", "m"))
+        await asyncio.sleep(0.05)   # t1 registers the shared task and enters the thread
+        t2 = asyncio.create_task(mc.get_context_length_async("http://cancelme", "m"))
+        await asyncio.sleep(0.05)   # t2 grabs the SAME shared task (awaits it under shield)
+        t1.cancel()                 # cancel the FIRST caller mid-probe
+        with pytest.raises(asyncio.CancelledError):
+            await t1                # its own cancellation propagates …
+        gate.set()                  # … but the shared probe keeps running; let it finish
+        # The invariant: t2 must resolve within a short timeout — never hang on an orphaned future.
+        return await asyncio.wait_for(t2, timeout=2.0)
+
+    res = _run(_scenario())
+    assert res == 999, "the awaiter got the shared probe's real result despite the first caller cancelling"
+    assert calls["n"] == 1, "still exactly ONE probe — the cancellation didn't spawn a duplicate"
+
+
+def test_get_context_length_async_cancelled_awaiter_leaves_others_intact(monkeypatch):
+    # The mirror case: a LATER caller (awaiter) is cancelled — the shared task and every other awaiter
+    # must be unaffected, and the shared probe still completes + caches.
+    import threading
+    gate = threading.Event()
+    calls = {"n": 0}
+
+    def slow(url, model):
+        calls["n"] += 1
+        gate.wait(3.0)
+        return 111
+
+    monkeypatch.setattr(mc, "get_context_length", slow)
+    mc._context_ttl_cache.clear()
+    mc._context_inflight.clear()
+
+    async def _scenario():
+        t1 = asyncio.create_task(mc.get_context_length_async("http://awaiter", "m"))
+        await asyncio.sleep(0.05)
+        t2 = asyncio.create_task(mc.get_context_length_async("http://awaiter", "m"))
+        await asyncio.sleep(0.05)
+        t2.cancel()                 # cancel the AWAITER
+        with pytest.raises(asyncio.CancelledError):
+            await t2
+        gate.set()
+        return await asyncio.wait_for(t1, timeout=2.0)  # the first caller still resolves
+
+    res = _run(_scenario())
+    assert res == 111
+    assert calls["n"] == 1
+
+
 # ── CR-MAJOR-2: env floats parse fail-soft (a bad env var must not crash startup) ── #
 
 
@@ -262,17 +329,26 @@ def test_env_float_falls_back_on_malformed(monkeypatch):
     assert mc._env_float("ORWELL_TEST_BAD_FLOAT", 5.0) == 12.5
 
 
-def test_model_context_imports_under_malformed_env(monkeypatch):
-    # The module must (re)import cleanly with a garbage timeout env — no ValueError at import time.
-    import importlib
-    monkeypatch.setenv("ORWELL_MODEL_PROBE_TIMEOUT", "5s")
-    monkeypatch.setenv("ORWELL_MODEL_CONTEXT_TTL", "not-a-number")
-    importlib.reload(mc)
-    assert mc.REQUEST_TIMEOUT == 5.0 and mc._CONTEXT_TTL_SECONDS == 60.0
-    # restore clean state for the rest of the session
-    monkeypatch.delenv("ORWELL_MODEL_PROBE_TIMEOUT", raising=False)
-    monkeypatch.delenv("ORWELL_MODEL_CONTEXT_TTL", raising=False)
-    importlib.reload(mc)
+def test_model_context_imports_under_malformed_env():
+    # The module must import cleanly with a garbage timeout env — no ValueError at import time.
+    # Run in a FRESH subprocess (not an in-process importlib.reload) so nothing pollutes the parallel
+    # suite's module state.
+    import subprocess
+    import sys
+
+    env = dict(os.environ, ORWELL_MODEL_PROBE_TIMEOUT="5s", ORWELL_MODEL_CONTEXT_TTL="not-a-number")
+    code = (
+        "import src.model_context as m; "
+        "assert m.REQUEST_TIMEOUT == 5.0, m.REQUEST_TIMEOUT; "
+        "assert m._CONTEXT_TTL_SECONDS == 60.0, m._CONTEXT_TTL_SECONDS; "
+        "print('IMPORT_OK')"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code], env=env, cwd=FRONTEND,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert r.returncode == 0, f"import crashed under malformed env: {r.stderr}"
+    assert "IMPORT_OK" in r.stdout
 
 
 # ── F-PY-2: non-blocking compaction (background; golden stays blocking) ─────── #
@@ -411,11 +487,98 @@ def test_background_compaction_abandons_on_concurrent_history_edit(monkeypatch):
     ), "no summary was injected over the concurrent edit"
 
 
-def test_background_compaction_bounded_by_global_semaphore():
-    # CR-ROBUSTNESS-4: a module-level bounded semaphore caps concurrent background compactions.
-    assert isinstance(cc._MAX_CONCURRENT_BG_COMPACTIONS, int) and cc._MAX_CONCURRENT_BG_COMPACTIONS >= 1
-    src = inspect.getsource(cc._schedule_background_compaction)
-    assert "_get_global_compaction_sem()" in src and "async with" in src
+def test_background_compaction_abandons_on_in_place_content_edit(monkeypatch):
+    # CR-MAJOR: history_routes.edit_message mutates the SAME message object's `content` IN PLACE —
+    # identity is unchanged, only content changes. The content-digest revalidation must catch it (an
+    # object-identity check would MISS it and overwrite the newer edit).
+    import core.models as core_models
+
+    async def fake_ctx(url, model):
+        return 100
+
+    monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
+    monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr("src.golden_path.active", lambda: False)
+    monkeypatch.setattr(core_models, "_session_manager", None, raising=False)
+    cc._compaction_in_flight.clear()
+    cc._background_tasks.clear()
+
+    sess = _FakeSession()
+    sess.history = [{"role": "system", "content": "S"}] + [
+        {"role": ("user" if i % 2 == 0 else "assistant"), "content": f"m{i}"} for i in range(7)
+    ]  # 8 objects; effective_split=4 lands inside, so index 1 is in the summarized prefix
+
+    async def mutating_llm(*a, **k):
+        # IN-PLACE edit of a prefix message (SAME object, new content) — the edit_message shape.
+        sess.history[1]["content"] = "EDITED-IN-PLACE"
+        return "SUMMARY"
+
+    monkeypatch.setattr(cc, "llm_call_async", mutating_llm)
+
+    messages = _msgs(6)
+
+    async def _drive():
+        out = await cc.maybe_compact(sess, "url", "model", messages)
+        if cc._background_tasks:
+            await asyncio.gather(*list(cc._background_tasks))
+        return out
+
+    out_msgs, ctxlen, was = _run(_drive())
+    assert was is False
+    # The in-place edit must SURVIVE — compaction abandoned, no summary injected, length unchanged.
+    assert sess.history[1]["content"] == "EDITED-IN-PLACE", "in-place edit was overwritten — data lost"
+    assert len(sess.history) == 8, "compaction rewrote history despite the concurrent in-place edit"
+    assert not any(
+        isinstance(m, dict) and "[Conversation summary" in (m.get("content") or "")
+        for m in sess.history
+    )
+
+
+def test_background_compaction_bounded_by_global_semaphore(monkeypatch):
+    # CR-ROBUSTNESS-4 (strengthened): RUNTIME-verify the global semaphore actually caps concurrency —
+    # a wrong sem object or off-by-one capacity must fail. Schedule cap+1 compactions (distinct session
+    # ids so the per-session guard doesn't block them) with a blocking summarize_fn that tracks a
+    # high-water-mark of concurrent calls; it must never exceed the cap, and must REACH it.
+    cap = 2
+    monkeypatch.setattr(cc, "_MAX_CONCURRENT_BG_COMPACTIONS", cap)
+    monkeypatch.setattr(cc, "_global_compaction_sem", None, raising=False)  # force a fresh sem at `cap`
+    monkeypatch.setattr(cc, "_global_compaction_sem_loop", None, raising=False)
+    cc._compaction_in_flight.clear()
+    cc._background_tasks.clear()
+
+    conc = {"now": 0, "max": 0}
+
+    async def _scenario():
+        release = asyncio.Event()
+
+        async def blocking_summarize():
+            conc["now"] += 1
+            conc["max"] = max(conc["max"], conc["now"])
+            try:
+                await release.wait()
+                return "S"
+            finally:
+                conc["now"] -= 1
+
+        for i in range(cap + 1):
+            s = _FakeSession()
+            s.id = f"sem-sess-{i}"   # distinct ids ⇒ the per-session guard admits all of them
+            s.history = []           # empty prefix ⇒ digest () ⇒ applies (no-op via early return)
+            cc._schedule_background_compaction(s, 0, 0, blocking_summarize)
+
+        # Wait until the cap is saturated, then give a broken/over-capacity sem a chance to over-admit.
+        for _ in range(200):
+            if conc["now"] >= cap:
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
+        assert conc["max"] == cap, f"semaphore admitted {conc['max']} concurrent, cap is {cap}"
+        assert conc["now"] == cap, f"expected exactly {cap} running (rest blocked), saw {conc['now']}"
+        release.set()
+        await asyncio.gather(*list(cc._background_tasks))
+
+    _run(_scenario())
+    assert conc["max"] == cap  # never exceeded, and the cap WAS reached
 
 
 def test_bg_compaction_semaphore_env_is_failsoft(monkeypatch):
