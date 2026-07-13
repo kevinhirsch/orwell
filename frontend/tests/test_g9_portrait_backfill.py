@@ -90,16 +90,22 @@ def _store_portrait(user, hid):
 
 # --- missing-set detection ----------------------------------------------------------------
 
-def test_missing_ids_are_active_houseguests_without_a_stored_portrait(tmp_portraits):
+def test_missing_ids_are_active_npcs_without_a_stored_portrait(tmp_portraits):
     _store_portrait("alice", "npc:1")
     cards = [
-        {"id": "player", "status": "active"},   # missing
+        {"id": "player", "status": "active"},   # EXEMPT — never a prompt-shoot candidate
         {"id": "npc:1", "status": "active"},    # stored
         {"id": "npc:2", "status": "jury"},      # departed — never backfilled
         {"id": "npc:3", "status": "evicted"},   # departed — never backfilled
         {"id": "npc:4", "status": "active"},    # missing
     ]
-    assert orwell_portraits.missing_portrait_ids("alice", cards) == ["player", "npc:4"]
+    # Bundle-audit fix (2026-07-13): the player is EXEMPT — the engine emits no portrait prompt
+    # for them by design (#529; upload/casting-studio path), so the prompt-shoot seams never
+    # chase them. Their separate track is `player_awaiting_upload` / completeness.
+    assert orwell_portraits.missing_portrait_ids("alice", cards) == ["npc:4"]
+    assert orwell_portraits.player_awaiting_upload("alice", cards) is True
+    counts = orwell_portraits.completeness("alice", cards)
+    assert counts == {"total": 2, "present": 1, "missing": 1, "playerAwaitingUpload": True}
 
 
 # --- backfill_missing: engine prompt fetch -> the standard pipeline ------------------------
@@ -124,11 +130,16 @@ def test_backfill_fetches_prompts_and_persists_portraits(tmp_portraits, monkeypa
 
     summary = _run(orwell_portraits.backfill_missing(["player", "npc:1"], "bob"))
 
-    assert summary["generated"] == 2
-    assert [f[0] for f in fetched] == ["player", "npc:1"]
+    # Bundle-audit fix (2026-07-13): the player is NEVER prompt-fetched (the engine emits no
+    # prompt for them — #529); with no chosen headshot on file the player entry is a silent
+    # no-op (no provider call, no `no-prompt` attempt-log spam). The NPC generates normally.
+    assert summary["generated"] == 1
+    assert [f[0] for f in fetched] == ["npc:1"]
     assert all(f[1] == "bob" for f in fetched)
-    assert (tmp_portraits / "bob" / "player.png").exists()
+    assert not (tmp_portraits / "bob" / "player.png").exists()
     assert (tmp_portraits / "bob" / "npc_1.png").exists()
+    assert not any(e["houseguestId"] == "player" for e in orwell_portraits.read_attempt_log()
+                   if not e["ok"])
 
 
 def test_backfill_prompt_fetch_failure_is_logged_and_skipped(tmp_portraits, monkeypatch):
@@ -214,8 +225,10 @@ def test_roster_kicks_backfill_for_missing_active_portraits(tmp_portraits, clien
     body = client.get("/api/orwell/roster").json()
     assert body["imagesAvailable"] is True
     assert len(body["roster"]) == 4
-    # The jury houseguest and the stored one are NOT in the missing set.
-    assert kicked["missing"] == ["player", "npc:3"]
+    # The jury houseguest and the stored one are NOT in the missing set — and neither is the
+    # player (exempt from the prompt-shoot loop; their track is `playerAwaitingUpload`).
+    assert kicked["missing"] == ["npc:3"]
+    assert body["playerAwaitingUpload"] is True
 
 
 def test_roster_does_not_kick_when_provider_unavailable(tmp_portraits, client, monkeypatch):
@@ -273,7 +286,8 @@ def test_backfill_route_returns_kicked_missing_available(tmp_portraits, client, 
     monkeypatch.setattr(orwell_portraits, "kickoff_backfill", fake_kick)
 
     body = client.post("/api/orwell/portraits/backfill").json()
-    assert body == {"kicked": True, "missing": ["player", "npc:1"], "available": True}
+    # The player is exempt from the prompt-shoot missing set (bundle-audit fix 2026-07-13).
+    assert body == {"kicked": True, "missing": ["npc:1"], "available": True}
     # the MANUAL lever forces past the auto-poll debounce (G21b)
     assert calls["force"] is True
 

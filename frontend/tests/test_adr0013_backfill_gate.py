@@ -233,11 +233,14 @@ def test_reshoot_never_touches_the_players_uploaded_photo(tmp_portraits, monkeyp
 # ── the reconciler's staleness self-heal (existing games heal within the budget) ────────────
 
 def _authored_state(n=5):
+    # Names match the stubbed engine prompt entries ("HG npc:{i}") — as in production, where the
+    # manifest name comes from the engine's roster/prompt — so the staleness heal's NAME-mismatch
+    # class (wrong person, bundle-audit fix 2026-07-13) never fires on these same-cast fixtures.
     return {
         "started": True,
         "player": {"id": "player", "name": "The Player", "status": "active"},
         "house": [
-            {"id": f"npc:{i}", "name": f"HG {i}", "status": "active", "authored": True}
+            {"id": f"npc:{i}", "name": f"HG npc:{i}", "status": "active", "authored": True}
             for i in range(1, n + 1)
         ],
     }

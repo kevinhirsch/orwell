@@ -275,7 +275,10 @@ RECONCILE_STATE_PATH = Path(DATA_DIR) / "portrait-reconcile.json"
 #
 # The staleness self-heal re-shoots at most this many faces per reconciler sweep — mirrors the
 # engine's IMAGE_BUDGET.perTurnCap (src/engine/imageConstants.ts) so an existing game's mismatched
-# cast heals over a few sweeps instead of flooding the provider.
+# cast heals over a few sweeps instead of flooding the provider. The heal QUEUE is priority-ordered
+# (bundle-audit fix 2026-07-13): name-mismatch faces (wrong PERSON — a dead cast's face still on
+# disk) heal first, then unstamped reference-carries (wrong-identity DNA), then fingerprint drift
+# (wrong wardrobe/composition) — see `_heal_stale_authored_faces`.
 STALE_RESHOOT_PER_SWEEP = 3
 # Per-user watermark: the ACTIVE-authored count the staleness pass last verified clean at. The
 # fingerprint comparison needs one engine prompt-read per authored face, so it runs only when the
@@ -286,6 +289,13 @@ _STALE_AUTHORED_SEEN: dict = {}
 # the routes asserted). The reconciler sweeps exactly these — per-user isolation holds; no
 # cross-user enumeration is invented.
 _SEEN_USERS: dict = {}
+# Bundle-audit fix (2026-07-13): slots whose `no-prompt` outcome was ALREADY logged this process —
+# {safeUser: {safeId}}. A missing engine prompt is a STATE, not an event: log it once, then quiesce
+# until the state changes (a prompt appears for the slot / the slot is discarded / the set is
+# scrubbed). The prod bundle showed 11 identical `{player, no-prompt}` rows crowding the capped
+# attempt ring; the player is now exempt from prompt-fetching entirely, and any NPC no-prompt is
+# once-only. Process-local like the sibling trackers (observability, never game state).
+_NO_PROMPT_LOGGED: dict = {}
 # Per-user last-observed provider availability (the absent→present transition resets the
 # budget) and last-observed missing count — TRANSITION logging only (the A9 lesson: the
 # reconciler never logs a line per idle cycle).
@@ -1009,7 +1019,8 @@ def _prompt_fingerprint(prompt: Optional[str]) -> Optional[str]:
 
 
 def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: str,
-                    source: str = "generated", fingerprint: Optional[str] = None) -> str:
+                    source: str = "generated", fingerprint: Optional[str] = None,
+                    ref_clean: Optional[bool] = None) -> str:
     """Persist one portrait + update the manifest; return its stored filename.
 
     `source` (G26) records HOW the portrait was made: 'generated' (text-to-image, the default),
@@ -1018,7 +1029,14 @@ def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: s
 
     `fingerprint` (0065 follow-up) is a stable hash of the PROMPT string the face was shot from,
     stamped so a LATER facet change at the same id+name re-shoots a stale face (see
-    `generate_and_store`). None when there is no prompt to fingerprint (e.g. an uploaded photo)."""
+    `generate_and_store`). None when there is no prompt to fingerprint (e.g. an uploaded photo).
+
+    `ref_clean` (bundle-audit fix 2026-07-13, 'reference' sources only): provenance of the img2img
+    identity-carry — True means the reference image was itself of KNOWN-GOOD identity lineage (a
+    fresh text-to-image shoot from the subject's current prompt, or a chain of such, or the
+    player's own upload). A 'reference' entry WITHOUT this stamp is a legacy write that may carry
+    pre-authoring wrong-face DNA (the prod bundle's npc:8–14, re-shot pre-#1559 with the old wrong
+    face as reference) — the staleness heal treats those as re-shoot candidates once."""
     d = user_portrait_dir(user)
     d.mkdir(parents=True, exist_ok=True)
     _ensure_cast_epoch(user)  # the per-cast URL version exists the moment any portrait is persisted
@@ -1034,6 +1052,8 @@ def _write_portrait(user: Optional[str], houseguest_id: str, png: bytes, name: s
     entry = {"file": filename, "name": name, "source": source}
     if fingerprint:
         entry["fingerprint"] = fingerprint
+    if source == "reference" and ref_clean:
+        entry["refClean"] = True
     manifest[_safe_id(houseguest_id)] = entry
     _save_manifest(user, manifest)
     if replaced_in_place:
@@ -1525,6 +1545,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         # (that establishes the canonical headshot), then carry identity on a RE-SHOOT.
         is_player = _safe_id(str(hid)) == PLAYER_PORTRAIT_ID
         ref = _read_intake_source(user) if (is_player and intake and intake.get("mode") == "reference") else None
+        # The player's own upload is inherently the RIGHT person — a clean identity reference.
+        ref_clean = ref is not None
         # #1153 identity-carry: if we reached here with a stored portrait on disk it's a RE-SHOOT
         # (a facet change fell through the generate-once guard above). Feed the houseguest's CURRENT
         # portrait back as the reference so a reference-image provider (fal Seedream) keeps the SAME
@@ -1539,6 +1561,15 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                     ref = existing.read_bytes()
                 except OSError:
                     ref = None
+                # Bundle-audit fix (2026-07-13): stamp the identity-carry's PROVENANCE. The carry is
+                # clean iff the base face is itself of known-good lineage — a fresh text-to-image
+                # shoot ('generated'), the player's literal photo ('upload'), or a carry already
+                # verified clean (refClean). A legacy/unknown base leaves the new entry UNSTAMPED, so
+                # the staleness heal can flag wrong-identity DNA instead of it riding forever.
+                if ref is not None:
+                    stored = load_manifest(user).get(sid)
+                    ref_clean = isinstance(stored, dict) and (
+                        stored.get("source") in ("generated", "upload") or stored.get("refClean") is True)
         source = "reference" if ref else "generated"
 
         _consume_gen_error(); _consume_gen_detail()  # clear any stale reason/detail
@@ -1558,7 +1589,8 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 skipped += 1
                 continue
             try:
-                _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp)
+                _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp,
+                                ref_clean=ref_clean)
                 log_attempt(str(hid), True, None, duration_ms)
                 generated += 1
                 _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
@@ -1810,11 +1842,23 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
 # player-channel tool and run it through the SAME generate+persist pipeline. No engine change.
 
 
+def _is_player_card(card: dict) -> bool:
+    """Is this roster card the player's? (isPlayer when the roster derivation set it, else the id.)"""
+    return bool(card.get("isPlayer")) or _safe_id(str(card.get("id") or "")) == PLAYER_PORTRAIT_ID
+
+
 def missing_portrait_ids(user: Optional[str], roster_cards: list) -> list:
-    """Active houseguests (player included) on the roster with no stored portrait.
+    """Active PROMPT-SHOOTABLE houseguests (NPCs — never the player) with no stored portrait.
 
     THE one definition of "missing" — the roster's lazy backfill, the manual lever, the
-    G20 reconciler, and the completeness counters all derive from this helper."""
+    G20 reconciler, and the completeness counters all derive from this helper.
+
+    Bundle-audit fix (2026-07-13): the PLAYER is exempt. Their face comes from the
+    upload/casting-studio path (0050/G26/G27) — the engine emits NO portrait prompt for the
+    player by design (#529: the human authors no look, so `getPortraitPrompt('player')` is
+    null), so a prompt-shoot seam chasing the player can only ever burn attempts on a
+    `no-prompt` loop (11× logged in the 2026-07-13 prod bundle). `player_awaiting_upload`
+    tracks them separately; a stored player portrait still serves like any other."""
     note_user_seen(user)  # G20: a missing-set read enrolls this user in the reconciler sweep
     out = []
     for card in roster_cards or []:
@@ -1822,22 +1866,44 @@ def missing_portrait_ids(user: Optional[str], roster_cards: list) -> list:
             continue
         if (card.get("status") or "active") != "active":
             continue  # departed houseguests keep their placeholder — no late generation
+        if _is_player_card(card):
+            continue  # the player is never a prompt-shoot candidate (see docstring)
         hid = card.get("id")
         if hid and portrait_file(user, hid) is None:
             out.append(str(hid))
     return out
 
 
+def player_awaiting_upload(user: Optional[str], roster_cards: list) -> bool:
+    """True when the ACTIVE player has no stored portrait — i.e. their headshot upload / casting-
+    studio pick (0050/G26/G27) hasn't landed. The player's separate track out of the prompt-shoot
+    "missing" set (bundle-audit fix 2026-07-13): surfaces on the completeness payload so the
+    operator/panel can say "upload your photo" instead of counting an eternally-missing portrait."""
+    for card in roster_cards or []:
+        if not isinstance(card, dict) or not _is_player_card(card):
+            continue
+        if (card.get("status") or "active") != "active":
+            return False
+        hid = card.get("id")
+        return bool(hid) and portrait_file(user, hid) is None
+    return False
+
+
 def completeness(user: Optional[str], roster_cards: list) -> dict:
-    """{total, present, missing} over the ACTIVE cast (player included) — G20 visibility.
+    """{total, present, missing, playerAwaitingUpload} over the ACTIVE cast — G20 visibility.
 
     `missing` comes straight from `missing_portrait_ids` (the one definition), so the
     Health card, the /admin/status page, and the roster counter can never disagree with
-    what the backfill/reconciler would actually act on."""
+    what the backfill/reconciler would actually act on. The counters cover the
+    PROMPT-SHOOTABLE cast (the NPCs); the player — whose face is uploaded/chosen, never
+    prompt-shot — rides the separate `playerAwaitingUpload` flag instead of standing as
+    an eternal "missing 1" (the 2026-07-13 bundle finding)."""
     active = [c for c in roster_cards or []
-              if isinstance(c, dict) and (c.get("status") or "active") == "active" and c.get("id")]
+              if isinstance(c, dict) and (c.get("status") or "active") == "active" and c.get("id")
+              and not _is_player_card(c)]
     missing = missing_portrait_ids(user, roster_cards)
-    return {"total": len(active), "present": len(active) - len(missing), "missing": len(missing)}
+    return {"total": len(active), "present": len(active) - len(missing), "missing": len(missing),
+            "playerAwaitingUpload": player_awaiting_upload(user, roster_cards)}
 
 
 async def portrait_completeness(user: Optional[str]) -> Optional[dict]:
@@ -1991,7 +2057,15 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
 
     ADR 0013 (2026-07-13): this is the ONE funnel every lazy seam routes through, so the
     authoring gate lives here — an un-authored ACTIVE NPC's id is held (not shot) while a real
-    authoring model resolves; the authored re-shoot picks it up the moment its write-back lands."""
+    authoring model resolves; the authored re-shoot picks it up the moment its write-back lands.
+
+    Bundle-audit fix (2026-07-13): the PLAYER id is never prompt-fetched — the engine emits no
+    portrait prompt for the player by design (#529; their face is the upload/casting-studio path),
+    so fetching could only log a `no-prompt` failure. A player id passed explicitly rides through
+    as a PROMPT-LESS entry instead, so `generate_and_store`'s chosen-headshot pre-pass can still
+    apply an available upload/avatar (silent no-op when none exists — zero provider calls). And a
+    genuine NPC `no-prompt` is logged ONCE per houseguest, then quiesced until the engine state
+    changes (a prompt appears / the slot is discarded/scrubbed) — never a per-sweep spam loop."""
     from src import orwell_engine
 
     try:
@@ -1999,8 +2073,14 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
     except Exception as e:  # pragma: no cover - defensive (the filter is itself fail-open)
         logger.info("[portraits] ADR 0013 filter failed (proceeding unfiltered): %s", e)
 
+    safe = _safe_user(user)
     prompts = []
     for hid in missing_ids or []:
+        if _safe_id(str(hid)) == PLAYER_PORTRAIT_ID:
+            # The player: no engine prompt exists by design — ride a prompt-less entry so the
+            # pre-pass can apply a chosen headshot; never a fetch, never a no-prompt log.
+            prompts.append({"houseguestId": str(hid), "name": ""})
+            continue
         try:
             p = await orwell_engine.get_portrait_prompt(str(hid), user=user)
         except Exception as e:
@@ -2008,13 +2088,18 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
             log_attempt(str(hid), False, "prompt-fetch-failed", 0)
             continue
         if isinstance(p, dict) and p.get("prompt"):
+            # State changed for the better — re-arm the once-only no-prompt log for this slot.
+            _NO_PROMPT_LOGGED.get(safe, set()).discard(_safe_id(str(hid)))
             prompts.append({
                 "houseguestId": p.get("houseguestId") or str(hid),
                 "name": p.get("name") or "",
                 "prompt": p.get("prompt"),
             })
         else:
-            log_attempt(str(hid), False, "no-prompt", 0)
+            logged = _NO_PROMPT_LOGGED.setdefault(safe, set())
+            if _safe_id(str(hid)) not in logged:
+                logged.add(_safe_id(str(hid)))
+                log_attempt(str(hid), False, "no-prompt", 0)
     if not prompts:
         return {"generated": 0, "skipped": 0, "total": 0}
     summary = await generate_and_store(prompts, user)
@@ -2061,6 +2146,41 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
         except Exception as e:
             logger.info("[portraits] sync backfill error: %s", e)
     return True
+
+
+async def _apply_player_headshot_if_available(user: Optional[str], cards: list) -> int:
+    """Bundle-audit fix (2026-07-13): the player's ONE self-heal — apply an already-CHOSEN headshot
+    (finalized studio pick / 'exact' upload / persisted account avatar) when the player portrait
+    file is missing. Returns 1 when a portrait landed, else 0.
+
+    The player is exempt from every prompt-shoot seam (no engine prompt exists for them, #529), so
+    this is deliberately NOT a generation path: it rides a PROMPT-LESS entry through
+    `generate_and_store`, whose G26/G27 pre-pass owns the chosen-source priority and writes the
+    locked 'upload' portrait. No chosen source ⇒ silent no-op, zero provider calls, zero log spam —
+    the awaiting state stays visible as `playerAwaitingUpload` on the completeness payload."""
+    for card in cards or []:
+        if not isinstance(card, dict) or not _is_player_card(card):
+            continue
+        if (card.get("status") or "active") != "active":
+            return 0
+        hid = str(card.get("id") or PLAYER_PORTRAIT_ID)
+        if portrait_file(user, hid) is not None:
+            return 0  # already on disk — nothing owed
+        # Only proceed when a CHOSEN source actually exists (the same priority the pre-pass
+        # applies: finalized studio pick → 'exact' upload → account avatar) — so the no-upload
+        # sweep is a TRUE no-op: no generate_and_store call, no per-cycle log (the A9 lesson).
+        intake = load_player_intake(user)
+        has_chosen = (
+            _intake_final_path(user).exists()
+            or bool(intake and intake.get("mode") == "exact" and _read_intake_source(user))
+            or user_avatar_path(user) is not None
+        )
+        if not has_chosen:
+            return 0
+        summary = await generate_and_store(
+            [{"houseguestId": hid, "name": str(card.get("name") or "")}], user)
+        return int(summary.get("generated") or 0)
+    return 0
 
 
 # ── G20: the portrait reconciler (the autonomous verify-and-retry loop) ───────────────────
@@ -2155,6 +2275,22 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     if not isinstance(state, dict) or state.get("started") is False:
         return None
 
+    # (a2) Bundle-audit fix (2026-07-13): the PLAYER is exempt from the prompt-shoot loop (the
+    # engine emits no prompt for them by design — #529; their face is the upload/casting-studio
+    # path), so `missing` below never contains them. The one thing the reconciler still owes the
+    # player: if a CHOSEN headshot already exists (the finalized studio pick / an 'exact' upload /
+    # the persisted account avatar) but the portrait file is gone (a crashed initial run), APPLY
+    # it — `generate_and_store`'s pre-pass owns the priority, costs ZERO provider calls (so it
+    # deliberately rides BEFORE the provider gate), and is a silent no-op when nothing is chosen
+    # (the "please upload" state rides `playerAwaitingUpload` on the completeness payload).
+    from routes.orwell_routes import _roster_cards  # lazy: routes import this module at load
+
+    cards = _roster_cards(state, user)
+    try:
+        await _apply_player_headshot_if_available(user, cards)
+    except Exception:  # pragma: no cover - defensive; enrichment, never the sweep
+        logger.debug("[portraits] player headshot apply failed (best-effort)", exc_info=True)
+
     # (b) the provider gate — absence idles WITHOUT consuming the budget.
     try:
         available = bool(image_generation_available(user))
@@ -2168,10 +2304,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
         _clear_counters(safe)
         logger.info("[portraits] reconciler: image provider available for %s — retry budget reset", safe)
 
-    # (c) what's missing — the SAME derivation the roster route serves.
-    from routes.orwell_routes import _roster_cards  # lazy: routes import this module at load
-
-    cards = _roster_cards(state, user)
+    # (c) what's missing — the SAME derivation the roster route serves (the cards from (a2)).
 
     # (c2) ADR 0013 staleness self-heal (2026-07-13): a face ON DISK that was shot BEFORE its
     # subject's authored identity landed (or before a portrait-prompt upgrade) re-shoots from the
@@ -2246,27 +2379,38 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
 
 async def _heal_stale_authored_faces(user: Optional[str], cards: list) -> int:
     """The ADR 0013 staleness pass (2026-07-13): re-shoot faces that PREDATE their subject's
-    authored identity. Returns how many faces were re-shot this sweep (≤ STALE_RESHOOT_PER_SWEEP).
+    current identity. Returns how many faces were re-shot this sweep (≤ STALE_RESHOOT_PER_SWEEP).
 
-    Detection is the 0065 prompt FINGERPRINT: the engine bakes every public facet into the
-    deterministic portrait prompt, so a stored face whose manifest fingerprint differs from the
-    CURRENT prompt's hash was shot from an older identity (the pre-authoring floor, or an older
-    prompt composition). Candidates are the ACTIVE, deep-AUTHORED (per the engine's Vault-free
-    card flag), non-player subjects with a fingerprinted face on disk — a legacy entry with NO
-    fingerprint is left alone (the quiet-backfill policy: never mass-re-shoot for a missing field).
+    THREE staleness classes, healed in PRIORITY order (bundle-audit fix 2026-07-13 — wrong person
+    beats wrong DNA beats wrong wardrobe; the prod bundle had a dead pre-reset cast's face queued
+    BEHIND fingerprint re-shoots):
+      1. NAME MISMATCH (wrong person): the manifest entry's NAME differs from the current cast's
+         name at the same slot — a face from a DEAD cast still on disk (a reset whose portrait
+         scrub was skipped). Detected locally (manifest × cards, no engine read), authored or not
+         (a wrong person is categorically wrong), every sweep.
+      2. WRONG-IDENTITY DNA: an authored subject's face with `source: "reference"` and NO
+         `refClean` provenance stamp — a legacy img2img re-shoot that may have carried a
+         pre-authoring wrong face as its identity reference (the bundle's npc:8–14, re-shot
+         pre-#1559 off the old wrong face). Also local; post-heal writes are stamped, so each
+         face is flagged at most once.
+      3. FINGERPRINT drift (wrong wardrobe/composition): the 0065 prompt-hash comparison — the
+         stored face was shot from an older prompt (the pre-authoring floor, or an older prompt
+         composition). Needs one engine prompt-read per authored face, so it stays gated behind
+         the per-user WATERMARK (`_STALE_AUTHORED_SEEN` — re-checked only when the authored count
+         moves / on the first sweep of a process, and re-armed while stale faces remain). A legacy
+         entry with NO fingerprint is left alone (the quiet-backfill policy).
 
-    Cost is bounded two ways: the per-user WATERMARK (`_STALE_AUTHORED_SEEN` — the fingerprint
-    comparison, one engine prompt-read per authored face, runs only when the authored count moves
-    or on the first sweep of a process, and only re-arms while stale faces remain) and the
-    per-sweep re-shoot cap (STALE_RESHOOT_PER_SWEEP — mirrors the engine's IMAGE_BUDGET.perTurnCap,
-    so a 15-face heal spreads over a few sweeps instead of flooding the provider). Stale faces are
-    DISCARDED before regeneration (fresh first-shoot semantics — the wrong face must never carry as
-    an img2img identity reference)."""
+    Cost stays bounded by the per-sweep re-shoot cap (STALE_RESHOOT_PER_SWEEP — mirrors the
+    engine's IMAGE_BUDGET.perTurnCap, so a full-cast heal spreads over a few sweeps instead of
+    flooding the provider). Stale faces are DISCARDED before regeneration (fresh first-shoot
+    semantics — the wrong face must never carry as an img2img identity reference)."""
     from src import orwell_engine
 
     safe = _safe_user(user)
     manifest = load_manifest(user)
-    candidates = []
+    wrong_person: list = []   # class 1 — heals first
+    wrong_dna: list = []      # class 2
+    fp_candidates: list = []  # class 3 (engine-read gated below)
     authored_count = 0
     for card in cards or []:
         if not isinstance(card, dict):
@@ -2276,37 +2420,55 @@ async def _heal_stale_authored_faces(user: Optional[str], cards: list) -> int:
         hid = card.get("id")
         if not hid or card.get("isPlayer") or _safe_id(str(hid)) == PLAYER_PORTRAIT_ID:
             continue
-        if card.get("authored") is not True:
-            continue
-        authored_count += 1
+        authored = card.get("authored") is True
+        if authored:
+            authored_count += 1
         entry = manifest.get(_safe_id(str(hid)))
         if not isinstance(entry, dict) or entry.get("source") == "upload":
             continue
-        if not entry.get("fingerprint"):
-            continue  # legacy entry — backfills its fingerprint quietly, never a mass re-shoot
         if portrait_file(user, str(hid)) is None:
             continue
-        candidates.append((str(hid), entry["fingerprint"]))
-    if _STALE_AUTHORED_SEEN.get(safe) == authored_count:
-        return 0  # verified clean at this authoring watermark — no per-sweep prompt fetches
-    if not candidates:
+        # Class 1 — wrong person (name mismatch), authored or not: the face belongs to a dead cast.
+        stored_name = str(entry.get("name") or "").strip().casefold()
+        card_name = str(card.get("name") or "").strip().casefold()
+        if stored_name and card_name and stored_name != card_name:
+            wrong_person.append(str(hid))
+            continue
+        if not authored:
+            continue  # classes 2–3 judge against the AUTHORED identity only
+        # Class 2 — wrong-identity DNA: an unstamped legacy reference carry.
+        if entry.get("source") == "reference" and entry.get("refClean") is not True:
+            wrong_dna.append(str(hid))
+            continue
+        # Class 3 — fingerprint drift (verified against the engine's current prompt below).
+        if entry.get("fingerprint"):
+            fp_candidates.append((str(hid), entry["fingerprint"]))
+    stale = wrong_person + wrong_dna
+    # Class 3 runs only when the watermark moved (the per-face engine prompt-read is the cost).
+    if fp_candidates and _STALE_AUTHORED_SEEN.get(safe) != authored_count:
+        fp_stale = []
+        engine_ok = True
+        for hid, stored_fp in fp_candidates:
+            try:
+                p = await orwell_engine.get_portrait_prompt(hid, user=user)
+            except Exception:
+                engine_ok = False  # engine trouble — verify nothing this sweep, try again next
+                break
+            cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
+            if cur_fp and cur_fp != stored_fp:
+                fp_stale.append(hid)
+        if engine_ok:
+            if not fp_stale and not stale:
+                _STALE_AUTHORED_SEEN[safe] = authored_count  # everything verified clean
+            stale += fp_stale
+    elif not fp_candidates and not stale:
         _STALE_AUTHORED_SEEN[safe] = authored_count
-        return 0
-    stale = []
-    for hid, stored_fp in candidates:
-        try:
-            p = await orwell_engine.get_portrait_prompt(hid, user=user)
-        except Exception:
-            return 0  # engine trouble — verify nothing this sweep, try again next
-        cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
-        if cur_fp and cur_fp != stored_fp:
-            stale.append(hid)
     if not stale:
-        _STALE_AUTHORED_SEEN[safe] = authored_count  # everything matches — verified clean
         return 0
     batch = stale[:STALE_RESHOOT_PER_SWEEP]
-    logger.info("[portraits] ADR 0013 staleness: %d face(s) predate their authored identity for %s "
-                "— re-shooting %d this sweep: %s", len(stale), safe, len(batch), batch)
+    logger.info("[portraits] ADR 0013 staleness: %d face(s) predate their current identity for %s "
+                "(wrong-person=%d, wrong-dna=%d) — re-shooting %d this sweep: %s",
+                len(stale), safe, len(wrong_person), len(wrong_dna), len(batch), batch)
     discard_portraits(user, batch)
     await backfill_missing(batch, user)
     # Deliberately NOT stamping the watermark while stale faces remain — the next sweep continues
@@ -2406,6 +2568,11 @@ def discard_portraits(user: Optional[str], houseguest_ids: list) -> int:
         logger.info("[portraits] discard manifest write failed: %s", e)
     _LAST_BACKFILL_AT.pop(_safe_user(user), None)
     _clear_counters(_safe_user(user))
+    # A discarded slot is a state change — re-arm its once-only no-prompt log.
+    logged = _NO_PROMPT_LOGGED.get(_safe_user(user))
+    if logged:
+        for hid in houseguest_ids or []:
+            logged.discard(_safe_id(hid))
     return removed
 
 
@@ -2429,6 +2596,8 @@ def scrub_user(user: Optional[str]) -> None:
     _LAST_MISSING.pop(_safe_user(user), None)
     # ADR 0013: the staleness watermark describes the OLD cast — the new one verifies afresh.
     _STALE_AUTHORED_SEEN.pop(_safe_user(user), None)
+    # A new season is a new prompt state — re-arm the once-only no-prompt logs.
+    _NO_PROMPT_LOGGED.pop(_safe_user(user), None)
     # L15: a finished/old season's progress record must not linger into the new cast.
     _GEN_PROGRESS.pop(_safe_user(user), None)
 
@@ -2450,4 +2619,5 @@ def scrub_all() -> None:
     _PROVIDER_SEEN.clear()
     _LAST_MISSING.clear()
     _STALE_AUTHORED_SEEN.clear()  # ADR 0013: the watermarks describe casts that no longer exist
+    _NO_PROMPT_LOGGED.clear()  # the once-only no-prompt logs describe casts that no longer exist
     _GEN_PROGRESS.clear()  # L15: no run is in flight after a wholesale scrub
