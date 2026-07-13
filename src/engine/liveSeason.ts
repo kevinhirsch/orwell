@@ -592,6 +592,13 @@ export interface SeasonCtx {
    * `ORWELL_COMP_MECHANICS_PLUS`; the calibration/UAT/golden harness leaves it off.
    */
   expandedComps?: boolean;
+  /**
+   * 0127 — blend a hybrid comp's SECONDARY aptitude into its outcome (a physical-with-a-puzzle-element
+   * veto rewards the well-rounded houseguest). Absent/false ⇒ the pure single stat, byte-identical (the
+   * seeded spine is unmoved). Wired live behind `ORWELL_COMP_MIXED`; the calibration/UAT/golden harness
+   * leaves it off.
+   */
+  mixedComps?: boolean;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -654,7 +661,12 @@ function hohField(s: LiveSeasonState, ctx: SeasonCtx): EntityId[] {
 function resolveComp(
   field: EntityId[], def: CompetitionDef, ctx: SeasonCtx, rng: RandomnessSource, playerApproach: Intent,
 ): CompetitionResult {
-  return resolveCompetition(competitorsOf(field, ctx), def.type, roundIntents(field, ctx, playerApproach), rng);
+  // 0127: a hybrid comp (def carries a `secondary`) blends that secondary aptitude into the score ONLY
+  // when `ctx.mixedComps` is on; off ⇒ undefined ⇒ the pure single stat ⇒ byte-identical.
+  const secondaryStat = ctx.mixedComps ? def.secondary : undefined;
+  return resolveCompetition(
+    competitorsOf(field, ctx), def.type, roundIntents(field, ctx, playerApproach), rng, undefined, secondaryStat,
+  );
 }
 
 /**

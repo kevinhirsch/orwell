@@ -98,6 +98,7 @@ module.exports = {
       "docs/features/0124-deeper-character-evolution.feature",
       "docs/features/0125-competition-theme-variety.feature",
       "docs/features/0126-expanded-competition-mechanics.feature",
+      "docs/features/0127-mixed-type-competitions.feature",
     ],
     import: ["features/support/**/*.ts", "features/step_definitions/**/*.ts"],
   },

@@ -59,7 +59,7 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
     },
   },
   {
-    id: "hoh-maze", name: "Night Maze", phase: "hoh", type: "memory", governing: "mental",
+    id: "hoh-maze", name: "Night Maze", phase: "hoh", type: "memory", governing: "mental", secondary: "physical",
     format: "puzzle",
     narrative: {
       premise: "The yard is a blacked-out maze; each houseguest got one daylight walkthrough to memorize.",
@@ -86,7 +86,7 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
     },
   },
   {
-    id: "hoh-read", name: "Read the Room", phase: "hoh", type: "social", governing: "social",
+    id: "hoh-read", name: "Read the Room", phase: "hoh", type: "social", governing: "social", secondary: "mental",
     format: "social",
     narrative: {
       premise: "Predict, one by one, how the rest of the house answered anonymous questions about each other.",
@@ -96,7 +96,7 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
   },
   // --- Veto competitions ----------------------------------------------------------------
   {
-    id: "veto-lock", name: "Lock and Key", phase: "veto", type: "puzzle", governing: "mental",
+    id: "veto-lock", name: "Lock and Key", phase: "veto", type: "puzzle", governing: "mental", secondary: "physical",
     format: "puzzle",
     narrative: {
       premise: "Six locked boxes, hundreds of keys, one veto medallion — sort, test, and think under the clock.",
@@ -132,7 +132,7 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-scramble", name: "House Scramble", phase: "veto", type: "puzzle", governing: "mental",
+    id: "veto-scramble", name: "House Scramble", phase: "veto", type: "puzzle", governing: "mental", secondary: "physical",
     format: "crapshoot",
     narrative: {
       premise: "A chaotic yard-wide scavenger scramble for hidden veto letters — part plan, part pandemonium.",
@@ -167,7 +167,7 @@ export const COMPETITION_LIBRARY: CompetitionDef[] = [
 export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
   // --- HOH (9 new: 3 physical, 5 mental, 1 social — mirrors the base mix) ----------------
   {
-    id: "hoh-slip", name: "Slip 'N Slide Shuffle", phase: "hoh", type: "physical", governing: "physical",
+    id: "hoh-slip", name: "Slip 'N Slide Shuffle", phase: "hoh", type: "physical", governing: "physical", secondary: "mental",
     format: "skill",
     narrative: {
       premise: "A foam-slick runway: belly-slide down, grab a puzzle piece, wade back, and build.",
@@ -239,7 +239,7 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "hoh-poll", name: "Popularity Contest", phase: "hoh", type: "social", governing: "social",
+    id: "hoh-poll", name: "Popularity Contest", phase: "hoh", type: "social", governing: "social", secondary: "mental",
     format: "social",
     narrative: {
       premise: "Guess how the house ranked each other in an anonymous poll — most likely to flip, to win, to bore.",
@@ -267,7 +267,7 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-crawl", name: "Mud Crawl", phase: "veto", type: "physical", governing: "physical",
+    id: "veto-crawl", name: "Mud Crawl", phase: "veto", type: "physical", governing: "physical", secondary: "mental",
     format: "crapshoot",
     narrative: {
       premise: "Belly-crawl a muddy obstacle course collecting veto tokens under a low net.",
@@ -312,7 +312,7 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-ballmaze", name: "Ball Maze", phase: "veto", type: "puzzle", governing: "mental",
+    id: "veto-ballmaze", name: "Ball Maze", phase: "veto", type: "puzzle", governing: "mental", secondary: "physical",
     format: "crapshoot",
     narrative: {
       premise: "Tilt a giant hand-held maze to roll a ball past every trap-hole to the veto slot.",
@@ -321,7 +321,7 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-tells", name: "Tells", phase: "veto", type: "social", governing: "social",
+    id: "veto-tells", name: "Tells", phase: "veto", type: "social", governing: "social", secondary: "mental",
     format: "social",
     narrative: {
       premise: "Watch silent clips of houseguests answering yes/no — call who was lying.",
