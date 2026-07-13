@@ -1,11 +1,39 @@
 # Road-to-market backlog — waves M0–M4 (2026-07-07)
 
-> **Status (2026-07-08, close of the build session):** **Wave M0 — DONE** (the golden gate is
-> ARMED; owner actions owed: the `OPENROUTER_API_KEY` repo secret + rotating the in-chat key).
-> **Wave M1 — DONE** (10/10). **Wave M2 — 4/8 shipped**: M2-1 ✅ · M2-2 ✅ (owner approved the
-> mock in-session) · M2-4 ✅ · M2-5 ✅ (owner pick: "Production") — M2-3 is next (unblocked by
-> M2-2), M2-6 has recon notes inline, M2-7/M2-8 are small P3s. **Waves M3–M4 — not started**
-> (M3 depends on M2-2, now in). Shipped via PR **#1234 (merged)** and PR **#1235 (open)**.
+> **Status (reconciled 2026-07-13 — source-audited against `main`, supersedes the 2026-07-08
+> header):** the prior header badly understated progress. Reconciling item-by-item against the
+> code + the passing `frontend/tests/test_m*.py` gate (**270 passed, 1 skipped**) shows most of
+> M2/M3 and the M4 flagships are already **built + green** — the "Waves M3–M4 — not started" line
+> was wrong.
+>
+> - **Wave M0 — DONE** (M0-1..M0-5, M0-7, M0-8, M0-9 all ✅; M0-6 model-tier-defaults docs/config
+>   reconcile is the one small residual). Owner actions still owed: the `OPENROUTER_API_KEY` repo
+>   secret + rotating the in-chat key.
+> - **Wave M1 — DONE** (10/10 ✅).
+> - **Wave M2 — 6/9 built** (was reported 4/8): M2-1 ✅ · M2-2 ✅ · **M2-3 ✅ (built — the header
+>   said "NEXT"; `test_m2_3_premiere_strip.py` is 14/14 green)** · M2-4 ✅ · M2-5 ✅ · M2-7
+>   partially done (beat chips carry the "Production notes" family; the reasoning **accordion** +
+>   settings copy still read "View thinking process"). **Open: M2-6** (no `game_moment` stamp in
+>   the render path), **M2-8** (only the J1-06 tuck-behind-reveal exists — not the DoD allowlist,
+>   no gate), **M2-9** (idle send-button aria unfixed, no gate).
+> - **Wave M3 — 3/6 built** (was "not started"): **M3-1 ✅** (`orwellRoomStrip.js` +
+>   `test_m3_1_room_strip.py`), **M3-2 ✅** (`test_m3_2_speaker_chips.py`; PR #1251 c1b6ba1),
+>   **M3-4 ✅** (`test_m3_4_decision_faces.py`). **Open: M3-3** (no scene-header code), **M3-5**
+>   (no player-face-on-You-bubble code), **M3-6** (`OrwellDossier.open` wired only in
+>   `orwellCast.js`, not every chip).
+> - **Wave M4 — 3/15 built** (was "not started"): **M4-1 ✅** (`orwellDossier.js` +
+>   `test_m4_1_dossier.py`), **M4-2 ✅ the flagship** (`orwellMemoryWall.js` +
+>   `test_m4_2_memory_wall.py`; PRs #1288/#1294), **M4-6 ✅** (`test_m4_6_ceremony_slates.py`).
+>   **Open/partial: M4-3, M4-4, M4-5, M4-7, M4-8, M4-10** (no surface, no gate); **M4-9** and
+>   **M4-11** each have a *pre-existing* surface (`orwellDeals.js` = feature 0039;
+>   `orwellRetrospective.js` = feature 0048) that does **not** satisfy the M4 DoD (M4-9 lacks deal
+>   duration / named alliances; M4-11 lacks the headline-first + vote-by-vote-expander restructure);
+>   **M4-12, M4-13, M4-14, M4-15** open. None of the open items has a dedicated `test_m4_*` gate.
+>
+> Genuinely-open work: **M2-6, M2-8, M2-9, M3-3, M3-5, M3-6, M4-3, M4-4, M4-5, M4-7, M4-8, M4-9,
+> M4-10, M4-11, M4-12, M4-13, M4-14, M4-15** (plus M0-6 docs reconcile). See the
+> **Reconciliation note (2026-07-13)** at the foot of this file. Originally shipped via PR
+> **#1234/#1235**; the M3/M4 built items landed later (M3-2 in #1251, Memory Wall in #1288/#1294).
 
 **What this is.** The consolidated, owner-triaged backlog from the 2026-07-07 FE–BE integration
 review session: every actionable item from the screenshot audit
@@ -496,7 +524,9 @@ Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces wo
   and decision cards consume the same component; browser-smoke asserts monograms render with
   zero image provider configured.
 
-### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1` · NEXT (unblocked — M2-2 is in)
+### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1` · ✅ DONE (evidence: `frontend/tests/test_m2_3_premiere_strip.py`, 14/14 green; `os-prem-count` in `orwellStatusPanel.js`)
+*Reconciled 2026-07-13: BUILT — the header's "NEXT" was stale. The 16-tile premiere strip, the
+`os-prem-count` met-progress gate, and the pre-HOH board reframe are all present and gated.*
 *Hand-off: build the 16-tile strip on `OrwellMonogram.face()` (it already takes the roster card
 + status; met flags ride the roster); the met-progress count lives in `orwellStatusPanel.js`
 (`os-prem-count`); the dead pre-HOH board rows render in the status panel — reframe when
@@ -541,7 +571,7 @@ Source: audit B4/B7 (bubbles "Orwell", beats "· ✔ 📺 PRODUCTION done", fict
   slates (aligned rail, styled label, no lowercase "done" debug tail); beat labels stay sourced
   from `orwellToolBeats.js` (single registry); browser-smoke label checks updated.
 
-### M2-6 · In-world timestamps on beats — S–M · `P2` (recon done, unstarted)
+### M2-6 · In-world timestamps on beats — S–M · `P2` · OPEN (recon done, unbuilt — no `game_moment` stamp at the persist site or in `roleTimestamp()`; no gate)
 *Hand-off: stamp `game_moment` into assistant-message metadata at the persist site — the seam
 already stamps `phase="casting"` pre-game (`routes/chat_routes.py` ~1457) and carries a
 server-minted ts via the ADR-0012 `message_saved` event; the render hook is `roleTimestamp()`
@@ -553,19 +583,19 @@ Source: audit B5 (wall-clock "12:35 PM" inside the fiction). Depends: M1-2 (cloc
   with the real clock demoted to hover/metadata; pre-game (casting) keeps neutral stamps; render
   contract test for the stamp source; no engine change (the moment is already in state).
 
-### M2-7 · Rename the reasoning surface diegeticly — S · `P3`
+### M2-7 · Rename the reasoning surface diegeticly — S · `P3` · PARTIAL (beat chips = "📋 Production notes" in `orwellToolBeats.js`; the reasoning **accordion** header + Settings copy still read "View thinking process" — `markdown.js:561`, `chat.js:1872` — and there is no gate)
 Source: audit B8 ("View thinking process"; Settings "Show <think> collapsible bars").
 - **DoD:** accordion label + settings copy renamed ("Production notes" family), admin surfaces
   keep the technical wording; the P1 owner ruling (collapsed-by-default, debug-viewable, scrubbed
   public reply) untouched — the existing browser-smoke thinking-split block still green.
 
-### M2-8 · Curate the game build's theme list — S · `P3`
+### M2-8 · Curate the game build's theme list — S · `P3` · PARTIAL (the J1-06 tuck exists — game build shows house themes first + hides the rest behind "Show all themes" in `theme.js` ~1516 — but "Show all themes" still lists GPT/claude/etc; the DoD asks for a curated **allowlist** with a source gate, which is absent)
 Source: audit B6 (`r-11` — "GPT", "claude", "organs", "cute" inside the fantasy).
 - **DoD:** game build's "Show all themes" lists only the curated on-brand set (core six +
   approved extras); Customize stays for power users; dropped themes remain available outside the
   game build; pytest source gate on the game-build theme allowlist.
 
-### M2-9 · Idle send button stops announcing "New chat" — S · `P3`
+### M2-9 · Idle send button stops announcing "New chat" — S · `P3` · OPEN (decision-mode aria is fixed — `chat.js:3197` sets "Send answer" — but the idle-mode composer control aria is unaddressed; no a11y gate added)
 Source: audit B10 (`aria-label="New chat"` on the composer's primary control in idle mode).
 - **DoD:** the send control's accessible name reflects its action in every mode; the session
   guard's New-Chat protection unaffected; a11y assertion added to the browser smoke.
@@ -574,7 +604,7 @@ Source: audit B10 (`aria-label="New chat"` on the composer's primary control in 
 
 ## Wave M3 — faces in the flow (idea catalog 1–6)
 
-### M3-1 · The room strip — S · `P1`
+### M3-1 · The room strip — S · `P1` · ✅ DONE (evidence: `frontend/static/js/orwellRoomStrip.js` + `frontend/tests/test_m3_1_room_strip.py`, green)
 Source: idea 1 (presence chips above the composer from `whereabouts.present`). Depends: M2-2.
 - **DoD:** a slim strip of portrait chips for the player's current room, dimming on exit, 🌙 on
   turned-in, role badges via M2-2; updates on the existing poll + `orwell:gamechanged` (no new
@@ -582,7 +612,7 @@ Source: idea 1 (presence chips above the composer from `whereabouts.present`). D
   Vault-free proof (renders only the whereabouts projection); ADR 0003 note in-PR (augments, no
   click-to-act beyond M3-6's dossier door).
 
-### M3-2 · Speaker-attributed dialogue (the microformat) — M–L · `P1`
+### M3-2 · Speaker-attributed dialogue (the microformat) — M–L · `P1` · ✅ DONE (evidence: `frontend/tests/test_m3_2_speaker_chips.py`, green; shipped PR #1251, commit c1b6ba1, golden fixture regenerated in the same PR)
 Source: idea 2 (the deepest version of the owner's faces idea). Depends: M2-2.
 - **DoR:** microformat decided (recommend inverting the existing `npc:<id>` scrub: a sanctioned
   well-formed speaker tag renders as a face chip; malformed still scrubs); **five-place FE wiring
@@ -594,24 +624,24 @@ Source: idea 2 (the deepest version of the owner's faces idea). Depends: M2-2.
   the game-build scrub still redacts raw ids (existing gate); golden fixture regenerated in the
   same PR if the narrator prompt changed (0108 rule).
 
-### M3-3 · One-on-one scene header — M · `P2`
+### M3-3 · One-on-one scene header — M · `P2` · OPEN (no scene-header code; no gate)
 Source: idea 3 (DM-style header when a scene is you + one houseguest). Depends: M2-2, M3-1.
 - **DoD:** when `whereabouts` (or the auto-record `withIds`) resolves a two-person scene, the
   chat header morphs to portrait + name + public status, dissolving on room change; never blocks
   or replaces chat input (ADR 0003); Vault-free proof; browser-smoke state-transition check.
 
-### M3-4 · Faces on decisions — S · `P1`
+### M3-4 · Faces on decisions — S · `P1` · ✅ DONE (evidence: `frontend/tests/test_m3_4_decision_faces.py`, green; portrait/monogram person options in `orwellDecision.js`)
 Source: idea 4 + audit's text-only eviction vote. Depends: M2-2, pairs with M1-4.
 - **DoD:** nominee/vote/houseguests-choice options render as portrait buttons (monogram
   fallback); the finale jury reveal rows carry faces; pick-count/binding semantics byte-identical
   (C20 gates untouched); responsive matrix covers the face-button grid on the phone profile.
 
-### M3-5 · The player's own face — S · `P2`
+### M3-5 · The player's own face — S · `P2` · OPEN (no player-face-on-"You"-bubble / board-You-row code; no gate)
 Source: idea 5 (headshot exists; the player is the only faceless person in the house).
 - **DoD:** the casting headshot/avatar renders on "You" bubbles and the board's You row (initial
   monogram fallback); no layout shift when absent; screenshot pair in PR.
 
-### M3-6 · Every face is a door — S · `P2`
+### M3-6 · Every face is a door — S · `P2` · OPEN (`OrwellDossier.open` is wired only from `orwellCast.js`, not from every portrait chip across strip/cards/slates; no shared click handler; no gate)
 Source: idea 6 (one interaction rule). Depends: M4-1 (dossier exists), M3-1/M3-4/M3-5.
 - **DoD:** every portrait chip anywhere (strip, cards, cast window, slates) click-opens that
   houseguest's dossier; one shared handler; keyboard-operable with an accessible name; asserted
@@ -621,7 +651,7 @@ Source: idea 6 (one interaction rule). Depends: M4-1 (dossier exists), M3-1/M3-4
 
 ## Wave M4 — surface the invisible game (audit lane C + ideas 7–16)
 
-### M4-1 · Houseguest dossier view — M · `P1`
+### M4-1 · Houseguest dossier view — M · `P1` · ✅ DONE (evidence: `frontend/static/js/orwellDossier.js` + `frontend/tests/test_m4_1_dossier.py`, green)
 Source: audit C4 + idea 12 (cast tiles are dead ends; witnessed-behavior ledger).
 - **DoR:** content contract fixed: public persona + met/last-seen + **witnessed** history beats
   + public alliances/deals with the player — facts and sources ONLY, never a weight/number
@@ -631,7 +661,7 @@ Source: audit C4 + idea 12 (cast tiles are dead ends; witnessed-behavior ledger)
   by a leak test templated on the casting-leak gate; empty states designed ("You haven't crossed
   paths yet"); paging replaced by a full grid in the cast window (audit C4's 2×2 dots finding).
 
-### M4-2 · The Memory Wall (knowledge journal) — L · `P1` (the flagship)
+### M4-2 · The Memory Wall (knowledge journal) — L · `P1` (the flagship) · ✅ DONE (evidence: `frontend/static/js/orwellMemoryWall.js` + `frontend/tests/test_m4_2_memory_wall.py`, green; PRs #1288 fact-line unify, #1294 WS poll-cancel)
 Source: audit C1 (`getVisibleStateFor`/`sealedFromHouse`/confidences have no surface).
 Depends: M4-1 (shares the fact-rendering component).
 - **DoR:** projection audit first: confirm the engine's knowledge read returns fact + pathway +
@@ -644,7 +674,7 @@ Depends: M4-1 (shares the fact-rendering component).
   sanity check (journal content survives reload/restart — the 0007 non-degradation promise made
   visible).
 
-### M4-3 · Recap affordance — S · `P2`
+### M4-3 · Recap affordance — S · `P2` · OPEN (no composer/rail recap chip that sends a "Previously, in the house…" prose turn; `dailyRecap`/`seasonRecap` remain silent model beats with no player-facing affordance; no gate)
 Source: audit C2 (`dailyRecap`/`seasonRecap` are model-called silent beats; players can't ask).
 - **DoR:** ADR-0003 shape confirmed: the affordance *asks the narrator* (a prefilled prose turn
   "Previously, in the house…"), never renders engine text directly.
@@ -652,7 +682,7 @@ Source: audit C2 (`dailyRecap`/`seasonRecap` are model-called silent beats; play
   model's recap lands as narration (dailyRecap stays a silent beat); works pre-noms and
   post-eviction; discoverability copy in the house handbook (M4-4); browser-smoke click-through.
 
-### M4-4 · The house handbook + first chat hints — S · `P2`
+### M4-4 · The house handbook + first chat hints — S · `P2` · OPEN (the `OrwellChatHint` **registry** exists in `orwellChatHint.js` but ships empty — no handbook window and no registered contextual hints; no gate)
 Source: audit C3 + idea 14 (fifty verbs, zero discoverability; `OrwellChatHint` ships empty).
 - **DoR:** the verb list drawn from `PLAYER_TOOLS`' player-meaningful subset (deals, alliances,
   confide, confront, trade/expose secrets, turn in, ask the producers, self-eviction), written
@@ -662,13 +692,13 @@ Source: audit C3 + idea 14 (fifty verbs, zero discoverability; `OrwellChatHint` 
   someone aside"), each dismissible and once-only; hints keep the empty-registry default OFF the
   non-game build; pytest for hint registry gating.
 
-### M4-5 · Casting file gadget — S · `P2`
+### M4-5 · Casting file gadget — S · `P2` · OPEN (no casting-file rail gadget consuming the 0050 casting-status projection; no gate)
 Source: audit C5 (0050 status exists engine-side; the interview flies blind).
 - **DoD:** during casting the rail shows the file (Name ✓ · Backstory … · Motivation … ·
   Headshot …) straight from the casting-status projection; it disappears at season start;
   fail-open when the engine is down; leak test (casting card only, no derived stats).
 
-### M4-6 · Ceremony slates — M · `P1`
+### M4-6 · Ceremony slates — M · `P1` · ✅ DONE (evidence: `frontend/tests/test_m4_6_ceremony_slates.py`, green; slate rendering from engine truth in the tool-beat/slate path)
 Source: idea 7 (closed-set beats render as designed full-width cards). Depends: M2-2, M2-5.
 - **DoR:** slate set fixed (HOH win / nominations / veto win / veto ceremony / eviction result /
   week roll), each rendered FROM ENGINE TRUTH (the tool-result/beat payload), never parsed from
@@ -678,18 +708,18 @@ Source: idea 7 (closed-set beats render as designed full-width cards). Depends: 
   (mirror window shows the same slate — extend the mirror harness assertion); Vault-free proof;
   reduced-motion respected.
 
-### M4-7 · Episode title cards — S · `P3`
+### M4-7 · Episode title cards — S · `P3` · OPEN (no episode-title slate; no `EPISODE N — …` render path; no gate). Depends on M4-6 (done) + M2-6 (open).
 Source: idea 8. Depends: M4-6 (shares the slate component), M2-6.
 - **DoD:** week/day transitions render a title slate ("EPISODE 4 — *The Backdoor*"); the title is
   one utility-model call, fail-open to "Day N" (no model ⇒ plain); never blocks the transition.
 
-### M4-8 · Point scene stills at the big beats — S · `P3` (config-gated)
+### M4-8 · Point scene stills at the big beats — S · `P3` (config-gated) · OPEN (no HOH/eviction-slate scene-still request via `recordImageBeat`; no slate-composed still; no gate)
 Source: idea 10 (0051 image beats exist). Depends: M4-6.
 - **DoD:** with an image provider configured, HOH/eviction slates request one still via the
   existing `recordImageBeat` budget-capped path, composed under the slate; zero-provider install
   renders slates without gaps; budget caps (`imageConstants.ts`) respected — no new spend class.
 
-### M4-9 · Deals & alliances board, verified and first-class — S–M · `P2`
+### M4-9 · Deals & alliances board, verified and first-class — S–M · `P2` · PARTIAL / OPEN (a **pre-existing** read-only deals tracker `orwellDeals.js` = feature 0039 exists, but it does NOT meet the M4 DoD: no deal **duration** (0104), no **named alliances** (0107), no visible expiring/dissolving; no `test_m4_9`)
 Source: audit C7 + idea 13 (`state.deals` ships; mid-season rendering unverified).
 - **DoR:** one real-model mid-season pass (piggyback M0-3's live session) confirming what
   `orwellDeals.js` renders when deals/alliances actually exist — findings recorded before scoping.
@@ -697,26 +727,26 @@ Source: audit C7 + idea 13 (`state.deals` ships; mid-season rendering unverified
   named alliances you're in (0107 projection), each expiring/dissolving visibly; nothing beyond
   the public/party-to projection (leak test); rail registry row per the kit contract.
 
-### M4-10 · Endgame sequence instead of a window pile — M · `P2`
+### M4-10 · Endgame sequence instead of a window pile — M · `P2` · OPEN (no post-finale one-at-a-time sequence orchestration; the finale/retrospective/new-season surfaces exist independently but are not sequenced; no gate)
 Source: audit C7/endgame (`r-6` — retrospective + season-complete + photo studio stacked scrimless).
 - **DoD:** post-finale surfaces open as a sequence (finale board → retrospective → next-season
   hand-off), each dismissible, one at a time, kit-modal stacking rules obeyed (#870 invariants);
   browser-smoke asserts no two post-finale windows overlap on auto-open.
 
-### M4-11 · Episodic retrospective — M · `P3`
+### M4-11 · Episodic retrospective — M · `P3` · PARTIAL / OPEN (a **pre-existing** retrospective `orwellRetrospective.js` = feature 0048 exists with per-week evictee lines + highlights, but NOT the M4 DoD restructure — no headline-first grouping of blindsides/flipped-votes/goodbye-tones and no vote-by-vote-behind-expanders; no `test_m4_11`). Depends: M4-10 (open).
 Source: audit C6 (`r-6` — the 0048 payoff as ~40 uniform bullets). Depends: M4-10.
 - **DoD:** the retrospective groups by week with headline beats first (blindsides, flipped votes,
   goodbye tones) and vote-by-vote detail behind expanders; unsealing scope unchanged (post-finale
   gate only — 0048's code-gated path untouched); Vault-unseal legitimacy test still green.
 
-### M4-12 · Board polish: You-row, Last out, Nightfall dupe — S · `P3`
+### M4-12 · Board polish: You-row, Last out, Nightfall dupe — S · `P3` · OPEN (no dedicated gate; polish items unverified on main)
 Source: audit C8 (`r-3` — cue collision "· running on empty You vote tonight", "Last out —"
 through an eviction, moon+word repeated).
 - **DoD:** You-row cues separate cleanly at every width (matrix case); "Last out" names the
   evictee from the beat that commits it (or the row hides untilweek 2 if that's the engine
   contract — verified, not assumed); Nightfall card title/body de-duplicated.
 
-### M4-13 · Shareable episode card export — M · `P3`
+### M4-13 · Shareable episode card export — M · `P3` · OPEN (no export compositor; no gate). Depends: M4-7 (open), M2-2 (done).
 Source: idea 15. Depends: M4-7 (title), M2-2 (portraits).
 - **DoR:** owner OK on the export composition (title, three beats, portraits, season branding) —
   note P-1 naming dependency for any wordmark on the card.
@@ -724,12 +754,12 @@ Source: idea 15. Depends: M4-7 (title), M2-2 (portraits).
   (no external service — content stays local); the card contains only player-known facts (leak
   test over the composition input); export works with monogram portraits.
 
-### M4-14 · Season poster — S · `P3`
+### M4-14 · Season poster — S · `P3` · OPEN (no season-poster compositor; no gate). Depends: M4-13 (open), M4-10 (open).
 Source: idea 16. Depends: M4-13 (shares the compositor), M4-10.
 - **DoD:** post-finale, the retrospective opens under a composed season poster (winner + cast +
   weeks); downloadable via the M4-13 path; monogram-complete without an image provider.
 
-### M4-15 · Player help + in-app problem report — S · `P3` (owner: nice-to-have)
+### M4-15 · Player help + in-app problem report — S · `P3` (owner: nice-to-have) · OPEN — but note `orwellReport.js` exists (the `POST /api/orwell/fe-report` ring client); the M4-15 "Report a problem" entry-points + rate-limit copy may be partly served by it — verify against DoR before scoping. Depends: M4-4 (open).
 Source: market #8. Depends: M4-4 (handbook is the "how to play" half).
 - **DoD:** a "Report a problem" entry (settings + engine-degraded banner) posts a player note to
   the existing `POST /api/orwell/fe-report` ring with the current session id attached — admin
@@ -737,6 +767,46 @@ Source: market #8. Depends: M4-4 (handbook is the "how to play" half).
   client-side like the ring; copy names where the operator reads it.
 
 ---
+
+## Reconciliation note (2026-07-13)
+
+Source-audited every item against `main` (code surfaces + the `frontend/tests/test_m*.py` gate:
+**270 passed, 1 skipped**). Method per CLAUDE.md ("trust the code over prose"): a passing
+dedicated `test_m<W>_<N>_*.py` + the named surface = **built**; a pre-existing surface that does
+not meet the M-item DoD = **partial/open**; no surface + no gate = **open**.
+
+**Items the stale 2026-07-08 header wrongly reported as "not started" / not-shipped — they are
+built + green on `main`:**
+
+- **M2-3** (premiere cast strip) — header said "NEXT"; in fact BUILT, `test_m2_3_premiere_strip.py`
+  14/14 green.
+- **M3-1** (room strip), **M3-2** (speaker chips; PR #1251, commit `c1b6ba1`), **M3-4** (faces on
+  decisions) — the whole "Wave M3 — not started" claim was wrong; 3 of 6 are shipped with gates.
+- **M4-1** (dossier), **M4-2** (Memory Wall — the flagship; PRs #1288, #1294), **M4-6** (ceremony
+  slates) — "Wave M4 — not started" was wrong; 3 of 15 are shipped with gates.
+
+**Genuinely open (no gate, DoD unmet):** M2-6, M2-9, M3-3, M3-5, M3-6, M4-3, M4-4, M4-5, M4-7,
+M4-8, M4-10, M4-12, M4-13, M4-14. **Partial:** M2-7 (beat chips renamed, accordion/settings copy
+not), M2-8 (J1-06 tuck, not the allowlist DoD), M4-9 (pre-existing 0039 deals tracker, no
+duration/alliances), M4-11 (pre-existing 0048 retrospective, not the headline/expander
+restructure), M4-15 (`orwellReport.js` ring client exists; entry-points unverified). **M0-6**
+(model-tier-defaults docs/config reconcile) is the one M0 residual.
+
+**Built-on-`main`-but-tracker-may-still-be-open (for the lead to close):** the roadmap dispatches
+work as GitHub issues referencing these M-ids, so each *built* M-item above likely has a tracking
+issue still open. History is squash-merged, so most implementing shas aren't cleanly traceable;
+the citable ones from `git log`:
+
+- **M3-2** — speaker-attributed dialogue, fixing commit `c1b6ba1` ("M3-2: speaker-attributed
+  dialogue (the chip microformat) + golden fixture regen (#1251)").
+- **M4-2** — Memory Wall, follow-on commits `063f218` (#1288, fact-line unify) + `7764eb4`
+  (#1294, WS poll-cancel).
+- **M2-3, M3-1, M3-4, M4-1, M4-6** — built + gated on `main` (dedicated `test_m*` files green);
+  implementing shas obscured by the #1523 R3-PR5 refactor rewrite, so no clean single sha to cite
+  — verify the tracking issue by M-id and close on the passing gate.
+
+*(No GitHub API was called for this reconciliation — the above is git-log evidence only; the lead
+should confirm issue numbers before closing.)*
 
 ## Parked (owner-owned decisions — not scheduled; cheap prep only)
 
