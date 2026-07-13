@@ -6,32 +6,43 @@
 > M2/M3 and the M4 flagships are already **built + green** — the "Waves M3–M4 — not started" line
 > was wrong.
 >
-> - **Wave M0 — DONE** (M0-1..M0-5, M0-7, M0-8, M0-9 all ✅; M0-6 model-tier-defaults docs/config
->   reconcile is the one small residual). Owner actions still owed: the `OPENROUTER_API_KEY` repo
->   secret + rotating the in-chat key.
-> - **Wave M1 — DONE** (10/10 ✅).
-> - **Wave M2 — 6/9 built** (was reported 4/8): M2-1 ✅ · M2-2 ✅ · **M2-3 ✅ (built — the header
->   said "NEXT"; `test_m2_3_premiere_strip.py` is 14/14 green)** · M2-4 ✅ · M2-5 ✅ · M2-7
->   partially done (beat chips carry the "Production notes" family; the reasoning **accordion** +
->   settings copy still read "View thinking process"). **Open: M2-6** (no `game_moment` stamp in
->   the render path), **M2-8** (only the J1-06 tuck-behind-reveal exists — not the DoD allowlist,
->   no gate), **M2-9** (idle send-button aria unfixed, no gate).
-> - **Wave M3 — 3/6 built** (was "not started"): **M3-1 ✅** (`orwellRoomStrip.js` +
->   `test_m3_1_room_strip.py`), **M3-2 ✅** (`test_m3_2_speaker_chips.py`; PR #1251 c1b6ba1),
->   **M3-4 ✅** (`test_m3_4_decision_faces.py`). **Open: M3-3** (no scene-header code), **M3-5**
->   (no player-face-on-You-bubble code), **M3-6** (`OrwellDossier.open` wired only in
->   `orwellCast.js`, not every chip).
-> - **Wave M4 — 3/15 built** (was "not started"): **M4-1 ✅** (`orwellDossier.js` +
->   `test_m4_1_dossier.py`), **M4-2 ✅ the flagship** (`orwellMemoryWall.js` +
->   `test_m4_2_memory_wall.py`; PRs #1288/#1294), **M4-6 ✅** (`test_m4_6_ceremony_slates.py`).
->   **Open/partial: M4-3, M4-4, M4-5, M4-7, M4-8, M4-10** (no surface, no gate); **M4-9** and
->   **M4-11** each have a *pre-existing* surface (`orwellDeals.js` = feature 0039;
->   `orwellRetrospective.js` = feature 0048) that does **not** satisfy the M4 DoD (M4-9 lacks deal
->   duration / named alliances; M4-11 lacks the headline-first + vote-by-vote-expander restructure);
->   **M4-12, M4-13, M4-14, M4-15** open. None of the open items has a dedicated `test_m4_*` gate.
+> **Status legend (used throughout — exactly these three labels):**
+> - **✅ DONE** — the item's DoD is met **and** a dedicated gate is green (a passing
+>   `test_m<W>_<N>_*.py` or a named source gate).
+> - **PARTIAL** — a surface exists but the DoD is **not** fully met; the missing DoD is named on
+>   the item line.
+> - **OPEN** — not built (no surface and no gate).
 >
-> Genuinely-open work: **M2-6, M2-8, M2-9, M3-3, M3-5, M3-6, M4-3, M4-4, M4-5, M4-7, M4-8, M4-9,
-> M4-10, M4-11, M4-12, M4-13, M4-14, M4-15** (plus M0-6 docs reconcile). See the
+> Per-wave counts below are **derived by counting the item statuses** (they must reconcile with
+> the inline `✅ DONE` / `PARTIAL` / `OPEN` markers on each item):
+>
+> - **Wave M0 — 8 DONE / 0 PARTIAL / 1 OPEN** (of 9). DONE: M0-1..M0-5, M0-7, M0-8, M0-9. OPEN:
+>   **M0-6** (model-tier-defaults docs/config reconcile — the one M0 residual). Owner actions
+>   still owed: the `OPENROUTER_API_KEY` repo secret + rotating the in-chat key.
+> - **Wave M1 — 10 DONE / 0 PARTIAL / 0 OPEN** (of 10).
+> - **Wave M2 — 5 DONE / 2 PARTIAL / 2 OPEN** (of 9; the prior header's "4/8" undercount).
+>   DONE: M2-1, M2-2, **M2-3** (header said "NEXT"; `test_m2_3_premiere_strip.py` 14/14 green),
+>   M2-4, M2-5. PARTIAL: **M2-7** (beat chips carry the "Production notes" family; the reasoning
+>   **accordion** + settings copy still read "View thinking process"), **M2-8** (only the J1-06
+>   tuck-behind-reveal exists — not the DoD allowlist, no gate). OPEN: **M2-6** (no `game_moment`
+>   stamp in the render path), **M2-9** (idle send-button aria unfixed, no gate).
+> - **Wave M3 — 3 DONE / 0 PARTIAL / 3 OPEN** (of 6; the prior header's "not started" was wrong).
+>   DONE: **M3-1** (`orwellRoomStrip.js` + `test_m3_1_room_strip.py`), **M3-2**
+>   (`test_m3_2_speaker_chips.py`; PR #1251 c1b6ba1), **M3-4** (`test_m3_4_decision_faces.py`).
+>   OPEN: **M3-3** (no scene-header code), **M3-5** (no player-face-on-You-bubble code), **M3-6**
+>   (`OrwellDossier.open` wired only in `orwellCast.js`, not every chip).
+> - **Wave M4 — 3 DONE / 3 PARTIAL / 9 OPEN** (of 15; the prior header's "not started" was wrong).
+>   DONE: **M4-1** (`orwellDossier.js` + `test_m4_1_dossier.py`), **M4-2** the flagship
+>   (`orwellMemoryWall.js` + `test_m4_2_memory_wall.py`; PRs #1288/#1294), **M4-6**
+>   (`test_m4_6_ceremony_slates.py`). PARTIAL: **M4-9** (pre-existing `orwellDeals.js` = feature
+>   0039; lacks deal duration / named alliances), **M4-11** (pre-existing `orwellRetrospective.js`
+>   = feature 0048; lacks the headline-first + vote-by-vote-expander restructure), **M4-15**
+>   (`orwellReport.js` fe-report ring client exists; the settings + degraded-banner entry-points
+>   are unverified). OPEN: **M4-3, M4-4, M4-5, M4-7, M4-8, M4-10, M4-12, M4-13, M4-14**. None of
+>   the OPEN items has a dedicated `test_m4_*` gate.
+>
+> Genuinely-open work (OPEN + PARTIAL): **M0-6; M2-6, M2-7, M2-8, M2-9; M3-3, M3-5, M3-6; M4-3,
+> M4-4, M4-5, M4-7, M4-8, M4-9, M4-10, M4-11, M4-12, M4-13, M4-14, M4-15**. See the
 > **Reconciliation note (2026-07-13)** at the foot of this file. Originally shipped via PR
 > **#1234/#1235**; the M3/M4 built items landed later (M3-2 in #1251, Memory Wall in #1288/#1294).
 
@@ -307,7 +318,7 @@ a flake).
   (quiesce/neutralize/serialize — never mute); the fix lands with a unit gate in
   `test_0108_golden_path.py`.
 
-### M0-6 · Reconcile the model-tier defaults to the two-tier decision — S (docs + config)
+### M0-6 · Reconcile the model-tier defaults to the two-tier decision — S (docs + config) · OPEN (the one M0 residual: ADR 0016 amendment + `settings.py`/`oobe_reset.py`/`golden-nightly` defaults not yet reconciled to the two-tier decision; blocked on the owner DoR confirmation; no gate)
 Source: the owner retarget above vs the repo's standing defaults (ADR 0016 names GLM-4.7 +
 Seedream; `settings.py` defaults `z-ai/glm-4.7`(chat)/`glm-4.7-flash`(utility); `oobe_reset.py`
 resets narrator to `deepseek/deepseek-v4-pro`).
@@ -525,12 +536,11 @@ Source: audit B3 (`s-d1` flat letter-rectangles); prerequisite for M3-* faces wo
   zero image provider configured.
 
 ### M2-3 · Premiere cast strip + pre-HOH board reframe — M · `P1` · ✅ DONE (evidence: `frontend/tests/test_m2_3_premiere_strip.py`, 14/14 green; `os-prem-count` in `orwellStatusPanel.js`)
-*Reconciled 2026-07-13: BUILT — the header's "NEXT" was stale. The 16-tile premiere strip, the
-`os-prem-count` met-progress gate, and the pre-HOH board reframe are all present and gated.*
-*Hand-off: build the 16-tile strip on `OrwellMonogram.face()` (it already takes the roster card
-+ status; met flags ride the roster); the met-progress count lives in `orwellStatusPanel.js`
-(`os-prem-count`); the dead pre-HOH board rows render in the status panel — reframe when
-`status.hoh` is null and week === 1.*
+*Reconciled 2026-07-13: BUILT — the header's "NEXT" was stale. Shipped on
+`OrwellMonogram.face()`: the 16-tile premiere strip, the `os-prem-count` met-progress gate (in
+`orwellStatusPanel.js`), and the pre-HOH board reframe (when `status.hoh` is null and week === 1)
+are all present and gated by `test_m2_3_premiere_strip.py` (14/14 green). Tracking issue: verify
+by M-id and close on the passing gate.*
 
 Source: audit B2 (`s-b1` — empty premiere, `HOH — / Noms — / Veto —`). Depends: M2-2 ✅.
 - **DoD:** premiere shows the sixteen-tile strip lighting up with the met-progress gate (0/15 →
@@ -719,7 +729,7 @@ Source: idea 10 (0051 image beats exist). Depends: M4-6.
   existing `recordImageBeat` budget-capped path, composed under the slate; zero-provider install
   renders slates without gaps; budget caps (`imageConstants.ts`) respected — no new spend class.
 
-### M4-9 · Deals & alliances board, verified and first-class — S–M · `P2` · PARTIAL / OPEN (a **pre-existing** read-only deals tracker `orwellDeals.js` = feature 0039 exists, but it does NOT meet the M4 DoD: no deal **duration** (0104), no **named alliances** (0107), no visible expiring/dissolving; no `test_m4_9`)
+### M4-9 · Deals & alliances board, verified and first-class — S–M · `P2` · PARTIAL (a **pre-existing** read-only deals tracker `orwellDeals.js` = feature 0039 exists; missing DoD: no deal **duration** (0104), no **named alliances** (0107), no visible expiring/dissolving; no `test_m4_9`)
 Source: audit C7 + idea 13 (`state.deals` ships; mid-season rendering unverified).
 - **DoR:** one real-model mid-season pass (piggyback M0-3's live session) confirming what
   `orwellDeals.js` renders when deals/alliances actually exist — findings recorded before scoping.
@@ -733,7 +743,7 @@ Source: audit C7/endgame (`r-6` — retrospective + season-complete + photo stud
   hand-off), each dismissible, one at a time, kit-modal stacking rules obeyed (#870 invariants);
   browser-smoke asserts no two post-finale windows overlap on auto-open.
 
-### M4-11 · Episodic retrospective — M · `P3` · PARTIAL / OPEN (a **pre-existing** retrospective `orwellRetrospective.js` = feature 0048 exists with per-week evictee lines + highlights, but NOT the M4 DoD restructure — no headline-first grouping of blindsides/flipped-votes/goodbye-tones and no vote-by-vote-behind-expanders; no `test_m4_11`). Depends: M4-10 (open).
+### M4-11 · Episodic retrospective — M · `P3` · PARTIAL (a **pre-existing** retrospective `orwellRetrospective.js` = feature 0048 exists with per-week evictee lines + highlights; missing DoD: no headline-first grouping of blindsides/flipped-votes/goodbye-tones and no vote-by-vote-behind-expanders; no `test_m4_11`). Depends: M4-10 (OPEN).
 Source: audit C6 (`r-6` — the 0048 payoff as ~40 uniform bullets). Depends: M4-10.
 - **DoD:** the retrospective groups by week with headline beats first (blindsides, flipped votes,
   goodbye tones) and vote-by-vote detail behind expanders; unsealing scope unchanged (post-finale
@@ -759,7 +769,7 @@ Source: idea 16. Depends: M4-13 (shares the compositor), M4-10.
 - **DoD:** post-finale, the retrospective opens under a composed season poster (winner + cast +
   weeks); downloadable via the M4-13 path; monogram-complete without an image provider.
 
-### M4-15 · Player help + in-app problem report — S · `P3` (owner: nice-to-have) · OPEN — but note `orwellReport.js` exists (the `POST /api/orwell/fe-report` ring client); the M4-15 "Report a problem" entry-points + rate-limit copy may be partly served by it — verify against DoR before scoping. Depends: M4-4 (open).
+### M4-15 · Player help + in-app problem report — S · `P3` (owner: nice-to-have) · PARTIAL (the `POST /api/orwell/fe-report` ring client `orwellReport.js` exists; missing DoD: the "Report a problem" **entry-points** in settings + the engine-degraded banner and the rate-limit copy are unverified/unwired; no gate). Depends: M4-4 (OPEN).
 Source: market #8. Depends: M4-4 (handbook is the "how to play" half).
 - **DoD:** a "Report a problem" entry (settings + engine-degraded banner) posts a player note to
   the existing `POST /api/orwell/fe-report` ring with the current session id attached — admin
@@ -785,12 +795,13 @@ built + green on `main`:**
 - **M4-1** (dossier), **M4-2** (Memory Wall — the flagship; PRs #1288, #1294), **M4-6** (ceremony
   slates) — "Wave M4 — not started" was wrong; 3 of 15 are shipped with gates.
 
-**Genuinely open (no gate, DoD unmet):** M2-6, M2-9, M3-3, M3-5, M3-6, M4-3, M4-4, M4-5, M4-7,
-M4-8, M4-10, M4-12, M4-13, M4-14. **Partial:** M2-7 (beat chips renamed, accordion/settings copy
-not), M2-8 (J1-06 tuck, not the allowlist DoD), M4-9 (pre-existing 0039 deals tracker, no
-duration/alliances), M4-11 (pre-existing 0048 retrospective, not the headline/expander
-restructure), M4-15 (`orwellReport.js` ring client exists; entry-points unverified). **M0-6**
-(model-tier-defaults docs/config reconcile) is the one M0 residual.
+**OPEN (no surface, no gate):** M0-6, M2-6, M2-9, M3-3, M3-5, M3-6, M4-3, M4-4, M4-5, M4-7,
+M4-8, M4-10, M4-12, M4-13, M4-14. **PARTIAL (surface exists, DoD not fully met):** M2-7 (beat
+chips renamed, accordion/settings copy not), M2-8 (J1-06 tuck, not the allowlist DoD), M4-9
+(pre-existing 0039 deals tracker, no duration/alliances), M4-11 (pre-existing 0048 retrospective,
+not the headline/expander restructure), M4-15 (`orwellReport.js` ring client exists; entry-points
+unverified). *(M0-6 is the one M0 residual — an OPEN docs/config reconcile blocked on the owner
+DoR.)*
 
 **Built-on-`main`-but-tracker-may-still-be-open (for the lead to close):** the roadmap dispatches
 work as GitHub issues referencing these M-ids, so each *built* M-item above likely has a tracking
