@@ -81,6 +81,19 @@ def test_chat_resume_response_carries_anti_buffering_headers():
     assert "SSE_STREAM_HEADERS" in resp.group(0)
 
 
+def test_stream_rewrite_response_carries_anti_buffering_headers():
+    # CR-MAJOR-1: POST /api/rewrite is a genuine token-carrying SSE stream and had NO anti-buffering
+    # headers — the same reverse-proxy hang could still happen there.
+    assert "StreamingResponse(stream_rewrite(), media_type=\"text/event-stream\", headers=SSE_STREAM_HEADERS)" in CHAT_ROUTES_SRC
+
+
+def test_no_token_stream_hardcodes_the_header_dict_anymore():
+    # CR-ROBUSTNESS-6: chat_events (and every token stream) must reuse the SSE_STREAM_HEADERS constant,
+    # not an ad-hoc dict that can drift. Exactly ONE literal definition of the dict remains: the constant.
+    literal = '{"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}'
+    assert CHAT_ROUTES_SRC.count(literal) == 1, "the anti-buffering header dict must be defined once (the constant)"
+
+
 # ── F-PY-5: a status/stage frame before the model call ─────────────────────── #
 
 
@@ -207,6 +220,61 @@ def test_compactor_uses_the_async_context_lookup():
     assert "await get_context_length_async(" in src
 
 
+def test_get_context_length_async_coalesces_concurrent_misses(monkeypatch):
+    # CR-ROBUSTNESS-5: two cold callers on the SAME key must share ONE probe, not launch duplicates.
+    import threading
+    calls = {"n": 0}
+    gate = threading.Event()
+
+    def slow(url, model):
+        calls["n"] += 1
+        gate.wait(2.0)  # hold the (threaded) probe so a second caller races in while it's in flight
+        return 555
+
+    monkeypatch.setattr(mc, "get_context_length", slow)
+    mc._context_ttl_cache.clear()
+    mc._context_inflight.clear()
+
+    async def _both():
+        t1 = asyncio.create_task(mc.get_context_length_async("http://coalesce", "m"))
+        await asyncio.sleep(0.05)          # let t1 register its in-flight future + enter the thread
+        t2 = asyncio.create_task(mc.get_context_length_async("http://coalesce", "m"))
+        await asyncio.sleep(0.05)
+        gate.set()                          # release the shared probe
+        return await asyncio.gather(t1, t2)
+
+    a, b = _run(_both())
+    assert a == b == 555
+    assert calls["n"] == 1, "concurrent cold callers must share ONE underlying probe"
+
+
+# ── CR-MAJOR-2: env floats parse fail-soft (a bad env var must not crash startup) ── #
+
+
+def test_env_float_falls_back_on_malformed(monkeypatch):
+    monkeypatch.setenv("ORWELL_TEST_BAD_FLOAT", "5s")   # trailing unit — not a float
+    assert mc._env_float("ORWELL_TEST_BAD_FLOAT", 5.0) == 5.0
+    monkeypatch.setenv("ORWELL_TEST_BAD_FLOAT", "   ")  # blank/whitespace
+    assert mc._env_float("ORWELL_TEST_BAD_FLOAT", 42.0) == 42.0
+    monkeypatch.delenv("ORWELL_TEST_BAD_FLOAT", raising=False)  # unset
+    assert mc._env_float("ORWELL_TEST_BAD_FLOAT", 7.0) == 7.0
+    monkeypatch.setenv("ORWELL_TEST_BAD_FLOAT", "12.5")  # a real override still applies
+    assert mc._env_float("ORWELL_TEST_BAD_FLOAT", 5.0) == 12.5
+
+
+def test_model_context_imports_under_malformed_env(monkeypatch):
+    # The module must (re)import cleanly with a garbage timeout env — no ValueError at import time.
+    import importlib
+    monkeypatch.setenv("ORWELL_MODEL_PROBE_TIMEOUT", "5s")
+    monkeypatch.setenv("ORWELL_MODEL_CONTEXT_TTL", "not-a-number")
+    importlib.reload(mc)
+    assert mc.REQUEST_TIMEOUT == 5.0 and mc._CONTEXT_TTL_SECONDS == 60.0
+    # restore clean state for the rest of the session
+    monkeypatch.delenv("ORWELL_MODEL_PROBE_TIMEOUT", raising=False)
+    monkeypatch.delenv("ORWELL_MODEL_CONTEXT_TTL", raising=False)
+    importlib.reload(mc)
+
+
 # ── F-PY-2: non-blocking compaction (background; golden stays blocking) ─────── #
 
 
@@ -289,3 +357,69 @@ def test_maybe_compact_under_threshold_is_noop(monkeypatch):
     messages = _msgs(6)
     out_msgs, ctxlen, was = _run(cc.maybe_compact(_FakeSession(), "url", "model", messages))
     assert was is False and out_msgs is messages
+
+
+# ── CR-MAJOR-3 (DATA INTEGRITY, mandate #4): a concurrent history edit during the in-flight ──── #
+#     summary must NOT be overwritten by the background compaction.
+
+
+def test_background_compaction_abandons_on_concurrent_history_edit(monkeypatch):
+    import core.models as core_models
+
+    async def fake_ctx(url, model):
+        return 100  # over threshold
+
+    monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
+    monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
+    monkeypatch.setattr("src.golden_path.active", lambda: False)
+    # Force the in-memory apply path (no real session manager DB write) so we can inspect history.
+    monkeypatch.setattr(core_models, "_session_manager", None, raising=False)
+    cc._compaction_in_flight.clear()
+    cc._background_tasks.clear()
+
+    sess = _FakeSession()
+    # A REAL persisted history so effective_split (= system_msg_count 1 + split_point 3 = 4) lands
+    # INSIDE it — i.e. compaction would otherwise proceed and overwrite.
+    sess.history = [{"role": "system", "content": "S"}] + [
+        {"role": ("user" if i % 2 == 0 else "assistant"), "content": f"m{i}"} for i in range(7)
+    ]  # 8 distinct dict objects
+    original = list(sess.history)
+
+    async def mutating_llm(*a, **k):
+        # Simulate a CONCURRENT writer (delete/truncate/replace) editing the summarized prefix while
+        # the summary is in flight — the classic lost-update race.
+        sess.history = sess.history[2:]   # drop the first two messages → the captured prefix shifts
+        return "SUMMARY"
+
+    monkeypatch.setattr(cc, "llm_call_async", mutating_llm)
+
+    messages = _msgs(6)  # 1 system + 6 convo → split_point=3, system_msg_count=1
+
+    async def _drive():
+        out = await cc.maybe_compact(sess, "url", "model", messages)
+        if cc._background_tasks:
+            await asyncio.gather(*list(cc._background_tasks))
+        return out
+
+    out_msgs, ctxlen, was = _run(_drive())
+    assert was is False
+    # The compaction must have ABANDONED: session.history is EXACTLY the concurrent edit, untouched.
+    assert sess.history == original[2:], "the concurrent edit was overwritten — data lost (mandate #4)"
+    assert not any(
+        isinstance(m, dict) and "[Conversation summary" in (m.get("content") or "")
+        for m in sess.history
+    ), "no summary was injected over the concurrent edit"
+
+
+def test_background_compaction_bounded_by_global_semaphore():
+    # CR-ROBUSTNESS-4: a module-level bounded semaphore caps concurrent background compactions.
+    assert isinstance(cc._MAX_CONCURRENT_BG_COMPACTIONS, int) and cc._MAX_CONCURRENT_BG_COMPACTIONS >= 1
+    src = inspect.getsource(cc._schedule_background_compaction)
+    assert "_get_global_compaction_sem()" in src and "async with" in src
+
+
+def test_bg_compaction_semaphore_env_is_failsoft(monkeypatch):
+    monkeypatch.setenv("ORWELL_MAX_BG_COMPACTIONS", "lots")  # malformed
+    assert cc._safe_int_env("ORWELL_MAX_BG_COMPACTIONS", 4) == 4
+    monkeypatch.setenv("ORWELL_MAX_BG_COMPACTIONS", "8")
+    assert cc._safe_int_env("ORWELL_MAX_BG_COMPACTIONS", 4) == 8

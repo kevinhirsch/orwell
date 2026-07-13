@@ -84,15 +84,31 @@ def _is_local_endpoint(url: str) -> bool:
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_CONTEXT = 128000
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float env var, FAIL-SOFT: a blank/unset/malformed value (e.g. "5s", stray whitespace)
+    falls back to `default` with a warning instead of raising at IMPORT time — a bad env var must
+    never crash app startup."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r — using default %s", name, raw, default)
+        return default
+
+
 # F-PY-3 (perf audit): a SHORT timeout on the /models + /slots probes so one slow/hung upstream
 # can't drag out the (now off-loaded) context-size lookup. Env-tunable; default 5s.
-REQUEST_TIMEOUT = float(os.environ.get("ORWELL_MODEL_PROBE_TIMEOUT") or "5")
+REQUEST_TIMEOUT = _env_float("ORWELL_MODEL_PROBE_TIMEOUT", 5.0)
 # F-PY-3: a short-TTL memo over the whole (blocking) resolution so a slow endpoint is probed at most
 # once per TTL window instead of on every turn. This complements the permanent `_context_cache`
 # below (which deliberately SKIPS local/default results so a restarted local server is re-read) —
 # the TTL layer still shields those hot paths from re-probing an upstream that's momentarily slow.
 # Env-tunable; default 60s.
-_CONTEXT_TTL_SECONDS = float(os.environ.get("ORWELL_MODEL_CONTEXT_TTL") or "60")
+_CONTEXT_TTL_SECONDS = _env_float("ORWELL_MODEL_CONTEXT_TTL", 60.0)
 
 # Known context windows for major API models (used as fallback when /models
 # endpoint doesn't report context_length).
@@ -223,6 +239,10 @@ _context_cache: Dict[Tuple[str, str], int] = {}
 
 # F-PY-3: short-TTL memo for the async path — value + monotonic expiry per (endpoint, model).
 _context_ttl_cache: Dict[Tuple[str, str], Tuple[int, float]] = {}
+# F-PY-3 (single-flight): concurrent COLD callers on the same key share ONE probe instead of each
+# launching a duplicate thread against the same slow upstream. The future is removed on completion
+# (success OR failure) so the next window re-probes cleanly.
+_context_inflight: Dict[Tuple[str, str], "asyncio.Future"] = {}
 
 
 async def get_context_length_async(endpoint_url: str, model: str) -> int:
@@ -232,8 +252,9 @@ async def get_context_length_async(endpoint_url: str, model: str) -> int:
     ``/models`` and ``/slots``. Called directly from async request paths (e.g. ``maybe_compact``),
     those synchronous probes run ON the event loop — so ONE slow upstream stalls EVERY concurrent
     user's turn, not just the one whose context is being sized. This wrapper (1) serves a short-TTL
-    memo when fresh (so a slow endpoint is probed at most once per window), and (2) off-loads the
-    blocking resolution to a worker thread via ``asyncio.to_thread`` so the event loop stays free.
+    memo when fresh (so a slow endpoint is probed at most once per window), (2) COALESCES concurrent
+    cold misses on the same key onto a single probe, and (3) off-loads the blocking resolution to a
+    worker thread via ``asyncio.to_thread`` so the event loop stays free.
 
     Fail-soft: any error in the off-loaded call degrades to ``DEFAULT_CONTEXT`` rather than
     propagating (the caller's own guards already treat a missing size as the default)."""
@@ -242,13 +263,31 @@ async def get_context_length_async(endpoint_url: str, model: str) -> int:
     hit = _context_ttl_cache.get(key)
     if hit is not None and hit[1] > now:
         return hit[0]
+
+    # Single-flight: if a probe for this key is already running, await ITS result instead of
+    # launching a second one. Fail-soft to the default if the shared probe errored.
+    inflight = _context_inflight.get(key)
+    if inflight is not None:
+        try:
+            return await inflight
+        except Exception:  # noqa: BLE001 — a shared probe failure still degrades to the default
+            return DEFAULT_CONTEXT
+
+    fut: "asyncio.Future" = asyncio.get_running_loop().create_future()
+    _context_inflight[key] = fut
     try:
-        ctx = await asyncio.to_thread(get_context_length, endpoint_url, model)
-    except Exception as e:  # noqa: BLE001 — never let a context probe break the turn
-        logger.debug("get_context_length_async failed for %s: %s", model, e)
-        ctx = DEFAULT_CONTEXT
-    _context_ttl_cache[key] = (ctx, now + _CONTEXT_TTL_SECONDS)
-    return ctx
+        try:
+            ctx = await asyncio.to_thread(get_context_length, endpoint_url, model)
+        except Exception as e:  # noqa: BLE001 — never let a context probe break the turn
+            logger.debug("get_context_length_async failed for %s: %s", model, e)
+            ctx = DEFAULT_CONTEXT
+        _context_ttl_cache[key] = (ctx, time.monotonic() + _CONTEXT_TTL_SECONDS)
+        if not fut.done():
+            fut.set_result(ctx)
+        return ctx
+    finally:
+        # Drop the in-flight entry (success or failure) so the next cold caller probes afresh.
+        _context_inflight.pop(key, None)
 
 
 def get_context_length(endpoint_url: str, model: str) -> int:

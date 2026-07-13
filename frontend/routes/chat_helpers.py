@@ -1274,6 +1274,11 @@ async def _capture_beat_signature(user) -> Optional[dict]:
         _refresh_beat_seq(user, status, state)
         return _beat_signature(status if isinstance(status, dict) else {},
                                state if isinstance(state, dict) else {})
+    except asyncio.TimeoutError:
+        # asyncio.TimeoutError stringifies to '' — log an explicit reason (else the general branch
+        # below would print an empty one). Fail-open, exactly like any other hiccup.
+        logger.warning("[orwell] beat-signature capture skipped for user=%s: framing read timed out", user)
+        return None
     except Exception as e:
         logger.warning("[orwell] beat-signature capture skipped for user=%s: %s", user, e)
         return None
@@ -2841,6 +2846,10 @@ async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
         # Keep the last-seen token fresh from the delta's own beatSeq (it carries one like every read).
         _refresh_beat_seq(user, delta if isinstance(delta, dict) else {})
         return _render_delta_line(delta if isinstance(delta, dict) else {})
+    except asyncio.TimeoutError:
+        # asyncio.TimeoutError stringifies to '' — log an explicit reason (the full context stands).
+        logger.debug("[orwell] state-delta line skipped for user=%s: framing read timed out", user)
+        return None
     except Exception as e:
         logger.debug("[orwell] state-delta line skipped for user=%s: %s", user, _exc_detail(e))
         return None
@@ -3250,6 +3259,9 @@ async def apply_game_framing(
             _barrier = _pending_barrier_directive((_status or {}).get("pending")) if isinstance(_status, dict) else None
             if _barrier:
                 gm_prompt = gm_prompt + "\n\n" + _barrier
+        except asyncio.TimeoutError:
+            # asyncio.TimeoutError stringifies to '' — log an explicit reason. Fail-open (no barrier).
+            logger.warning("[orwell] pending barrier skipped for user=%s: framing read timed out", _gkey)
         except Exception as e:
             logger.warning("[orwell] pending barrier skipped for user=%s: %s", _gkey, e)
         # ADR 0009 (D3 Part A) — the LOCATION grounding barrier. The same desync class as the pending

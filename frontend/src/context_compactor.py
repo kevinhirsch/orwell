@@ -8,6 +8,7 @@ Summarizes older messages via the same LLM, preserving key context.
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from src.model_context import get_context_length_async, estimate_tokens
@@ -302,12 +303,40 @@ def trim_for_context(messages: List[Dict], context_length: int, reserve_tokens: 
     return result
 
 
+def _safe_int_env(name: str, default: int) -> int:
+    """Read an int env var, fail-soft: blank/unset/malformed ⇒ `default` (clamped to ≥1)."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return max(1, int(raw.strip()))
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r — using default %s", name, raw, default)
+        return default
+
+
 # F-PY-2: background-compaction bookkeeping. `_compaction_in_flight` keeps at most ONE background
 # summarization per session (a second over-threshold turn while the first is still summarizing just
 # rides trim_for_context, then benefits when the first lands). `_background_tasks` holds strong refs
 # so the fire-and-forget tasks are not garbage-collected before they complete.
 _compaction_in_flight: set = set()
 _background_tasks: set = set()
+# Global ceiling on concurrent BACKGROUND compactions across ALL sessions, so a burst of
+# over-threshold turns can't spawn unbounded summarization tasks. Env-tunable; default 4.
+_MAX_CONCURRENT_BG_COMPACTIONS = _safe_int_env("ORWELL_MAX_BG_COMPACTIONS", 4)
+# Created lazily inside the running loop (and rebound if the loop changes — e.g. across isolated
+# test loops) so a module-level asyncio primitive never binds to the wrong event loop.
+_global_compaction_sem: "Optional[asyncio.Semaphore]" = None
+_global_compaction_sem_loop = None
+
+
+def _get_global_compaction_sem() -> "asyncio.Semaphore":
+    global _global_compaction_sem, _global_compaction_sem_loop
+    loop = asyncio.get_running_loop()
+    if _global_compaction_sem is None or _global_compaction_sem_loop is not loop:
+        _global_compaction_sem = asyncio.Semaphore(_MAX_CONCURRENT_BG_COMPACTIONS)
+        _global_compaction_sem_loop = loop
+    return _global_compaction_sem
 
 
 def _schedule_background_compaction(session, split_point: int, system_msg_count: int,
@@ -316,18 +345,43 @@ def _schedule_background_compaction(session, split_point: int, system_msg_count:
 
     The current turn has already returned its (uncompacted, trim-guaranteed-to-fit) messages; this
     persists a compacted `session.history` for FUTURE turns without blocking the first token. One in
-    flight per session; any error is swallowed (compaction is an optimization, never load-bearing —
-    trim_for_context is the correctness floor)."""
+    flight per session, bounded globally by a semaphore; any error is swallowed (compaction is an
+    optimization, never load-bearing — trim_for_context is the correctness floor)."""
     sid = getattr(session, "id", None)
     if sid is not None and sid in _compaction_in_flight:
         return  # already summarizing this session — don't stack a second call
+    # DATA-INTEGRITY (mandate #4 non-degradation): snapshot the identity of the message range this
+    # compaction will SUMMARIZE + REPLACE (`session.history[:effective_split]`), holding references
+    # so no id can be reused. Serializing compactions (the in-flight set) does NOT protect against
+    # OTHER writers (delete-messages / truncate_session / replace_messages) mutating history while the
+    # summary is in flight — that leaves split_point/system_msg_count pointing at the wrong range and
+    # `_update_session_history` would OVERWRITE the newer edit (lost data). `_run` re-checks this
+    # prefix just before applying; if it changed, it ABANDONS fail-soft (the next over-threshold turn
+    # re-compacts) rather than clobbering.
+    effective_split = system_msg_count + split_point
+    try:
+        prefix_snapshot = list((getattr(session, "history", None) or [])[:effective_split])
+    except Exception:  # noqa: BLE001 — an odd history shape ⇒ can't validate ⇒ skip safely
+        return
     if sid is not None:
         _compaction_in_flight.add(sid)
 
     async def _run() -> None:
         try:
-            summary = await summarize_fn()
-            if summary:
+            async with _get_global_compaction_sem():
+                summary = await summarize_fn()
+                if not summary:
+                    return
+                # Re-validate the summarized prefix is UNCHANGED since capture. A normal tail append
+                # (this turn's own assistant message) leaves the prefix identical → apply; any edit to
+                # the summarized range (delete/truncate/replace) makes it differ → abandon, don't clobber.
+                cur = getattr(session, "history", None) or []
+                cur_prefix = cur[:effective_split]
+                if (len(cur_prefix) != len(prefix_snapshot)
+                        or any(a is not b for a, b in zip(cur_prefix, prefix_snapshot))):
+                    logger.debug(
+                        "Background compaction abandoned for session %s — history changed under it", sid)
+                    return
                 _update_session_history(session, split_point, summary,
                                         system_msg_count=system_msg_count)
                 logger.info("Background compaction persisted for session %s", sid)
@@ -430,11 +484,10 @@ async def maybe_compact(
                 headers=compact_headers,
                 timeout=30,
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — degrade gracefully; a summary failure is never fatal
             logger.error(f"Compaction summary failed: {e}")
-            # Degrade gracefully: keep the conversation intact rather than silently dropping the
-            # older half. None signals the caller nothing was summarized; trim_for_context handles
-            # length either way.
+            # Keep the conversation intact rather than silently dropping the older half. None signals
+            # the caller nothing was summarized; trim_for_context handles length either way.
             return None
 
     # F-PY-2 (perf audit): DO NOT block the first token on the summary LLM call. The old path
@@ -457,7 +510,7 @@ async def maybe_compact(
     try:
         from src import golden_path as _gp
         _golden = _gp.active()
-    except Exception:
+    except Exception:  # noqa: BLE001 — golden probe is best-effort; absence ⇒ not golden
         _golden = False
 
     if not _golden:

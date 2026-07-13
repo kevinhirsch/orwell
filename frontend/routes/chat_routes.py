@@ -2040,7 +2040,7 @@ def setup_chat_routes(
         return StreamingResponse(
             session_events.subscribe(session_id),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            headers=SSE_STREAM_HEADERS,
         )
 
     # ------------------------------------------------------------------ #
@@ -2242,7 +2242,7 @@ def setup_chat_routes(
                 logger.error("Rewrite stream error: %s", e)
                 yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 500})}\n\n'
 
-        return StreamingResponse(stream_rewrite(), media_type="text/event-stream")
+        return StreamingResponse(stream_rewrite(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     # ── WebSocket Phase-1 (ADR 0017 §3.5): register the `turn` producer ──────────────────────────
     # Build the factory over THIS closure's `_prepare_chat_stream` and hand it to ws_routes. Dormant
