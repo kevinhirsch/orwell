@@ -7463,10 +7463,43 @@ export class GameSessionAdapter implements GameSession {
    * restarts. Idempotent against the mirror: a content already present (e.g. a double restore replay) is
    * not duplicated, so the monotonic-count non-degradation guard stays exact.
    */
+  /**
+   * F-EN-4 (issue #1562) — a per-array membership cache for the scene-memory dedup, keyed on the
+   * `soul.memory` ARRAY REFERENCE. The `!includes(content)` guard below asks exactly the question
+   * `.includes` asks ("is this content already in the mirror?"), which was an O(memory) linear scan
+   * that grows all season and fires once per witness per scene — twice when the scene carries a
+   * rationale (content then rationale, back to back against the SAME ever-growing mirror), so a warm
+   * cache turns the second and every subsequent same-witness check into O(1).
+   *
+   * Byte-identity argument — the cache answers `set.has(content)` iff `soul.memory.includes(content)`:
+   *  - The set is (re)built as `new Set(arr)` whenever the cache is absent OR `cache.len !== arr.length`,
+   *    so any push through ANOTHER path (arc notes, confessionals, deep-profile authoring) — which
+   *    always CHANGES the array length — forces a fresh rebuild from the current array before the next
+   *    membership test.
+   *  - The single same-length in-place content swap (deep-profile reseal) FIRST reassigns `soul.memory`
+   *    to a NEW array via `.slice()` (see the `lastIndexOf`/`[idx] = newNote` site), so it presents as a
+   *    brand-new WeakMap key ⇒ a fresh rebuild. There is NO in-place `arr[i] = …` on a RETAINED array
+   *    reference anywhere, so a stale set can never silently disagree with its array's contents.
+   *  - Our own dedup push mutates the SAME array in place and advances the cached set + len in lockstep.
+   * `.includes` tests membership (not multiplicity), so duplicate strings other paths may append are
+   * harmless. Result: identical push/skip decisions and identical persisted bytes vs. the linear scan.
+   */
+  private readonly sceneMemoryIndex = new WeakMap<string[], { set: Set<string>; len: number }>();
+
   recordSceneMemory(id: EntityId, content: string): void {
     const soul = this.soulObj(id);
-    if (soul && !soul.memory.includes(content)) {
-      soul.memory.push(content);            // persisted mirror — survives + re-indexes on restore (0030)
+    if (soul) {
+      const arr = soul.memory;
+      let cache = this.sceneMemoryIndex.get(arr);
+      if (!cache || cache.len !== arr.length) {
+        cache = { set: new Set(arr), len: arr.length };
+        this.sceneMemoryIndex.set(arr, cache);
+      }
+      if (!cache.set.has(content)) {
+        arr.push(content);                    // persisted mirror — survives + re-indexes on restore (0030)
+        cache.set.add(content);
+        cache.len = arr.length;
+      }
     }
     this.soul?.recordToSoul(id, content);    // vector recall index NOW (0024), same-session recall
   }
