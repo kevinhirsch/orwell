@@ -2278,20 +2278,32 @@ export class GameSessionAdapter implements GameSession {
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
     this.onResealProfile?.(target.id, next, ctx.getThreads().filter((t) => t.sourceId === target.id));
 
-    // PERSIST. A pre-game authored profile lands on `prewarm` (durable pre-game state). A LIVE authored
-    // profile (#1067) is a SEASON-START FE-driven enrichment of byte-stable IDENTITY facets, exactly like
-    // the 0062 `recordWorldSnapshot` zeitgeist write-back: it must persist DURABLY but must NOT bump the
-    // closed-set `beatSeq` or run the integrity checkpoint. Previously the live path persisted NOTHING here
-    // and relied on a later, unrelated player-turn commit to flush it — which (a) could silently drop the
-    // write if no commit followed, and (b) made that commit's checkpoint compare the authored biography
-    // against the floor baseline and REFUSE the whole turn as degradation (the live-verify's "integrity
-    // checkpoint failed (degradation)" losses). Routing through `backgroundPersist` blind-saves the upgrade
-    // without a checkpoint (like the zeitgeist), and the `deepProfileAuthored` provenance flag lets the NEXT
-    // genuine player-turn commit's `isSuperset` recognize the floor→authored facet change as a sanctioned
-    // upgrade rather than a regression. Non-degradation is intact: the flag permits exactly the one-way
-    // floor→authored transition and the bio is byte-stable forever after.
-    if (ctx.prewarm) this.persist();
-    else this.backgroundPersist();
+    // PERSIST — through the BACKGROUND seam on BOTH paths (the 2026-07-13 prod deadlock fix). A LIVE
+    // authored profile (#1067) is a SEASON-START FE-driven enrichment of byte-stable IDENTITY facets,
+    // exactly like the 0062 `recordWorldSnapshot` zeitgeist write-back: it must persist DURABLY but must
+    // NOT bump the closed-set `beatSeq` or run the integrity checkpoint. Previously the live path persisted
+    // NOTHING here and relied on a later, unrelated player-turn commit to flush it — which (a) could
+    // silently drop the write if no commit followed, and (b) made that commit's checkpoint compare the
+    // authored biography against the floor baseline and REFUSE the whole turn as degradation (the
+    // live-verify's "integrity checkpoint failed (degradation)" losses). Routing through
+    // `backgroundPersist` blind-saves the upgrade without a checkpoint (like the zeitgeist), and the
+    // `deepProfileAuthored` provenance flag lets the NEXT genuine player-turn commit's `isSuperset`
+    // recognize the floor→authored facet change as a sanctioned upgrade rather than a regression.
+    //
+    // The PRE-GAME (prewarm) path is the SAME enrichment class and must ride the SAME seam. It used to
+    // route through `persist()` — the orchestrator's CHECKPOINTED player-turn commit — and step (5)'s
+    // re-seal REPLACES this subject's derived story threads in the Vault: an authored profile with FEWER
+    // secrets than the seeded floor derives fewer `thread:<id>:<n>` records, so `thread:` Vault ids
+    // vanish against the post-genesis baseline ⇒ a DETERMINISTIC `TurnRefusedError (degradation)` on
+    // every 0116-flow pre-create write-back (the 2026-07-13 prod deadlock: authoring could never land,
+    // the #1313 house-entry hold starved forever, and the fault streak opened the corruption circuit).
+    // The replacement is the sanctioned floor→authored accretion, not memory-thinning — the checkpoint
+    // byte-compare simply cannot see that pre-game (prewarm NPCs are not in the GameState projection;
+    // only the Vault ids are), so the background seam (blind durable save + `seedBaseline` re-seed, the
+    // #1067/R-BND discipline) is the correct one here too. Non-degradation is intact: once the season
+    // starts, every commit checkpoints against the authored baseline as before. On a STANDALONE adapter
+    // (tests, the 0065 next-season scratch) `backgroundPersist` falls back to `onPersist` — byte-identical.
+    this.backgroundPersist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }

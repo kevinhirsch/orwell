@@ -1452,6 +1452,14 @@ def _env_float(name: str, default: float) -> float:
 # out. Kept generous because the no-prewarm path starts all 15 authoring calls at house entry.
 _HOUSE_READY_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_TIMEOUT_S", 180.0)
 _HOUSE_READY_POLL_S = _env_float("ORWELL_HOUSE_READY_POLL_S", 2.0)
+# 2026-07-13 (fast holding card — no dead air): how long the createCharacter TURN may wait INLINE for
+# authoring before returning the "Production is finalizing your casting…" HOLDING card and letting the
+# background gate-clear watch own the rest. The old inline wait was the FULL readiness window
+# (`_HOUSE_READY_TIMEOUT_S`, ~180s) — the player watched a silent spinning tool for minutes. The PO
+# design is card-promptly + background watch: a short grace keeps the common "authoring just finishing"
+# case starting on the same turn; anything longer converges through the watch (which clears the marker,
+# runs the deferred post-start kicks exactly once, and pushes a game-updated so open pages reconcile).
+_HOUSE_READY_INLINE_S = _env_float("ORWELL_HOUSE_READY_INLINE_S", 10.0)
 # After a REFUSED entry the background gate-clear watch keeps polling this much longer, so the season
 # still opens (and the skipped post-start kicks still run) the moment authoring finally lands.
 _HOUSE_READY_WATCH_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_WATCH_TIMEOUT_S", 1800.0)
@@ -1465,6 +1473,14 @@ _HOUSE_READY_WATCH_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_WATCH_TIMEOUT_S", 
 _HOUSE_ENTRY_GATE_BLOCKS: dict = {}
 # One background gate-clear watch per user (exactly-once post-start kicks on clear).
 _HOUSE_READY_WATCHES: dict = {}
+
+
+def house_ready_inline_budget() -> float:
+    """The INLINE (in-turn) slice of the readiness wait — how long `do_create_character` may block the
+    player's turn before returning the holding card and handing off to the background watch. Bounded to
+    the full readiness window so a mis-tuned env value can never make the inline wait LONGER than the
+    old inline-everything behavior."""
+    return min(_HOUSE_READY_INLINE_S, _HOUSE_READY_TIMEOUT_S)
 
 
 def floor_start_allowed() -> bool:
@@ -1575,6 +1591,20 @@ def kickoff_house_ready_watch(owner: Optional[str],
                     "entry remains held (set ORWELL_ALLOW_FLOOR_START=1 to override).", k,
                     ready.get("authored"), ready.get("total"))
                 record_house_entry_gate_block(owner, ready)
+                # STRICT enrichment policy: the exhausted watch is the REAL "house entry refused"
+                # failure (2026-07-13 — it moved here from the createCharacter turn, whose short
+                # inline wait now returns the holding card as the NORMAL path, not a failure).
+                # Ledger it loudly on the admin surface beside the gate marker. Soft: the error
+                # log + marker alone (legacy).
+                try:
+                    from src import enrichment_policy
+                    if enrichment_policy.is_strict():
+                        enrichment_policy.record_failure(
+                            owner, "cast-authoring",
+                            f"house entry refused — cast only {ready.get('authored')}/"
+                            f"{ready.get('total')} authored after the readiness window")
+                except Exception:
+                    pass
         finally:
             if _HOUSE_READY_WATCHES.get(k) is task_ref[0]:
                 _HOUSE_READY_WATCHES.pop(k, None)
