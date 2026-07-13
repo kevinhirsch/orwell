@@ -153,10 +153,29 @@ if (!process.env.MIRROR_SKIP_WARMUP) {
 // CP2 — the MEASURED turn: A sends, B (now pre-subscribed) must mirror it LIVE. Capture both
 // filmstrips around this stream only (behaviorSignature filters to [sendWall, endWall], so warm-up
 // mutations are excluded by wall clock).
+// The warm-up reply is STILL the last AI bubble when we send the measured turn (both windows persist
+// it). Capture it so we can wait for turn-2's NEW reply specifically — otherwise `waitSettled` returns
+// immediately on the already-settled warm-up bubble (before turn-2 renders) and `aText` is the WRONG
+// (previous) turn's text, so `waitForBText` chases a target B's turn-2 bubble never shows → a
+// host-speed-dependent false red where B in fact mirrored turn-2 perfectly (issue #1560).
+// Capture with the SAME extraction the settle-poll uses (cloneNode + innerText + whitespace-collapse)
+// so the "text changed" comparison is apples-to-apples — a different normalizer would make the prior
+// reply spuriously compare unequal to its own poll snapshot and let the wait return on the stale bubble.
+const prevAText = await A.page.evaluate(() => {
+  const e = document.querySelectorAll('#chat-history .msg-ai');
+  const el = e[e.length - 1];
+  if (!el) return '';
+  const c = el.cloneNode(true); c.querySelectorAll('.thinking-content,.thinking,[class*=thinking],.msg-footer,.role').forEach((n) => n.remove());
+  return (c.innerText || '').replace(/\s+/g, ' ').trim();
+});
 const sendWall = Date.now();
 console.log(`\nCP2 A sends @${sendWall}: ${JSON.stringify(TURN)}`);
 await sendTurn(A.page, TURN);
-const reasonA = await waitSettled(A.page);
+// Wait until A's last AI bubble is THIS turn's settled reply — a new, non-placeholder, footer-settled
+// bubble whose text differs from the previous (warm-up) reply. This pins `aText` to turn-2's real
+// narration on any host, so B is measured against the right target (the fix never weakens the mirror
+// checks below — B must still render turn-2 live, via the shared incremental renderer, within budget).
+const reasonA = await waitSettledNewTurn(A.page, prevAText, 180000);
 const aSettleWall = Date.now();
 // B mirrors live (resumeStream) — wait until it reaches A's settled text (or a bounded timeout).
 const aText = lastAiText(await transcriptOf(A.page));
@@ -275,6 +294,49 @@ process.exit(PASS ? 0 : 1);
 function lastAiText(transcript) {
   const ai = transcript.filter((m) => /msg-ai/.test(m.cls));
   return ai.length ? ai[ai.length - 1].text : '';
+}
+// Wait until A's LAST AI bubble is the CURRENT turn's settled reply — distinct from `prevText` (the
+// previous, still-visible reply), holding real non-placeholder narration, and settled (footer OR a
+// length-stable stream tail). This is the fix for the measurement race behind issue #1560: after
+// sending turn-2 the warm-up bubble is still last and already settled, so the generic `waitSettled`
+// returns instantly and `aText` becomes the WRONG (previous) turn — then B (which mirrored turn-2
+// correctly) is measured against a target it never shows and the gate false-reds on a slow host. By
+// keying on "text changed AND settled" the measurement pins turn-2's real reply on any host. It does
+// NOT relax the mirror assertion: it only makes the gate compare B against the correct turn.
+async function waitSettledNewTurn(page, prevText, timeoutMs = 180000) {
+  const prev = (prevText || '').replace(/\s+/g, ' ').trim();
+  const t0 = Date.now(); let last = -1, stable = 0;
+  while (Date.now() - t0 < timeoutMs) {
+    await page.waitForTimeout(500);
+    const info = await page.evaluate(() => {
+      const sseDone = (window.__mirror && window.__mirror.sse || []).some((s) => s.kind === 'eof');
+      const errShown = !!document.querySelector('#chat-history .msg-system');
+      const e = document.querySelectorAll('#chat-history .msg-ai');
+      const el = e[e.length - 1];
+      if (!el) return { len: 0, done: false, ph: true, txt: '', sseDone, errShown };
+      const c = el.cloneNode(true); c.querySelectorAll('.thinking-content,.thinking,[class*=thinking],.msg-footer,.role').forEach((n) => n.remove());
+      const txt = (c.innerText || '').replace(/\s+/g, ' ').trim();
+      // ph: a live placeholder — "thinking…", the animated tool-beat spinner (block chars U+2581–2588),
+      // or too-short-to-be-a-reply. Same rule as mirrorlib.waitSettled (kept in lockstep).
+      const ph = /^(thinking|still|generating)/i.test(txt) || /[\u2581-\u2588]/.test(txt) || txt.length < 8;
+      return { len: txt.length, done: !!el.querySelector('.msg-footer'), ph, txt, sseDone, errShown };
+    });
+    if (info.errShown && info.sseDone) return 'error-or-no-model';
+    // Require the NEW turn's DISTINCTIVE content — not a placeholder, and not merely != prev but
+    // genuinely DIVERGED from the previous reply (`!prev.startsWith`). This matters because the fake
+    // model's replies share a fixed opening ("The house settles for a moment."), which is a PREFIX of
+    // the warm-up reply; a churn transient can leave that bare prefix on screen, and matching B against
+    // it would be non-distinctive (B could satisfy it from the still-visible warm-up bubble). Waiting
+    // for text that diverges from the prior reply pins `aText` to THIS turn's own narration, so the
+    // downstream B-mirror check is meaningful (and a broken mirror still fails — proven by the
+    // MIRROR_SKIP_WARMUP + CPU-throttle self-tests and the structural during-stream checks).
+    const isNewReply = !info.ph && info.len > 8 && info.txt && info.txt !== prev && !prev.startsWith(info.txt);
+    if (isNewReply && info.done) { await page.waitForTimeout(500); return 'settled'; }
+    // Footer can lag under load; accept a length-stable DIVERGED reply (5 stable polls ≈ 2.5s).
+    if (isNewReply && info.len === last) { if (++stable >= 5) { await page.waitForTimeout(300); return 'stable'; } } else stable = 0;
+    last = isNewReply ? info.len : -1;
+  }
+  return 'timeout';
 }
 // Poll B until its last AI bubble reaches `target` text (normalized) — i.e. B finished mirroring.
 async function waitForBText(page, target, timeoutMs) {
