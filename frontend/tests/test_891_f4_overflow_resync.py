@@ -196,9 +196,13 @@ def test_client_handles_the_resync_sentinel():
 def test_client_reconciles_through_the_existing_seam_not_a_new_one():
     """The recovery reuses the EXISTING coalesced reconcile seam (scheduleReconcile → softReloadHistory)
     — the same mechanism message-added uses — and must NOT invent a new reload path or an ad-hoc g15
-    dispatcher (that invariant lives in platform.js)."""
-    assert "if (id && (type === 'resync' || _busGap(id, data))) { scheduleReconcile(id); }" in SYNC, \
-        "a resync OR a busSeq hole triggers the existing coalesced reconcile"
+    dispatcher (that invariant lives in platform.js). Order-stability follow-up: the gap path now rides
+    a rate-limited wrapper (scheduleGapReconcile) that STILL routes into the one scheduleReconcile seam
+    — see test_f4_order_stability.py for the cooldown contract."""
+    assert "if (id && (type === 'resync' || _busGap(id, data))) { scheduleGapReconcile(id); }" in SYNC, \
+        "a resync OR a busSeq hole triggers the (rate-limited) coalesced reconcile"
+    assert "scheduleReconcile(id, wait)" in SYNC, \
+        "the gap wrapper must route into the ONE coalesced scheduleReconcile seam — never a second reload path"
     # keeps the stream contiguous for events the board-ping dedupe doesn't track (no re-detect loop).
     assert "function _noteBusSeq(id, data)" in SYNC
     assert "if (id && !_isBoardPing) { _noteBusSeq(id, data); }" in SYNC

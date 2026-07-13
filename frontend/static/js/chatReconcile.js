@@ -330,6 +330,15 @@ export function _setReconcileDeps(deps) {
       if (el) {
         if (sid) { el.dataset.dbId = sid; byId.set(sid, el); }
         if (msg.seq != null) el.dataset.seq = String(msg.seq);
+        // OOC retro-styling (live half): a message classified OUT-OF-CHARACTER after the fact —
+        // server metadata `ooc: true`, NO `((...))`/`ooc:` markers in the text — must style the
+        // ALREADY-RENDERED bubble the moment the row is observed, not only on the next full reload
+        // (the classic live-vs-reload divergence class, ADR 0015). Rides the adopt pass (zero DOM
+        // churn) through chatRenderer's shared metadata half, which self-gates on the game build +
+        // role and is additive-only (it never strips a marker-applied class).
+        if (chatRenderer.applyOocClassFromMetadata) {
+          chatRenderer.applyOocClassFromMetadata(el, msg.metadata, msg.role);
+        }
       }
     }
 
