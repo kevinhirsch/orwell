@@ -243,6 +243,10 @@ fi
 FE_DATA_DIR="${ORWELL_FE_DATA_DIR:-${APP_DIR}/frontend/data}"
 PORTRAITS_DIR="${ORWELL_PORTRAITS_DIR:-${FE_DATA_DIR}/portraits}"
 if [[ -d "$PORTRAITS_DIR" ]]; then
+  # Same safety as CONFIG_DIR / ENGINE_SAVE_DIR: an ORWELL_PORTRAITS_DIR=/ (or other empty/root/
+  # too-shallow) override passes the [[ -d ]] test above but must NEVER be rm -rf'd. Validate the
+  # shape before removal — sanity_path dies on empty, non-absolute, '/', or depth < 2.
+  sanity_path "$PORTRAITS_DIR" "cast PORTRAITS_DIR"
   msg "scrubbing cast portraits in ${PORTRAITS_DIR}"
   do_rm "$PORTRAITS_DIR"
 fi

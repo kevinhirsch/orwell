@@ -169,3 +169,63 @@ def test_never_touches_dotenv(monkeypatch, tmp_path):
     _seed_store(str(db), str(tmp_path / "settings.json"))
     mod.reset_frontend_store()
     assert env_file.read_text() == "ANTHROPIC_API_KEY=keepme\nORWELL_ENGINE_TOKEN=secret\n"
+
+
+def test_rebuild_is_atomic_original_survives_a_crash(monkeypatch, tmp_path):
+    """DATA-SAFETY P2: a crash DURING the rebuild must NOT destroy the live app.db.
+
+    The preserved provider config lives only in memory (`rows`) during the swap. The old
+    remove-then-recreate deleted app.db FIRST, so a crash before the re-insert committed lost the
+    API-provider config the OOBE tier promises to keep. The atomic version builds a temp DB and
+    os.replace()s it, leaving the original intact until the swap succeeds — so a failed rebuild
+    loses nothing.
+    """
+    mod, db = _load_helper(monkeypatch, tmp_path)
+    settings = tmp_path / "settings.json"
+    _seed_store(str(db), str(settings))
+
+    real_connect = mod.sqlite3.connect
+
+    # Snapshot the providers BEFORE the (doomed) reset, via the un-patched connect.
+    before_conn = real_connect(str(db))
+    endpoints_before = before_conn.execute(
+        "SELECT id, base_url, api_key FROM model_endpoints ORDER BY id").fetchall()
+    before_conn.close()
+    assert endpoints_before, "precondition: the seeded store has provider rows"
+
+    def _crashing_connect(target, *a, **kw):
+        # Fail ONLY when building the temp replacement — i.e. in the rebuild's write window.
+        if str(target).endswith(".rebuild.tmp"):
+            raise sqlite3.OperationalError("simulated crash mid-rebuild")
+        return real_connect(target, *a, **kw)
+
+    monkeypatch.setattr(mod.sqlite3, "connect", _crashing_connect)
+
+    with pytest.raises(sqlite3.OperationalError):
+        mod.reset_frontend_store()
+
+    # The ORIGINAL app.db is untouched — providers are all still there (nothing silently lost).
+    after_conn = real_connect(str(db))
+    endpoints_after = after_conn.execute(
+        "SELECT id, base_url, api_key FROM model_endpoints ORDER BY id").fetchall()
+    after_conn.close()
+    assert endpoints_after == endpoints_before, \
+        "the live provider config MUST survive a failed rebuild (source never removed pre-swap)"
+
+    # No half-written temp DB is left behind after the failure.
+    assert not os.path.exists(str(db) + ".rebuild.tmp")
+
+
+def test_rebuild_leaves_no_temp_file_on_success(monkeypatch, tmp_path):
+    """The happy-path atomic swap consumes its temp file (os.replace renames it into place)."""
+    mod, db = _load_helper(monkeypatch, tmp_path)
+    settings = tmp_path / "settings.json"
+    _seed_store(str(db), str(settings))
+    mod.reset_frontend_store()
+    assert os.path.exists(str(db)), "the rebuilt DB must be present"
+    assert not os.path.exists(str(db) + ".rebuild.tmp"), "no temp DB may linger after a clean swap"
+    # And the carried providers round-tripped through the swap.
+    conn = sqlite3.connect(str(db))
+    n = conn.execute("SELECT COUNT(*) FROM model_endpoints").fetchone()[0]
+    conn.close()
+    assert n == 2

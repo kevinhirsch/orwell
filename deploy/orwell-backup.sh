@@ -26,12 +26,16 @@ OUT="${DEST}/orwell-backup-${STAMP}.tar.gz"
 mkdir -p "$DEST"
 # A consistent snapshot does not strictly require stopping the services (saves are atomic files,
 # SQLite is journaled), but quiescing is safest when available.
-tar -czf "$OUT" -C "$APP_DIR" \
+#
+# EXCLUDE data/models — that is the fastembed ONNX embedding cache (ORWELL_EMBED_CACHE). It is
+# re-fetchable and RE-WARMS on the engine's first boot, so it is game-irrelevant weight: a daily
+# backup × the 30-day retention would otherwise bloat the very disk the saves/portraits live on.
+tar -czf "$OUT" -C "$APP_DIR" --exclude='data/models' \
   $( [[ -d "${APP_DIR}/data" ]] && echo "data" ) \
   $( [[ -d "${APP_DIR}/frontend/data" ]] && echo "frontend/data" )
 chmod 600 "$OUT"
 echo "backup written: ${OUT}"
-echo "contents: <app>/data (engine .env + saves) + <app>/frontend/data (FE SQLite + uploads)"
+echo "contents: <app>/data (engine .env + saves; the models/ embedding cache is EXCLUDED and re-warms on first boot) + <app>/frontend/data (FE SQLite + uploads)"
 
 # Retention: prune backups OLDER than the window, never the one just written (mtime-based `find
 # -mtime +N`, so a fresh install with only one backup prunes nothing).

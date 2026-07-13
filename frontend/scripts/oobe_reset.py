@@ -194,40 +194,54 @@ def export_preserved_settings(path: str) -> dict:
     return {k: saved[k] for k in PRESERVED_SETTINGS_KEYS if k in saved}
 
 
-def rebuild_db_with_endpoints(path: str, rows: list[dict], columns: list[str]) -> None:
-    """Recreate the SQLite file from scratch carrying ONLY the model_endpoints rows.
-
-    The old file is removed first so NO other table (sessions, memories, mcp_servers, …)
-    can survive — the rebuilt DB has exactly one table with exactly the preserved rows.
-    The app's own ``init_db()`` re-creates every other table (and runs migrations) on the
-    next boot; we only need the provider config present for the resolver to work pre-login.
-    """
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
-    # SQLite side files — remove so a half-written WAL/SHM can't resurrect dropped rows.
-    for suffix in ("-wal", "-shm", "-journal"):
+def _remove_db_files(path: str) -> None:
+    """Remove a SQLite main file plus its WAL/SHM/journal side files (missing ⇒ fine)."""
+    for p in (path, path + "-wal", path + "-shm", path + "-journal"):
         try:
-            os.remove(path + suffix)
+            os.remove(p)
         except FileNotFoundError:
             pass
 
+
+def rebuild_db_with_endpoints(path: str, rows: list[dict], columns: list[str]) -> None:
+    """Recreate the SQLite file from scratch carrying ONLY the model_endpoints rows.
+
+    The rebuilt DB has exactly one table with exactly the preserved rows; NO other table
+    (sessions, memories, mcp_servers, …) survives. The app's own ``init_db()`` re-creates every
+    other table (and runs migrations) on the next boot; we only need the provider config present
+    for the resolver to work pre-login.
+
+    ATOMIC (data-safety P2, 2026-07-13): the preserved provider config lives ONLY in ``rows`` (in
+    memory). The old code ``os.remove(path)`` FIRST and then recreated + re-inserted — a crash in
+    that window destroyed the API-provider config the OOBE tier PROMISES to keep. So we build the
+    replacement at a temp path, commit it durably, then ``os.replace()`` it over the live DB in ONE
+    atomic rename (mirroring ``write_preserved_settings``). The source ``app.db`` is NEVER removed
+    before the replacement is durable, so a crash anywhere here can only leave EITHER the intact
+    original OR the finished replacement — never a gap that loses the provider config.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
     if not rows or not columns:
-        # Nothing to carry — leave the file ABSENT so the app's init_db() creates a pristine
+        # Nothing to carry — remove the DB (+ side files) so the app's init_db() creates a pristine
         # schema on next boot. (Creating an endpoints-only DB here would make init_db skip the
-        # other tables it lazily creates; an absent file is the cleanest OOBE state.)
+        # other tables it lazily creates; an absent file is the cleanest OOBE state.) There is no
+        # provider config to lose in this branch, so removal is safe.
+        _remove_db_files(path)
         return
 
-    conn = sqlite3.connect(path)
+    # Validate the exported column set BEFORE any filesystem mutation (identifiers only).
+    for col in columns:
+        if not re.match(r'^[a-zA-Z0-9_]+$', str(col)):
+            raise ValueError("Invalid input")
+
+    # Build the replacement at a sibling temp path (same dir ⇒ os.replace is an atomic rename).
+    tmp = path + ".rebuild.tmp"
+    _remove_db_files(tmp)  # clear any stale temp from a previously interrupted run
+    conn = sqlite3.connect(tmp)
     try:
         # A minimal, app-compatible model_endpoints schema. The app's SQLAlchemy
         # create_all + migrations will reconcile/extend it on next boot; we only need the
         # columns we are carrying to round-trip. Use the exported column set verbatim.
-        for col in columns:
-            if not re.match(r'^[a-zA-Z0-9_]+$', str(col)):
-                raise ValueError("Invalid input")
         col_defs = ", ".join(f'"{c}" TEXT' for c in columns)
         conn.execute(f'CREATE TABLE model_endpoints ({col_defs})')
         placeholders = ", ".join("?" for _ in columns)
@@ -238,8 +252,25 @@ def rebuild_db_with_endpoints(path: str, rows: list[dict], columns: list[str]) -
                 tuple(row.get(c) for c in columns),
             )
         conn.commit()
-    finally:
+    except BaseException:
+        # A failed rebuild must not leave a half-written temp behind, and must NOT touch the
+        # still-intact live DB — the original app.db stands, providers preserved.
         conn.close()
+        _remove_db_files(tmp)
+        raise
+    else:
+        conn.close()
+
+    # The tmp DB is durable + self-contained (default rollback-journal mode leaves no side files
+    # after a clean close). Swap it in atomically, THEN clear the OLD db's WAL/SHM/journal so a
+    # stale side file can't be applied against the fresh file. (Order matters: removing the old
+    # side files only AFTER the replace keeps the original recoverable until the swap succeeds.)
+    os.replace(tmp, path)
+    for suffix in ("-wal", "-shm", "-journal"):
+        try:
+            os.remove(path + suffix)
+        except FileNotFoundError:
+            pass
 
 
 def write_preserved_settings(path: str, preserved: dict) -> None:
