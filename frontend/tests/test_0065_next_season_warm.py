@@ -192,15 +192,22 @@ def test_warm_portraits_shoots_after_the_next_season_char_data_warm_landed():
     assert P.warm_state("u1")["authorDone"] is True
 
     class _Port:
-        def __init__(self): self.calls = 0; self.prompts = None
-        def kickoff_generation(self, prompts, user): self.calls += 1; self.prompts = prompts
+        def __init__(self): self.calls = 0; self.shot_ids = []
+        def kickoff_generation(self, prompts, user): self.calls += 1
+
+        def kickoff_authored_reshoot(self, hid, user):
+            # 2026-07-13: the per-NPC authored shoot hands over the ID — the pipeline fetches the
+            # CURRENT (authored) prompt at shoot time, never the captured pre-warm snapshot.
+            self.calls += 1
+            self.shot_ids.append(hid)
+            return True
 
     port = _Port()
     res = _loop().run_until_complete(P.warm_portraits("u1", portraits=port))
     assert res["started"] is True
     _drive()
     assert port.calls == 1
-    assert port.prompts == _WARM_RES["portraitPrompts"]
+    assert port.shot_ids == [p["houseguestId"] for p in _WARM_RES["portraitPrompts"]]
 
 
 def test_warm_portraits_declines_when_no_next_season_warm_ran():

@@ -15,7 +15,21 @@ Roles only — "admin"/"user" are ACCOUNT ROLES, not people. Proves:
     * versions, system info, feature flags, recent logs, ops status, REDACTED provider
       config, a scalar game-state summary, and recent session METADATA all ride along;
     * a configured secret (token/key/password) NEVER crosses; an api-key VALUE never crosses
-      even though provider names/models/urls do; no transcript body crosses.
+      even though provider names/models/urls do; no transcript body crosses the session-
+      METADATA section (the schema-3 chatStore dump carries transcripts BY DESIGN — owner
+      ruling 2026-07-13 — under the same credential redaction).
+
+  Part 3 — schema 3 ("include everything an operator/debugger could need", owner 2026-07-13):
+    * the new sections all ride: full LLM I/O records (0112), the complete chat store dump
+      (bounded per session), the whole FE log ring, the token ledger, the sync/divergence
+      ledger + belt telemetry, the enrichment ledger, the overseer report ring, cast-
+      authoring + house-entry detail, portrait/image state, a REDACTED settings snapshot,
+      and the engine per-sandbox health;
+    * a meta.sections index lists what's present/skipped with per-section item counts;
+    * seeded credentials (api keys / Authorization headers) NEVER cross — in LLM I/O
+      records, chat content, session headers, or the settings snapshot;
+    * every new section is Vault-free (the repo's structural key-scan) and a broken
+      subsystem degrades to an {"error": ...} section, never a build failure.
 """
 
 import importlib
@@ -200,11 +214,17 @@ def test_bundle_carries_the_beefed_up_sections(monkeypatch, stubbed):
     r = client.get("/api/admin/debug-bundle")
     assert r.status_code == 200
     bundle = json.loads(r.content)
-    # All the new top-level sections are present.
+    # All the schema-2 sections are still present…
     for key in ("versions", "systemInfo", "featureFlags", "logs",
                 "opsStatus", "providerConfig", "gameState", "sessions"):
         assert key in bundle, f"beefed-up bundle missing section: {key}"
-    assert bundle.get("schema") == 2
+    # …plus the schema-3 "everything an operator could need" set.
+    for key in ("llmIo", "chatStore", "frontendLog", "tokenEconomy", "syncLedger",
+                "enrichment", "overseer", "castAuthoring", "houseEntry", "portraits",
+                "settings", "sandboxHealth", "meta"):
+        assert key in bundle, f"schema-3 bundle missing section: {key}"
+    assert bundle.get("schema") == 3
+    assert bundle["meta"]["schema"] == 3
     # System info carries the runtime versions an operator needs.
     assert "python" in bundle["systemInfo"]
     # Feature flags carry the build posture.
@@ -216,8 +236,18 @@ def test_bundle_game_state_summary_is_vault_free_scalars_only(monkeypatch, stubb
     """The game-state summary reduces to counts/phase/week — NO roster, NO Vault/soul.
 
     We feed a deliberately rich engine projection (a soul-ish blob + per-houseguest hidden
-    fields) and assert ONLY the scalar reductions cross."""
+    fields) and assert ONLY the scalar reductions cross.
+
+    The schema-3 sections are stubbed empty here: they carry process-global content (the
+    live log ring, the shared test chat store) whose AMBIENT text would make this test's
+    full-bundle marker scan order-dependent. Their own Vault-free gates live in Part 3
+    (structural key-scan + the planted-sentinel tests in test_debug_bundle_fixes.py)."""
     monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    async def empty_v3(user):
+        return {}
+
+    monkeypatch.setattr(ahr, "_bundle_v3_sections", empty_v3)
 
     async def fake_status(user=None):
         return {"started": True, "week": 3, "phase": "nominations",
@@ -345,3 +375,242 @@ def test_bundle_is_admin_gated_and_leaks_nothing_on_refusal(monkeypatch):
     r = client.get("/api/admin/debug-bundle")
     assert r.status_code == 403
     assert "refusal-path-secret-value" not in r.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Part 3 — schema 3: everything an operator/debugger could need (owner 2026-07-13)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_V3_SECTIONS = ("llmIo", "chatStore", "frontendLog", "tokenEconomy", "syncLedger",
+                "enrichment", "overseer", "castAuthoring", "houseEntry", "portraits",
+                "settings", "sandboxHealth")
+
+
+def _get_bundle(client, url="/api/admin/debug-bundle", headers=None):
+    r = client.get(url, headers=headers or {})
+    assert r.status_code == 200
+    return json.loads(r.content), r.text
+
+
+def test_v3_meta_sections_index_lists_presence_and_counts(monkeypatch, stubbed):
+    """(a) The meta.sections index: every content section has a row saying present/
+    skipped (with per-section item counts where they exist), and the producerVault row
+    is present:false on the STANDARD (Vault-free) export."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_app(), raise_server_exceptions=False)
+    bundle, _ = _get_bundle(client)
+    sections = bundle["meta"]["sections"]
+    for name in _V3_SECTIONS + ("health", "config", "sessions", "providerConfig"):
+        assert name in sections, f"meta.sections missing a row for: {name}"
+        assert "present" in sections[name]
+    # Counts ride where a natural item collection exists.
+    assert isinstance(sections["frontendLog"].get("items"), int)
+    assert isinstance(sections["chatStore"].get("items"), int)
+    # The Vault row is self-describing and CLOSED on the standard export.
+    assert sections["producerVault"]["present"] is False
+    assert "producerVault" not in bundle
+
+
+def test_v3_llm_io_carries_full_records_and_redacts_auth(monkeypatch, stubbed, tmp_path):
+    """The llmIo section carries COMPLETE request/response records — system prompt,
+    messages, REASONING, tool calls, finish reason, per-call class (kind) + the applied
+    maxTokens — and a seeded Authorization/api-key shape NEVER survives serialization."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from src import llm_trace
+    secret = "sk-LLMIO-SEEDED-SECRET-0123456789"
+    llm_trace.record_llm_call(
+        kind="narration",
+        model="test-model-v1",
+        messages=[
+            {"role": "system", "content": "You are the narrator."},
+            {"role": "user", "content": f"my key is {secret} and Authorization: Bearer {secret}"},
+        ],
+        tools=[{"type": "function", "function": {"name": "advanceGame"}}],
+        temperature=0.7,
+        max_tokens=1234,
+        response={"text": "The house stirs.", "reasoning": "hidden-from-player reasoning text",
+                  "toolCalls": [{"name": "advanceGame", "arguments": "{}"}],
+                  "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                  "finishReason": "stop"},
+        ok=True, duration_ms=42)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    bundle, text = _get_bundle(client)
+    recs = bundle["llmIo"]["records"]
+    assert recs, "the seeded LLM I/O record must ride in the bundle"
+    rec = recs[-1]
+    assert rec["kind"] == "narration"                       # per-call class
+    assert rec["request"]["maxTokens"] == 1234              # applied output cap
+    assert rec["request"]["messages"][0]["role"] == "system"
+    assert rec["response"]["reasoning"].startswith("hidden-from-player")
+    assert rec["response"]["toolCalls"][0]["name"] == "advanceGame"
+    assert rec["response"]["finishReason"] == "stop"
+    assert bundle["llmIo"]["meta"]["cap"] == ahr._BUNDLE_LLM_IO_CAP
+    # HARD LINE #2: the seeded credential shapes never appear ANYWHERE in the bundle.
+    assert secret not in text
+
+
+def test_v3_chat_store_dumps_messages_with_metadata_and_caps(monkeypatch, stubbed):
+    """The chatStore section is the COMPLETE dump — sessions + messages with metadata
+    (reasoning/tool_events/client_msg_id ride inside), seq and timestamps — capped at the
+    LAST N per session with the truncation noted in the section meta. Session `headers`
+    (which can carry Authorization) NEVER cross — presence only."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setattr(ahr, "_BUNDLE_CHAT_MSG_CAP", 5)
+    hdr_secret = "Bearer sk-SESSION-HEADER-SECRET-987654321"
+    import uuid
+    from core.database import SessionLocal, Session as DbSession, ChatMessage as DbChatMessage
+    sid = f"bundle-dump-{uuid.uuid4().hex[:10]}"
+    db = SessionLocal()
+    try:
+        db.add(DbSession(id=sid, name="bundle dump session", endpoint_url="http://x/v1",
+                         model="m", owner="admin", headers={"Authorization": hdr_secret}))
+        for i in range(8):
+            db.add(DbChatMessage(
+                id=f"{sid}-m{i}", session_id=sid, role="user" if i % 2 == 0 else "assistant",
+                content=f"turn {i}",
+                meta_data=json.dumps({"client_msg_id": f"c{i}", "reasoning": f"r{i}",
+                                      "tool_events": [{"name": "getGameState"}]}),
+                seq=i))
+        db.commit()
+    finally:
+        db.close()
+    try:
+        client = TestClient(_app(), raise_server_exceptions=False)
+        bundle, text = _get_bundle(client)
+        sessions = {s["id"]: s for s in bundle["chatStore"]["sessions"]}
+        assert sid in sessions, "every session must be in the dump"
+        s = sessions[sid]
+        # The LAST 5 of 8 messages, chronological, with content + parsed metadata + seq.
+        assert [m["seq"] for m in s["messages"]] == [3, 4, 5, 6, 7]
+        assert s["messages"][-1]["content"] == "turn 7"
+        assert s["messages"][-1]["metadata"]["client_msg_id"] == "c7"
+        assert s["messages"][-1]["metadata"]["reasoning"] == "r7"
+        assert s["messages"][-1]["metadata"]["tool_events"][0]["name"] == "getGameState"
+        assert s["messages"][-1]["timestamp"]
+        # Truncation is noted in the section meta.
+        trunc = {t["id"]: t for t in bundle["chatStore"]["meta"]["truncatedSessions"]}
+        assert sid in trunc and trunc[sid]["total"] == 8 and trunc[sid]["included"] == 5
+        assert bundle["chatStore"]["meta"]["messageCapPerSession"] == 5
+        # Session headers NEVER cross — presence flag only; the seeded secret is absent.
+        assert s["hasHeaders"] is True
+        assert "headers" not in s
+        assert hdr_secret not in text
+        assert "sk-SESSION-HEADER-SECRET" not in text
+    finally:
+        db = SessionLocal()
+        try:
+            db.query(DbChatMessage).filter(DbChatMessage.session_id == sid).delete()
+            db.query(DbSession).filter(DbSession.id == sid).delete()
+            db.commit()
+        finally:
+            db.close()
+
+
+def test_v3_frontend_log_ring_and_ledgers_ride(monkeypatch, stubbed, tmp_path):
+    """The FULL FE log ring (with the WARN/ERROR history), the sync/divergence ledger +
+    belt totals, the token ledger, the enrichment ledger, and the overseer report ring
+    all ride in the bundle."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    import logging
+    from src import log_rings, orwell_sync_ledger
+    marker = "v3-bundle-ring-marker-line"
+    logging.getLogger("v3-bundle-test").warning(marker)
+    log_rings.record_overseer("observation", "v3-bundle-probe", "bundle test diagnostic")
+    monkeypatch.setattr(orwell_sync_ledger, "LEDGER_PATH",
+                        tmp_path / "sync_ledger.json", raising=True)
+    orwell_sync_ledger.note_belt_fire("admin", "auto-record-scene")
+    orwell_sync_ledger.record_turn("admin", session="s1", turn_id="t1",
+                                   beat_seq_before=1, beat_seq_after=2,
+                                   tools_called=["recordInteraction"])
+    client = TestClient(_app(), raise_server_exceptions=False)
+    # effective_user resolves None → the "default"/admin bucket in these middleware-less
+    # apps; read the ledger sections for whichever bucket the route resolved by checking
+    # both shapes are present rather than user-keyed content.
+    bundle, _ = _get_bundle(client)
+    # The full ring (not just a tail) + the WARN/ERROR slice.
+    lines = bundle["frontendLog"]["lines"]
+    assert any(marker in (l.get("msg") or "") for l in lines)
+    assert any(marker in (l.get("msg") or "") for l in bundle["frontendLog"]["warnErrors"])
+    # The overseer report ring carries the probe.
+    assert any((l.get("kind") or "") == "v3-bundle-probe" for l in bundle["overseer"]["reports"])
+    # The ledgers carry their shapes (entries may be user-scoped; shape is the contract).
+    assert "recent" in bundle["syncLedger"] and "beltTotals" in bundle["syncLedger"]
+    assert "entries" in bundle["tokenEconomy"] and "summary" in bundle["tokenEconomy"]
+    assert "policy" in bundle["enrichment"] and "failures" in bundle["enrichment"]
+    # House entry + cast authoring + portraits + settings + sandboxHealth all ride.
+    assert "hold" in bundle["houseEntry"] and "watchActive" in bundle["houseEntry"]
+    assert "attemptsSpent" in bundle["castAuthoring"] and "givenUp" in bundle["castAuthoring"]
+    for key in ("manifest", "lastRun", "budget", "attemptLog", "prompts"):
+        assert key in bundle["portraits"], f"portraits section missing: {key}"
+    assert "settings" in bundle["settings"]
+    assert isinstance(bundle["sandboxHealth"], dict)  # engine down ⇒ {"error": ...}, still a dict
+
+
+def test_v3_settings_snapshot_redacts_secret_shaped_values(monkeypatch, stubbed):
+    """(HARD LINE #2) The settings snapshot rides with every secret-shaped value REDACTED
+    — a seeded api key / token / webhook secret never survives serialization."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    seeded = {
+        "default_model": "some-chat-model",
+        "openrouter_api_key": "sk-SETTINGS-SEEDED-SECRET-1234567890",
+        "gateway_webhook_secret": "whsec-SETTINGS-SEEDED-XYZ",
+        "reminder_token": "tok-SETTINGS-SEEDED-999",
+        "token_spend_alert_usd": 2.5,          # plural-*tokens / numeric knobs survive
+        "max_tokens_budget": {"narration": 4096},
+    }
+    import src.settings as settings_mod
+    monkeypatch.setattr(settings_mod, "load_settings", lambda: dict(seeded))
+    client = TestClient(_app(), raise_server_exceptions=False)
+    bundle, text = _get_bundle(client)
+    snap = bundle["settings"]["settings"]
+    assert snap["default_model"] == "some-chat-model"
+    assert snap["openrouter_api_key"] == ahr.REDACTED
+    assert snap["gateway_webhook_secret"] == ahr.REDACTED
+    assert snap["reminder_token"] == ahr.REDACTED
+    assert snap["token_spend_alert_usd"] == 2.5
+    assert snap["max_tokens_budget"] == {"narration": 4096}
+    for leak in ("sk-SETTINGS-SEEDED-SECRET", "whsec-SETTINGS-SEEDED", "tok-SETTINGS-SEEDED"):
+        assert leak not in text, f"a settings secret crossed into the bundle: {leak}"
+
+
+def test_v3_new_sections_are_structurally_vault_free(monkeypatch, stubbed):
+    """(HARD LINE #1) The repo's structural leak-scan (llm_trace's Vault-key denylist —
+    the same class of gate as the engine secrets.test.ts) over every schema-3 section
+    whose keys are OURS (fixed shapes, not free-text ring lines): no Vault-shaped key may
+    exist in the STANDARD export."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    from src.llm_trace import record_is_vault_free
+    client = TestClient(_app(), raise_server_exceptions=False)
+    bundle, _ = _get_bundle(client)
+    for name in ("gameState", "castAuthoring", "houseEntry", "portraits", "syncLedger",
+                 "tokenEconomy", "enrichment", "sandboxHealth", "sessions"):
+        assert record_is_vault_free(bundle.get(name)), \
+            f"a Vault-shaped key surfaced in bundle section: {name}"
+
+
+def test_v3_broken_subsystems_degrade_to_error_sections(monkeypatch, stubbed):
+    """(d) Fail-soft: broken subsystems yield {"error": ...} sections — marked skipped in
+    the meta index — and the bundle still assembles at 200 with every other section."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    def boom_chat():
+        raise RuntimeError("chat store exploded")
+
+    def boom_settings():
+        raise RuntimeError("settings store exploded")
+
+    monkeypatch.setattr(ahr, "_chat_store_section", boom_chat)
+    monkeypatch.setattr(ahr, "_settings_section", boom_settings)
+    client = TestClient(_app(), raise_server_exceptions=False)
+    bundle, _ = _get_bundle(client)
+    assert bundle["schema"] == 3
+    assert "chat store exploded" in bundle["chatStore"]["error"]
+    assert "settings store exploded" in bundle["settings"]["error"]
+    # The meta index marks them skipped, with the error.
+    assert bundle["meta"]["sections"]["chatStore"]["present"] is False
+    assert "error" in bundle["meta"]["sections"]["chatStore"]
+    # Every OTHER section still assembled.
+    assert "records" in bundle["llmIo"]
+    assert "lines" in bundle["frontendLog"]
+    assert "recent" in bundle["syncLedger"]

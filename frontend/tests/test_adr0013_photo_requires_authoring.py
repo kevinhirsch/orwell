@@ -33,6 +33,12 @@ class _FakePortraits:
         for e in entries:
             self.shot.append(prewarm._prompt_id(e))
 
+    def kickoff_authored_reshoot(self, hid, user):
+        # 2026-07-13: the per-NPC authored shoot hands over the ID — the pipeline fetches the
+        # CURRENT (authored) prompt at shoot time, never the captured pre-authoring snapshot.
+        self.shot.append(hid)
+        return True
+
 
 def _setup(user, ids):
     prewarm.reset(user)

@@ -2250,7 +2250,12 @@ export interface GameSession {
    */
   sealedFromHouse(): SealedFact[];
 
-  /** Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public appearance facets. Null if no game is started or the houseguest is unknown. */
+  /**
+   * Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public
+   * appearance + authored storyline facets. Serves the live house, or PRE-GAME the warmed pre-seed
+   * cast (0065/ADR 0013 — the per-NPC authored shoot fetches the store as it stands at shoot time).
+   * Null when neither holds the id.
+   */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null;
 
   /**

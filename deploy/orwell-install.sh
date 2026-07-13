@@ -306,6 +306,11 @@ write_config() {
       # holds (juryReach re-run green flag-on). DEFAULT OFF in code (it changes seeded winners, so off keeps
       # the seeded gates + golden byte-identical); the deploy opts in here.
       echo "ORWELL_COMP_MECHANICS_PLUS=1"
+      # Mixed-type competitions (0127): a HYBRID comp (a physical challenge with a puzzle element) blends its
+      # secondary aptitude into the outcome, so a well-rounded houseguest edges a one-dimensional one. The
+      # primary stat still dominates (65/35). DEFAULT OFF in code (it edits the resolution core, so off keeps
+      # the seeded gates + golden byte-identical; juryReach re-run green flag-on); the deploy opts in here.
+      echo "ORWELL_COMP_MIXED=1"
       # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
       # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
       # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded

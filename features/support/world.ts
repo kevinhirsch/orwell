@@ -786,6 +786,16 @@ export class BbWorld extends World {
     detB?: string[];
   };
 
+  // Feature 0127 — mixed-type competitions scratch state (one bag).
+  mix?: {
+    pureRate?: number;
+    hybridRate?: number;
+    a?: readonly string[];
+    b?: readonly string[];
+    diverged?: boolean;
+    views?: string;
+  };
+
   // Feature 0126 — expanded competition mechanics scratch state (one bag).
   cmp?: {
     hoh?: string[];

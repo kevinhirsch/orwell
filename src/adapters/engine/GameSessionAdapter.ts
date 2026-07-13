@@ -533,6 +533,16 @@ const COMP_THEMES_ENABLED_DEFAULT = process.env.ORWELL_COMP_THEMES !== "0";
 const COMP_MECHANICS_PLUS_ENABLED_DEFAULT = process.env.ORWELL_COMP_MECHANICS_PLUS === "1";
 
 /**
+ * 0127 — whether HYBRID competitions blend their SECONDARY aptitude into the outcome by DEFAULT (a
+ * physical-with-a-puzzle-element veto rewards a well-rounded houseguest). OFF unless `ORWELL_COMP_MIXED=1`.
+ * Like 0126, this changes seeded winners (the score base becomes a stat blend), so it is DEFAULT-OFF: unset
+ * ⇒ `ctx().mixedComps` is false, every comp resolves on its pure single stat, and every seeded gate
+ * (juryReach / gradient / UAT / golden) is byte-identical. The primary stat still dominates (weight
+ * `1 − mixedSecondaryWeight`); the deploy turns it on and the band is re-confirmed on.
+ */
+const COMP_MIXED_ENABLED_DEFAULT = process.env.ORWELL_COMP_MIXED === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -934,6 +944,8 @@ export class GameSessionAdapter implements GameSession {
   private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
 
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
+
+  private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
 
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
@@ -1990,22 +2002,44 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The portrait prompt for one houseguest by id (0051) — Vault-free. Built from PUBLIC appearance
-   * facets only (appearance/age/presentation) + the per-season style anchor. Returns null when no
-   * game is started or the id is unknown. No stats, soul, or hidden element ever reaches the prompt.
+   * facets only + the per-season style anchor. No stats, soul, or hidden element ever reaches the prompt.
+   *
+   * Serves the LIVE house when a season runs. PRE-GAME it falls back to the WARMED pre-seed cast
+   * (0065/ADR 0013, 2026-07-13): the pre-game `recordCastProfile` write-backs mutate the prewarm
+   * store, so the FE's per-NPC authored shoot must fetch the prompt AS THE STORE STANDS when that
+   * houseguest's authoring gate fires — never a snapshot captured before authoring landed (a face
+   * shot from a stale captured prompt is exactly the identity-mismatch ADR 0013 forbids). Returns
+   * null when neither a live house nor a warmed cast holds the id.
    */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null {
-    if (!this.house || !this.portraitStyleAnchor) return null;
-    const npc = this.house.npcs.find((n) => n.id === id);
-    const subject = id === this.house.player.id ? this.house.player : npc;
-    if (!subject) return null;
-    // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
-    // player portrait from a name hash. With no authored appearance (and no structured facet), there
-    // is nothing to draw, so emit no prompt at all rather than a fabricated one.
-    if (id === this.house.player.id
-      && !subject.character.appearance
-      && subject.character.physicalCharacteristics === undefined) {
-      return null;
+    if (this.house && this.portraitStyleAnchor) {
+      const npc = this.house.npcs.find((n) => n.id === id);
+      const subject = id === this.house.player.id ? this.house.player : npc;
+      if (!subject) return null;
+      // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
+      // player portrait from a name hash. With no authored appearance (and no structured facet), there
+      // is nothing to draw, so emit no prompt at all rather than a fabricated one.
+      if (id === this.house.player.id
+        && !subject.character.appearance
+        && subject.character.physicalCharacteristics === undefined) {
+        return null;
+      }
+      return this.portraitPromptFor(subject, this.portraitStyleAnchor);
     }
+    // Pre-game: the warmed pre-seed roster (NPCs only — no player exists yet). Same builder, same
+    // public facets, the warm's own anchor — Vault-free by the same construction as the live path.
+    if (this.prewarm) {
+      const warmed = this.prewarm.npcs.find((n) => n.id === id);
+      if (warmed) return this.portraitPromptFor(warmed, this.prewarm.portraitStyleAnchor);
+    }
+    return null;
+  }
+
+  /** The shared Vault-free prompt build for one subject (live or prewarm) — PUBLIC facets only. */
+  private portraitPromptFor(
+    subject: { id: EntityId; name: string; character: GameHouse["npcs"][number]["character"] },
+    styleAnchor: string,
+  ): { houseguestId: string; name: string; prompt: string } {
     return buildPortraitPrompt(
       subject.id,
       subject.name,
@@ -2022,8 +2056,13 @@ export class GameSessionAdapter implements GameSession {
         ...(subject.character.ethnicity !== undefined ? { ethnicity: subject.character.ethnicity } : {}),
         ...(subject.character.genderPresentation !== undefined ? { genderPresentation: subject.character.genderPresentation } : {}),
         ...(subject.character.demeanor !== undefined ? { demeanor: subject.character.demeanor } : {}),
+        // The AUTHORED storyline facets (2026-07-13) — both PUBLIC HouseguestCard fields: the 0116
+        // freeform identity + the L28/0058 vocation, so the shot's wardrobe/vibe match the person's
+        // actual storyline (owner report: portraits didn't match storylines/aesthetics).
+        ...(subject.character.identityConcept !== undefined ? { identityConcept: subject.character.identityConcept } : {}),
+        ...(subject.character.vocation !== undefined ? { vocation: subject.character.vocation } : {}),
       },
-      this.portraitStyleAnchor,
+      styleAnchor,
     );
   }
 
@@ -2278,20 +2317,32 @@ export class GameSessionAdapter implements GameSession {
     // (5) Re-seal into the Vault — REPLACING this subject's prior profile + thread records (idempotent).
     this.onResealProfile?.(target.id, next, ctx.getThreads().filter((t) => t.sourceId === target.id));
 
-    // PERSIST. A pre-game authored profile lands on `prewarm` (durable pre-game state). A LIVE authored
-    // profile (#1067) is a SEASON-START FE-driven enrichment of byte-stable IDENTITY facets, exactly like
-    // the 0062 `recordWorldSnapshot` zeitgeist write-back: it must persist DURABLY but must NOT bump the
-    // closed-set `beatSeq` or run the integrity checkpoint. Previously the live path persisted NOTHING here
-    // and relied on a later, unrelated player-turn commit to flush it — which (a) could silently drop the
-    // write if no commit followed, and (b) made that commit's checkpoint compare the authored biography
-    // against the floor baseline and REFUSE the whole turn as degradation (the live-verify's "integrity
-    // checkpoint failed (degradation)" losses). Routing through `backgroundPersist` blind-saves the upgrade
-    // without a checkpoint (like the zeitgeist), and the `deepProfileAuthored` provenance flag lets the NEXT
-    // genuine player-turn commit's `isSuperset` recognize the floor→authored facet change as a sanctioned
-    // upgrade rather than a regression. Non-degradation is intact: the flag permits exactly the one-way
-    // floor→authored transition and the bio is byte-stable forever after.
-    if (ctx.prewarm) this.persist();
-    else this.backgroundPersist();
+    // PERSIST — through the BACKGROUND seam on BOTH paths (the 2026-07-13 prod deadlock fix). A LIVE
+    // authored profile (#1067) is a SEASON-START FE-driven enrichment of byte-stable IDENTITY facets,
+    // exactly like the 0062 `recordWorldSnapshot` zeitgeist write-back: it must persist DURABLY but must
+    // NOT bump the closed-set `beatSeq` or run the integrity checkpoint. Previously the live path persisted
+    // NOTHING here and relied on a later, unrelated player-turn commit to flush it — which (a) could
+    // silently drop the write if no commit followed, and (b) made that commit's checkpoint compare the
+    // authored biography against the floor baseline and REFUSE the whole turn as degradation (the
+    // live-verify's "integrity checkpoint failed (degradation)" losses). Routing through
+    // `backgroundPersist` blind-saves the upgrade without a checkpoint (like the zeitgeist), and the
+    // `deepProfileAuthored` provenance flag lets the NEXT genuine player-turn commit's `isSuperset`
+    // recognize the floor→authored facet change as a sanctioned upgrade rather than a regression.
+    //
+    // The PRE-GAME (prewarm) path is the SAME enrichment class and must ride the SAME seam. It used to
+    // route through `persist()` — the orchestrator's CHECKPOINTED player-turn commit — and step (5)'s
+    // re-seal REPLACES this subject's derived story threads in the Vault: an authored profile with FEWER
+    // secrets than the seeded floor derives fewer `thread:<id>:<n>` records, so `thread:` Vault ids
+    // vanish against the post-genesis baseline ⇒ a DETERMINISTIC `TurnRefusedError (degradation)` on
+    // every 0116-flow pre-create write-back (the 2026-07-13 prod deadlock: authoring could never land,
+    // the #1313 house-entry hold starved forever, and the fault streak opened the corruption circuit).
+    // The replacement is the sanctioned floor→authored accretion, not memory-thinning — the checkpoint
+    // byte-compare simply cannot see that pre-game (prewarm NPCs are not in the GameState projection;
+    // only the Vault ids are), so the background seam (blind durable save + `seedBaseline` re-seed, the
+    // #1067/R-BND discipline) is the correct one here too. Non-degradation is intact: once the season
+    // starts, every commit checkpoints against the authored baseline as before. On a STANDALONE adapter
+    // (tests, the 0065 next-season scratch) `backgroundPersist` falls back to `onPersist` — byte-identical.
+    this.backgroundPersist();
 
     return { accepted: true, publicFields: [...publicFields], hiddenFields: [...hiddenFields], reason: "authored profile sealed (live)" };
   }
@@ -4734,6 +4785,10 @@ export class GameSessionAdapter implements GameSession {
       ...(h.character.ethnicity !== undefined ? { ethnicity: h.character.ethnicity } : {}),
       ...(h.character.genderPresentation !== undefined ? { genderPresentation: h.character.genderPresentation } : {}),
       ...(h.character.demeanor !== undefined ? { demeanor: h.character.demeanor } : {}),
+      // The AUTHORED storyline facets (2026-07-13): the 0116 freeform identity + the L28/0058 vocation —
+      // both already on the public HouseguestCard — so the face matches the person's storyline/aesthetic.
+      ...(h.character.identityConcept !== undefined ? { identityConcept: h.character.identityConcept } : {}),
+      ...(h.character.vocation !== undefined ? { vocation: h.character.vocation } : {}),
     }));
     return buildCastPortraitPrompts(publicCast, styleAnchor);
   }
@@ -6256,6 +6311,9 @@ export class GameSessionAdapter implements GameSession {
       // 0126: fold the expanded mechanic pool into the competition draw — present ONLY when enabled (off in
       // the calibration/golden harness ⇒ absent ⇒ the base 12-mechanic draw ⇒ byte-identical).
       ...(this.compMechanicsPlusEnabled ? { expandedComps: true as const } : {}),
+      // 0127: blend a hybrid comp's secondary aptitude into its outcome — present ONLY when enabled (off in
+      // the calibration/golden harness ⇒ absent ⇒ pure single-stat resolution ⇒ byte-identical).
+      ...(this.compMixedEnabled ? { mixedComps: true as const } : {}),
     };
   }
 
@@ -6267,6 +6325,12 @@ export class GameSessionAdapter implements GameSession {
   setCompMechanicsPlusEnabled(on: boolean): void { this.compMechanicsPlusEnabled = on; }
   /** 0126 — the resolved on/off state of the expanded-mechanic pool (for an admin/status read). */
   compMechanicsPlusEnabledNow(): boolean { return this.compMechanicsPlusEnabled; }
+
+  /** 0127 — turn hybrid (mixed-type) competition resolution on/off. Off by default (the calibration harness
+   *  leaves it off ⇒ pure single-stat resolution ⇒ byte-identical). The deploy turns it on for real play. */
+  setCompMixedEnabled(on: boolean): void { this.compMixedEnabled = on; }
+  /** 0127 — the resolved on/off state of hybrid competition resolution (for an admin/status read). */
+  compMixedEnabledNow(): boolean { return this.compMixedEnabled; }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }

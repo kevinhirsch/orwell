@@ -42,6 +42,14 @@ automatically, reskinning whatever mechanic is drawn); making 30 the pool in the
 
 ## 4. Design
 
+- **Distinct concepts (PO polish, 2026-07-13):** the first 0126 cut reused a few archetypes (4 endurance-hangs,
+  4 season-quizzes), so several comps read as near-twins. The expanded pool was re-authored so all 30 comps are
+  genuinely distinct challenges (endurance → 2 total; the quizzes split into trivia / true-false / ordering /
+  anagram; mazes/math/image-memory collapse to one concept each). Six expanded comps were rewritten
+  (`The Gauntlet` agility, `Dead Eye` precision, `Spellbound` anagram, `Process of Elimination` deduction,
+  `Crack the Safe` code-break, `Total Recall` sequence-memory). Each kept its **exact governing + secondary
+  stat**, so the change is **byte-identical** (juryReach re-confirmed) and the base 12 (hence the golden fixture)
+  are untouched.
 - **`COMPETITION_LIBRARY_PLUS`** — 18 new defs, same `CompetitionDef` shape as 0042. Governing-stat counts
   per phase after expansion: **physical 5, mental 8, social 2** (base was 2/3/1) — the same mental-dominant
   mix, so the stat pressure on the cast is unchanged.

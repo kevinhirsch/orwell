@@ -86,6 +86,14 @@ class _FakePortraits:
                 if hid:
                     self.shot_ids.append(hid)
 
+    def kickoff_authored_reshoot(self, hid, user):
+        # 2026-07-13: the per-NPC authored shoot fetches the CURRENT prompt at shoot time (never
+        # the captured pre-authoring snapshot) — the warm hands it the ID, not the stale entry.
+        self.calls += 1
+        if hid:
+            self.shot_ids.append(hid)
+        return True
+
 
 _WARM_RES = {
     "warmed": True, "seed": 5,
@@ -158,7 +166,9 @@ def test_warm_portraits_shoots_after_author_warm_finished():
     assert res["started"] is True
     _drive()  # let the gated background task run
     assert port.calls == 1
-    assert port.prompts == _WARM_RES["portraitPrompts"]
+    # 2026-07-13: the per-NPC authored shoot passes the ID (the fresh-prompt fetch happens inside
+    # the portrait pipeline at shoot time), not the pre-seed-time captured prompt entry.
+    assert port.shot_ids == ["npc:1"]
 
 
 def test_portraits_NEVER_shoot_before_authoring_completes():

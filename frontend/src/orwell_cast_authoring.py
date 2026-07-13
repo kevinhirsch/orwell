@@ -279,6 +279,13 @@ def reset_attempts(user) -> None:
     for k in [t for t in _gaveup_logged if t[0] == key]:
         _gaveup_logged.discard(k)
 
+
+def attempts_spent(user) -> dict:
+    """Per-houseguest authoring LLM calls spent this season (admin/debug-bundle visibility).
+    A copy — callers can never mutate the ledger through it. Vault-free: ids + counts only."""
+    return dict(_attempt_ledger.get(_safe_user(user), {}))
+
+
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
@@ -1364,7 +1371,20 @@ async def backfill_unauthored(missing_ids: list, user: Optional[str]) -> int:
     ]
     if not subset:
         return 0
-    written = await run_authoring(subset, user)
+
+    def _reshoot(hid):
+        # ADR 0013 (2026-07-13): this NPC's authoring JUST landed — (re)shoot its face from the now-
+        # authored prompt. This is the LATE-authoring seam (the game-start seams wire their own
+        # per-NPC shoots): without it, an NPC authored hours late kept whatever face was shot from
+        # the pre-authoring floor — permanently mismatched. The helper discards a stale-fingerprint
+        # face first (never carried as an img2img reference) and is fail-soft throughout.
+        try:
+            from src import orwell_portraits
+            orwell_portraits.kickoff_authored_reshoot(hid, user)
+        except Exception as e:
+            logger.info("[cast-authoring] authored re-shoot kick for %s failed: %s", hid, e)
+
+    written = await run_authoring(subset, user, on_authored=_reshoot)
     logger.info("[cast-authoring] backfill for %s: authored %d/%d requested",
                 _safe_user(user), written, len(subset))
     return written
@@ -1452,6 +1472,14 @@ def _env_float(name: str, default: float) -> float:
 # out. Kept generous because the no-prewarm path starts all 15 authoring calls at house entry.
 _HOUSE_READY_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_TIMEOUT_S", 180.0)
 _HOUSE_READY_POLL_S = _env_float("ORWELL_HOUSE_READY_POLL_S", 2.0)
+# 2026-07-13 (fast holding card — no dead air): how long the createCharacter TURN may wait INLINE for
+# authoring before returning the "Production is finalizing your casting…" HOLDING card and letting the
+# background gate-clear watch own the rest. The old inline wait was the FULL readiness window
+# (`_HOUSE_READY_TIMEOUT_S`, ~180s) — the player watched a silent spinning tool for minutes. The PO
+# design is card-promptly + background watch: a short grace keeps the common "authoring just finishing"
+# case starting on the same turn; anything longer converges through the watch (which clears the marker,
+# runs the deferred post-start kicks exactly once, and pushes a game-updated so open pages reconcile).
+_HOUSE_READY_INLINE_S = _env_float("ORWELL_HOUSE_READY_INLINE_S", 10.0)
 # After a REFUSED entry the background gate-clear watch keeps polling this much longer, so the season
 # still opens (and the skipped post-start kicks still run) the moment authoring finally lands.
 _HOUSE_READY_WATCH_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_WATCH_TIMEOUT_S", 1800.0)
@@ -1465,6 +1493,14 @@ _HOUSE_READY_WATCH_TIMEOUT_S = _env_float("ORWELL_HOUSE_READY_WATCH_TIMEOUT_S", 
 _HOUSE_ENTRY_GATE_BLOCKS: dict = {}
 # One background gate-clear watch per user (exactly-once post-start kicks on clear).
 _HOUSE_READY_WATCHES: dict = {}
+
+
+def house_ready_inline_budget() -> float:
+    """The INLINE (in-turn) slice of the readiness wait — how long `do_create_character` may block the
+    player's turn before returning the holding card and handing off to the background watch. Bounded to
+    the full readiness window so a mis-tuned env value can never make the inline wait LONGER than the
+    old inline-everything behavior."""
+    return min(_HOUSE_READY_INLINE_S, _HOUSE_READY_TIMEOUT_S)
 
 
 def floor_start_allowed() -> bool:
@@ -1529,6 +1565,16 @@ def house_entry_gate_status(user: Optional[str]) -> Optional[dict]:
     return _HOUSE_ENTRY_GATE_BLOCKS.get(_safe_user(user))
 
 
+def house_ready_watch_active(user: Optional[str]) -> bool:
+    """Whether a background house-ready gate-clear WATCH is currently armed for this user
+    (admin/debug-bundle visibility). Vault-free: a single boolean."""
+    try:
+        t = _HOUSE_READY_WATCHES.get(_safe_user(user))
+        return t is not None and not t.done()
+    except Exception:
+        return False
+
+
 def kickoff_house_ready_watch(owner: Optional[str],
                               on_ready: Optional[Callable[[], None]] = None,
                               *, timeout: Optional[float] = None,
@@ -1575,6 +1621,20 @@ def kickoff_house_ready_watch(owner: Optional[str],
                     "entry remains held (set ORWELL_ALLOW_FLOOR_START=1 to override).", k,
                     ready.get("authored"), ready.get("total"))
                 record_house_entry_gate_block(owner, ready)
+                # STRICT enrichment policy: the exhausted watch is the REAL "house entry refused"
+                # failure (2026-07-13 — it moved here from the createCharacter turn, whose short
+                # inline wait now returns the holding card as the NORMAL path, not a failure).
+                # Ledger it loudly on the admin surface beside the gate marker. Soft: the error
+                # log + marker alone (legacy).
+                try:
+                    from src import enrichment_policy
+                    if enrichment_policy.is_strict():
+                        enrichment_policy.record_failure(
+                            owner, "cast-authoring",
+                            f"house entry refused — cast only {ready.get('authored')}/"
+                            f"{ready.get('total')} authored after the readiness window")
+                except Exception:
+                    pass
         finally:
             if _HOUSE_READY_WATCHES.get(k) is task_ref[0]:
                 _HOUSE_READY_WATCHES.pop(k, None)
