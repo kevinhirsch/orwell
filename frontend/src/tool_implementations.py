@@ -4921,13 +4921,13 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             pass  # authoring + portraits are augmentation — never let them affect game start
         # #1313 — THE HOUSE-ENTRY GATE (P0): the game must NEVER start on the deterministic FLOOR cast.
         # When the gate is ON (a real utility model resolves + no escape hatch), HOLD the started
-        # result until authoring lands the FULL cast (15/15 — no floor identity may enter the house),
-        # retrying via the backfill spine while we wait. The player sees the createCharacter tool
-        # "running" (and then the "Production is finalizing your casting…" card) — never a silent
-        # 0/15 start. The happy path returns the instant completeness
-        # clears the threshold; only a genuine failure waits out the window, and then we refuse entry
-        # LOUDLY (error log + health marker) and return a NOT-started casting-in-progress holding
-        # result rather than dropping the player into an unauthored house.
+        # result until authoring lands the FULL cast (15/15 — no floor identity may enter the house).
+        # 2026-07-13 (fast holding card): the turn waits only a SHORT inline grace — the happy path
+        # (authoring already landed / just finishing) starts on this turn; otherwise the
+        # "Production is finalizing your casting…" HOLDING card returns promptly (never minutes of a
+        # silently spinning tool) with a health marker, and the background gate-clear watch owns the
+        # rest — re-checking authoring, re-kicking stragglers, and opening the season the moment the
+        # cast is ready. Only the watch's own expiry is the LOUD "house entry refused" failure.
         try:
             _started = isinstance(res, dict) and res.get("started") and not res.get("createRefused")
             if _started and _gate_on:
@@ -4936,28 +4936,28 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 # hold BEFORE waiting, so a concurrent /status or /state poll during the wait reports
                 # the authoring/holding state (routes/_house_entry_overlay), never a started game.
                 _authoring_gate.begin_house_entry_hold(owner)
-                ready = await _authoring_gate.await_house_ready(owner)
+                # 2026-07-13 (fast holding card — no dead air): the readiness wait used to run INLINE
+                # for the FULL window (~180s) before ANY holding response reached the player — minutes
+                # of a silently spinning tool. The PO design is card-promptly + background watch: wait
+                # only a SHORT inline grace (the common "authoring just finishing" case still starts on
+                # this turn), then return the holding card IMMEDIATELY and let the gate-clear watch own
+                # the rest (it re-checks authoring, clears the marker, runs the deferred post-start
+                # kicks exactly once, and pushes a game-updated so open pages reconcile the moment the
+                # cast lands).
+                ready = await _authoring_gate.await_house_ready(
+                    owner, timeout=_authoring_gate.house_ready_inline_budget())
                 if ready.get("ready"):
                     _authoring_gate.clear_house_entry_gate_block(owner)
                 else:
-                    logger.error(
-                        "[house-entry-gate] REFUSING house entry for %s — cast only %s/%s authored "
-                        "after the readiness window; NOT starting on the deterministic floor "
+                    # HOLDING is the normal path while authoring streams — the LOUD "house entry
+                    # refused" failure (error log + strict enrichment ledger) now lives at the
+                    # background watch's expiry, the point the wait has GENUINELY been exhausted.
+                    logger.warning(
+                        "[house-entry-gate] HOLDING house entry for %s — cast %s/%s authored; "
+                        "returning the holding card and arming the background gate-clear watch "
                         "(set ORWELL_ALLOW_FLOOR_START=1 to override).",
                         owner, ready.get("authored"), ready.get("total"))
                     _authoring_gate.record_house_entry_gate_block(owner, ready)
-                    # STRICT enrichment policy (owner directive 2026-07-11): the refused house entry
-                    # is the "flow blocked" arm of a failing authoring run — ledger it loudly on the
-                    # admin surface beside the gate marker. Soft: the gate marker alone (legacy).
-                    try:
-                        from src import enrichment_policy as _enrichment2
-                        if _enrichment2.is_strict():
-                            _enrichment2.record_failure(
-                                owner, "cast-authoring",
-                                f"house entry refused — cast only {ready.get('authored')}/"
-                                f"{ready.get('total')} authored after the readiness window")
-                    except Exception:
-                        pass
                     # gap #3 belt-fire telemetry (docs/design/undercall-seam-structural.md §5;
                     # note_belt never raises)
                     _sync_ledger_note_belt(owner, "house-entry-gate-hold")
