@@ -147,11 +147,21 @@ export async function waitSettled(page, t = 180000) {
       if (!el) return { len: 0, done: false, ph: true, sseDone, errShown };
       const c = el.cloneNode(true); c.querySelectorAll('.thinking-content,.thinking,[class*=thinking],.msg-footer').forEach((n) => n.remove());
       const txt = (c.innerText || '').trim();
-      return { len: txt.length, done: !!el.querySelector('.msg-footer'), ph: /^(thinking|still|generating)/i.test(txt) || txt.length < 8, sseDone, errShown };
+      // `ph` = the last .msg-ai is a LIVE PLACEHOLDER, not settled reply text. Besides the classic
+      // "thinking…"/short-stub cases, this includes the animated TOOL-BEAT status ("The house is in
+      // motion ▂▃▄", orwellToolBeats.js): while a turn runs, the last .msg-ai can briefly BE that beat
+      // chip with its animated block-bar spinner (▁▂▃▄▅▆▇█, U+2581–2588) — chars that NEVER occur in a
+      // settled reply. Treating that as settled made waitSettled return a premature `sse-eof` and
+      // capture the SPINNER as A's text, so waitForBText then chased placeholder text that B (correctly
+      // mirroring the real reply) never matched → a host-speed-dependent false red (issue #1560). So a
+      // spinner/beat placeholder is `ph`, and the `sse-eof` shortcut below is gated on `!ph` — settle is
+      // recorded only once the last .msg-ai holds real, non-placeholder reply text.
+      const ph = /^(thinking|still|generating)/i.test(txt) || /[\u2581-\u2588]/.test(txt) || txt.length < 8;
+      return { len: txt.length, done: !!el.querySelector('.msg-footer'), ph, sseDone, errShown };
     });
     if (info.errShown && info.sseDone) return 'error-or-no-model';
     if (info.done && !info.ph) { await page.waitForTimeout(700); return 'settled'; }
-    if (info.sseDone && (info.len > 8 || info.errShown)) { await page.waitForTimeout(900); return 'sse-eof'; }
+    if (info.sseDone && !info.ph && (info.len > 8 || info.errShown)) { await page.waitForTimeout(900); return 'sse-eof'; }
     if (!info.ph && info.len > 40 && info.len === last) { if (++stable >= 6) return 'stable'; } else stable = 0;
     last = info.len;
   }

@@ -102,7 +102,15 @@ createServer((req, res) => {
       }
 
       const reasoning = `Considering the room and who is present. (echo of: ${seed})`;
-      const reply = `The house settles for a moment. [stub-echo] ${seed}`;
+      // The reply carries a DETERMINISTIC fixed tail (seed-independent) so the streamed REPLY has
+      // MANY deltas — ~29 words even when the seed is empty. Combined with FAKE_TOKEN_DELAY_MS
+      // (run_mirror_gate.sh sets it) this gives A's reply a wall-clock WIDTH of ~10-13s, wide enough
+      // that a second window's re-subscribe/attach for the measured turn reliably lands DURING the
+      // stream and mirrors it live — even on a contended CI runner where the WS rebind churn delays
+      // the attach (issue #1560: a short ~3-5s stream let turn-2 settle before B attached, false-red).
+      // It changes PACING/length only, never determinism: both windows on the same run get identical
+      // bytes (the mirror byte-identity invariant is intact — the tail is fixed, not random).
+      const reply = `The house settles for a moment. [stub-echo] ${seed} Somewhere down the hall a door clicks shut and two low voices trade a quick word before the whole room drifts back to quiet again.`;
       if (!stream) {
         return send(res, 200, { id: 'fake', object: 'chat.completion', model: MODEL, choices: [{ index: 0, message: { role: 'assistant', content: reply }, finish_reason: 'stop' }], usage: { prompt_tokens: 40, completion_tokens: 16, total_tokens: 56 } });
       }
