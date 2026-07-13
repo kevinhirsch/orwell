@@ -106,13 +106,21 @@ def test_picker_resolves_configured_default_not_arbitrary_first():
     )
 
 
-def test_picker_default_pick_never_an_image_model():
+def test_picker_default_pick_never_an_image_or_nonchat_model():
     js = _read("static/js/modelPicker.js")
-    # Both the configured-default branch and the floor exclude image models.
-    assert "_firstChatPick" in js, "the auto-pick floor must skip image models (_firstChatPick)"
+    # The floor filters via the composed chat-capability check, which excludes BOTH image models
+    # AND non-image non-chat models (embeddings / tts / rerank / …) — the client mirror of the
+    # server's `_NON_CHAT_MODEL` rule.
+    assert "_firstChatPick" in js, "the auto-pick floor must exist (_firstChatPick)"
     fn_start = js.index("function _firstChatPick(")
     fn = js[fn_start:fn_start + 600]
-    assert "_isImageModelId(mid)" in fn, "the auto-pick floor must filter image models"
+    assert "_isChatCapableModelId(mid)" in fn, \
+        "the auto-pick floor must filter by chat-capability (not just image models)"
+    # The capability predicate composes both exclusions.
+    cap_start = js.index("function _isChatCapableModelId(")
+    cap = js[cap_start:cap_start + 400]
+    assert "_isImageModelId(mid)" in cap and "_isNonChatModelId(mid)" in cap, \
+        "chat-capability must exclude BOTH image and non-chat (embedding/tts/rerank/…) models"
 
 
 def test_explicit_pick_clears_auto_marker():
@@ -131,9 +139,11 @@ def test_explicit_pick_clears_auto_marker():
 
 
 def _slice_fns(js):
-    """Pull the module-level helpers the resolver harness needs."""
+    """Pull the module-level helpers the resolver harness needs (in dependency order:
+    `_firstChatPick` now calls `_isChatCapableModelId` → `_isNonChatModelId`/`_isImageModelId`)."""
     out = []
-    for name in ("_isImageModelId", "_firstChatPick", "_resolveDefaultPick"):
+    for name in ("_isImageModelId", "_isNonChatModelId", "_isChatCapableModelId",
+                 "_firstChatPick", "_resolveDefaultPick"):
         start = js.index(f"function {name}(")
         end = js.index("\n}\n", start) + len("\n}\n")
         out.append(js[start:end])
@@ -199,6 +209,36 @@ def test_resolver_never_returns_image_model_even_when_default_is_image():
     assert pick and pick["mid"] != "google/gemini-2.5-flash-image", (
         f"the resolver must never hand back an image model as the chat default, got {pick}"
     )
+
+
+def test_first_chat_pick_skips_a_leading_embedding_model():
+    """CodeRabbit (Minor): the CLIENT auto-pick floor must skip NON-CHAT models (embeddings /
+    tts / rerank), not just image models — mirroring the server's `_NON_CHAT_MODEL` gap that was
+    just closed. An endpoint that lists an embedding BEFORE a real chat model must auto-select the
+    CHAT model, never the embedding (which can only 400 a chat completion)."""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        {"endpoint_id": "or", "endpoint_name": "OpenRouter", "url": "http://or/v1",
+         "models": ["text-embedding-3-large", "tts-1", "z-ai/glm-4.7"]},
+    ]
+    pick = _run_resolver(items, None)  # no configured default → the first-chat floor
+    assert pick and pick["mid"] == "z-ai/glm-4.7", (
+        f"the client floor must skip the embedding/tts and land on the chat model, got {pick}"
+    )
+
+
+def test_first_chat_pick_returns_null_for_an_all_nonchat_endpoint():
+    """An endpoint that serves ONLY non-chat models (embeddings + tts + image) yields no
+    auto-pick — the picker resolves nothing rather than a chat-incapable model."""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        {"endpoint_id": "emb", "endpoint_name": "Embeddings", "url": "http://e/v1",
+         "models": ["text-embedding-3-large", "tts-1", "google/gemini-3.1-flash-image"]},
+    ]
+    pick = _run_resolver(items, None)
+    assert pick is None, f"an all-non-chat endpoint must yield no auto-pick, got {pick}"
 
 
 def test_resolver_trusts_configured_default_on_an_empty_stale_catalog():

@@ -375,6 +375,7 @@ def test_session_rejects_a_mixed_nonchat_endpoint_with_no_chat_model(monkeypatch
     res = client.post("/api/session", data={"endpoint_url": "http://mixed.example/v1"})
     assert res.status_code == 400, res.text
     assert "no chat-capable model" in res.text
+    assert not _sm.created, "no session row may be created for a chat-incapable endpoint"
 
 
 def test_session_still_binds_a_real_chat_model_beside_nonchat_ones(monkeypatch):
