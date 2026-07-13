@@ -175,19 +175,28 @@ def _accepts_routing_kwargs(fn) -> bool:
         p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
-async def resolve_authoring_llm_fn(owner: Optional[str]) -> "Optional[LlmFn]":
+async def resolve_authoring_llm_fn(owner: Optional[str], *,
+                                   min_output_tokens: Optional[int] = None) -> "Optional[LlmFn]":
     """The CAST-AUTHORING class resolver (owner directive 2026-07-11): route to the NARRATION model
     by default at the runtime-editable authoring temperature, with the utility chain appended as the
     EXPLICIT fallback; `cast_authoring_model_source="utility"` restores the legacy utility-first
     routing (still at the authoring temperature). Every call flows through the module-level
-    `_resolve_llm_fn`, so tests that stub it keep intercepting the authoring path."""
+    `_resolve_llm_fn`, so tests that stub it keep intercepting the authoring path.
+
+    ``min_output_tokens`` (2026-07-13 genesis-cap fix): a per-call-family FLOOR on the resolved
+    output cap — the full-cast genesis SKETCH passes ``GENESIS_SKETCH_MIN_OUTPUT_TOKENS`` because
+    one completion must carry the whole 15-NPC skeleton JSON (the class cap is sized for one NPC).
+    ``None`` ⇒ the legacy ``_AUTHOR_MIN_OUTPUT_TOKENS`` floor, byte-identical for every existing
+    caller (the per-NPC deep calls keep their cap — also a golden-fixture pin)."""
     if not _accepts_routing_kwargs(_resolve_llm_fn):
         return await _resolve_llm_fn(owner)  # a legacy-signature stub (tests) — bare call
     temperature = cast_authoring_temperature()
     if cast_authoring_model_source() == "utility":
-        return await _resolve_llm_fn(owner, temperature=temperature)
+        return await _resolve_llm_fn(owner, temperature=temperature,
+                                     min_output_tokens=min_output_tokens)
     return await _resolve_llm_fn(owner, prefix="default", fallbacks_key="default",
-                                 include_utility_fallback=True, temperature=temperature)
+                                 include_utility_fallback=True, temperature=temperature,
+                                 min_output_tokens=min_output_tokens)
 
 # #1044: the floor visible-output budget for an authoring call. With reasoning forced OFF (below) the
 # whole cap is the answer; a full deep-profile JSON object is ~500-800 tokens, so this leaves generous
@@ -195,6 +204,15 @@ async def resolve_authoring_llm_fn(owner: Optional[str]) -> "Optional[LlmFn]":
 # `max_tokens_budget` too low (the observed live value was 1200 — fine once reasoning is off, but we
 # never want authoring to truncate a profile mid-object).
 _AUTHOR_MIN_OUTPUT_TOKENS = 2000
+
+# 2026-07-13 retry-on-length ceiling: when a JSON-authoring completion ends `finish_reason=length`
+# (cut off by the output cap ⇒ chopped, unparseable JSON), the call is re-issued EXACTLY ONCE at
+# double its cap, never above this bound. The number lives in token_policy (the single source of
+# the sizing numbers); the import is defensive so this module stays loadable in isolation.
+try:
+    from src.token_policy import LENGTH_RETRY_MAX_TOKENS as _LENGTH_RETRY_MAX_TOKENS
+except Exception:  # pragma: no cover - token_policy is a sibling pure module
+    _LENGTH_RETRY_MAX_TOKENS = 16000
 
 # #1002: the one-shot reparse retry instruction. DeepSeek (and other reasoning models) reliably emit
 # reasoning/prose around the JSON instead of a bare object; when the first reply yields no JSON we retry
@@ -880,7 +898,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                           fallbacks_key: str = "utility",
                           include_utility_fallback: bool = False,
-                          temperature: Optional[float] = None) -> Optional[LlmFn]:
+                          temperature: Optional[float] = None,
+                          min_output_tokens: Optional[int] = None) -> Optional[LlmFn]:
     """Build a one-shot completion fn over the user's UTILITY model (background-safe, like the email
     triage path). Returns None when no usable endpoint resolves — authoring then silently no-ops.
 
@@ -894,7 +913,13 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
     its configured fallback chain to the candidates as the EXPLICIT fallback (de-duped, logged —
     never a silent substitution), and ``temperature`` overrides the shared ``_AUTHOR_TEMPERATURE``
     for THIS resolved fn only (``None`` ⇒ unchanged). Both default OFF, so every existing caller is
-    byte-identical."""
+    byte-identical.
+
+    ``min_output_tokens`` (2026-07-13 genesis-cap fix): a per-call-family FLOOR on the resolved
+    output cap — the full-cast genesis sketch needs a ~15-NPC-sized budget the one-NPC class cap
+    can't carry (``token_policy.GENESIS_SKETCH_MIN_OUTPUT_TOKENS``). ``None`` ⇒ the legacy
+    ``_AUTHOR_MIN_OUTPUT_TOKENS`` floor (byte-identical for every existing caller). An admin
+    ``max_tokens_budget`` override LARGER than the floor still wins (max, not replace)."""
     try:
         from src.endpoint_resolver import (resolve_endpoint, resolve_utility_fallback_candidates,
                                            _resolve_fallback_candidates)
@@ -995,25 +1020,35 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
     # Guarantee a comfortable visible-output budget regardless of any admin `max_tokens_budget` override
     # that set the authoring cap too low (a full JSON profile is ~500-800 tokens; with reasoning OFF the
     # whole cap is the answer, but keep generous headroom so a verbose biography never truncates).
-    if _max_tokens < _AUTHOR_MIN_OUTPUT_TOKENS:
-        _max_tokens = _AUTHOR_MIN_OUTPUT_TOKENS
+    # 2026-07-13: a caller-supplied `min_output_tokens` RAISES the floor for its call family (the
+    # full-cast genesis sketch) — max, not replace, so a LARGER admin override still wins.
+    _floor = _AUTHOR_MIN_OUTPUT_TOKENS
+    if isinstance(min_output_tokens, int) and not isinstance(min_output_tokens, bool) \
+            and min_output_tokens > 0:
+        _floor = max(_floor, min_output_tokens)
+    if _max_tokens < _floor:
+        _max_tokens = _floor
 
-    async def _fn(messages: list[dict]) -> str:
+    async def _once(messages: list[dict], cap: int) -> tuple[str, Optional[str]]:
+        """One completion at output cap ``cap``. Returns ``(visible_text, finish_reason)`` and
+        records one Vault-free token-ledger entry (ADR 0010) for the attempt."""
         parts: list[str] = []
         _usage: dict = {}
+        _finish: Optional[str] = None
         # #1002: request strict JSON (response_format) so a model that honours it can't leak prose/
         # reasoning into the body. Threads through stream_llm_with_fallback → stream_llm onto the
         # OpenAI-style payload; a provider that ignores it is harmless (the strict prompt + the one-shot
         # retry in author_cast still apply). The policy already supplies the (raised, #1002) token budget.
         async for chunk in stream_llm_with_fallback(
             candidates, messages, temperature=_temperature, policy=_policy,
-            max_tokens=_max_tokens, response_format=_RESPONSE_FORMAT):
+            max_tokens=cap, response_format=_RESPONSE_FORMAT):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
             if piece:
                 parts.append(piece)
                 continue
-            # ADR 0010: capture the usage envelope (the trailing 'usage' SSE event) for the meter.
+            # ADR 0010: capture the usage envelope (the trailing 'usage' SSE event) for the meter,
+            # and the terminal finish event ("length" ⇒ the model was CUT OFF by the output cap).
             s = str(chunk or "")
             if s.startswith("data:"):
                 _body = s[5:].strip()
@@ -1033,6 +1068,8 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                                 "cost": _ud.get("cost"),
                                 "provider": _ud.get("provider"),
                             }
+                    elif isinstance(_d, dict) and _d.get("type") == "finish":
+                        _finish = _d.get("reason") or _finish
         # ADR 0010: one Vault-free token/cost entry per authoring call, keyed by the canonical game
         # session so it aggregates with the game's narration spend. Fail-open; never seen by the player.
         if owner and _usage:
@@ -1048,14 +1085,31 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                     owner, session=_sess or owner, turn_id=None, call_class="background-authoring",
                     input_tokens=_usage.get("input_tokens", 0), cached_tokens=_usage.get("cached_tokens", 0),
                     reasoning_tokens=_usage.get("reasoning_tokens", 0), output_tokens=_usage.get("output_tokens", 0),
-                    # DB3 (#1026): the cap WAS applied on the wire (max_tokens=_max_tokens above); log it so
-                    # the ledger shows appliedMaxTokens=_max_tokens, not cap=0. Omitting it mis-logged cap=0.
-                    applied_max_tokens=_max_tokens,
+                    # DB3 (#1026): the cap WAS applied on the wire (max_tokens=cap above); log it so
+                    # the ledger shows appliedMaxTokens=cap, not cap=0. Omitting it mis-logged cap=0.
+                    applied_max_tokens=cap, finish_reason=_finish,
                     cost=float(_usage.get("cost") or 0), provider=_usage.get("provider"),
                 )
             except Exception:
                 pass
-        return "".join(parts)
+        return "".join(parts), _finish
+
+    async def _fn(messages: list[dict]) -> str:
+        text, finish = await _once(messages, _max_tokens)
+        # 2026-07-13 retry-on-length: `finish_reason == "length"` means the completion was CUT OFF
+        # by the output cap — for a JSON-authoring call the body is chopped mid-object and
+        # unparseable, so a same-cap retry (#1057) can never fix it. Re-issue EXACTLY ONCE at
+        # double the cap, bounded by LENGTH_RETRY_MAX_TOKENS; never loop (a second "length" at the
+        # doubled cap falls through to the caller's normal parse-failure handling / the floor).
+        if finish == "length" and _max_tokens < _LENGTH_RETRY_MAX_TOKENS:
+            retry_cap = min(_max_tokens * 2, _LENGTH_RETRY_MAX_TOKENS)
+            logger.warning(
+                f"[cast-authoring] completion hit the output cap (finish_reason=length at "
+                f"max_tokens={_max_tokens}) — retrying ONCE at a doubled cap {retry_cap}")
+            retry_text, _retry_finish = await _once(messages, retry_cap)
+            if retry_text:
+                return retry_text
+        return text
 
     return _fn
 
