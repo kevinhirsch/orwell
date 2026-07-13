@@ -399,8 +399,23 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             # basename match). Only when no default is configured — or this endpoint genuinely
             # does not serve it (a custom/local provider) — does the first-CHAT-model floor apply
             # (never an embedding/tts/image entry, and never blindly ids[0]).
-            from src.endpoint_resolver import _first_chat_model
+            from src.endpoint_resolver import _first_chat_model, _NON_CHAT_MODEL
             from src.llm_core import is_image_model
+
+            def _is_chat_capable(mid) -> bool:
+                # Reuse the canonical predicates: a model is chat-capable iff it is neither a
+                # NON-CHAT class (embedding / tts / whisper / rerank / moderation / …, the shared
+                # `_NON_CHAT_MODEL` set) NOR a text→image model (`is_image_model`). CodeRabbit
+                # (Major): `_first_chat_model`'s tier-2 fallback returns the first NON-IMAGE model,
+                # which for an all-embeddings endpoint is the embeddings id — a non-image NON-chat
+                # model that an image-only guard would let through. Filter the whole non-chat class.
+                m = str(mid or "").lower()
+                if not m:
+                    return False
+                if any(p in m for p in _NON_CHAT_MODEL):
+                    return False
+                return not is_image_model(mid)
+
             _cfg_model = ""
             try:
                 from routes.chat_routes import _default_chat_target
@@ -412,7 +427,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                 except Exception:
                     _cfg_model = ""
             _picked = ""
-            if _cfg_model and not is_image_model(_cfg_model):
+            if _cfg_model and _is_chat_capable(_cfg_model):
                 if _cfg_model in ids:
                     _picked = _cfg_model
                 else:
@@ -427,14 +442,16 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                         "[session] configured default model %r not served by %s — falling back "
                         "to the first chat model", _cfg_model, endpoint_url)
             # Never bind a chat-INCAPABLE model (the never-arbitrary goal). `_first_chat_model`
-            # only hands back an image model when the endpoint serves NOTHING but image models
-            # (its all-image `models[0]` fallthrough); binding it would create a session that
-            # can't chat (CodeRabbit). Drop the raw `ids[0]` floor and refuse loudly instead —
+            # can still hand back a NON-CHAT model — an image id (all-image `models[0]`
+            # fallthrough) OR a non-image non-chat id like an embeddings model (its tier-2
+            # "first non-image" fallback). Binding either creates a session that can't chat.
+            # Validate BOTH candidates (the configured pick above + this fallback) against the full
+            # chat-capability predicate and refuse loudly rather than bind the raw `ids[0]` floor —
             # scoped to this route so the shared `_first_chat_model` contract (relied on by
             # endpoint_resolver / chat_routes / model_routes callers via `or ""` / `if picked`)
             # is untouched.
             model_to_use = _picked or _first_chat_model(ids)
-            if not model_to_use or is_image_model(model_to_use):
+            if not model_to_use or not _is_chat_capable(model_to_use):
                 raise HTTPException(400, "Endpoint exposes no chat-capable model")
         else:
             from src.llm_core import list_model_ids

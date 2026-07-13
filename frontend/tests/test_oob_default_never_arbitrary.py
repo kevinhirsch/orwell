@@ -350,3 +350,50 @@ def test_session_with_explicit_model_is_untouched(monkeypatch):
         "endpoint_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4o"})
     assert res.status_code == 200, res.text
     assert res.json()["model"] == "openai/gpt-4o"
+
+
+def test_session_rejects_an_embeddings_only_endpoint(monkeypatch):
+    """CodeRabbit (Major): an endpoint that serves only NON-CHAT models — e.g. an embeddings-only
+    provider — must be refused with 400, never bind a chat-INCAPABLE model. `_first_chat_model`'s
+    tier-2 'first non-image' fallback would otherwise return the embeddings id (non-image but
+    non-chat), which an image-only guard let through. The configured default is NOT served here,
+    so this exercises the fallback branch."""
+    client, _sm = _session_client(
+        monkeypatch, live_ids=["text-embedding-3-large", "text-embedding-ada-002"])
+    res = client.post("/api/session", data={"endpoint_url": "http://embeddings.example/v1"})
+    assert res.status_code == 400, res.text
+    assert "no chat-capable model" in res.text
+    assert not _sm.created, "no session row may be created for a chat-incapable endpoint"
+
+
+def test_session_rejects_a_mixed_nonchat_endpoint_with_no_chat_model(monkeypatch):
+    """A grab-bag of non-chat classes (embeddings + tts + rerank + an image model) with NO chat
+    model must still 400 — the full non-chat class is filtered, not just image models."""
+    client, _sm = _session_client(
+        monkeypatch, live_ids=["tts-1", "rerank-english-v3", "text-embedding-ada-002",
+                               "google/gemini-3.1-flash-image"])
+    res = client.post("/api/session", data={"endpoint_url": "http://mixed.example/v1"})
+    assert res.status_code == 400, res.text
+    assert "no chat-capable model" in res.text
+
+
+def test_session_still_binds_a_real_chat_model_beside_nonchat_ones(monkeypatch):
+    """The guard must NOT over-reject: an endpoint that lists embeddings/tts BUT also a real chat
+    model still creates a session on the CHAT model (never the embeddings id)."""
+    client, _sm = _session_client(
+        monkeypatch, live_ids=["text-embedding-ada-002", "tts-1", _NARRATOR])
+    res = client.post("/api/session", data={"endpoint_url": "http://mixed.example/v1"})
+    assert res.status_code == 200, res.text
+    # cfg default (_NARRATOR) is served here ⇒ it binds; either way the model must be chat-capable.
+    assert res.json()["model"] == _NARRATOR
+
+
+def test_session_configured_default_that_is_nonchat_is_ignored(monkeypatch):
+    """Belt: even if the configured default were somehow a NON-CHAT id (embeddings), the route must
+    not bind it — it falls through to the first chat model on the endpoint."""
+    client, _sm = _session_client(
+        monkeypatch, live_ids=["text-embedding-ada-002", _NARRATOR],
+        cfg_model="text-embedding-ada-002")
+    res = client.post("/api/session", data={"endpoint_url": "http://mixed.example/v1"})
+    assert res.status_code == 200, res.text
+    assert res.json()["model"] == _NARRATOR

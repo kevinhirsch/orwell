@@ -235,6 +235,44 @@ def test_resolver_still_falls_back_when_the_defaults_endpoint_is_gone():
     assert pick and pick["mid"] == "fugu/fugu-1"
 
 
+def test_resolver_falls_back_when_default_endpoint_catalog_excludes_the_model():
+    """Greptile P1 (2026-07-13): the default's OWN endpoint is present + online but its NON-EMPTY
+    visible catalog EXCLUDES dc.model (a stale/renamed default the provider no longer offers). The
+    picker must NOT auto-select the unofferable model — it falls to the first-chat floor. (An
+    EMPTY/unprobed catalog still honors the default — pinned by the sibling test above.)"""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        # The default's own endpoint, online, NON-EMPTY catalog that does NOT contain glm-4.7.
+        {"endpoint_id": "or", "endpoint_name": "OpenRouter", "url": "http://or/v1",
+         "models": ["deepseek/deepseek-v4-pro", "openai/gpt-4o"]},
+    ]
+    pick = _run_resolver(items, {"model": "z-ai/glm-4.7", "endpoint_id": "or"})
+    assert pick and pick["mid"] == "deepseek/deepseek-v4-pro", (
+        f"a non-empty catalog excluding the default must fall to the first chat model, got {pick}"
+    )
+    assert pick["endpointId"] == "or"
+
+
+def test_resolver_falls_back_when_default_endpoint_catalog_excludes_it_across_endpoints():
+    """Same Greptile case with a second endpoint present: still no online catalog serves glm-4.7,
+    and the default's own endpoint has a non-empty excluding catalog ⇒ first-chat floor, never the
+    unofferable configured default."""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        {"endpoint_id": "misc", "endpoint_name": "Misc", "url": "http://m/v1",
+         "models": ["fugu/fugu-1"]},
+        {"endpoint_id": "or", "endpoint_name": "OpenRouter", "url": "http://or/v1",
+         "models": ["openai/gpt-4o"]},  # non-empty, excludes glm-4.7
+    ]
+    pick = _run_resolver(items, {"model": "z-ai/glm-4.7", "endpoint_id": "or"})
+    assert pick and pick["mid"] != "z-ai/glm-4.7", (
+        f"must never pin the unofferable configured default, got {pick}"
+    )
+    assert pick["mid"] == "fugu/fugu-1"  # the first-chat floor across items
+
+
 # ── #860: a factory/OOBE reset RESETS model selections to the OOB defaults ──────
 #
 # Root cause of #860: the reset preserved the previously-SELECTED models, so a stale placeholder

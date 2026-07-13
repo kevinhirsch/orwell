@@ -146,16 +146,28 @@ function _resolveDefaultPick(items) {
       if (any) return { url: any.url, mid: dc.model, endpointId: any.endpoint_id };
     }
     // 2026-07-13 (the arbitrary-default class, mirroring the server's #1550/#1551 ruling): an
-    // EMPTY/STALE catalog must never kick the configured default over to the first-listed model
+    // EMPTY/UNPROBED catalog must never kick the configured default over to the first-listed model
     // (the "luna" bug — a fresh box whose endpoint hasn't cached its model list yet). When the
-    // default's OWN endpoint is present and online, trust the configured default even though its
-    // (possibly-empty) model list doesn't include it — the server keeps the default on a
-    // possibly-stale cache too (never swapping the narrator). Only a genuinely-missing endpoint
-    // falls to the first-chat floor.
+    // default's OWN endpoint is present + online AND its visible catalog is EMPTY, trust the
+    // configured default (we can't disprove it — some providers don't list every model, and the
+    // server keeps the default on a possibly-stale cache too, never swapping the narrator).
+    //
+    // But NEVER auto-select an UNOFFERABLE model (Greptile P1): we are in the `exists === false`
+    // branch, so any NON-EMPTY catalog necessarily EXCLUDES dc.model — returning it would pin a
+    // model the endpoint doesn't offer. A non-empty catalog that excludes the default (a
+    // stale/renamed default) falls through to the first-chat floor instead. Only an
+    // empty/unprobed own-endpoint honors the configured default; a genuinely-missing endpoint
+    // falls through too.
     if (dc.endpoint_id) {
       const ownEp = (items || []).find(item =>
         !item.offline && String(item.endpoint_id || '') === String(dc.endpoint_id));
-      if (ownEp) return { url: ownEp.url, mid: dc.model, endpointId: ownEp.endpoint_id };
+      if (ownEp) {
+        const ownModels = (ownEp.models || []).concat(ownEp.models_extra || []);
+        if (ownModels.length === 0) {
+          return { url: ownEp.url, mid: dc.model, endpointId: ownEp.endpoint_id };
+        }
+        // Non-empty catalog excluding dc.model ⇒ fall through (never pin an unofferable model).
+      }
     }
   }
   return _firstChatPick(items);
