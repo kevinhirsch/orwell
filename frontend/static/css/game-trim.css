@@ -182,11 +182,17 @@ body[data-game-build] [data-vis-card="chat-bar"] {
  * One aligned rail (a thin accent rule down the beat column), the label set in slate type
  * (small-caps tracking, dimmed ink), no debug tail (the "done" span is suppressed at the
  * render site; this styles what remains). Scoped to the game build only — the workspace
- * build keeps the technical thread look. */
+ * build keeps the technical thread look.
+ *
+ * SINGLE-RAIL (owner polish): the ONE aligned rail down the beat column is the base
+ * `.agent-thread::before` (defined in style.css — the animated red rail that connects to the
+ * bubbles above/below and owns the terminating dot). We deliberately DO NOT draw a second
+ * per-node `border-left` rail here: two parallel lines read as a redundant double stripe, and
+ * the `margin-left` that offset the border also nudged the `.agent-thread-dot` state markers
+ * off the rail centre. Keep ONLY the slate label indent (padding-left) — it shifts the LABEL,
+ * not the node's positioning box, so the dot stays dead-centre on the single base rail. */
 body[data-game-build] .agent-thread-node {
-  border-left: 2px solid color-mix(in srgb, var(--fg, #9cdef2) 22%, transparent);
   padding-left: .55rem;
-  margin-left: .1rem;
 }
 body[data-game-build] .agent-thread-node + .agent-thread-node { margin-top: .18rem; }
 body[data-game-build] .agent-thread-tool {

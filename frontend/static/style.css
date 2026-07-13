@@ -9274,7 +9274,11 @@ body.hide-thinking .thinking-section { display: none !important; }
    when the pulse is stripped for reduced motion. */
 .agent-thread-dot {
   position: absolute;
-  left: -20px;
+  /* -20.5px (not -20) centres the 9px marker DEAD-CENTRE on the single ::before rail:
+     the node's positioning box starts at the thread's 22px padding-left, the rail sits at
+     left:5px width:2px (centre x=6), and a 9px dot needs its left at x=1.5 for centre x=6 —
+     an odd-width dot can't centre on an integer x from an integer offset, hence the .5px. */
+  left: -20.5px;
   top: 10px;
   width: 9px;
   height: 9px;
@@ -9445,7 +9449,9 @@ body.hide-thinking .thinking-section { display: none !important; }
     font-size: 0.8em;
   }
   .agent-thread-dot {
-    left: -16px;
+    /* mobile: thread padding-left is 18px here, so -16.5px keeps the 9px dot dead-centre
+       on the rail (centre x=6), matching the desktop -20.5px tune. */
+    left: -16.5px;
     top: 10px;
   }
 }
