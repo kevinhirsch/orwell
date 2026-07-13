@@ -904,6 +904,15 @@ _LAST_BEAT_SEQ: dict = {}
 # changes ONLY when this turn progresses, so the check is inert and behavior is byte-identical.
 _LAST_FRAMED_BEAT_KEY: dict = {}
 
+# M2-6 — the IN-WORLD moment string ("Week 1 · Eviction night · Late night") for the beat the model
+# was FRAMED on this turn, formatted from the SAME Vault-free framing state read that builds
+# `_LAST_FRAMED_BEAT_KEY` (zero extra engine read — week/phase/timeOfDay are already in hand). The
+# persist site reads it to stamp the assistant beat's transcript timestamp with the game moment (the
+# wall clock demoted to hover), so the fiction isn't dated by the real-world clock. Keyed the SAME
+# "default"-fallback way as `_LAST_FRAMED_BEAT_KEY`. Absent (pre-game / casting) ⇒ a neutral wall-clock
+# stamp (prior behavior). Vault-free by construction (closed-set public status only).
+_LAST_FRAMED_GAME_MOMENT: dict = {}
+
 # #1411 — the engine-SIGNALED required lever for the framed beat (`GameStateView.requiredLever`),
 # captured from the SAME framing state read that builds `_LAST_FRAMED_BEAT_KEY` (zero extra engine
 # read). The agent loop's forced-`tool_choice` gate reads THIS instead of a FE-held beat→lever map
@@ -2879,6 +2888,52 @@ def _with_moment(game_state: dict, moment: str) -> dict:
     return held
 
 
+# M2-6 — the engine's internal phase enums are house vocabulary; the transcript stamp speaks the
+# show's, mirroring the HUD (`static/js/orwellStatusPanel.js` PHASE_LABELS) so the status panel and
+# the beat stamp read as ONE vocabulary. Vault-free (a display label for a public phase).
+_MOMENT_PHASE_LABELS = {
+    "setup": "Move-in day", "premiere": "Premiere", "hoh-competition": "HOH competition",
+    "nominations": "Nominations", "veto-competition": "Veto competition",
+    "veto-ceremony": "Veto ceremony", "eviction": "Eviction night",
+    "final-eviction": "Final eviction", "finale": "The finale", "jury": "Jury",
+    "social": "A day in the house", "twist-reveal": "A twist!",
+}
+# ADR 0006 — the in-game clock band (no wall-clock, no emoji in the transcript stamp).
+_MOMENT_TOD_LABELS = {
+    "morning": "Morning", "afternoon": "Afternoon", "evening": "Evening",
+    "night": "Night", "late-night": "Late night",
+}
+
+
+def _format_game_moment(game_state: dict) -> Optional[str]:
+    """M2-6 — the IN-WORLD moment string for a live game, from the Vault-free public status the FE
+    already fetches (week/phase/time-of-day): e.g. "Week 1 · Eviction night · Late night". Returns
+    None pre-game (casting / not started) so the transcript keeps a NEUTRAL wall-clock stamp — the
+    producer interview is out-of-fiction and must not be dated by the game clock. No engine change:
+    every field is already on `GameStateView`."""
+    if not isinstance(game_state, dict) or not game_state.get("started"):
+        return None
+    parts: list = []
+    week = game_state.get("week")
+    if isinstance(week, int) and not isinstance(week, bool) and week > 0:
+        parts.append(f"Week {week}")
+    phase = (game_state.get("phase") or "").strip()
+    if phase:
+        parts.append(_MOMENT_PHASE_LABELS.get(phase) or phase.replace("-", " "))
+    tod = (game_state.get("timeOfDay") or "").strip()
+    if tod:
+        parts.append(_MOMENT_TOD_LABELS.get(tod) or tod.replace("-", " "))
+    return " · ".join(parts) if parts else None
+
+
+def current_game_moment(user) -> Optional[str]:
+    """M2-6 — the IN-WORLD moment string stashed for `user` by `apply_game_framing` this turn (the beat
+    the model was framed on). The persist site stamps it onto the assistant beat's transcript timestamp;
+    absent (pre-game / no framed game turn) ⇒ None ⇒ a neutral wall-clock stamp. Keyed the same
+    "default"-fallback way framing writes it. Vault-free (closed-set public status only)."""
+    return _LAST_FRAMED_GAME_MOMENT.get(user or "default")
+
+
 async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, player_msg=None) -> dict:
     """If the live game sits at an unresolved engine-driven beat with NO player decision pending,
     advance that single beat (one advanceGame) so the moment prompt carries the engine's real
@@ -3192,6 +3247,11 @@ async def apply_game_framing(
         # memory is the store recalled, never the chat remembered). Subsequent turns in the
         # same session get the live phase moment as before.
         moment = game_state.get("moment")
+        # M2-6: stash this turn's IN-WORLD moment string ("Week 1 · Eviction night · Late night") from
+        # the SAME framing state (zero extra read) — the persist site stamps it onto the assistant
+        # beat's transcript timestamp so the fiction isn't dated by the wall clock. Keyed the SAME
+        # "default"-fallback way as the beat key below. Vault-free (closed-set public status only).
+        _LAST_FRAMED_GAME_MOMENT[user or "default"] = _format_game_moment(game_state)
         # ADR 0011: stash the FRAMING beat key (the beat the model is grounded on THIS turn) so the
         # agent loop can distinguish a concurrent PEER's advance from the model under-calling — the
         # two-tab "20-step loop" fix. Engine's raw fields (NOT the RE_ENTRY display moment). Zero extra
@@ -4637,15 +4697,23 @@ def save_assistant_response(
     incognito: bool = False,
     phase: str = None,
     reasoning: str = "",
+    game_moment: str = None,
 ):
     """Add assistant response to session history. In incognito mode, keeps in-memory context but skips DB persistence.
 
     `phase` (Vault Wall / casting-leak fix): when this reply is part of the OOC pre-game
     casting interview (game not yet started), stamp `phase=casting` so the in-game narrator's
-    context build excludes it later — the producer interview never becomes house-knowable."""
+    context build excludes it later — the producer interview never becomes house-knowable.
+
+    `game_moment` (M2-6): the IN-WORLD moment string ("Week 1 · Eviction night · Late night") for a
+    live game beat, stamped into metadata so the transcript timestamp reads the game moment with the
+    real wall clock demoted to hover. Vault-free (closed-set public status only). None pre-game
+    (casting) ⇒ a neutral wall-clock stamp."""
     md = dict(last_metrics) if last_metrics else {}
     if phase:
         md["phase"] = phase
+    if game_moment:
+        md["game_moment"] = game_moment
     def _model_value(value) -> str:
         if value is None:
             return ""
