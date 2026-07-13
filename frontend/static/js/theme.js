@@ -59,6 +59,24 @@ export const THEMES = {
 // 0052: each preset knows its own key (drives the per-theme house treatment class).
 for (const [k, v] of Object.entries(THEMES)) v._key = k;
 
+// M2-8 (road-to-market; audit B6 / r-11): the GAME BUILD's theme picker is curated to an
+// ON-BRAND allowlist. Off-brand-named inherited workspace themes ("GPT"/"claude"/"organs"/
+// "cute") break the Big Brother fiction, so they are dropped from the game-build VIEW — the
+// "Show all themes" reveal lists ONLY the curated set (core six + approved atmospheric extras).
+// This curates the VIEW, it does NOT delete themes: the full inherited set still renders under
+// ORWELL_GAME_BUILD=0 (the non-game-build else branch below), and Customize stays for power
+// users. New inherited themes stay out of the fiction by default until explicitly approved here.
+const GAME_BUILD_THEME_ALLOWLIST = new Set([
+  // Core six — the glass default + the five 0052 house themes.
+  'glass', 'the-feed', 'telescreen', 'room-101', 'memory-wall', 'sequester',
+  // Approved atmospheric extras — generic, non-brand aesthetic names that fit the fiction.
+  'dark', 'light', 'midnight', 'paper',
+  'cyberpunk', 'retrowave', 'forest', 'ocean', 'ume', 'copper', 'terminal', 'lavender',
+]);
+// The dropped-from-the-game-build set is exactly the off-brand names r-11 flagged. Kept
+// explicit as documentation + a belt-and-braces guard the source gate can assert against.
+const GAME_BUILD_THEME_DENYLIST = new Set(['gpt', 'claude', 'organs', 'cute']);
+
 // The Apple "Liquid Glass" theme — neutral, colorless, refraction-on — is the
 // DEFAULT theme out of the box. A brand-new player, an unset preference, or a
 // factory-reset / no-stored-theme session all resolve here; an explicit SAVED
@@ -1546,8 +1564,15 @@ export function initThemeUI() {
     // The glass theme (the neutral Apple default) leads alongside the house
     // themes — it's the out-of-box look, not an "extra" tucked behind the reveal.
     const _isLead = (n, c) => n === 'glass' || c.glass || c.house;
-    const houseEntries = _entries.filter(([n, c]) => _isLead(n, c));
-    const otherEntries = _entries.filter(([n, c]) => !_isLead(n, c));
+    // M2-8: curate the game-build VIEW to the on-brand allowlist. The off-brand-named
+    // inherited themes (gpt/claude/organs/cute) are dropped here — but a power user whose
+    // CURRENT pick is one of them still sees it up-front (never hide the active theme), and
+    // it survives ORWELL_GAME_BUILD=0 (the else branch renders every theme).
+    const _curated = _entries.filter(
+      ([n]) => GAME_BUILD_THEME_ALLOWLIST.has(n) || n === activeName
+    );
+    const houseEntries = _curated.filter(([n, c]) => _isLead(n, c));
+    const otherEntries = _curated.filter(([n, c]) => !_isLead(n, c));
     // Keep the active (non-house) theme visible up-front so a power user's current pick isn't hidden.
     const activeIsOther = otherEntries.some(([n]) => n === activeName);
     grid.innerHTML = houseEntries.map(_swatch).join('')
