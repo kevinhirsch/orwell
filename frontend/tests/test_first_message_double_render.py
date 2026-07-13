@@ -29,8 +29,10 @@ the narration here. Roles only — the player label is a generic probe; the cast
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -142,6 +144,34 @@ def _post_form(base, path, form, timeout=30):
         return json.loads(r.read() or b"{}")
 
 
+def _stop_proc(p: "subprocess.Popen") -> None:
+    """Terminate a child process and WAIT for it — escalate to kill+wait if it lingers, so no
+    orphaned engine/uvicorn survives the fixture (the kill path also waits, never leaks a zombie)."""
+    if p is None:
+        return
+    p.terminate()
+    try:
+        p.wait(timeout=10)
+    except Exception:
+        p.kill()
+        try:
+            p.wait(timeout=10)
+        except Exception:
+            pass
+
+
+def _restore_settings(path: str, existed: bool, original: "bytes | None") -> None:
+    """Restore the SHARED, tracked `data/settings.json` to EXACTLY its pre-test state: rewrite its
+    original bytes if it existed, else DELETE the file the test created — so the working tree is clean
+    afterwards. Errors are NOT swallowed (a restore failure must surface as a teardown error)."""
+    if existed:
+        with open(path, "wb") as fh:
+            fh.write(original or b"")
+    else:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(path)
+
+
 @pytest.fixture(scope="module")
 def _stack():
     try:
@@ -155,43 +185,71 @@ def _stack():
     # The canonical-binding store is SHARED frontend/data state (first-writer-wins) — scrub a stale
     # binding so it can't win this boot's bind (the #1085/#1086 lesson the golden driver scrubs too).
     for stale in ("orwell_game_session.json", "orwell_layout.json"):
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.remove(os.path.join(FRONTEND, "data", stale))
-        except FileNotFoundError:
-            pass
 
-    stub_port = _free_port()
-    stub = ThreadingHTTPServer(("127.0.0.1", stub_port), _StubHandler)
-    threading.Thread(target=stub.serve_forever, daemon=True).start()
+    # ONE cleanup scope: every server / process / tempdir / log handle registers its teardown the
+    # instant it exists, so a FAILED later launch (engine or FE never comes up) still tears down
+    # everything already created — no leaked ports, processes, or temp dirs (CodeRabbit stability).
+    # ExitStack unwinds LIFO, so the order below means: FE+engine stopped (and waited) FIRST, then the
+    # stub server, then log handles closed, then the tempdirs removed, then settings restored — the
+    # SHARED tracked `data/settings.json` last (after nothing can rewrite it).
+    with contextlib.ExitStack() as stack:
+        # Snapshot the SHARED, tracked settings file BEFORE we touch it; restore-or-delete on teardown
+        # so the working tree is byte-clean afterwards (a file that did NOT exist is DELETED, not left
+        # as `{}`). Registered first ⇒ restored last.
+        sfile = os.path.join(FRONTEND, "data", "settings.json")
+        _settings_existed = os.path.exists(sfile)
+        _settings_original = None
+        if _settings_existed:
+            with open(sfile, "rb") as fh:
+                _settings_original = fh.read()
+        stack.callback(_restore_settings, sfile, _settings_existed, _settings_original)
 
-    engine_port = _free_port()
-    engine_env = dict(os.environ, ORWELL_DATA_DIR=tempfile.mkdtemp(prefix="orwell-fmdr-engine-"),
-                      ORWELL_ENGINE_PORT=str(engine_port))
-    engine = subprocess.Popen(["node", dist], cwd=REPO, env=engine_env,
-                              stdout=open("/tmp/fmdr-engine.log", "w"), stderr=subprocess.STDOUT)
-    ebase = f"http://127.0.0.1:{engine_port}"
+        engine_data = tempfile.mkdtemp(prefix="orwell-fmdr-engine-")
+        stack.callback(shutil.rmtree, engine_data, ignore_errors=True)
+        fe_db_dir = tempfile.mkdtemp(prefix="orwell-fmdr-fe-")
+        stack.callback(shutil.rmtree, fe_db_dir, ignore_errors=True)
+        fe_data = tempfile.mkdtemp(prefix="orwell-fmdr-data-")
+        stack.callback(shutil.rmtree, fe_data, ignore_errors=True)
 
-    fe_port = _free_port()
-    fe_env = dict(
-        os.environ,
-        ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
-        # The SSE/poll fallback is the transport casting/pre-game uses (WS falls back
-        # `pregame-not-live`) — and it is where the self-echo double lived. Pin it.
-        ORWELL_WS_TRANSPORT="0",
-        ORWELL_ENGINE_MCP_URL=ebase,
-        PLAYWRIGHT_BROWSERS_PATH=os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"),
-        DATABASE_URL="sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-fmdr-fe-"), "app.db"),
-        ORWELL_DATA_DIR_FE=tempfile.mkdtemp(prefix="orwell-fmdr-data-"),
-    )
-    fe = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app",
-                           "--host", "127.0.0.1", "--port", str(fe_port)],
-                          cwd=FRONTEND, env=fe_env,
-                          stdout=open("/tmp/fmdr-fe.log", "w"), stderr=subprocess.STDOUT)
-    fbase = f"http://127.0.0.1:{fe_port}"
+        eng_log = open("/tmp/fmdr-engine.log", "w")
+        stack.callback(eng_log.close)
+        fe_log = open("/tmp/fmdr-fe.log", "w")
+        stack.callback(fe_log.close)
 
-    sfile = os.path.join(FRONTEND, "data", "settings.json")
-    prior_settings = None
-    try:
+        stub_port = _free_port()
+        stub = ThreadingHTTPServer(("127.0.0.1", stub_port), _StubHandler)
+        stack.callback(stub.shutdown)
+        threading.Thread(target=stub.serve_forever, daemon=True).start()
+
+        engine_port = _free_port()
+        engine_env = dict(os.environ, ORWELL_DATA_DIR=engine_data,
+                          ORWELL_ENGINE_PORT=str(engine_port))
+        engine = subprocess.Popen(["node", dist], cwd=REPO, env=engine_env,
+                                  stdout=eng_log, stderr=subprocess.STDOUT)
+        stack.callback(_stop_proc, engine)
+        ebase = f"http://127.0.0.1:{engine_port}"
+
+        fe_port = _free_port()
+        fe_env = dict(
+            os.environ,
+            ORWELL_GAME_BUILD="1", AUTH_ENABLED="false", LOCALHOST_BYPASS="true",
+            # The SSE/poll fallback is the transport casting/pre-game uses (WS falls back
+            # `pregame-not-live`) — and it is where the self-echo double lived. Pin it.
+            ORWELL_WS_TRANSPORT="0",
+            ORWELL_ENGINE_MCP_URL=ebase,
+            PLAYWRIGHT_BROWSERS_PATH=os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/opt/pw-browsers"),
+            DATABASE_URL="sqlite:///" + os.path.join(fe_db_dir, "app.db"),
+            ORWELL_DATA_DIR_FE=fe_data,
+        )
+        fe = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app",
+                               "--host", "127.0.0.1", "--port", str(fe_port)],
+                              cwd=FRONTEND, env=fe_env,
+                              stdout=fe_log, stderr=subprocess.STDOUT)
+        stack.callback(_stop_proc, fe)
+        fbase = f"http://127.0.0.1:{fe_port}"
+
         _wait_http(ebase + "/player/tools", engine, "engine", 60)
         _wait_http(fbase + "/openapi.json", fe, "front-end", 120)
 
@@ -203,7 +261,6 @@ def _stack():
         if os.path.exists(sfile):
             with open(sfile, encoding="utf-8") as fh:
                 cur = json.load(fh)
-        prior_settings = dict(cur)  # restored on teardown — the file is SHARED checkout state
         cur.update({"default_model": "stub-narrator", "default_endpoint_id": ep["id"]})
         tmp = sfile + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -224,22 +281,6 @@ def _stack():
             raise RuntimeError(f"default-chat never resolved the stub model: {resolved}")
 
         yield {"fe": fbase, "endpoint_id": ep["id"]}
-    finally:
-        if prior_settings is not None:
-            try:
-                tmp2 = sfile + ".tmp"
-                with open(tmp2, "w", encoding="utf-8") as fh:
-                    json.dump(prior_settings, fh, indent=2)
-                os.replace(tmp2, sfile)
-            except Exception:
-                pass
-        for p in (fe, engine):
-            p.terminate()
-            try:
-                p.wait(timeout=10)
-            except Exception:
-                p.kill()
-        stub.shutdown()
 
 
 # Installed once in the page: a MutationObserver + a tight poll that record, at EVERY frame, the
@@ -311,11 +352,31 @@ def test_first_message_renders_exactly_once_no_transient_double(_stack):
             pytest.skip(f"chromium unavailable: {e}")
         page = browser.new_page()
         page.goto(fbase + "/", wait_until="load", timeout=30000)
-        page.wait_for_timeout(1200)
-        # Open the fresh session (a real first-open on it).
-        page.evaluate(
-            "(sid) => window.sessionModule && window.sessionModule.selectSession"
-            " && window.sessionModule.selectSession(sid)", sess)
+        # Wait for sessionModule before selecting — a bare `&&`-guarded evaluate is a silent NO-OP if the
+        # module graph hasn't loaded yet, which would let the test observe the WRONG session and
+        # FALSE-PASS (defeating the gate). The API-created row is not in the CLIENT's session list until
+        # a loadSessions(), so selectSession would no-op against an unknown id — load first.
+        page.wait_for_function(
+            "() => !!(window.sessionModule && window.sessionModule.loadSessions"
+            " && window.sessionModule.selectSession && window.sessionModule.getCurrentSessionId)",
+            timeout=15000)
+        page.evaluate("async () => { try { await window.sessionModule.loadSessions(); } catch (_) {} }")
+        # Select, then hard-ASSERT the switch landed. SELF-HEALING: (re-)invoke selectSession every poll
+        # until getCurrentSessionId is `sess`, so a call that lands before the list finished loading
+        # simply retries (robust against a slow boot) instead of timing out for an unrelated reason.
+        page.wait_for_function(
+            "(sid) => {"
+            "  const sm = window.sessionModule;"
+            "  if (!sm || !sm.getCurrentSessionId || !sm.selectSession) return false;"
+            "  if (sm.getCurrentSessionId() === sid) return true;"
+            "  try { sm.selectSession(sid); } catch (_) {}"
+            "  return false;"
+            "}",
+            arg=sess, timeout=25000)
+        active = page.evaluate("() => window.sessionModule.getCurrentSessionId()")
+        assert active == sess, (
+            f"failed to switch to the fresh session — active is {active!r}, expected {sess!r}; "
+            "the gate would observe the wrong session and FALSE-PASS")
         # Let the module graph, the sessionSync SSE subscription, and init fully settle so the
         # first send races the SSE exactly as a real first-open does.
         page.wait_for_timeout(3800)
