@@ -373,10 +373,10 @@ def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
         # positionally binds + floors the rest) instead of discarding the whole proposal.
         obj = _salvage_truncated_npcs(text)
         if obj is not None:
+            _n = len(obj.get("npcs") or [])
             logger.warning(
-                "[cast-genesis] reply was truncated mid-JSON — salvaged %d complete leading "
-                "houseguest entr%s (the engine floors the rest)",
-                len(obj.get("npcs") or []), "y" if len(obj.get("npcs") or []) == 1 else "ies")
+                f"[cast-genesis] reply was truncated mid-JSON — salvaged {_n} complete leading "
+                f"houseguest entr{'y' if _n == 1 else 'ies'} (the engine floors the rest)")
     if obj is None:
         return {}
     npcs_out: list = []

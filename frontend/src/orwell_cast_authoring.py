@@ -1104,8 +1104,8 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
         if finish == "length" and _max_tokens < _LENGTH_RETRY_MAX_TOKENS:
             retry_cap = min(_max_tokens * 2, _LENGTH_RETRY_MAX_TOKENS)
             logger.warning(
-                "[cast-authoring] completion hit the output cap (finish_reason=length at "
-                "max_tokens=%s) — retrying ONCE at a doubled cap %s", _max_tokens, retry_cap)
+                f"[cast-authoring] completion hit the output cap (finish_reason=length at "
+                f"max_tokens={_max_tokens}) — retrying ONCE at a doubled cap {retry_cap}")
             retry_text, _retry_finish = await _once(messages, retry_cap)
             if retry_text:
                 return retry_text
