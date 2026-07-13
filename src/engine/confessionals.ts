@@ -463,12 +463,20 @@ export function selectRecentForConfessional(
   // confessor's OWN confessionals — a confessional reacting to a prior confessional is self-referential
   // noise (and we never re-voice another confessional's content). `idx` preserves the append order so
   // recency is the original log position, not the post-filter position.
-  const witnessed = events
-    .map((ev, idx) => ({ ev, idx }))
-    .filter(({ ev }) => ev.witnessSet.includes(npc) && ev.type !== "confessional");
-  if (witnessed.length === 0) return [];
-  // Consider only the most-recent `window` events the confessor witnessed, then rank.
-  const recent = witnessed.slice(-window);
+  //
+  // BOUNDED SCAN (F-EN-2): the only events we rank are the LAST `window` the confessor witnessed, so we
+  // walk the append-only log from the TAIL and stop as soon as we have `window` of them — rather than
+  // map+filtering the whole, ever-growing log every tick (an O(events) per-tick, O(events²)/season cost).
+  // In the common case (the confessor witnessed most of the recent house events) this scans only ~`window`
+  // events from the end. Byte-identical to `events.filter(witnessed).slice(-window)`: same elements, same
+  // original `idx`, same ascending order — so the ranking + result is unchanged.
+  const recent: { ev: GameEvent; idx: number }[] = [];
+  for (let idx = events.length - 1; idx >= 0 && recent.length < window; idx--) {
+    const ev = events[idx]!;
+    if (ev.witnessSet.includes(npc) && ev.type !== "confessional") recent.push({ ev, idx });
+  }
+  if (recent.length === 0) return [];
+  recent.reverse(); // tail-first collection → restore ascending (append) order, matching `.slice(-window)`
   const ranked = recent
     .map(({ ev, idx }) => {
       const cls = salienceClassOf(ev);

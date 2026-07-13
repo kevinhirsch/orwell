@@ -934,9 +934,18 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
   if (trigger !== "audit" && ids.length > 0) {
     const day = dayOfWeek(core.phase);
     const stamp = day === null ? `Week ${core.week}` : `Week ${core.week}, day ${day}`;
-    const alreadyToday = sandbox.engine.events
-      .query({ type: "house-event" })
-      .some((e) => e.content.startsWith(`${stamp}:`));
+    // BOUNDED SCAN (F-EN-2): "has today's ambient headline already been recorded?" — `.some()` over the
+    // house-events. We walk the append-only log from the TAIL and short-circuit on the first match instead
+    // of `query({type})` materializing a full O(events) filtered array of every house-event each tick. The
+    // current-day stamp (if present) sits in the recent tail, so the common ALREADY-recorded case hits
+    // immediately. Byte-identical to `query({type:"house-event"}).some(startsWith(stamp+":"))` (same
+    // predicate; iteration order is irrelevant to a boolean), with no per-tick filtered-array allocation.
+    const events = sandbox.engine.events.queryAll();
+    let alreadyToday = false;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === "house-event" && e.content.startsWith(`${stamp}:`)) { alreadyToday = true; break; }
+    }
     if (!alreadyToday) {
       const ambientRng = new SeededRandom(
         hashSeed(`${core.seed ?? ""}:house-event:${core.week}:${core.phase}:${before}`),
@@ -1014,11 +1023,8 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
 }
 
 function playerSweep(sandbox: UserSandbox): string {
-  const p = sandbox.player;
-  return [
-    p.produce("player-visible log"),
-    p.produce("scene narration"),
-    JSON.stringify(p.assembleNarrationContext("scene")),
-    JSON.stringify(p.getVisibleState()),
-  ].join("\n---\n");
+  // Every player-facing rendering that could carry event/knowledge content, built from a SINGLE
+  // visible projection (byte-identical to the four independent renderings, one O(events) scan not
+  // four). The exact surface set + string forms are unchanged, so the vault-leak guarantee holds.
+  return sandbox.player.vaultLeakSweep();
 }
