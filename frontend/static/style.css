@@ -9267,26 +9267,41 @@ body.hide-thinking .thinking-section { display: none !important; }
 .agent-thread-node + .agent-thread-node {
   margin-top: 2px;
 }
+/* The timeline dot is the SINGLE per-node state marker (the separate ▶/✓ header glyph
+   was removed — it doubled the dot). DONE/default = a solid FILLED dot; RUNNING = a
+   HOLLOW pulsing ring that FILLS on completion (the classic "in-progress → done" read on
+   a connecting timeline). The fill/ring encodes state, so the distinction survives even
+   when the pulse is stripped for reduced motion. */
 .agent-thread-dot {
   position: absolute;
-  left: -20px;
+  /* -20.5px (not -20) centres the 9px marker DEAD-CENTRE on the single ::before rail:
+     the node's positioning box starts at the thread's 22px padding-left, the rail sits at
+     left:5px width:2px (centre x=6), and a 9px dot needs its left at x=1.5 for centre x=6 —
+     an odd-width dot can't centre on an integer x from an integer offset, hence the .5px. */
+  left: -20.5px;
   top: 10px;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
+  box-sizing: border-box;
   border-radius: 50%;
   background: var(--red);
-  border: 2px solid var(--bg);
+  /* a bg ring lifts the marker off the connector line behind it */
+  box-shadow: 0 0 0 2px var(--bg);
   z-index: 1;
+  transition: background 0.22s ease, box-shadow 0.22s ease;
 }
 .agent-thread-node.running .agent-thread-dot {
-  background: var(--red);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 25%, transparent);
+  /* hollow: the chat bg shows through the center, a red rim reads "not yet filled" */
+  background: var(--bg);
+  box-shadow: 0 0 0 2px var(--red),
+              0 0 0 4px color-mix(in srgb, var(--red) 22%, transparent);
   animation: thread-pulse 1.5s ease-in-out infinite;
   top: 10px;
 }
 @keyframes thread-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 20%, transparent); }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 10%, transparent); }
+  /* keep the solid red rim; breathe only the soft outer halo (hollow-ring look) */
+  0%, 100% { box-shadow: 0 0 0 2px var(--red), 0 0 0 3px color-mix(in srgb, var(--red) 20%, transparent); }
+  50% { box-shadow: 0 0 0 2px var(--red), 0 0 0 6px color-mix(in srgb, var(--red) 8%, transparent); }
 }
 
 /* TRANS-2 (#627): DECORATIVE infinite loops (the agent-thread running pulse — the
@@ -9350,13 +9365,8 @@ body.hide-thinking .thinking-section { display: none !important; }
 .agent-thread-node--flat > .agent-thread-header:hover {
   color: color-mix(in srgb, var(--fg) 70%, transparent);
 }
-.agent-thread-icon {
-  font-size: 0.9em;
-  color: var(--red);
-}
-.agent-thread-node.error .agent-thread-icon {
-  color: var(--color-error);
-}
+/* (the .agent-thread-icon glyph was removed — the timeline dot is the single state
+   marker; run/done/error read off .agent-thread-dot's fill + color.) */
 .agent-thread-tool {
   font-weight: 600;
   color: var(--red);
@@ -9439,7 +9449,9 @@ body.hide-thinking .thinking-section { display: none !important; }
     font-size: 0.8em;
   }
   .agent-thread-dot {
-    left: -16px;
+    /* mobile: thread padding-left is 18px here, so -16.5px keeps the 9px dot dead-centre
+       on the rail (centre x=6), matching the desktop -20.5px tune. */
+    left: -16.5px;
     top: 10px;
   }
 }

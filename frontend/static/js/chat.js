@@ -512,10 +512,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         if (node._waveInterval) { clearInterval(node._waveInterval); node._waveInterval = null; }
         if (node._elapsedTicker) { clearInterval(node._elapsedTicker); node._elapsedTicker = null; }
         node.classList.remove('running');
+        // The timeline dot is the SINGLE state marker (no separate glyph): dropping
+        // `.running` settles it to the solid done fill, and the "stopped" status below
+        // labels the halt.
         const wave = node.querySelector('.agent-thread-wave');
         if (wave) wave.textContent = '';
-        const icon = node.querySelector('.agent-thread-icon');
-        if (icon) icon.textContent = '\u25A0'; // stop square
         const statusEl = node.querySelector('.agent-thread-status');
         if (!statusEl) {
           const header = node.querySelector('.agent-thread-header');
@@ -2714,7 +2715,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 const node = document.createElement('div')
                 node.className = 'agent-thread-node running';
                 const cmdHtml = cmd ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
-                node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">\u25B6</span><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
+                // ONE state marker per node: the timeline dot is the single state
+                // glyph (a hollow pulsing ring while running \u2192 a solid fill on done).
+                // The old \u25B6/\u2713 icon doubled the dot with a second round mark.
+                node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-tool">${esc(toolLabel)}</span><span class="agent-thread-wave">▁▂▃</span></div><div class="agent-thread-content">${cmdHtml}</div>`;
                 // Expand/collapse via delegated click handler (init at module bottom).
                 threadWrap.appendChild(node);
                 // ADR 0011 — cap the rail (backstop; a normal turn never hits it). Keep the most
@@ -2750,10 +2754,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   if (!el2) {
                     el2 = document.createElement('span');
                     el2.className = 'agent-thread-elapsed';
-                    // Sits on the LEFT, right after the icon.
-                    const icon = hdr2.querySelector('.agent-thread-icon');
-                    if (icon && icon.nextSibling) hdr2.insertBefore(el2, icon.nextSibling);
-                    else hdr2.appendChild(el2);
+                    // Sits at the LEFT of the header (the icon glyph was removed — the
+                    // timeline dot is the state marker now), before the tool label.
+                    hdr2.insertBefore(el2, hdr2.firstChild);
                   }
                   const s = (Date.now() - node._startTime) / 1000;
                   // Hundredths so it visibly counts sub-second (1.00, 1.05, …).
@@ -2901,7 +2904,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   // silent state flip. `ow-ceremony-reveal` (style.css) gives the header a brief
                   // staged entrance; reduced-motion strips it to the same instant swap as before.
                   currentToolBubble.className = 'agent-thread-node' + (ok ? '' : ' error') + (_hasExpand ? '' : ' agent-thread-node--flat') + (_wasOpen ? ' open' : '') + (_outcome ? ' ow-ceremony-reveal ow-slate-outcome' : '');
-                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
+                  currentToolBubble.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-tool">${esc(_toolText)}</span>${_statusHtml}${_chevron2}</div>${_contentDiv2}`;
                   if (_outcome) {
                     const _revealHeader = currentToolBubble.querySelector('.agent-thread-header');
                     const _clearReveal = () => currentToolBubble.classList.remove('ow-ceremony-reveal');
