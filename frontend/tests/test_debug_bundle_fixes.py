@@ -298,6 +298,113 @@ def test_debug_bundle_vault_optin_fail_soft(monkeypatch):
     assert "error" in bundle["producerVault"]
 
 
+# ── The two-export ruling (owner, 2026-07-13): ONE assembler, flavors differ ONLY in ──
+# ── the Vault; the unsealed file is self-identifying; redaction applies to BOTH.      ──
+
+
+def test_unsealed_export_is_self_identifying(monkeypatch, quiet_bundle):
+    """The unsealed export announces itself: `bundle: orwell-debug-unsealed`, the
+    _SPOILERS banner, a meta.sections producerVault row marked present/unsealed, and an
+    `unsealed` filename — so a casually-shared file can never masquerade as Vault-free."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
+    assert r.status_code == 200
+    bundle = json.loads(r.content)
+    assert bundle["bundle"] == "orwell-debug-unsealed"
+    assert "_SPOILERS" in bundle
+    assert bundle["meta"]["sections"]["producerVault"]["present"] is True
+    assert "orwell-debug-bundle-unsealed-" in r.headers.get("content-disposition", "")
+    # …while the STANDARD export keeps the plain name + a closed producerVault row.
+    r2 = client.get("/api/admin/debug-bundle")
+    b2 = json.loads(r2.content)
+    assert b2["bundle"] == "orwell-debug"
+    assert b2["meta"]["sections"]["producerVault"]["present"] is False
+    assert "unsealed" not in r2.headers.get("content-disposition", "")
+
+
+def test_standard_and_unsealed_exports_differ_only_in_the_vault(monkeypatch, quiet_bundle):
+    """(c) PARITY — one assembler, no drift: the two flavors carry the IDENTICAL non-Vault
+    section set; the unsealed export adds EXACTLY {_SPOILERS, producerVault} (and flips
+    the self-identifying `bundle` name + the meta producerVault row)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    standard = json.loads(client.get("/api/admin/debug-bundle").content)
+    unsealed = json.loads(
+        client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS).content)
+    assert set(unsealed) - set(standard) == {"_SPOILERS", "producerVault"}
+    assert set(standard) - set(unsealed) == set()
+    # The same section ROWS exist in both meta indexes (no drift between flavors).
+    assert set(standard["meta"]["sections"]) == set(unsealed["meta"]["sections"])
+    # Every shared non-Vault section carries the same schema/shape in both flavors.
+    assert standard["schema"] == unsealed["schema"] == 3
+    for key in set(standard) - {"bundle", "generatedAt", "meta"}:
+        assert type(standard[key]) is type(unsealed[key]), f"flavor drift in section: {key}"
+
+
+def test_standard_export_never_touches_the_vault(monkeypatch, quiet_bundle):
+    """(b, structural) The STANDARD export must never even CALL the sanctioned unseal —
+    the Vault-free guarantee is structural, not a matter of what happened to serialize."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    calls = {"n": 0}
+
+    async def counting_producer_vault(user=None):
+        calls["n"] += 1
+        return {"hiddenStory": [{"type": "scheme", "content": _VAULT_SENTINEL}]}
+
+    import importlib as _il
+    _oe = _il.import_module("src.orwell_engine")
+    monkeypatch.setattr(_oe, "producer_vault", counting_producer_vault)
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle")
+    assert r.status_code == 200
+    assert calls["n"] == 0, "the standard export must never invoke the producerVault unseal"
+    assert _VAULT_SENTINEL not in r.text
+    # The unsealed export invokes it exactly once.
+    r2 = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
+    assert r2.status_code == 200 and calls["n"] == 1
+    assert _VAULT_SENTINEL in r2.text
+
+
+def test_unsealed_export_still_redacts_credentials(monkeypatch, quiet_bundle):
+    """Vault ≠ credentials: the unsealed export reveals GAME secrets, but a seeded api-key
+    shape (e.g. pasted into an ops log line that rides a section) is still scrubbed."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    secret = "sk-UNSEALED-EXPORT-SEEDED-0123456789"
+    import logging
+    logging.getLogger("unsealed-redaction-test").warning("leaked credential %s", secret)
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
+    assert r.status_code == 200
+    assert _VAULT_SENTINEL in r.text            # the Vault content IS revealed…
+    assert secret not in r.text                 # …the credential shape is NOT
+
+
+def test_unsealed_export_keeps_the_vaults_own_secret_keys(monkeypatch, quiet_bundle):
+    """The credential KEY-redaction must not eat the Vault's own game content: a
+    producerVault field literally named `secrets` (hidden character attributes) survives
+    the unseal — only credential STRING shapes are scrubbed there."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+
+    async def vault_with_secret_keys(user=None):
+        return {"hiddenStory": [{"type": "scheme", "content": _VAULT_SENTINEL}],
+                "cast": [{"name": "NPC", "secrets": ["a hidden past"],
+                          "secretPlan": "backdoor the comp beast",
+                          "trueGoals": ["win"], "hidden": {"threat": 0.9}}]}
+
+    import importlib as _il
+    _oe = _il.import_module("src.orwell_engine")
+    monkeypatch.setattr(_oe, "producer_vault", vault_with_secret_keys)
+    client = TestClient(_vault_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/debug-bundle?vault=1", headers=_ADMIN_HDRS)
+    bundle = json.loads(r.content)
+    assert bundle["producerVault"]["cast"][0]["secrets"] == ["a hidden past"]
+    # A secret-SHAPED key with a STRING value would be eaten by the credential key-
+    # redaction — the Vault section must apply only the credential STRING scrub.
+    assert bundle["producerVault"]["cast"][0]["secretPlan"] == "backdoor the comp beast"
+    assert bundle["producerVault"]["cast"][0]["hidden"]["threat"] == 0.9
+
+
 def test_status_page_has_separate_spoiler_bundle_affordance(monkeypatch):
     # The fallback status page exposes a SEPARATE, explicitly-labelled spoiler download
     # (hitting ?vault=1) alongside the plain Vault-free bundle link.

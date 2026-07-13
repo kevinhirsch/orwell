@@ -279,6 +279,13 @@ def reset_attempts(user) -> None:
     for k in [t for t in _gaveup_logged if t[0] == key]:
         _gaveup_logged.discard(k)
 
+
+def attempts_spent(user) -> dict:
+    """Per-houseguest authoring LLM calls spent this season (admin/debug-bundle visibility).
+    A copy — callers can never mutate the ledger through it. Vault-free: ids + counts only."""
+    return dict(_attempt_ledger.get(_safe_user(user), {}))
+
+
 # The keys the engine's recordCastProfile accepts (everything else is dropped before write-back).
 # NOTE: `dayOnePerception` is INTENTIONALLY NOT authored here (anti-sycophancy) — the engine owns the
 # seeded, balanced Day-1 read. We never send it, so the authoring path carries zero player coupling.
@@ -1527,6 +1534,16 @@ def house_entry_gate_status(user: Optional[str]) -> Optional[dict]:
     """The current house-entry HOLD/refusal marker for this user (the status/state overlay + the
     health surface + tests), or None when entry is not being held."""
     return _HOUSE_ENTRY_GATE_BLOCKS.get(_safe_user(user))
+
+
+def house_ready_watch_active(user: Optional[str]) -> bool:
+    """Whether a background house-ready gate-clear WATCH is currently armed for this user
+    (admin/debug-bundle visibility). Vault-free: a single boolean."""
+    try:
+        t = _HOUSE_READY_WATCHES.get(_safe_user(user))
+        return t is not None and not t.done()
+    except Exception:
+        return False
 
 
 def kickoff_house_ready_watch(owner: Optional[str],
