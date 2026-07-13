@@ -1424,6 +1424,11 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     generated = 0
     skipped = 0
     newly_shown = []  # (houseguestId, ref) for beat recording
+    # Ids the pre-pass already APPLIED + counted in `generated` (only ever the player). The main
+    # loop below must not re-count these: the player rides a PROMPT-LESS entry, so it would fall
+    # into the `not prompt` skip branch and double-count the one slot (generated=1 AND skipped=1
+    # for total=1 — CodeRabbit #1564). Populated only on the pre-pass's write+count path.
+    prepass_applied: set = set()
 
     # Player-portrait pre-pass (G26/G27): a player-chosen headshot needs NO provider — apply it
     # BEFORE the availability gate, so it works even with no image model. Priority: the finalized
@@ -1453,6 +1458,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 _write_portrait(user, str(hid), chosen, str(entry.get("name") or ""), source="upload")
                 log_attempt(str(hid), True, None, 0)
                 generated += 1
+                prepass_applied.add(_safe_id(str(hid)))  # counted here — the main loop must not re-count it
                 newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
             except Exception as e:
                 logger.info("[portraits] failed to persist chosen headshot: %s", e)
@@ -1501,6 +1507,11 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
         hid = entry.get("houseguestId") or entry.get("id")
         prompt = entry.get("prompt")
         name = entry.get("name") or ""
+        # The player pre-pass already applied + counted this id (a chosen headshot) — skip WITHOUT
+        # counting `skipped`, else the one player slot is double-counted (it is prompt-less, so it
+        # would otherwise fall into the `not prompt` branch below). CodeRabbit #1564.
+        if hid and _safe_id(str(hid)) in prepass_applied:
+            continue
         if not hid or not prompt:
             skipped += 1
             continue

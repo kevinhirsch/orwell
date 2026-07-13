@@ -127,9 +127,13 @@ def test_backfill_never_fetches_or_logs_no_prompt_for_the_player(tmp_portraits, 
 
 def test_backfill_applies_the_players_chosen_headshot_without_a_prompt(tmp_portraits, monkeypatch):
     """An explicit player backfill (the manual lever / authored re-shoot seam) still lands the
-    CHOSEN headshot — through generate_and_store's pre-pass, with zero prompt fetches."""
+    CHOSEN headshot — through generate_and_store's pre-pass, with zero prompt fetches. And with a
+    provider AVAILABLE (the main loop runs, not the no-provider early-return), the COMPLETE summary
+    counts the player exactly once — no double-count between the pre-pass and the main loop
+    (CodeRabbit #1564: the prompt-less player entry must not fall into the `not prompt` skip branch
+    after the pre-pass already counted it in `generated`)."""
     _stub_gate(monkeypatch, False)
-    _stub_provider(monkeypatch, True)
+    _stub_provider(monkeypatch, True)  # provider ON ⇒ the main loop runs past the pre-pass
     fetched = _stub_prompts(monkeypatch)
     _stub_generate(monkeypatch)
     orwell_portraits.set_user_avatar("u", b"\x89PNG-my-face")
@@ -137,9 +141,24 @@ def test_backfill_applies_the_players_chosen_headshot_without_a_prompt(tmp_portr
     summary = _run(orwell_portraits.backfill_missing(["player"], "u"))
 
     assert fetched == []
-    assert summary["generated"] == 1
+    # The COMPLETE summary — generated + skipped must sum to total (the double-count bug returned
+    # {generated:1, skipped:1, total:1}, sum 2 > total 1).
+    assert summary == {"generated": 1, "skipped": 0, "total": 1}
     assert orwell_portraits.portrait_file("u", "player").read_bytes() == b"\x89PNG-my-face"
     assert orwell_portraits.load_manifest("u")["player"]["source"] == "upload"
+
+
+def test_player_headshot_summary_is_correct_with_no_provider(tmp_portraits, monkeypatch):
+    """The no-provider early-return (`skipped: total - generated`) also counts the player exactly
+    once — the chosen headshot lands with NO provider (pre-pass), and the summary stays balanced."""
+    _stub_gate(monkeypatch, False)
+    _stub_provider(monkeypatch, False)  # provider OFF ⇒ the early-return path
+    orwell_portraits.set_user_avatar("u", b"\x89PNG-my-face")
+
+    summary = _run(orwell_portraits.backfill_missing(["player"], "u"))
+
+    assert summary == {"generated": 1, "skipped": 0, "total": 1}
+    assert orwell_portraits.portrait_file("u", "player").read_bytes() == b"\x89PNG-my-face"
 
 
 def test_reconciler_applies_the_avatar_when_the_player_portrait_is_missing(tmp_portraits, monkeypatch):

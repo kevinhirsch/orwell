@@ -220,16 +220,16 @@ export function buildPortraitPrompt(
   if (genderPhrase) subjectParts.push(genderPhrase);
   subjectParts.push(`${age} years old`);
   if (ethnicity) subjectParts.push(`of ${ethnicity} heritage`);
-  // The name LAST, as an identifier. Bundle-audit fix (2026-07-13, owner-ruled): the old form re-stated
-  // the gender cue in a parenthetical after the name ("named X (a woman (feminine presentation))"), but
-  // whenever the phrase LEADS the subject clause (the normal case above) the parenthetical was a literal
-  // duplicate inside one Subject line — prompt noise, not extra signal. DEDUPE: the parenthetical rides
-  // ONLY when its content is not already in the subject clause (i.e. the lead phrase is absent, which a
-  // legacy no-gender card also is — those emit the plain `named X`, byte-identical to before). The name
-  // still never stands as the LONE gender signal: the lead phrase opens the clause, and the #1317
-  // `Build & hair styling:` clause carries per-facet gender cues further down the prompt.
-  const genderCueAlreadyInSubject = genderPhrase !== undefined && subjectParts.includes(genderPhrase);
-  subjectParts.push(genderPhrase && !genderCueAlreadyInSubject ? `named ${name} (${genderPhrase})` : `named ${name}`);
+  // The name LAST, as a plain identifier. Bundle-audit fix (2026-07-13, owner-ruled): the #1140 form
+  // re-stated the gender cue in a parenthetical after the name ("named X (a woman (feminine
+  // presentation))"), but the gender phrase ALWAYS leads the subject clause above (pushed first the
+  // moment `genderPresentation` is set — which the engine carries for the whole cast), so the
+  // parenthetical was a pure in-line duplicate. It rides plain: the lead phrase already flanks the
+  // name from the front, and the #1317 `Build & hair styling:` clause carries per-facet gender cues
+  // further down the prompt. (A legacy no-gender card emits this same plain form — byte-identical to
+  // before the #1140 parenthetical, and to the dedup guard this replaced, which was unreachable
+  // because the lead phrase is unconditionally present whenever it is defined.)
+  subjectParts.push(`named ${name}`);
   // 0063: the observable DEMEANOR colors the EXPRESSION line — the face matches the personality (a blunt
   // person reads guarded, a warm one reads open) instead of every portrait sharing one default affect.
   const expressionLine = demeanor ? `${expression}, ${demeanor}` : expression;
