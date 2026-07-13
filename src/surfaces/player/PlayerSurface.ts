@@ -1,6 +1,7 @@
 import type { EntityId } from "../../domain/ids";
 import type { NarrativePort, NarrationContext, NarrationMode, SceneFidelity } from "../../ports/NarrativePort";
 import { VisibleStateService } from "../../services/VisibleStateService";
+import type { VisibleState } from "../../services/VisibleStateService";
 import { SummaryService } from "../../services/SummaryService";
 import { toPlayerCompetitionView } from "../../domain/competition";
 import type { PlayerCompetitionView } from "../../domain/competition";
@@ -43,9 +44,10 @@ export class PlayerSurface {
     return this.visible.getVisibleStateFor(this.player);
   }
 
-  /** The exact context handed to the narrative layer — provably Vault-free. */
-  assembleNarrationContext(mode: NarrationMode = "scene", fidelity?: SceneFidelity): NarrationContext {
-    const vs = this.visible.getVisibleStateFor(this.player);
+  /** Assemble the narration context from an ALREADY-computed visible projection (no re-fetch).
+   *  Byte-identical to `assembleNarrationContext` — factored out so a caller that already holds the
+   *  projection (the checkpoint's vault-leak sweep) does not pay the O(events) witness scan again. */
+  private contextFrom(vs: VisibleState, mode: NarrationMode, fidelity?: SceneFidelity): NarrationContext {
     return {
       forEntity: this.player,
       mode,
@@ -53,6 +55,11 @@ export class PlayerSurface {
       knowledge: vs.knowledge,
       ...(fidelity ? { fidelity } : {}),
     };
+  }
+
+  /** The exact context handed to the narrative layer — provably Vault-free. */
+  assembleNarrationContext(mode: NarrationMode = "scene", fidelity?: SceneFidelity): NarrationContext {
+    return this.contextFrom(this.visible.getVisibleStateFor(this.player), mode, fidelity);
   }
 
   /**
@@ -111,7 +118,11 @@ export class PlayerSurface {
   }
 
   renderLog(): string {
-    const vs = this.visible.getVisibleStateFor(this.player);
+    return this.renderLogFrom(this.visible.getVisibleStateFor(this.player));
+  }
+
+  /** `renderLog` over an ALREADY-computed projection (no re-fetch) — byte-identical. */
+  private renderLogFrom(vs: VisibleState): string {
     const roster = this.visible.publicRoster();
     // The pathway is internal plumbing (`overheard:offscreen:…`, `told-by:npc:3`) — never echo it
     // raw into a player-facing log; render a friendly source label instead (audit R4-03). Content
@@ -120,6 +131,26 @@ export class PlayerSurface {
       ...vs.visibleEvents.map((e) => `[${e.ts}] ${e.type}: ${e.content}`),
       ...vs.knowledge.map((k) => `[${k.ts}] known (${pathwayLabel(k.pathway, roster)}): ${k.content}`),
     ].join("\n");
+  }
+
+  /**
+   * The Vault-leak sweep surface (feature 0031 checkpoint): EVERY player-facing rendering that could
+   * carry event/knowledge content, concatenated so the orchestrator's fail-closed checkpoint can scan
+   * it for any unsanctioned hidden content. It computes the player's visible projection ONCE and renders
+   * all four surfaces from it — BYTE-IDENTICAL to rendering each independently (the projection is a pure,
+   * deterministic function of the current stores), but paying the O(events) witness-filter + roster scrub
+   * a single time instead of four. The set of surfaces (and their exact string forms) is unchanged, so
+   * the leak-detection guarantee is preserved exactly — no player/admin surface may ever carry Vault data.
+   */
+  vaultLeakSweep(): string {
+    const vs = this.visible.getVisibleStateFor(this.player);
+    const context = this.contextFrom(vs, "scene");
+    return [
+      this.renderLogFrom(vs),          // produce("player-visible log")
+      this.narrator.narrate(context),  // produce("scene narration")
+      JSON.stringify(context),         // assembleNarrationContext("scene")
+      JSON.stringify(vs),              // getVisibleState()
+    ].join("\n---\n");
   }
 
   renderSystemMessage(): string {
