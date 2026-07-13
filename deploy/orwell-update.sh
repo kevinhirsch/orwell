@@ -279,6 +279,43 @@ fi
 # dev-chain — see README "Dependency advisories"). Non-fatal; the next update re-installs it to build.
 npm prune --omit=dev || echo "WARN: npm prune --omit=dev failed (dev deps remain; harmless)"
 
+# ── FINDING #4 — record the rollback breadcrumb HERE, right after the engine build succeeds and
+# BEFORE the FE dep-install + the unit reconcile below (both run under bare `set -e`, and both can
+# fail). PREV_SHA + PREV_DIST are the verified-good prior build — the build guard above already
+# reverted on a build failure — so this is the earliest safe rollback point. Recording it here means
+# a later pip/reconcile failure still leaves an ACCURATE `--rollback` target (the immediately-prior
+# build) instead of a STALE SHA carried over from an older update. Moving it earlier is safe: PREV_FILE
+# only records WHERE to roll back to; nothing in this run consumes it. (data/ survives updates.)
+mkdir -p "${APP_DIR}/data"
+printf '%s' "$PREV_SHA" > "$PREV_FILE"
+
+# ── FINDING #3 — resolve the service USER/GROUP (mirrors orwell-oobe-reset.sh's resolution, ~L368):
+# needed both to drop privileges for the sqlite cruft-cleanup below AND to restore ownership after the
+# root-run build/dep/prefetch/cleanup steps. Prefer an explicit override, then the unit's own User=,
+# then the conventional `orwell`. Layout-agnostic on purpose — a legacy bbai box's files must also be
+# left readable by its unprivileged service.
+SVC_USER="${ORWELL_SERVICE_USER:-}"
+[[ -n "$SVC_USER" ]] || SVC_USER="$(systemctl show -p User --value "$FRONTEND_SVC" 2>/dev/null || true)"
+[[ -n "$SVC_USER" ]] || SVC_USER="$(systemctl show -p User --value "$ENGINE_SVC" 2>/dev/null || true)"
+[[ -n "$SVC_USER" ]] || SVC_USER="orwell"
+SVC_GROUP="$SVC_USER"
+if id "$SVC_USER" >/dev/null 2>&1; then
+  SVC_GROUP="$(id -gn "$SVC_USER" 2>/dev/null || printf '%s' "$SVC_USER")"
+fi
+
+# Run sqlite3 as the service USER, never as root: a root-run write against data/app.db while the FE is
+# up leaves root-owned app.db-wal/-shm sidecars that make the unprivileged FE hit "readonly database" /
+# "database is locked". Drop privileges with runuser when we are root and the user resolves; otherwise
+# (already unprivileged, or no runuser) run in-process. The service user owns the DB in normal
+# operation, and the chown below re-affirms it.
+_svc_sqlite3() {
+  if [[ "$(id -u)" -eq 0 ]] && command -v runuser >/dev/null 2>&1 && id "${SVC_USER:-orwell}" >/dev/null 2>&1; then
+    runuser -u "${SVC_USER:-orwell}" -- sqlite3 "$@"
+  else
+    sqlite3 "$@"
+  fi
+}
+
 # ── data/.env reconcile: opt-in feature flags + the two security keys install.sh writes that the
 #    updater used to miss (ROOT CAUSE of "a built feature / admin is silently OFF on an old box") ───────
 # orwell-install.sh writes a set of deploy defaults into data/.env, but the updater reconciled NONE of
@@ -387,9 +424,8 @@ else
   ./.venv/bin/pip install -q -r requirements.txt
 fi
 
-# Record the rollback point only once the new build is in place.
-mkdir -p "${APP_DIR}/data"
-printf '%s' "$PREV_SHA" > "$PREV_FILE"
+# (The rollback breadcrumb PREV_FILE was recorded right after the engine build succeeded, above —
+#  FINDING #4 — so a pip/reconcile failure here still leaves an accurate `--rollback` target.)
 
 # ── Issue #636 — converge an existing box to the lean game build ───────────────────────────────
 # The FE is vendored from a larger workspace whose browser (Playwright NPX), ChromaDB RAG
@@ -439,14 +475,18 @@ cleanup_inherited_cruft() {
   # 2) Drop any admin-added MCP-server DB rows referencing browser/playwright/memory/rag/email.
   #    Built-in servers are NOT persisted (registered at boot), so this only ever touches a row an
   #    operator added by hand. Guarded: skip silently if there's no sqlite3, no db, or no table.
+  # FINDING #3 — every sqlite3 here goes through _svc_sqlite3 (drop privileges to the service user).
+  # As ROOT while the FE is up, even a SELECT can create/checkpoint root-owned app.db-wal/-shm
+  # sidecars that then make the unprivileged FE hit "readonly database" / "database is locked"; the
+  # DELETE is the same hazard. Running as the DB's owner keeps every sidecar owned by that user.
   local db="${APP_DIR}/data/app.db"
   if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$db" ]]; then
-    if sqlite3 "$db" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_servers' LIMIT 1;" 2>/dev/null | grep -q 1; then
+    if _svc_sqlite3 "$db" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mcp_servers' LIMIT 1;" 2>/dev/null | grep -q 1; then
       local pat="'%browser%' OR lower(name) LIKE '%playwright%' OR lower(command) LIKE '%playwright%' OR lower(args) LIKE '%@playwright/mcp%' OR lower(name) IN ('memory','rag','email') OR lower(id) IN ('memory','rag','email','builtin_browser')"
       local before after
-      before="$(sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
-      sqlite3 "$db" "DELETE FROM mcp_servers WHERE lower(name) LIKE ${pat};" 2>/dev/null || true
-      after="$(sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
+      before="$(_svc_sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
+      _svc_sqlite3 "$db" "DELETE FROM mcp_servers WHERE lower(name) LIKE ${pat};" 2>/dev/null || true
+      after="$(_svc_sqlite3 "$db" "SELECT count(*) FROM mcp_servers;" 2>/dev/null || echo 0)"
       if [[ "$before" =~ ^[0-9]+$ && "$after" =~ ^[0-9]+$ ]] && (( before > after )); then
         echo "    removed $(( before - after )) inherited MCP-server config row(s) from app.db"
       fi
@@ -470,6 +510,23 @@ cleanup_inherited_cruft() {
   return 0
 }
 cleanup_inherited_cruft || true
+
+# ── FINDING #3 — restore data-dir + app-dir OWNERSHIP to the service user. Everything above ran as
+# root (git reset, npm ci/build/prune, pip install, the embedding prefetch, the app.db cruft-cleanup),
+# so freshly-written files (dist/, frontend/.venv, models/, app.db + its sidecars) are now root-owned —
+# and the E85-hardened orwell-* services run UNPRIVILEGED, so a root-owned store makes the engine/FE
+# fail to read or write and the UI "refuses to connect". Mirrors orwell-install.sh's ownership() (its
+# `chown -R orwell:orwell "${APP_DIR}" "${DATA_DIR}"`) and orwell-oobe-reset.sh's post-scrub restore.
+# Runs BEFORE the restart so the services boot able to write. Layout-agnostic + best-effort (a missing
+# service user just skips it, with a warning); idempotent (re-chowning already-correct files is a no-op).
+if [[ "$(id -u)" -eq 0 ]]; then
+  if id "$SVC_USER" >/dev/null 2>&1; then
+    echo "==> restoring ownership to ${SVC_USER}:${SVC_GROUP} (root-run build/deps/cleanup left files root-owned)"
+    chown -R "$SVC_USER":"$SVC_GROUP" "$APP_DIR" "${APP_DIR}/data" 2>/dev/null || true
+  else
+    echo "WARN: service user '${SVC_USER}' not found — skipping ownership restore (set ORWELL_SERVICE_USER)"
+  fi
+fi
 
 
 # Login health panel (ruling #21, 2026-06-11): greet interactive container shells with live
@@ -521,6 +578,51 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 EOF
 else
   rm -f "$FRONTEND_DROPIN"
+fi
+
+# ── FINDING #1 — reconcile the long-running service unit CONTENT + host log policy (mirrors
+# orwell-install.sh's systemd_services() + log_management(), which run on EVERY install). The updater
+# historically installed only the G19b ops-trigger units below and NEVER these — so a box provisioned
+# before the backup timer or the DEPLOY-13/14 log policy existed got NO scheduled backups and NO log
+# rotation, a silent slow disk-fill. Re-install them here, idempotently. Gated on the modern
+# /opt/orwell layout — the SAME guard the ops-unit reconcile below uses — because the shipped units and
+# logrotate config hard-code /opt/orwell; aiming them at a pre-rename /opt/bbai tree would be worse than
+# absent, so a legacy box instead gets ONE warning that it is not fully reconciled.
+BACKUP_TIMER_READY=0
+if [[ "$APP_DIR" == "/opt/orwell" ]]; then
+  # (a) Service + backup unit content — the exact `install -m 644` set from systemd_services() (no
+  #     substitutions, same as install copies them). The engine/frontend units are picked up by the
+  #     daemon-reload + the existing final restart below; the backup TIMER is enabled + restarted after
+  #     the daemon-reload (see below), mirroring systemd_services().
+  echo "==> reconciling engine/frontend/backup unit content from the checkout"
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-engine.service"   /etc/systemd/system/orwell-engine.service
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-frontend.service" /etc/systemd/system/orwell-frontend.service
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-backup.service"   /etc/systemd/system/orwell-backup.service
+  install -m 644 "${APP_DIR}/deploy/systemd/orwell-backup.timer"     /etc/systemd/system/orwell-backup.timer
+  BACKUP_TIMER_READY=1
+
+  # (b) Host log policy — the shipped logrotate config + a journald SystemMaxUse cap (mirrors
+  #     log_management()). A box installed before DEPLOY-13/14 has neither → the five ops-*.log files
+  #     and the two services' journals grow unbounded on the same disk. `install -m 644` overwrites the
+  #     logrotate config idempotently; the journald drop-in is a full-file REWRITE (never an append), so
+  #     a re-run is a no-op. SystemMaxUse is overridable via ORWELL_JOURNAL_MAX_USE, same as install.
+  install -m 644 "${APP_DIR}/deploy/logrotate/orwell" /etc/logrotate.d/orwell
+  ORWELL_JOURNAL_CAP="${ORWELL_JOURNAL_MAX_USE:-300M}"
+  mkdir -p /etc/systemd/journald.conf.d
+  cat > /etc/systemd/journald.conf.d/orwell.conf <<EOF
+# Written by orwell-update.sh (DEPLOY-14, mirrors orwell-install.sh's log_management): cap persistent
+# journal storage so orwell-engine / orwell-frontend's continuous logging can't slow-burn toward disk
+# exhaustion on a small LXC disk. Override by editing this file and: systemctl restart systemd-journald
+[Journal]
+SystemMaxUse=${ORWELL_JOURNAL_CAP}
+EOF
+  systemctl restart systemd-journald 2>/dev/null || true
+else
+  # Legacy /opt/bbai box: ONE warning (the shipped units + logrotate config hard-code /opt/orwell).
+  echo "WARN: app dir is ${APP_DIR} — the shipped systemd/logrotate units hard-code /opt/orwell, so the"
+  echo "      engine/frontend/backup unit content, host log rotation, and the journald cap are NOT"
+  echo "      reconciled on this legacy box. It is not fully converged to a fresh install (no scheduled"
+  echo "      backups, no log rotation) and should be rebuilt on the current layout (deploy/orwell.sh)."
 fi
 
 # G19b — the web-triggered-update seam: reconcile the ops trigger units from the fresh checkout
@@ -622,6 +724,15 @@ fi
 if [[ "$OPS_TLS_READY" -eq 1 ]]; then
   systemctl enable --now orwell-ops-tls.path
   systemctl restart orwell-ops-tls.path
+fi
+# FINDING #1 — arm the scheduled-backup timer now that daemon-reload has picked up the freshly
+# reconciled unit (mirrors systemd_services()): enable the TIMER (never the .service — no [Install]).
+# `enable --now` no-ops when already running; the restart just resets its next-fire countdown and
+# does NOT run an out-of-schedule backup, so a re-run never triggers an extra snapshot. (The
+# engine/frontend units are handled by the existing final restart below.)
+if [[ "$BACKUP_TIMER_READY" -eq 1 ]]; then
+  systemctl enable --now orwell-backup.timer
+  systemctl restart orwell-backup.timer
 fi
 
 # ops-progress lane: terminal OK. Clear the trap before the success write so the EXIT trap can't
