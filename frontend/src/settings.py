@@ -334,11 +334,12 @@ DEFAULT_SETTINGS = {
     "faithfulness_model": "",
     "faithfulness_model_fallbacks": [],
     # Feature 0079/0080 + 0081 — the overseer operator dials (off | shadow | active), persisted via the
-    # admin /api/auth/settings route so the Settings UI controls them. The "off" default here exists ONLY
-    # so the settings allowlist accepts the key; the resolvers (overseer.overseer_mode /
-    # faithfulness.faithfulness_mode) gate the read on is_setting_overridden, so an UNSAVED dial still
-    # falls through to the ORWELL_OVERSEER* / ORWELL_FAITHFULNESS_MODE env fallback.
-    "overseer_mode": "off",
+    # admin /api/auth/settings route so the Settings UI controls them. Owner ruling 2026-07-13: both dials
+    # ship "active" by default. The value here is the Settings-UI DEFAULT ONLY; the resolvers
+    # (overseer.overseer_mode / faithfulness.faithfulness_mode) still gate the read on is_setting_overridden,
+    # so an UNSAVED dial does NOT shadow the resolver's own default — it falls through to the
+    # ORWELL_OVERSEER* / ORWELL_FAITHFULNESS_MODE env fallback and the resolver's active default.
+    "overseer_mode": "active",
     # Verbose overseer/corrector DEBUG telemetry (OPT-IN, default OFF). Spellings: "off"/"0" (no
     # telemetry, byte-identical behavior + no extra work), "log"/"1" (Tier 1 — cheap, log-only:
     # record what NATURALLY happened — which corrector guardrails fired + the model's own tool
@@ -349,7 +350,10 @@ DEFAULT_SETTINGS = {
     # settings allowlist accepts the key — the resolver gates on is_setting_overridden so an
     # UNSAVED dial still falls through to the ORWELL_OVERSEER_DEBUG env fallback.
     "overseer_debug": "off",
-    "faithfulness_mode": "off",
+    # Owner ruling 2026-07-13 — the faithfulness judge ships "active" by default too (its own dial). Same
+    # gate discipline: this is the Settings-UI DEFAULT; faithfulness.faithfulness_mode() honors it only
+    # when explicitly saved (is_setting_overridden), else falls to the env / resolver active default.
+    "faithfulness_mode": "active",
     "teacher_model": "",
     "teacher_enabled": False,
     # Skills: minimum self-reported confidence for an auto-written (LLM-authored)

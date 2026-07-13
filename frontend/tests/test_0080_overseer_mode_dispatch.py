@@ -93,13 +93,14 @@ def test_step4_legacy_env_flag(monkeypatch, tmp_path):
         assert overseer.overseer_mode() == "off", repr(falsey)
 
 
-def test_step5_default_off_everywhere(monkeypatch, tmp_path):
-    """Step 5: nothing set anywhere -> 'off'."""
+def test_step5_default_active_everywhere(monkeypatch, tmp_path):
+    """Step 5: nothing set anywhere -> 'active' (owner ruling 2026-07-13 — the shipped default; was
+    'off'). Only the truly-unset default changed; every explicit step above still wins."""
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
     save_settings({})
     _clear_env(monkeypatch)
-    assert overseer.overseer_mode() == "off"
+    assert overseer.overseer_mode() == "active"
 
 
 def test_mode_is_failsoft_on_broken_settings(monkeypatch):
@@ -116,7 +117,7 @@ def test_mode_is_failsoft_on_broken_settings(monkeypatch):
     monkeypatch.setenv("ORWELL_OVERSEER_MODE", "active")
     assert overseer.overseer_mode() == "active"               # degrades to the 3-state env
     _clear_env(monkeypatch)
-    assert overseer.overseer_mode() == "off"                  # and the floor, still no raise
+    assert overseer.overseer_mode() == "active"               # truly-unset ⇒ the active default, no raise
 
 
 # ── overseer_enabled() back-compat (the load-bearing 0079 shim) ───────────────────
@@ -142,7 +143,7 @@ def test_enabled_honors_legacy_env_flag(monkeypatch, tmp_path):
     monkeypatch.setenv("ORWELL_OVERSEER", "on")
     assert overseer.overseer_enabled() is True
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
-    assert overseer.overseer_enabled() is False
+    assert overseer.overseer_enabled() is True                # truly-unset ⇒ the active default (2026-07-13)
 
 
 # ── dispatch_lever — routing + TRIGGER-ONLY + fail-soft ───────────────────────────

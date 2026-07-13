@@ -178,6 +178,25 @@ def test_ship_gate_create_character_is_not_refused(post_reset_settings, rhino_is
     zg = importlib.import_module("src.orwell_zeitgeist")
     monkeypatch.setattr(zg, "kickoff_capture", lambda *a, **k: None)
 
+    # #1568 — stub the 0116 cast-genesis seam so this ship-gate check NEVER dials openrouter.ai.
+    # do_create_character warms the cast (pre_seed_cast) then AWAITS genesis inline; with the seeded
+    # live OpenRouter endpoint, real genesis resolves that endpoint and makes a network completion
+    # (the CI real-call leak). Stub the pre-warm to a deterministic roster and genesis to a
+    # deterministic (no-_resolve_llm_fn, no-network) success, so the strict pre-finalize gate passes
+    # against the stub — IDENTICAL with or without a network/engine, and regardless of the
+    # enrichment_policy default. The refusal decision under test rides preflight_unwired (real, resolves
+    # the seeded endpoint ⇒ every class wired) + genesis strict_failed (False after a clean run).
+    genesis = importlib.import_module("src.orwell_cast_genesis")
+    genesis.reset_state("rhino")   # no stale strict-failed latch from a sibling test in this worker
+
+    async def fake_pre_seed(*a, **k):
+        return {"warmed": True, "seed": 7, "house": [{"id": "npc:1"}], "portraitPrompts": []}
+
+    async def fake_run_genesis(*a, **k):
+        return {"committed": 1}    # deterministic success — no _resolve_llm_fn, no network
+    monkeypatch.setattr(oe, "pre_seed_cast", fake_pre_seed)
+    monkeypatch.setattr(genesis, "run_genesis", fake_run_genesis)
+
     enrichment.clear_failures("rhino")
     res = run(ti.do_create_character('{"playerName":"P"}', owner="rhino"))
     assert res.get("exit_code") == 0, f"creation must NOT be refused on this store state: {res}"
@@ -489,6 +508,27 @@ def test_utility_resolver_binds_the_configured_default_model(post_reset_settings
     run(fn([{"role": "user", "content": "probe"}]))
     cands = captured.get("candidates") or []
     assert cands and cands[0][1] == "qwen/qwen3.6-flash"
+
+
+def test_faithfulness_judge_resolves_the_cheap_utility_tier_not_the_narrator(
+        post_reset_settings, rhino_is_admin, monkeypatch, run):
+    """Owner ruling 2026-07-13 (0081 faithfulness ships ACTIVE by default): the judge resolves via
+    ``_resolve_llm_fn(prefix='faithfulness', fallbacks_key='faithfulness')``, and with an UNSET
+    faithfulness endpoint/model it must fall THROUGH to the CHEAP utility tier (qwen) on the default
+    endpoint — NEVER the expensive narrator (glm-4.7). This keeps active-by-default faithfulness
+    cheap out of the box (resolve_endpoint chains faithfulness → utility → default)."""
+    _seed_single_openrouter_endpoint(owner=None)
+    ca = importlib.import_module("src.orwell_cast_authoring")
+    captured = _capture_stream(monkeypatch)
+
+    fn = run(ca._resolve_llm_fn("rhino", prefix="faithfulness", fallbacks_key="faithfulness"))
+    assert fn is not None, "the faithfulness judge must resolve on the owner-box store state"
+    run(fn([{"role": "user", "content": "probe"}]))
+    cands = captured.get("candidates") or []
+    assert cands, "the resolved judge fn must dispatch to real candidates"
+    assert cands[0][1] == "qwen/qwen3.6-flash", (
+        "the faithfulness judge must default to the cheap utility tier (qwen), never the narrator; "
+        f"got {cands[0][1]!r}")
 
 
 @pytest.mark.parametrize("prefix", ["task", "faithfulness", "research"])

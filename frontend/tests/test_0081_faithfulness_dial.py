@@ -4,7 +4,7 @@ The faithfulness gate is the overseer's SECOND role and rides its OWN 3-state di
 the 0079/0080 ``overseer_mode()`` (owner ruling O2, 2026-06-24 — its own clock). This lane pins the
 dial's contract at the unit grain, mirroring ``tests/test_0080_active_overseer.py``:
 
-  * three states, default OFF, reversible by flipping the setting;
+  * three states, default ACTIVE (owner ruling 2026-07-13; was OFF), reversible by flipping the setting;
   * settings ``faithfulness_mode`` wins, env ``ORWELL_FAITHFULNESS_MODE`` is the headless fallback;
   * garbage degrades to off (config never crashes the turn);
   * INDEPENDENCE — setting one dial never moves the other (the whole point of "its own dial");
@@ -49,14 +49,15 @@ def test_modes_tuple_is_the_three_states():
 
 # ── 1) default off + per-state resolution + reversibility ──────────────────────────
 
-def test_mode_defaults_to_off_with_nothing_configured(monkeypatch, tmp_path):
-    """A fresh install with no faithfulness mode configured ⇒ off (the judge never runs)."""
+def test_mode_defaults_to_active_with_nothing_configured(monkeypatch, tmp_path):
+    """A fresh install with no faithfulness mode configured ⇒ ACTIVE (owner ruling 2026-07-13 — the
+    judge ships on, using the cheap utility tier; was 'off'). Only the truly-unset default changed."""
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
     _clear_env(monkeypatch)
     save_settings({})
-    assert faithfulness_mode() == "off"
-    assert faithfulness_enabled() is False
+    assert faithfulness_mode() == "active"
+    assert faithfulness_enabled() is True
 
 
 def test_mode_resolves_each_state_from_settings(monkeypatch, tmp_path):
@@ -90,16 +91,17 @@ def test_flipping_the_setting_flips_the_mode_reversibly(monkeypatch, tmp_path):
 
 def test_env_var_is_the_headless_fallback_when_unset(monkeypatch, tmp_path):
     """With nothing in settings the ``ORWELL_FAITHFULNESS_MODE`` env knob decides (the headless
-    fallback); unset ⇒ off."""
+    fallback); truly-unset ⇒ the active default (2026-07-13). An explicit env value still wins,
+    including 'off'."""
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
     save_settings({})  # nothing in settings -> env decides
-    monkeypatch.setenv("ORWELL_FAITHFULNESS_MODE", "active")
-    assert faithfulness_mode() == "active"
+    monkeypatch.setenv("ORWELL_FAITHFULNESS_MODE", "off")     # an explicit off still disables
+    assert faithfulness_mode() == "off"
     monkeypatch.setenv("ORWELL_FAITHFULNESS_MODE", "SHADOW")  # case-insensitive
     assert faithfulness_mode() == "shadow"
     monkeypatch.delenv("ORWELL_FAITHFULNESS_MODE", raising=False)
-    assert faithfulness_mode() == "off"
+    assert faithfulness_mode() == "active"                   # truly-unset ⇒ the active default
 
 
 def test_settings_win_over_env(monkeypatch, tmp_path):
@@ -111,17 +113,18 @@ def test_settings_win_over_env(monkeypatch, tmp_path):
     assert faithfulness_mode() == "off"
 
 
-def test_garbage_values_fall_through_to_off(monkeypatch, tmp_path):
-    """An out-of-set settings value or env value degrades to off — never raises, never a bogus
-    state (config must not crash the turn)."""
+def test_garbage_values_fall_through_to_the_active_default(monkeypatch, tmp_path):
+    """An out-of-set settings value or env value is IGNORED and resolution falls through to the
+    shipped default (now 'active', owner ruling 2026-07-13) — never raises, never a bogus state
+    (config must not crash the turn). An EXPLICIT valid 'off' is still honored (other tests)."""
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
     _clear_env(monkeypatch)
     save_settings({"faithfulness_mode": "frobnicate"})
-    assert faithfulness_mode() == "off"
+    assert faithfulness_mode() == "active"
     save_settings({})
     monkeypatch.setenv("ORWELL_FAITHFULNESS_MODE", "loud")
-    assert faithfulness_mode() == "off"
+    assert faithfulness_mode() == "active"
 
 
 # ── 3) INDEPENDENCE — the two dials never move each other (the point of "its own dial") ──
@@ -149,8 +152,9 @@ def test_faithfulness_dial_is_independent_of_overseer_mode(monkeypatch, tmp_path
 
 
 def test_overseer_dial_unaffected_by_faithfulness(monkeypatch, tmp_path):
-    """Symmetric guard: writing only ``faithfulness_mode`` leaves ``overseer_mode`` at its own
-    resolution (here: absent ⇒ off), and writing only ``overseer_mode`` leaves faithfulness off."""
+    """Symmetric guard: writing only one dial NEVER drags the other to its value — each stays at its
+    OWN resolution. Both now default 'active' (2026-07-13), so we write the OTHER dial to a CONTRAST
+    value ('shadow') and prove the unwritten dial is NOT pulled to it (it holds its active default)."""
     from src.settings import save_settings
     from src.overseer import overseer_mode
     _isolate_settings(monkeypatch, tmp_path)
@@ -158,13 +162,13 @@ def test_overseer_dial_unaffected_by_faithfulness(monkeypatch, tmp_path):
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
     monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
 
-    save_settings({"faithfulness_mode": "active"})
-    assert overseer_mode() == "off"          # overseer absent -> its own default
-    assert faithfulness_mode() == "active"
+    save_settings({"faithfulness_mode": "shadow"})
+    assert overseer_mode() == "active"       # overseer NOT pulled to 'shadow' — its own default
+    assert faithfulness_mode() == "shadow"
 
-    save_settings({"overseer_mode": "active"})
-    assert faithfulness_mode() == "off"      # faithfulness absent -> off
-    assert overseer_mode() == "active"
+    save_settings({"overseer_mode": "shadow"})
+    assert faithfulness_mode() == "active"   # faithfulness NOT pulled to 'shadow' — its own default
+    assert overseer_mode() == "shadow"
 
 
 # ── 4) SOURCE-PIN — the dials + the faithfulness model picker live in Settings (moved off admin) ──

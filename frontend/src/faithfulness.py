@@ -37,9 +37,11 @@ from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 # Feature 0081 — the 3-state faithfulness dial, independent of the 0079/0080 overseer_mode():
-#   'off'    — the judge never runs (default).
+#   'off'    — the judge never runs.
 #   'shadow' — the judge runs on claim-bearing turns and LOGS; it does not correct.
 #   'active' — the judge's verdict drives the diegetic correction (adopt/reframe); LIVE-only.
+#              **DEFAULT** since the owner ruling 2026-07-13 — the judge ships on, using the CHEAP
+#              utility tier by default (see ``_resolve_llm_fn(prefix='faithfulness')``).
 FAITHFULNESS_MODES = ("off", "shadow", "active")
 
 
@@ -50,8 +52,10 @@ def faithfulness_mode() -> str:
     (owner ruling O2 — its own dial, its own clock). Resolution order (the first that yields a value
     wins):
       1. settings ``faithfulness_mode`` — if it is one of :data:`FAITHFULNESS_MODES`;
-      2. else the env ``ORWELL_FAITHFULNESS_MODE`` — if it is one of :data:`FAITHFULNESS_MODES`;
-      3. else ``'off'`` (the deterministic 0065 floor stands).
+      2. else the env ``ORWELL_FAITHFULNESS_MODE`` — if it is one of :data:`FAITHFULNESS_MODES``
+         (an explicit ``off`` here still disables the judge);
+      3. else ``'active'`` — the shipped default (owner ruling 2026-07-13). Only a TRULY-UNSET config
+         reaches here; the deterministic 0065 floor is still the fail-soft floor underneath.
 
     A brand-new role has NO legacy toggle to honor (unlike ``overseer_mode``), so this is the simpler
     sibling. A broken settings read degrades to the env path and NEVER raises into the loop — config
@@ -61,8 +65,9 @@ def faithfulness_mode() -> str:
     try:
         from src.settings import get_setting, is_setting_overridden
         # Only an EXPLICITLY-saved value wins. ``faithfulness_mode`` lives in DEFAULT_SETTINGS purely so
-        # the admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its "off"
-        # default must NOT shadow the env fallback, so honor it only when actually saved.
+        # the admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its DEFAULT
+        # value there (now "active", for the Settings UI) must NOT shadow the env/step-3 resolution, so
+        # honor it only when the operator ACTUALLY saved a value (the is_setting_overridden gate).
         if is_setting_overridden("faithfulness_mode"):
             mode = get_setting("faithfulness_mode", None)
             if isinstance(mode, str) and mode in FAITHFULNESS_MODES:
@@ -73,14 +78,16 @@ def faithfulness_mode() -> str:
     env_mode = os.getenv("ORWELL_FAITHFULNESS_MODE")
     if env_mode is not None and env_mode.strip().lower() in FAITHFULNESS_MODES:
         return env_mode.strip().lower()
-    # 3) the default — the judge never runs.
-    return "off"
+    # 3) the default — ACTIVE (owner ruling 2026-07-13): the judge ships on. Only a truly-unset config
+    #    reaches here; an explicit setting/env value above still wins (including an explicit off).
+    return "active"
 
 
 def faithfulness_enabled() -> bool:
-    """OPT-IN, default OFF. ``True`` iff the faithfulness mode is not ``'off'`` (``'shadow'`` or
-    ``'active'``). Mirrors :func:`src.overseer.overseer_enabled` for symmetry, so callers can gate
-    on a single boolean when they don't care which non-off state is live."""
+    """DEFAULT ACTIVE since the owner ruling 2026-07-13 (was opt-in/default-off). ``True`` iff the
+    faithfulness mode is not ``'off'`` (``'shadow'`` or ``'active'``). Mirrors
+    :func:`src.overseer.overseer_enabled` for symmetry, so callers can gate on a single boolean when
+    they don't care which non-off state is live (an explicit ``off`` still disables)."""
     return faithfulness_mode() != "off"
 
 

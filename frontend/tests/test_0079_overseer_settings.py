@@ -52,11 +52,12 @@ def test_env_is_the_fallback_when_toggle_unset(monkeypatch, tmp_path):
     from src import overseer
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
     save_settings({})                                   # no overseer_enabled key -> env decides
     monkeypatch.setenv("ORWELL_OVERSEER", "on")
     assert overseer.overseer_enabled() is True
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
-    assert overseer.overseer_enabled() is False         # default OFF everywhere
+    assert overseer.overseer_enabled() is True          # default ACTIVE everywhere (owner flip 2026-07-13)
 
 
 def test_overseer_enabled_is_failsoft(monkeypatch):
@@ -67,10 +68,11 @@ def test_overseer_enabled_is_failsoft(monkeypatch):
         raise RuntimeError("settings unreadable")
 
     monkeypatch.setattr(_s, "get_setting", _boom)
+    monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
     monkeypatch.setenv("ORWELL_OVERSEER", "1")
     assert overseer.overseer_enabled() is True          # degrades to env, never raises
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
-    assert overseer.overseer_enabled() is False
+    assert overseer.overseer_enabled() is True          # truly-unset ⇒ the active default (2026-07-13)
 
 
 # ── the admin route reports + persists the toggle (admin-gated) ──────────────────

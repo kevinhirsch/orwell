@@ -5,10 +5,11 @@ This is the TEST lane for 0080. It realizes the .feature INVARIANTS at the unit 
 0080 contract added to ``src/overseer.py`` (the foundation lane), reusing the 0079 primitives
 (``Signals``, ``Verdict``, ``LEVERS``, ``should_assess``, ``DeterministicOverseer``):
 
-  * **3-state mode + default off + reversibility** — ``overseer_mode()`` resolves
+  * **3-state mode + default ACTIVE + reversibility** — ``overseer_mode()`` resolves
     ``off``/``shadow``/``active`` (settings ``overseer_mode`` wins; the legacy ``overseer_enabled``
     toggle / ``ORWELL_OVERSEER`` env map to ``shadow``); flipping the setting flips the mode;
-    default is ``off`` and ``overseer_enabled()`` tracks ``mode != 'off'``.
+    the truly-unset default is ``active`` (owner ruling 2026-07-13) and ``overseer_enabled()`` tracks
+    ``mode != 'off'``.
   * **TRIGGER-ONLY** (the core anti-sycophancy invariant, §7.1) — ``dispatch_lever`` only *invokes*
     the verdict's lever's caller-supplied callable; exactly that lever's spy fires, no other; the
     overseer authors NO outcome (the spy is the only side effect). Driven for every actionable lever.
@@ -77,15 +78,36 @@ def test_actionable_levers_are_a_subset_of_the_fixed_lever_set():
 
 # ── 1) three-state mode + default off + reversibility ─────────────────────────────
 
-def test_mode_defaults_to_off_with_nothing_configured(monkeypatch, tmp_path):
-    """A fresh install with no overseer mode configured ⇒ off (the live loop runs as before)."""
+def test_mode_defaults_to_active_with_nothing_configured(monkeypatch, tmp_path):
+    """A fresh install with no overseer mode configured ⇒ ACTIVE (owner ruling 2026-07-13 — the
+    deterministic-correction overseer ships on; was 'off')."""
     from src.settings import save_settings
     _isolate_settings(monkeypatch, tmp_path)
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
     monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
     save_settings({})                                   # nothing configured
+    assert overseer_mode() == "active"
+    assert overseer_enabled() is True                   # the back-compat shim tracks mode != off
+
+
+def test_default_active_but_explicit_dials_still_override(monkeypatch, tmp_path):
+    """Owner ruling 2026-07-13 in one place: unset ⇒ active, yet every explicit dial still wins —
+    a saved ``overseer_mode`` ('off'/'shadow') and the ``ORWELL_OVERSEER_MODE`` env each override the
+    active default ("anyone who set off/shadow keeps it")."""
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
+    monkeypatch.delenv("ORWELL_OVERSEER_MODE", raising=False)
+    save_settings({})                                   # unset everywhere ⇒ active
+    assert overseer_mode() == "active"
+    for explicit in ("off", "shadow"):                  # a saved setting still wins (both directions)
+        save_settings({"overseer_mode": explicit})
+        assert overseer_mode() == explicit
+    save_settings({})                                   # and the env dial wins over the default
+    monkeypatch.setenv("ORWELL_OVERSEER_MODE", "off")
     assert overseer_mode() == "off"
-    assert overseer_enabled() is False                  # the back-compat shim tracks mode != off
+    monkeypatch.setenv("ORWELL_OVERSEER_MODE", "shadow")
+    assert overseer_mode() == "shadow"
 
 
 def test_mode_resolves_each_state_from_settings(monkeypatch, tmp_path):
@@ -133,7 +155,7 @@ def test_legacy_toggle_and_env_map_to_shadow(monkeypatch, tmp_path):
     monkeypatch.setenv("ORWELL_OVERSEER", "1")
     assert overseer_mode() == "shadow"
     monkeypatch.delenv("ORWELL_OVERSEER", raising=False)
-    assert overseer_mode() == "off"
+    assert overseer_mode() == "active"                  # truly-unset ⇒ the active default (2026-07-13)
 
 
 def test_explicit_overseer_mode_setting_wins_over_legacy_toggle(monkeypatch, tmp_path):

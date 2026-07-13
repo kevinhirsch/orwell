@@ -46,10 +46,13 @@ LEVERS = ("hold", "nudge", "force-advance", "propose-record", "reinject-delta", 
 LEVELS = ("observation", "action", "anomaly", "escalation")
 
 # Feature 0080 — the 3-state runtime-overseer mode (extends 0079's binary toggle):
-#   'off'    — the deterministic floor stands; the loop runs exactly as before (default).
+#   'off'    — the deterministic floor stands; the loop runs exactly as before.
 #   'shadow' — the 0079 behavior: the overseer diagnoses + LOGS, the inline guardrails still act.
 #   'active' — the 0080 behavior: the overseer's verdict DRIVES the correction (LIVE-only; the
-#              deterministic guardrails are the fail-soft floor underneath).
+#              deterministic guardrails are the fail-soft floor underneath). **DEFAULT** since the
+#              owner ruling 2026-07-13 — the deterministic-correction overseer (mark-met / gap-repair
+#              / advance-nudge) is sparse, deterministic-floored, and ships on. (This is NOT the 0081
+#              LLM faithfulness judge, which rides its own `faithfulness_mode()` dial and stays off.)
 OVERSEER_MODES = ("off", "shadow", "active")
 
 # The truthy spellings of the legacy ORWELL_OVERSEER env flag (its presence ⇒ 'shadow').
@@ -65,8 +68,11 @@ def overseer_mode() -> str:
          ``False`` → ``'off'`` (the 0079 toggle still works untouched);
       3. else the env ``ORWELL_OVERSEER_MODE`` — if it is one of :data:`OVERSEER_MODES`;
       4. else the legacy env ``ORWELL_OVERSEER`` — truthy (``1``/``true``/``yes``/``on``) →
-         ``'shadow'``, anything else → ``'off'``;
-      5. else ``'off'``.
+         ``'shadow'``, present-but-non-truthy (``0``/``false``/``off``…) → ``'off'`` (an explicit
+         operator value still wins over the default in BOTH directions);
+      5. else ``'active'`` — the shipped default (owner ruling 2026-07-13): the deterministic-
+         correction overseer is on unless something above explicitly says otherwise. Only a
+         TRULY-UNSET config reaches here.
 
     A broken settings read degrades to the env path (steps 3–4) and NEVER raises into the loop —
     config must never crash the turn."""
@@ -74,8 +80,9 @@ def overseer_mode() -> str:
     try:
         from src.settings import get_setting, is_setting_overridden
         # Only an EXPLICITLY-saved value wins. ``overseer_mode`` lives in DEFAULT_SETTINGS purely so the
-        # admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its "off"
-        # default must NOT shadow the env fallback, so we honor it only when actually saved.
+        # admin /api/auth/settings route (allowlisted to DEFAULT_SETTINGS) can persist it; its DEFAULT
+        # value there (now "active", for the Settings UI) must NOT shadow the env/step-5 resolution, so
+        # we honor it only when the operator ACTUALLY saved a value (the is_setting_overridden gate).
         if is_setting_overridden("overseer_mode"):
             mode = get_setting("overseer_mode", None)
             if isinstance(mode, str) and mode in OVERSEER_MODES:
@@ -89,19 +96,23 @@ def overseer_mode() -> str:
     env_mode = os.getenv("ORWELL_OVERSEER_MODE")
     if env_mode is not None and env_mode.strip().lower() in OVERSEER_MODES:
         return env_mode.strip().lower()
-    # 4) the legacy binary env flag (truthy ⇒ shadow).
+    # 4) the legacy binary env flag: truthy ⇒ shadow; PRESENT-but-non-truthy ⇒ off. An explicit
+    #    ORWELL_OVERSEER value is an operator choice, so it still wins over the step-5 default in BOTH
+    #    directions — a `false`/`0`/`off` keeps the overseer off ("anyone who set off keeps it").
     raw = os.getenv("ORWELL_OVERSEER")
-    if raw is not None and raw.strip().lower() in _TRUTHY:
-        return "shadow"
-    # 5) the default — the deterministic floor stands.
-    return "off"
+    if raw is not None:
+        return "shadow" if raw.strip().lower() in _TRUTHY else "off"
+    # 5) the default — ACTIVE (owner ruling 2026-07-13): ship the deterministic-correction overseer on
+    #    by default. Only a truly-unset config reaches here; every explicit dial above still wins.
+    return "active"
 
 
 def overseer_enabled() -> bool:
-    """Feature 0079 runtime overseer — OPT-IN, default OFF. Back-compat shim over the 0080
-    3-state :func:`overseer_mode`: enabled iff the mode is not ``'off'`` (i.e. ``'shadow'`` or
-    ``'active'``). The admin Settings toggle and the ``ORWELL_OVERSEER`` env fallback still resolve
-    exactly as in 0079 (they flow through :func:`overseer_mode`'s legacy branches). Fail-soft: a
+    """Feature 0079 runtime overseer — DEFAULT ACTIVE since the owner ruling 2026-07-13 (was
+    opt-in/default-off). Back-compat shim over the 0080 3-state :func:`overseer_mode`: enabled iff
+    the mode is not ``'off'`` (i.e. ``'shadow'`` or ``'active'``). The admin Settings dial and the
+    ``ORWELL_OVERSEER`` env fallback still resolve exactly as in 0079 (they flow through
+    :func:`overseer_mode`'s legacy branches, and an explicit ``off`` still disables). Fail-soft: a
     broken settings read degrades to the env var (config must never raise into the loop)."""
     return overseer_mode() != "off"
 
