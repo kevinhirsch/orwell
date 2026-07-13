@@ -279,9 +279,88 @@ fi
 # dev-chain — see README "Dependency advisories"). Non-fatal; the next update re-installs it to build.
 npm prune --omit=dev || echo "WARN: npm prune --omit=dev failed (dev deps remain; harmless)"
 
-# Refresh the pinned embedding model cache (ADR 0004 / E86a) — a no-op when already cached;
-# non-fatal on failure (the engine falls back to deterministic recall and retries at boot).
-echo "==> embedding model prefetch (no-op when cached)"
+# ── data/.env reconcile: opt-in feature flags + the two security keys install.sh writes that the
+#    updater used to miss (ROOT CAUSE of "a built feature / admin is silently OFF on an old box") ───────
+# orwell-install.sh writes a set of deploy defaults into data/.env, but the updater reconciled NONE of
+# them — a box provisioned before any given key was added never got it. Backfill them idempotently,
+# add-if-absent + never-clobber, in ONE atomic rewrite (same mktemp idiom as --set-token; existing
+# content + ordering preserved, new keys append at the end). Three categories:
+#   1. the opt-in FEATURE flags — from the SAME shared source install writes from
+#      (deploy/orwell-env-defaults.sh) so install + update cannot drift. Missing ORWELL_EMBEDDINGS is the
+#      one that got noticed (⇒ DEGRADED deterministic semantic recall — ROOT CAUSE A).
+#   2. ORWELL_ENGINE_MULTIUSER=1 — unset ⇒ the engine routes a missing x-orwell-user header to a shared
+#      "default" sandbox (weakened cross-user isolation, feature 0021). Default 1, matching install.
+#   3. ORWELL_ENGINE_ADMIN_TOKEN — MINTED fresh when absent (never copied from ORWELL_ENGINE_TOKEN: one
+#      bearer must not grant both any-user impersonation AND God Mode — audit E27). A box missing it has
+#      admin/God-Mode fail-closed-disabled; minting restores it, using install.sh's exact openssl idiom.
+# Runs BEFORE the model prefetch below so ORWELL_EMBED_CACHE is settled and the prefetch warms the EXACT
+# dir the engine reads. A box with no data/.env is skipped (the systemd EnvironmentFile is optional `-`).
+# Prefer the freshly-pulled lib in the checkout; fall back to this script's own dir (the pushed /tmp copy
+# carries only the updater, so the checkout copy is the real one).
+ENV_DEFAULTS_LIB="${APP_DIR}/deploy/orwell-env-defaults.sh"
+[[ -r "$ENV_DEFAULTS_LIB" ]] || ENV_DEFAULTS_LIB="${__here}/orwell-env-defaults.sh"
+if [[ -f "$ENV_FILE" && -r "$ENV_DEFAULTS_LIB" ]]; then
+  . "$ENV_DEFAULTS_LIB"
+  RECON_TMP="$(mktemp "${APP_DIR}/data/.env.optin.XXXXXX")"
+  cat "$ENV_FILE" > "$RECON_TMP"                 # preserve all existing content + ordering
+  recon_added=""
+  # Append KEY=VALUE only when KEY is genuinely ABSENT — idempotent (a re-run is a no-op) and it never
+  # clobbers an operator's own value (or an intentional `KEY=0` opt-out). The `if grep` keeps grep's
+  # no-match exit off `set -e`.
+  _env_add_if_absent() {   # $1=key  $2=value
+    if grep -qs "^${1}=" "$ENV_FILE"; then return 0; fi
+    printf '%s=%s\n' "$1" "$2" >> "$RECON_TMP"
+    recon_added="${recon_added} ${1}"
+  }
+  # 1. opt-in feature flags (shared single source) — pass the box's data dir so ORWELL_EMBED_CACHE
+  #    resolves to <data>/models (== the prefetch --cache-dir resolved below).
+  while IFS='=' read -r _key _val; do
+    [[ -n "$_key" ]] || continue
+    _env_add_if_absent "$_key" "$_val"
+  done < <(orwell_optin_env_defaults "${APP_DIR}/data")
+  # 2. multi-user identity (cross-user isolation)
+  _env_add_if_absent "ORWELL_ENGINE_MULTIUSER" "1"
+  # 3. admin/God-Mode secret — MINTED (not defaulted/copied) only when absent, install.sh's exact idiom.
+  if ! grep -qs '^ORWELL_ENGINE_ADMIN_TOKEN=' "$ENV_FILE"; then
+    _admin_secret="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf 'ORWELL_ENGINE_ADMIN_TOKEN=%s\n' "$_admin_secret" >> "$RECON_TMP"
+    recon_added="${recon_added} ORWELL_ENGINE_ADMIN_TOKEN(minted)"
+  fi
+  if [[ -n "$recon_added" ]]; then
+    chmod --reference="$ENV_FILE" "$RECON_TMP" 2>/dev/null || chmod 600 "$RECON_TMP"
+    mv "$RECON_TMP" "$ENV_FILE"
+    echo "==> reconciled data/.env — added keys the install predated:${recon_added}"
+    case " $recon_added " in
+      *" ORWELL_EMBEDDINGS "*) echo "    (incl. ORWELL_EMBEDDINGS=fastembed — real semantic recall re-armed; prefetched below into the engine's cache dir, so the next boot is offline + non-degraded)" ;;
+    esac
+  else
+    rm -f "$RECON_TMP"      # every key already present ⇒ a true no-op (idempotent re-run)
+  fi
+fi
+
+# Resolve the embedding-model cache dir the ENGINE will actually read, so the prefetch below warms the
+# SAME dir. A box installed with a custom DATA_DIR pins ORWELL_EMBED_CACHE off it — hardcoding
+# ${APP_DIR}/data/models would prefetch to the wrong dir and the engine would still see an empty cache
+# and re-download / degrade. Priority: the (now-reconciled) ORWELL_EMBED_CACHE in data/.env → the box's
+# data dir (ORWELL_DATA_DIR minus its /saves leaf) + /models → ${APP_DIR}/data/models.
+EMBED_CACHE_DIR=""
+if [[ -f "$ENV_FILE" ]]; then
+  EMBED_CACHE_DIR="$(sed -n 's/^ORWELL_EMBED_CACHE=//p' "$ENV_FILE" | tail -n1)"
+  if [[ -z "$EMBED_CACHE_DIR" ]]; then
+    _box_saves="$(sed -n 's/^ORWELL_DATA_DIR=//p' "$ENV_FILE" | tail -n1)"
+    [[ -n "$_box_saves" ]] && EMBED_CACHE_DIR="${_box_saves%/saves}/models"
+  fi
+fi
+EMBED_CACHE_DIR="${EMBED_CACHE_DIR:-${APP_DIR}/data/models}"
+
+# Prefetch the pinned embedding model cache (ADR 0004 / E86a) — FIRST-CLASS on every update, not just
+# fresh installs (ROOT CAUSE B of "semantic recall silently degraded on an old box"): a box provisioned
+# before the fastembed default has its model cache EMPTY, so even once ORWELL_EMBEDDINGS is backfilled
+# above the engine's boot warm-up would need the network and quietly fall back. Prefetching here (into
+# the resolved $EMBED_CACHE_DIR, identical to orwell-install.sh's prefetch_model) makes that cache
+# offline-capable, so the next boot uses real embeddings. A no-op when already cached; non-fatal on
+# failure (the engine still boots + retries at boot).
+echo "==> embedding model prefetch into ${EMBED_CACHE_DIR} (no-op when cached)"
 # A11: onnxruntime logs a harmless `pthread_setaffinity_np … error code: 22` (twice) inside an LXC
 # restricted cpuset — the thread pool just runs unpinned (inference unaffected; fastembed-js doesn't
 # expose ORT's intraOpNumThreads to silence it at the source). Filter that one benign stderr line so
@@ -290,9 +369,11 @@ echo "==> embedding model prefetch (no-op when cached)"
 # only stderr a successful prefetch emits), so its no-match status must never read as a failure. This
 # script has no ERR trap today, but the guard keeps the pattern safe if one is ever added — see
 # orwell-install.sh's prefetch_model, where errtrace makes the identical stray exit-1 fatal.
-if ! node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "${APP_DIR}/data/models" \
+if ! node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "$EMBED_CACHE_DIR" \
      2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2 || true); then
-  echo "WARN: embedding model prefetch failed — engine will retry at boot"
+  echo "WARN: embedding model prefetch FAILED — semantic recall will run DEGRADED (deterministic"
+  echo "      fallback) until the model is cached. The engine retries the prefetch at boot; if it keeps"
+  echo "      failing, check the engine boot log (journalctl -u ${ENGINE_SVC}) for the real ONNX/RAM/download error."
 fi
 
 echo "==> refresh front-end deps"
