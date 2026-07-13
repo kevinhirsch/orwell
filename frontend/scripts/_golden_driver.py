@@ -329,7 +329,10 @@ class GoldenDriver:
                    ORWELL_COMP_THEMES="0",
                    # 0126: the expanded mechanic pool changes WHICH comp a fixed seed draws (and thus the
                    # winner); the fixture was recorded on the base 12. Pin off so the replay is byte-stable.
-                   ORWELL_COMP_MECHANICS_PLUS="0")
+                   ORWELL_COMP_MECHANICS_PLUS="0",
+                   # 0127: hybrid resolution blends a secondary aptitude into the score ⇒ changes the winner;
+                   # the fixture was recorded on pure single-stat resolution. Pin off for a byte-stable replay.
+                   ORWELL_COMP_MIXED="0")
         self.procs.append(subprocess.Popen(
             ["node", dist], cwd=REPO, env=env,
             stdout=open(self.engine_log, "w"), stderr=subprocess.STDOUT))

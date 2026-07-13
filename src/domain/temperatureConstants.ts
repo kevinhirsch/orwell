@@ -49,6 +49,17 @@ export interface OutcomeWeights {
    * value of `1` here disables the widening entirely (the alternate inert setting).
    */
   convictionVarianceCap: number;
+  /**
+   * Feature 0127 (mixed-type competitions) — OPT-IN, DEFAULT-INERT AT RUNTIME. When a caller passes a
+   * competition's SECONDARY aptitude (a genuine hybrid comp — "crawl through mud, then solve a puzzle"),
+   * the score's stat base becomes a weighted blend: `primary·(1 − w) + secondary·w`, where `w` is this
+   * weight. The PRIMARY stat still dominates (the winner is mostly the primary favorite), but a
+   * well-rounded houseguest edges a one-dimensional one on hybrid comps. NO secondary passed ⇒ the base is
+   * the pure single stat ⇒ BYTE-IDENTICAL to the pre-0127 model. Live callers pass it ONLY behind
+   * `ORWELL_COMP_MIXED` (the calibration spine is byte-identical off; the band is re-confirmed on). A value
+   * of `0` here disables the blend entirely (the alternate inert setting).
+   */
+  mixedSecondaryWeight: number;
 }
 
 export interface EmotionalConstants {
@@ -98,7 +109,7 @@ export const TEMPERATURE_CONSTANTS: TemperatureConstants = {
   // convictionVarianceGain/Cap (0098): a low-conviction read at conviction→0 widens the span up to ~2×
   // (gain 1.0), hard-capped at 2.5×. INERT at runtime (no caller passes a conviction — owner-gated); they
   // tune the mechanic the 0098 property tests exercise. A bold gamble is a real swing, never mean-moving.
-  outcome: { stat: 1.0, temperature: 0.40, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.20, convictionVarianceGain: 1.0, convictionVarianceCap: 2.5 },
+  outcome: { stat: 1.0, temperature: 0.40, emotion: 0.2, throwPenalty: 1.5, playSafePenalty: 0.2, sleepPenalty: 0.20, convictionVarianceGain: 1.0, convictionVarianceCap: 2.5, mixedSecondaryWeight: 0.35 },
   emotional: { baseline: 0.5, volatilityScale: 0.5, meanReversionRate: 0.3, swingTemperatureWeight: 0.25 },
   hiddenSurfacingRate: 0.05,
 };
