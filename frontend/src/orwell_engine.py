@@ -1100,12 +1100,14 @@ PLAY_CLOCK_STEP_MS = 60_000
 
 
 def _play_clock_beat(ms) -> int | None:
-    """The committed-mutation count ("beat") a raw play-clock stamp encodes, or None."""
+    """The committed-mutation count ("beat") a raw play-clock stamp encodes, or None.
+    Fail-soft: a bool / None / non-numeric / non-finite (``inf``/``nan`` → OverflowError or
+    ValueError on ``int()``) stamp returns None rather than raising."""
+    if isinstance(ms, bool):
+        return None
     try:
         n = int(ms)
-    except (TypeError, ValueError):
-        return None
-    if isinstance(ms, bool):
+    except (TypeError, ValueError, OverflowError):
         return None
     return max(0, (n - PLAY_CLOCK_EPOCH_MS) // PLAY_CLOCK_STEP_MS)
 
@@ -1138,9 +1140,17 @@ def label_play_clock(health) -> dict:
     if isinstance(faults, list):
         new_faults = []
         for f in faults:
-            if isinstance(f, dict) and isinstance(f.get("when"), (int, float)) and not isinstance(f.get("when"), bool):
+            # Mirror the top-level branch: for EVERY dict fault carrying a `when` key, always POP
+            # the raw wall-clock-looking key and set `whenPlayClock` to the labeled value when
+            # numeric, else None. A non-numeric / date-like `when` must NEVER survive (that would
+            # defeat the "never render as a date" invariant this feature enforces). Non-dict faults
+            # and faults with no `when` pass through unchanged.
+            if isinstance(f, dict) and "when" in f:
                 f = dict(f)
-                f["whenPlayClock"] = _labeled(f.pop("when"))
+                raw = f.pop("when")
+                f["whenPlayClock"] = (
+                    _labeled(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+                )
                 relabeled = True
             new_faults.append(f)
         out["faults"] = new_faults

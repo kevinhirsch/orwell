@@ -101,3 +101,52 @@ def test_sandbox_health_applies_the_play_clock_labels(monkeypatch):
         "the shared client seam must relabel play-clock stamps for every consumer " \
         "(admin tool result, health page, debug bundle)"
     assert res["lastAdvancePlayClock"]["beat"] == 2
+
+
+# ── CodeRabbit P1-fix hardening (2026-07-13): the raw `when` key must NEVER survive ─────────
+
+def test_fault_with_non_numeric_when_never_retains_the_raw_key():
+    """A fault whose `when` is NON-numeric (a date-like string, or None) must still have the raw
+    `when` popped — otherwise a wall-clock-looking value survives, defeating the whole invariant.
+    `whenPlayClock` is None (not labelable), but the raw key is gone."""
+    for bad_when in ("2026-01-01T00:00:00Z", None, "yesterday", {"nested": 1}):
+        h = {"faults": [{"when": bad_when, "kind": "degradation"}]}
+        out = orwell_engine.label_play_clock(h)
+        fault = out["faults"][0]
+        assert "when" not in fault, f"raw `when` ({bad_when!r}) must never survive"
+        assert fault["whenPlayClock"] is None
+        assert fault["kind"] == "degradation"  # sibling fields ride through
+        # A relabel happened ⇒ the playClock legend rides along.
+        assert "playClock" in out
+
+
+def test_fault_without_a_when_key_is_untouched():
+    h = {"faults": [{"kind": "vault-leak"}]}
+    out = orwell_engine.label_play_clock(h)
+    assert out["faults"][0] == {"kind": "vault-leak"}
+
+
+def test_non_dict_faults_pass_through_unchanged():
+    h = {"faults": ["oops", 42, None, {"when": 1_767_225_660_000, "kind": "no-daily-event"}]}
+    out = orwell_engine.label_play_clock(h)
+    assert out["faults"][0] == "oops" and out["faults"][1] == 42 and out["faults"][2] is None
+    assert "when" not in out["faults"][3] and out["faults"][3]["whenPlayClock"]["beat"] == 1
+
+
+def test_play_clock_beat_is_fail_soft_on_non_finite_and_junk():
+    """`_play_clock_beat` is documented fail-soft: `float('inf')`/`nan` (which raise OverflowError/
+    ValueError inside `int()`) and junk return None, never crash (the helper must never raise)."""
+    for junk in (float("inf"), float("-inf"), float("nan"), "not-a-number", None, [1], True, False):
+        assert orwell_engine._play_clock_beat(junk) is None, junk
+    # a real numeric stamp still resolves.
+    assert orwell_engine._play_clock_beat(orwell_engine.PLAY_CLOCK_EPOCH_MS + 2 * 60_000) == 2
+
+
+def test_label_play_clock_survives_an_inf_stamp():
+    """The end-to-end guard: an `inf` lastAdvanceAt / fault `when` must relabel to a None-beat
+    play-clock entry, never raise (label_play_clock is 'purely presentational and fail-soft')."""
+    out = orwell_engine.label_play_clock(
+        {"lastAdvanceAt": float("inf"), "faults": [{"when": float("nan"), "kind": "degradation"}]})
+    assert out["lastAdvancePlayClock"] is not None
+    assert out["lastAdvancePlayClock"]["beat"] is None
+    assert "when" not in out["faults"][0] and out["faults"][0]["whenPlayClock"]["beat"] is None

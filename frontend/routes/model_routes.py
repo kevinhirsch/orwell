@@ -1667,8 +1667,10 @@ def setup_model_routes(model_discovery):
                                 "(reversible in the model manager)",
                                 _served_game, base_url, len(_hidden_seed))
                 except Exception as _cur_e:
+                    # Fail-open (curation must never block adding an endpoint) but LOUD: a real
+                    # curation regression would otherwise be invisible at debug level.
                     _hidden_seed = []
-                    logger.debug(f"game-build curation skipped: {_cur_e}")
+                    logger.warning(f"game-build curation skipped (fail-open): {_cur_e}")
             # Stamp owner so the picker only shows this endpoint to the admin
             # who added it. Pass `shared=true` to mark it null-owner (visible
             # to all users), preserving the pre-fix "everyone sees everything"

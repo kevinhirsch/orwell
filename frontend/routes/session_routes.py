@@ -426,7 +426,16 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     logger.info(
                         "[session] configured default model %r not served by %s — falling back "
                         "to the first chat model", _cfg_model, endpoint_url)
-            model_to_use = _picked or _first_chat_model(ids) or ids[0]
+            # Never bind a chat-INCAPABLE model (the never-arbitrary goal). `_first_chat_model`
+            # only hands back an image model when the endpoint serves NOTHING but image models
+            # (its all-image `models[0]` fallthrough); binding it would create a session that
+            # can't chat (CodeRabbit). Drop the raw `ids[0]` floor and refuse loudly instead —
+            # scoped to this route so the shared `_first_chat_model` contract (relied on by
+            # endpoint_resolver / chat_routes / model_routes callers via `or ""` / `if picked`)
+            # is untouched.
+            model_to_use = _picked or _first_chat_model(ids)
+            if not model_to_use or is_image_model(model_to_use):
+                raise HTTPException(400, "Endpoint exposes no chat-capable model")
         else:
             from src.llm_core import list_model_ids
             import os as _os

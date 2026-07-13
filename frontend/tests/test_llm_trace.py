@@ -299,7 +299,17 @@ def test_nonstreaming_call_threads_call_class_to_the_record(data_dir, monkeypatc
             "https://openrouter.ai/api/v1/chat/completions", "m",
             [{"role": "user", "content": "x"}], call_class="background-authoring")
 
-    text = asyncio.get_event_loop().run_until_complete(drive())
+    # Deterministic fresh loop WITHOUT poisoning the shared xdist-worker loop: a bare
+    # `asyncio.run()` closes+unsets the current loop, which then breaks every later test on
+    # this worker that uses `asyncio.get_event_loop().run_until_complete` (the suite-wide
+    # convention). `new_event_loop()` + `close()` (no `set_event_loop`) gives a private loop and
+    # leaves the policy's current-loop state untouched — the same pattern as the sibling `_run`
+    # helpers.
+    _loop = asyncio.new_event_loop()
+    try:
+        text = _loop.run_until_complete(drive())
+    finally:
+        _loop.close()
     assert text == "answer"
     rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
     assert rec["callClass"] == "background-authoring"
