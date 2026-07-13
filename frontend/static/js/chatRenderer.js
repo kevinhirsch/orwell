@@ -2327,7 +2327,7 @@ export function addMessage(role, content, modelName, metadata) {
             const _evStatusHtml = _evOutcome ? '' : (ok && isGameBuild()) ? ''
               : `<span class="agent-thread-status">${ok ? 'done' : 'failed'}</span>`;
             if (_evOutcome) node.className += ' ow-slate-outcome';
-            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-icon">${ok ? '\u2713' : '\u2717'}</span><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
+            node.innerHTML = `<div class="agent-thread-dot"></div><div class="agent-thread-header"><span class="agent-thread-tool">${esc(_evToolText)}</span>${_evStatusHtml}${_evChevron}</div>${_evContentDiv}`;
             // Click handling is delegated globally \u2014 see chat.js init.
             threadWrap.appendChild(node);
             // M4-6: the SAME pure descriptor + shared DOM builder the live path uses (chat.js) \u2014

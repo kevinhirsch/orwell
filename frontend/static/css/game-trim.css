@@ -196,7 +196,7 @@ body[data-game-build] .agent-thread-tool {
   text-transform: uppercase;
   opacity: .78;
 }
-body[data-game-build] .agent-thread-node .agent-thread-icon { opacity: .6; }
+/* (the .agent-thread-icon glyph was removed — the timeline dot carries state now.) */
 /* an OUTCOME slate keeps its richer type — outcomes are the show speaking. Keyed on the
    persistent .ow-slate-outcome marker (the reveal class is transient — it clears after the
    entrance animation, which would have snapped outcomes back to slate caps). */
