@@ -1515,6 +1515,7 @@ async def _llm_call_async_traced(
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=True, duration_ms=int((time.time() - started) * 1000),
+            call_class=call_class,
             response={"text": text, "reasoning": _meta.get("reasoning") or "",
                       "finishReason": _meta.get("finish_reason"), "usage": _usage or None})
         _meter()
@@ -1524,7 +1525,11 @@ async def _llm_call_async_traced(
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
-            response={"error": {"type": type(e).__name__, "message": str(e)[:500]}})
+            call_class=call_class,
+            # The terminal stop reason still rides on a FAILED call when the impl saw one
+            # (e.g. the empty-stop guard below raised after parsing finish_reason=stop).
+            response={"error": {"type": type(e).__name__, "message": str(e)[:500]},
+                      "finishReason": _meta.get("finish_reason")})
         await _emit_obs("error", int((time.time() - started) * 1000))
         raise
 
@@ -1679,6 +1684,8 @@ async def _llm_call_async_impl(
                         "cost": _u.get("cost"),
                         "provider": provider,
                     })
+            _finish_local: Optional[str] = None
+            _saw_tool_calls = False
             try:
                 if provider == "anthropic":
                     response = _parse_anthropic_response(data)
@@ -1687,17 +1694,47 @@ async def _llm_call_async_impl(
                 else:
                     msg = data["choices"][0]["message"]
                     response = _openai_message_text(msg)
+                    if isinstance(msg, dict) and msg.get("tool_calls"):
+                        _saw_tool_calls = True
+                    _fr0 = (data.get("choices") or [{}])[0].get("finish_reason")
+                    if _fr0:
+                        _finish_local = str(_fr0)
                     if meta_sink is not None and isinstance(msg, dict):
                         _rsn = msg.get("reasoning_content") or msg.get("reasoning") or ""
                         if _rsn:
                             meta_sink["reasoning"] = _rsn
-                        _fr0 = (data.get("choices") or [{}])[0].get("finish_reason")
                         if _fr0:
                             meta_sink["finish_reason"] = _fr0
-                _set_cached_response(cache_key, response)
-                return response
             except Exception:
                 raise HTTPException(502, f"Unexpected schema from {target_url}: {str(data)[:400]}")
+            # ── EMPTY "stop" COMPLETION GUARD (2026-07-13 prod debug-bundle audit) ──────────
+            # The STREAM path has surfaced empty completions as typed `empty_completion` errors
+            # since fix D / #1453 — but this non-stream `call` path silently returned "" on a
+            # well-formed 200 whose message body was empty with finish_reason=stop (two such
+            # records sat in the live bundle's llmIo ring as ok=True utility calls that folded
+            # nothing). An empty non-length completion is NOT a success: log loud and count it
+            # as a FAILED attempt (retry like a 5xx; typed 502 when retries are exhausted).
+            # Deliberately excluded: a message carrying tool_calls (an empty text body is
+            # legitimate there) and finish_reason=length (the cap-cutoff case keeps its ""
+            # return so the existing cap-retry / parse-failure floors behave exactly as today).
+            if (not (response or "").strip() and not _saw_tool_calls
+                    and _finish_local != "length"):
+                logger.warning(
+                    f"upstream 200 but EMPTY completion (non-stream) target_url={target_url} "
+                    f"model={model} finish_reason={_finish_local or 'unknown'} "
+                    f"attempt={attempt}/{max_retries} — an empty 'stop' completion is a failed "
+                    f"attempt, never a silent success (empty_completion)"
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(LLMConfig.RETRY_DELAY)
+                    continue
+                raise HTTPException(
+                    502,
+                    f"{model} returned an empty completion "
+                    f"(finish_reason={_finish_local or 'stop'}) — empty_completion",
+                )
+            _set_cached_response(cache_key, response)
+            return response
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             _cooled = _mark_host_dead(target_url)
             duration = time.time() - start

@@ -174,8 +174,12 @@ def test_overseer_reports_resolution_when_the_auto_default_can_fix_it(
         "no model resolved for the cast-authoring call class — authoring cannot run")
     verdict = ov.assess_enrichment_health("rhino", force=True)
     assert verdict and verdict["resolvable"] is True
-    assert verdict.get("model") == "z-ai/glm-5.2", \
-        "the reported resolution must be the CONFIGURED default identity"
+    # The overseer probes the utility→default chain; since 2026-07-13 the unset utility
+    # ENDPOINT keeps the CONFIGURED utility MODEL (the ADR 0016 qwen tier) instead of
+    # collapsing to the narrator — either way it must be a CONFIGURED identity, never an
+    # arbitrary provider-list pick.
+    assert verdict.get("model") == "qwen/qwen3.6-flash", \
+        "the reported resolution must be the CONFIGURED utility identity"
     _, lines = lr.OVERSEER.since(0)
     ours = [l for l in lines if l.get("kind") == "model-wiring" and l.get("user") == "rhino"]
     assert ours and ours[-1]["overseerLevel"] == "action"
@@ -273,17 +277,17 @@ def _default_chat_client(monkeypatch, settings):
 
 def test_default_chat_keeps_the_stored_default_on_a_stale_cache(monkeypatch):
     """The live PROD symptom (consequence B): a carried-over cached model list without the
-    stored default (z-ai/glm-5.2) must NOT swap the narrator to the first cached model
+    stored default (z-ai/glm-4.7) must NOT swap the narrator to the first cached model
     (openai/gpt-5.6-luna-pro) — with no in-process refresh, the configured default stands."""
     model_routes, client = _default_chat_client(monkeypatch, {
-        "default_endpoint_id": "", "default_model": "z-ai/glm-5.2",
+        "default_endpoint_id": "", "default_model": "z-ai/glm-4.7",
     })
     _seed_single_openrouter_endpoint(
         cached=["openai/gpt-5.6-luna-pro", "openai/gpt-4o"])  # stale list; no glm entry
     model_routes._MODELS_LIVE_REFRESH.clear()  # no in-process refresh — cache age unknown
 
     body = client.get("/api/default-chat").json()
-    assert body["model"] == "z-ai/glm-5.2", \
+    assert body["model"] == "z-ai/glm-4.7", \
         f"a stale cache must never swap the configured narrator, got {body['model']!r}"
 
 

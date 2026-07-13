@@ -5,10 +5,11 @@ Two bugs/specs covered:
   Bug 2 (chat default): the chat picker used to auto-pick `items[0].models[0]`
   — an arbitrary first-sorted model ("fugu") — IGNORING the configured default.
   The owner ALWAYS wants the OOB default chat model to be the narrator tier on
-  the OpenRouter endpoint (z-ai/glm-5.2 since the 2026-07-07/09 two-tier
-  retarget; ADR 0016 as amended). The picker now resolves the auto-pick via
+  the OpenRouter endpoint (z-ai/glm-4.7 — ADR 0016; the 2026-07-07/09 glm-5.2
+  two-tier retarget was reverted for the shipped default by the 2026-07-13
+  owner ruling). The picker now resolves the auto-pick via
   `_resolveDefaultPick(items)`, which PREFERS the server-resolved configured
-  default (cached on `window.__orwellDefaultChat`, out-of-box glm-5.2)
+  default (cached on `window.__orwellDefaultChat`, out-of-box glm-4.7)
   over the first-listed model, and NEVER picks an image model. An explicit user
   selection clears the auto-pick marker, so the configured default never
   overrides a real choice (only the unset/auto case resolves to the default).
@@ -46,12 +47,14 @@ def _read(rel):
 # ── OOB defaults live in DEFAULT_SETTINGS (the assumed defaults) ────────────────
 
 
-def test_oob_default_chat_model_is_glm_5_2():
-    # ADR 0016 as amended (2026-07-07/09 two-tier retarget, M0-6): the OOB narrator/chat model is
-    # the GLM 5.2 tier — the pair the M0-1 golden fixture + golden-nightly job record on.
+def test_oob_default_chat_model_is_glm_4_7():
+    # OWNER RULING 2026-07-13 (live prod debug-bundle audit): the OOB narrator/chat model is the
+    # ADR 0016 GLM-4.7 tier (the 2026-07-07/09 glm-5.2 retarget is reverted for the SHIPPED
+    # default). NOTE the committed golden fixture stays recorded on glm-5.2 explicitly (its own
+    # `--model` flag) — the golden gate is fixture-pinned, not seed-pinned, so it does not move.
     from src.settings import DEFAULT_SETTINGS
-    assert DEFAULT_SETTINGS["default_model"] == "z-ai/glm-5.2", (
-        "the assumed default chat model must be glm-5.2 (OpenRouter)"
+    assert DEFAULT_SETTINGS["default_model"] == "z-ai/glm-4.7", (
+        "the assumed default chat model must be glm-4.7 (OpenRouter)"
     )
 
 
@@ -198,13 +201,47 @@ def test_resolver_never_returns_image_model_even_when_default_is_image():
     )
 
 
+def test_resolver_trusts_configured_default_on_an_empty_stale_catalog():
+    """2026-07-13 (the arbitrary-default class, mirroring the server's #1550/#1551 ruling): a
+    fresh box whose endpoint hasn't cached its model list yet must NOT kick the configured
+    default over to the first-listed model of some other endpoint — when the default's own
+    endpoint is present and online, the configured default stands."""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        {"endpoint_id": "misc", "endpoint_name": "Misc", "url": "http://m/v1",
+         "models": ["fugu/fugu-1"]},
+        # The default's own endpoint is present but its catalog is EMPTY (unprobed cache).
+        {"endpoint_id": "or", "endpoint_name": "OpenRouter", "url": "http://or/v1",
+         "models": []},
+    ]
+    pick = _run_resolver(items, {"model": "z-ai/glm-4.7", "endpoint_id": "or"})
+    assert pick and pick["mid"] == "z-ai/glm-4.7", (
+        f"an empty/stale catalog must not swap the configured default, got {pick}"
+    )
+    assert pick["endpointId"] == "or"
+
+
+def test_resolver_still_falls_back_when_the_defaults_endpoint_is_gone():
+    """The original guard stands: a stale default whose ENDPOINT no longer exists must not
+    pin a dead model — the first-chat floor applies."""
+    if shutil.which("node") is None:
+        pytest.skip("node not available")
+    items = [
+        {"endpoint_id": "misc", "endpoint_name": "Misc", "url": "http://m/v1",
+         "models": ["fugu/fugu-1"]},
+    ]
+    pick = _run_resolver(items, {"model": "z-ai/glm-4.7", "endpoint_id": "gone-ep"})
+    assert pick and pick["mid"] == "fugu/fugu-1"
+
+
 # ── #860: a factory/OOBE reset RESETS model selections to the OOB defaults ──────
 #
 # Root cause of #860: the reset preserved the previously-SELECTED models, so a stale placeholder
 # (sakana/fugu-ultra) the owner once had selected was faithfully re-kept across every reset — a
 # circular trap (Settings was locked, #870, so they couldn't change it either). The fix: a reset
 # keeps only the API key(s) + endpoint and RESETS the model selections, so they revert to the OOB
-# defaults (glm-5.2 narrator, gemini-3.1-flash-image portraits). A real served selection
+# defaults (glm-4.7 narrator, gemini-3.1-flash-image portraits). A real served selection
 # is also reset by design (owner ruling) — the defaults are what the owner wants post-reset.
 
 
@@ -222,7 +259,7 @@ def _load_oobe_helper(monkeypatch, tmp_path):
 def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_path):
     """A reset whose prior settings.json had a stale default_model=sakana/fugu-ultra (+ any
     portrait pick) must NOT carry those across — they reset, so the merge over DEFAULT_SETTINGS
-    restores glm-5.2 / gemini-3.1-flash-image."""
+    restores glm-4.7 / gemini-3.1-flash-image."""
     mod = _load_oobe_helper(monkeypatch, tmp_path)
     setp = tmp_path / "settings.json"
     setp.write_text(json.dumps({
@@ -249,7 +286,7 @@ def test_reset_drops_stale_model_selection_so_defaults_stand(monkeypatch, tmp_pa
     # The effective post-reset values are the OOB defaults (merge over DEFAULT_SETTINGS).
     from src.settings import DEFAULT_SETTINGS
     effective = {**DEFAULT_SETTINGS, **preserved}
-    assert effective["default_model"] == "z-ai/glm-5.2"
+    assert effective["default_model"] == "z-ai/glm-4.7"
     assert effective["image_model"] == "google/gemini-3.1-flash-image"
 
 
@@ -267,7 +304,7 @@ def test_reset_resets_even_a_valid_served_selection_to_defaults(monkeypatch, tmp
 
     from src.settings import DEFAULT_SETTINGS
     effective = {**DEFAULT_SETTINGS, **preserved}
-    assert effective["default_model"] == "z-ai/glm-5.2"
+    assert effective["default_model"] == "z-ai/glm-4.7"
     assert effective["image_model"] == "google/gemini-3.1-flash-image"
 
 

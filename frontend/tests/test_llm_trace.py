@@ -214,6 +214,98 @@ def test_stream_accumulator_notes_fallback_answerer():
     assert acc.response()["answeredBy"] == "b"
 
 
+# ── 2026-07-13 (prod bundle audit): top-level finishReason + callClass triage fields ──
+
+def test_record_carries_top_level_finish_reason_and_call_class(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="call", model="m", messages=[{"role": "user", "content": "x"}],
+        call_class="utility-extraction",
+        response={"text": "", "finishReason": "stop"}, ok=True)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["finishReason"] == "stop", "the stop reason must be a TOP-LEVEL triage field"
+    assert rec["callClass"] == "utility-extraction", "the ADR-0010 call class must be recorded"
+    # Back-compat: the response copy stays where it always was.
+    assert rec["response"]["finishReason"] == "stop"
+
+
+def test_record_call_class_is_null_when_unknown(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="stream", model="m", messages=[{"role": "user", "content": "x"}],
+        response={"text": "hi"}, ok=True)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["callClass"] is None, "unknown class is null — never guessed"
+    assert rec["finishReason"] is None
+
+
+def test_record_call_class_falls_back_to_the_observability_context(data_dir, monkeypatch):
+    """The streaming chokepoint has no call_class parameter — the 0112 per-turn context
+    (set by the agent loop on game turns) supplies it when available."""
+    _enable(monkeypatch)
+    token = llm_trace.set_observability_context(call_class="narration")
+    try:
+        llm_trace.record_llm_call(
+            kind="stream", model="m", messages=[{"role": "user", "content": "x"}],
+            response={"text": "hi", "finishReason": "length"}, ok=True)
+    finally:
+        llm_trace.reset_observability_context(token)
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["callClass"] == "narration"
+    assert rec["finishReason"] == "length"
+
+
+def test_ring_summary_line_shows_class_and_finish_reason(data_dir, monkeypatch):
+    _enable(monkeypatch)
+    llm_trace.record_llm_call(
+        kind="call", model="m9", messages=[{"role": "user", "content": "x"}],
+        call_class="utility-extraction",
+        response={"text": "", "finishReason": "stop"}, ok=True)
+    _, lines = log_rings.LLMIO.since(0)
+    msg = lines[-1]["msg"]
+    assert "call[utility-extraction]" in msg, f"the ring summary must carry the class: {msg}"
+    assert "finish=stop" in msg, f"the ring summary must carry the stop reason: {msg}"
+
+
+def test_nonstreaming_call_threads_call_class_to_the_record(data_dir, monkeypatch):
+    """End-to-end: llm_call_async(call_class=…) lands as the record's top-level callClass."""
+    import asyncio
+    from src import llm_core as lc
+    _enable(monkeypatch)
+
+    data = {"choices": [{"message": {"content": "answer"}, "finish_reason": "stop"}]}
+
+    class _Resp:
+        is_success = True
+        status_code = 200
+        text = "x"
+
+        def json(self):
+            return data
+
+    class _Client:
+        async def post(self, url, headers=None, json=None, timeout=None):
+            return _Resp()
+
+    monkeypatch.setattr(lc, "_get_http_client", lambda: _Client())
+    monkeypatch.setattr(lc, "_is_host_dead", lambda u: False)
+    monkeypatch.setattr(lc, "note_model_activity", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "_clear_host_dead", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "_get_cached_response", lambda k: None)
+    monkeypatch.setattr(lc, "_set_cached_response", lambda *a, **k: None)
+
+    async def drive():
+        return await lc.llm_call_async(
+            "https://openrouter.ai/api/v1/chat/completions", "m",
+            [{"role": "user", "content": "x"}], call_class="background-authoring")
+
+    text = asyncio.get_event_loop().run_until_complete(drive())
+    assert text == "answer"
+    rec = json.loads(open(llm_trace.trace_path()).read().splitlines()[-1])
+    assert rec["callClass"] == "background-authoring"
+    assert rec["finishReason"] == "stop"
+
+
 # ── retention: trim by age, total-size, human formatting ───────────────────────
 
 def test_trim_drops_old_jsonl_entries_keeps_new(data_dir):

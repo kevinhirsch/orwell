@@ -145,6 +145,18 @@ function _resolveDefaultPick(items) {
         !item.offline && (item.models || []).concat(item.models_extra || []).includes(dc.model));
       if (any) return { url: any.url, mid: dc.model, endpointId: any.endpoint_id };
     }
+    // 2026-07-13 (the arbitrary-default class, mirroring the server's #1550/#1551 ruling): an
+    // EMPTY/STALE catalog must never kick the configured default over to the first-listed model
+    // (the "luna" bug — a fresh box whose endpoint hasn't cached its model list yet). When the
+    // default's OWN endpoint is present and online, trust the configured default even though its
+    // (possibly-empty) model list doesn't include it — the server keeps the default on a
+    // possibly-stale cache too (never swapping the narrator). Only a genuinely-missing endpoint
+    // falls to the first-chat floor.
+    if (dc.endpoint_id) {
+      const ownEp = (items || []).find(item =>
+        !item.offline && String(item.endpoint_id || '') === String(dc.endpoint_id));
+      if (ownEp) return { url: ownEp.url, mid: dc.model, endpointId: ownEp.endpoint_id };
+    }
   }
   return _firstChatPick(items);
 }

@@ -165,9 +165,11 @@ def test_settings_keys_present_with_correct_defaults():
     assert isinstance(defaults["reasoning_budget"], dict)
     # Populated with the owner-ratified optimized efforts (so the admin UI shows them).
     assert defaults["reasoning_budget"] == {
-        # narration "low" (was "medium"): ADR 0016 — GLM-4.7's interleaved thinking needs a small budget
-        # to decide its tool calls. "off" = genuine disable (reasoning:{enabled:false}).
-        "narration": "low", "utility-extraction": "off",
+        # narration "off" (owner ruling 2026-07-13, perf audit F-PY-1): "low"/"medium" are INERT on
+        # OpenRouter (llm_core drops effort, sends the computed sub-budget) so the model still bursts
+        # ~4096 pre-token reasoning ("it hangs then streams"); only "off" (reasoning:{enabled:false})
+        # stops it. Supersedes the ADR-0016 "low" seed.
+        "narration": "off", "utility-extraction": "off",
         # #1007: background-authoring is "off" too — structured JSON extraction, not a reasoning task.
         # An enabled reasoning channel burned the cap before any visible JSON on deepseek-v4-pro (0/15).
         "casting": "medium", "background-authoring": "off",

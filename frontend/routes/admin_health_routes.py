@@ -712,8 +712,12 @@ def _llm_io_section() -> dict:
     """0112 — the full LLM I/O record tail: complete request/response records (system
     prompts + messages + REASONING + tool calls + finish reasons + per-call class `kind`
     + the applied maxTokens), from the durable `llm-io.jsonl` archive the LLMIO ring is
-    seeded from. Records were auth-scrubbed at write time (llm_trace._scrub) and are
-    re-scrubbed on export by `_scrub_bundle`. Bounded to the ring's natural seed size."""
+    seeded from. Since 2026-07-13 (prod bundle audit) each record also carries TOP-LEVEL
+    `finishReason` and `callClass` triage fields (records that predate the change simply
+    lack them), so an empty `finish_reason=stop` utility completion is spottable without
+    digging into `response`. Records were auth-scrubbed at write time (llm_trace._scrub)
+    and are re-scrubbed on export by `_scrub_bundle`. Bounded to the ring's natural seed
+    size."""
     from src import llm_trace
     out: dict = {"meta": {"source": "llm-io.jsonl", "cap": _BUNDLE_LLM_IO_CAP,
                           "truncated": False}, "records": []}
@@ -996,7 +1000,11 @@ def _settings_section() -> dict:
 
 async def _sandbox_health_section(user: str | None) -> dict:
     """The engine's per-sandbox health/fault-ring projection — an EXISTING admin-channel
-    read (`sandboxHealth`); Vault-free by the engine's own admin-surface construction."""
+    read (`sandboxHealth`); Vault-free by the engine's own admin-surface construction.
+    Play-clock stamps arrive RELABELED (`lastAdvancePlayClock` / `faults[].whenPlayClock`
+    + the `playClock` legend — orwell_engine.label_play_clock, 2026-07-13): the engine's
+    LogicalClock values look like epoch-ms but are NOT wall time and must never be
+    rendered as a date."""
     h = await orwell_engine.sandbox_health(user=user)
     return h if isinstance(h, dict) else {"error": "no sandbox health available"}
 

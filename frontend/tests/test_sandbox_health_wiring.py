@@ -50,3 +50,54 @@ def test_sandbox_health_client_uses_the_admin_channel(monkeypatch):
     assert captured["name"] == "sandboxHealth"
     assert captured["user"] == "u-admin"
     assert res["lastIntegrity"] == "ok"
+
+
+# ── 2026-07-13 (prod bundle audit): play-clock stamps are LABELED, never wall time ────────
+#
+# The engine's runtime Clock is a fixed-epoch LogicalClock (one step per committed mutation);
+# sandboxHealth's `lastAdvanceAt` / `faults[].when` are PLAY-CLOCK values that merely look like
+# epoch-ms. Rendering them as a date ("Jan 2026") is a mislabel — the FE relabels them at the
+# one seam every consumer shares (orwell_engine.sandbox_health → label_play_clock).
+
+def test_label_play_clock_relabels_last_advance_and_faults():
+    h = {
+        "user": "u", "week": 2, "phase": "veto",
+        "lastAdvanceAt": 1_767_225_780_000,          # epoch + 3 beats (3 committed mutations)
+        "faults": [{"when": 1_767_225_660_000, "kind": "no-daily-event"}],
+        "lastIntegrity": "ok",
+    }
+    out = orwell_engine.label_play_clock(h)
+    assert "lastAdvanceAt" in h and "lastAdvanceAt" not in out, \
+        "the wall-time-looking key must not survive (input dict untouched)"
+    la = out["lastAdvancePlayClock"]
+    assert la["beat"] == 3 and la["playClockMs"] == 1_767_225_780_000
+    assert la["label"] == "play-clock beat 3"
+    fw = out["faults"][0]["whenPlayClock"]
+    assert "when" not in out["faults"][0] and fw["beat"] == 1
+    legend = out["playClock"]
+    assert legend["epochMs"] == orwell_engine.PLAY_CLOCK_EPOCH_MS
+    assert "NOT wall time" in legend["note"]
+    # The untouched fields ride through.
+    assert out["week"] == 2 and out["lastIntegrity"] == "ok"
+
+
+def test_label_play_clock_passes_through_stampless_payloads():
+    for payload in ({"week": 1, "phase": "hoh", "lastIntegrity": "ok"}, {"error": "down"}, None, []):
+        assert orwell_engine.label_play_clock(payload) == payload
+
+
+def test_label_play_clock_handles_null_last_advance():
+    out = orwell_engine.label_play_clock({"lastAdvanceAt": None, "faults": []})
+    assert out["lastAdvancePlayClock"] is None and "lastAdvanceAt" not in out
+
+
+def test_sandbox_health_applies_the_play_clock_labels(monkeypatch):
+    async def fake_post(path, name, args=None, user=None, timeout=None):
+        return {"week": 1, "phase": "hoh", "lastAdvanceAt": 1_767_225_720_000, "faults": []}
+
+    monkeypatch.setattr(orwell_engine, "_post_tool", fake_post)
+    res = _run(orwell_engine.sandbox_health(user="u-admin"))
+    assert "lastAdvanceAt" not in res, \
+        "the shared client seam must relabel play-clock stamps for every consumer " \
+        "(admin tool result, health page, debug bundle)"
+    assert res["lastAdvancePlayClock"]["beat"] == 2

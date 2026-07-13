@@ -390,11 +390,43 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                                  headers=validation_headers)
             if not ids:
                 raise HTTPException(400, "Cannot reach /v1/models")
-            # Default to the first CHAT model — endpoints often list embedding/tts/whisper
-            # (e.g. text-embedding-ada-002) or text→image models (e.g. "*-flash-image")
-            # which can't hold a conversation. _first_chat_model excludes both.
+            # 2026-07-13 (owner ruling, the arbitrary-default class): a session created with NO
+            # model must honor the CONFIGURED default chat model first — this path used to jump
+            # straight to the first listed model, so a fresh OOBE box opened its first chat on
+            # whatever the provider list led with (openai/gpt-5.6-luna-pro) instead of the shipped
+            # narrator. The configured default (per-user prefs → global settings, the same source
+            # /api/default-chat reads) wins whenever this endpoint's LIVE list serves it (exact or
+            # basename match). Only when no default is configured — or this endpoint genuinely
+            # does not serve it (a custom/local provider) — does the first-CHAT-model floor apply
+            # (never an embedding/tts/image entry, and never blindly ids[0]).
             from src.endpoint_resolver import _first_chat_model
-            model_to_use = _first_chat_model(ids) or ids[0]
+            from src.llm_core import is_image_model
+            _cfg_model = ""
+            try:
+                from routes.chat_routes import _default_chat_target
+                _, _cfg_model = _default_chat_target(user)
+            except Exception:
+                try:
+                    from src.settings import get_setting as _gs_dflt
+                    _cfg_model = (_gs_dflt("default_model", "") or "").strip()
+                except Exception:
+                    _cfg_model = ""
+            _picked = ""
+            if _cfg_model and not is_image_model(_cfg_model):
+                if _cfg_model in ids:
+                    _picked = _cfg_model
+                else:
+                    import os as _os_dflt
+                    _cfg_base = _os_dflt.path.basename(_cfg_model.rstrip("/"))
+                    for _a in ids:
+                        if _os_dflt.path.basename(str(_a).rstrip("/")) == _cfg_base:
+                            _picked = _a
+                            break
+                if not _picked:
+                    logger.info(
+                        "[session] configured default model %r not served by %s — falling back "
+                        "to the first chat model", _cfg_model, endpoint_url)
+            model_to_use = _picked or _first_chat_model(ids) or ids[0]
         else:
             from src.llm_core import list_model_ids
             import os as _os

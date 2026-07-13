@@ -1,7 +1,7 @@
 """The post-OOBE-reset default-endpoint brick (PROD blocker, 2026-07-12) — fixed end to end.
 
 Live evidence (debug bundle, schema 2): after a factory/OOBE reset the store held exactly ONE
-enabled OpenRouter endpoint WITH an API key, `default_model` = the OOB "z-ai/glm-5.2", but the
+enabled OpenRouter endpoint WITH an API key, `default_model` = the OOB "z-ai/glm-4.7", but the
 default-endpoint DESIGNATION was gone (`defaultEndpointId: null` / `defaultResolved: null`) —
 the #860 reset deliberately drops `default_endpoint_id`, relying on a "resolution binds the
 empty default to the first enabled endpoint" behavior that `endpoint_resolver.resolve_endpoint`
@@ -103,7 +103,7 @@ def _endpoint_isolation():
 def post_reset_settings(monkeypatch):
     """The live post-reset settings state: settings.json is {} + operational flags, so the
     MERGE over DEFAULT_SETTINGS is what loads — `default_endpoint_id` EMPTY,
-    `default_model` = the OOB z-ai/glm-5.2. Per-user prefs are absent (accounts recreated)."""
+    `default_model` = the OOB z-ai/glm-4.7. Per-user prefs are absent (accounts recreated)."""
     merged = dict(settings_mod.DEFAULT_SETTINGS)
     monkeypatch.setattr(settings_mod, "load_settings", lambda: dict(merged))
     monkeypatch.setattr(settings_mod, "get_setting",
@@ -126,22 +126,25 @@ def rhino_is_admin(monkeypatch):
 
 def test_ship_gate_single_keyed_endpoint_resolves_for_recreated_admin(
         post_reset_settings, rhino_is_admin):
-    """settings: default_endpoint_id ABSENT, default_model=z-ai/glm-5.2; ONE enabled keyed
+    """settings: default_endpoint_id ABSENT, default_model=z-ai/glm-4.7; ONE enabled keyed
     OpenRouter row (owner stamp stale — not 'rhino'); recreated admin user. The single-endpoint
     auto-default MUST bind resolution to that endpoint — no settings edit, no UI toggle."""
     _seed_single_openrouter_endpoint(owner="pre-reset-ghost")
 
     url, model, headers = endpoint_resolver.resolve_endpoint("default", owner="rhino")
     assert url and url.endswith("/chat/completions"), f"must bind the sole keyed endpoint, got {url!r}"
-    assert model == "z-ai/glm-5.2", "the stored OOB default_model must be honored, never re-derived"
+    assert model == "z-ai/glm-4.7", "the stored OOB default_model must be honored, never re-derived"
     assert isinstance(headers, dict) and headers.get("Authorization", "").startswith("Bearer ")
 
 
 def test_ship_gate_utility_class_resolves_too(post_reset_settings, rhino_is_admin):
-    """The per-call-class chain (utility → default) that cast-genesis/-identity/-authoring ride."""
+    """The per-call-class chain (utility → default) that cast-genesis/-identity/-authoring ride.
+    2026-07-13: the unset utility ENDPOINT rides the default endpoint, but the configured
+    utility MODEL (the ADR 0016 qwen tier) stays authoritative — it no longer collapses to
+    the narrator model out of the box."""
     _seed_single_openrouter_endpoint(owner=None)
     url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="rhino")
-    assert url and model == "z-ai/glm-5.2"
+    assert url and model == "qwen/qwen3.6-flash"
 
 
 def test_ship_gate_preflight_unwired_is_empty(post_reset_settings, rhino_is_admin, run):
@@ -189,7 +192,7 @@ def test_ship_gate_non_admin_user_with_shared_endpoint_also_resolves(post_reset_
     monkeypatch.setattr(auth_helpers, "is_admin_user", lambda user: False)
     _seed_single_openrouter_endpoint(owner=None)
     url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="someone-new")
-    assert url and model == "z-ai/glm-5.2"
+    assert url and model == "z-ai/glm-4.7"
 
 
 # ── the fallback's guardrails: it must NOT fire outside the unambiguous case ─────────────
@@ -215,7 +218,7 @@ def test_auto_default_skips_image_only_endpoints(post_reset_settings, rhino_is_a
     assert url is None
     _add_endpoint("ep-llm", api_key="sk-llm", model_type="llm")
     url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="rhino")
-    assert url and model == "z-ai/glm-5.2"
+    assert url and model == "z-ai/glm-4.7"
 
 
 def test_auto_default_never_overrides_a_caller_fallback(post_reset_settings, rhino_is_admin):
@@ -250,7 +253,7 @@ def test_dangling_designation_falls_back_to_the_sole_keyed_endpoint(post_reset_s
     _seed_single_openrouter_endpoint("ep-or")
     url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="rhino")
     assert url and url.endswith("/chat/completions")
-    assert model == "z-ai/glm-5.2"
+    assert model == "z-ai/glm-4.7"
 
 
 # ── owner-scope hardening (the second latent brick) ──────────────────────────────────────
@@ -263,7 +266,7 @@ def test_explicit_designation_resolves_shared_row_for_non_admin(post_reset_setti
     _seed_single_openrouter_endpoint("ep-or", owner=None)
     merged["default_endpoint_id"] = "ep-or"
     url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="someone-new")
-    assert url and model == "z-ai/glm-5.2"
+    assert url and model == "z-ai/glm-4.7"
 
 
 def test_explicit_designation_resolves_stale_owner_row_for_admin(post_reset_settings,
@@ -274,7 +277,7 @@ def test_explicit_designation_resolves_stale_owner_row_for_admin(post_reset_sett
     _seed_single_openrouter_endpoint("ep-or", owner="pre-reset-ghost")
     merged["default_endpoint_id"] = "ep-or"
     url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="rhino")
-    assert url and model == "z-ai/glm-5.2"
+    assert url and model == "z-ai/glm-4.7"
 
 
 def test_non_admin_still_cannot_resolve_another_users_owned_row(post_reset_settings, monkeypatch):
@@ -291,9 +294,9 @@ def test_non_admin_still_cannot_resolve_another_users_owned_row(post_reset_setti
 def test_resolve_endpoint_by_id_allows_shared_rows(post_reset_settings, monkeypatch):
     monkeypatch.setattr(auth_helpers, "is_admin_user", lambda user: False)
     _seed_single_openrouter_endpoint("ep-or", owner=None)
-    resolved = endpoint_resolver.resolve_endpoint_by_id("ep-or", "z-ai/glm-5.2",
+    resolved = endpoint_resolver.resolve_endpoint_by_id("ep-or", "z-ai/glm-4.7",
                                                         owner="someone-new")
-    assert resolved is not None and resolved[1] == "z-ai/glm-5.2"
+    assert resolved is not None and resolved[1] == "z-ai/glm-4.7"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -456,7 +459,7 @@ def test_authoring_resolver_binds_the_configured_default_model(post_reset_settin
                                                                rhino_is_admin, monkeypatch, run):
     """Owner ruling 2026-07-12 ('the RIGHT model, not A model'): on the owner-box store state
     the cast-authoring/genesis resolver must resolve THE configured default model identity
-    (z-ai/glm-5.2 on the sole keyed endpoint) — never an arbitrary provider-list pick."""
+    (z-ai/glm-4.7 on the sole keyed endpoint) — never an arbitrary provider-list pick."""
     _seed_single_openrouter_endpoint(owner="pre-reset-ghost")
     ca = importlib.import_module("src.orwell_cast_authoring")
     captured = _capture_stream(monkeypatch)
@@ -467,14 +470,16 @@ def test_authoring_resolver_binds_the_configured_default_model(post_reset_settin
     cands = captured.get("candidates") or []
     assert cands, "the resolved fn must dispatch to real candidates"
     url, model = cands[0][0], cands[0][1]
-    assert model == "z-ai/glm-5.2", f"the PRIMARY candidate must be the configured default, got {model!r}"
+    assert model == "z-ai/glm-4.7", f"the PRIMARY candidate must be the configured default, got {model!r}"
     assert "openrouter" in url and url.endswith("/chat/completions")
 
 
 def test_utility_resolver_binds_the_configured_default_model(post_reset_settings,
                                                              rhino_is_admin, monkeypatch, run):
     """The background-utility resolver (cast-identity / zeitgeist / offscreen-texture classes)
-    binds the same configured identity through the utility→default chain."""
+    binds a CONFIGURED identity through the utility→default chain — since 2026-07-13 that is
+    the shipped utility model (the ADR 0016 qwen tier) on the default endpoint, never an
+    arbitrary provider-list pick."""
     _seed_single_openrouter_endpoint(owner=None)
     ca = importlib.import_module("src.orwell_cast_authoring")
     captured = _capture_stream(monkeypatch)
@@ -483,7 +488,7 @@ def test_utility_resolver_binds_the_configured_default_model(post_reset_settings
     assert fn is not None
     run(fn([{"role": "user", "content": "probe"}]))
     cands = captured.get("candidates") or []
-    assert cands and cands[0][1] == "z-ai/glm-5.2"
+    assert cands and cands[0][1] == "qwen/qwen3.6-flash"
 
 
 def test_auto_default_declines_rather_than_picking_first_available(post_reset_settings,
