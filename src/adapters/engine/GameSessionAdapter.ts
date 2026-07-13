@@ -533,6 +533,16 @@ const COMP_THEMES_ENABLED_DEFAULT = process.env.ORWELL_COMP_THEMES !== "0";
 const COMP_MECHANICS_PLUS_ENABLED_DEFAULT = process.env.ORWELL_COMP_MECHANICS_PLUS === "1";
 
 /**
+ * 0127 — whether HYBRID competitions blend their SECONDARY aptitude into the outcome by DEFAULT (a
+ * physical-with-a-puzzle-element veto rewards a well-rounded houseguest). OFF unless `ORWELL_COMP_MIXED=1`.
+ * Like 0126, this changes seeded winners (the score base becomes a stat blend), so it is DEFAULT-OFF: unset
+ * ⇒ `ctx().mixedComps` is false, every comp resolves on its pure single stat, and every seeded gate
+ * (juryReach / gradient / UAT / golden) is byte-identical. The primary stat still dominates (weight
+ * `1 − mixedSecondaryWeight`); the deploy turns it on and the band is re-confirmed on.
+ */
+const COMP_MIXED_ENABLED_DEFAULT = process.env.ORWELL_COMP_MIXED === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -934,6 +944,8 @@ export class GameSessionAdapter implements GameSession {
   private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
 
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
+
+  private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
 
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
@@ -6268,6 +6280,9 @@ export class GameSessionAdapter implements GameSession {
       // 0126: fold the expanded mechanic pool into the competition draw — present ONLY when enabled (off in
       // the calibration/golden harness ⇒ absent ⇒ the base 12-mechanic draw ⇒ byte-identical).
       ...(this.compMechanicsPlusEnabled ? { expandedComps: true as const } : {}),
+      // 0127: blend a hybrid comp's secondary aptitude into its outcome — present ONLY when enabled (off in
+      // the calibration/golden harness ⇒ absent ⇒ pure single-stat resolution ⇒ byte-identical).
+      ...(this.compMixedEnabled ? { mixedComps: true as const } : {}),
     };
   }
 
@@ -6279,6 +6294,12 @@ export class GameSessionAdapter implements GameSession {
   setCompMechanicsPlusEnabled(on: boolean): void { this.compMechanicsPlusEnabled = on; }
   /** 0126 — the resolved on/off state of the expanded-mechanic pool (for an admin/status read). */
   compMechanicsPlusEnabledNow(): boolean { return this.compMechanicsPlusEnabled; }
+
+  /** 0127 — turn hybrid (mixed-type) competition resolution on/off. Off by default (the calibration harness
+   *  leaves it off ⇒ pure single-stat resolution ⇒ byte-identical). The deploy turns it on for real play. */
+  setCompMixedEnabled(on: boolean): void { this.compMixedEnabled = on; }
+  /** 0127 — the resolved on/off state of hybrid competition resolution (for an admin/status read). */
+  compMixedEnabledNow(): boolean { return this.compMixedEnabled; }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }

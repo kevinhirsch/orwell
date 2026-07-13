@@ -90,6 +90,14 @@ export function resolveCompetition(
   rng: RandomnessSource,
   /** Tunable temperature/outcome constants (0028); defaults to the single module. */
   constants: TemperatureConstants = TEMPERATURE_CONSTANTS,
+  /**
+   * Feature 0127 — the competition's SECONDARY aptitude for a genuine HYBRID comp (e.g. a physical
+   * challenge with a puzzle element). When present, the stat base is a weighted blend of the primary
+   * (`RELEVANT[type]`) and this secondary — the primary still dominates (`1 − w`), the secondary tilts
+   * (`w = constants.outcome.mixedSecondaryWeight`). Undefined ⇒ the pure single stat ⇒ BYTE-IDENTICAL.
+   * The engine still decides on stats (anti-sycophancy); a hybrid just rewards a well-rounded houseguest.
+   */
+  secondaryStat?: "physical" | "mental" | "social",
 ): CompetitionResult {
   // Audit C5: fail LOUDLY on malformed fields. An empty field used to die with a bare
   // TypeError, and a NaN stat silently crowned competitors[0] (every NaN comparison is
@@ -123,7 +131,14 @@ export function resolveCompetition(
 
   const scores: Record<EntityId, number> = {};
   for (const c of competitors) {
-    const base = c.stats[stat] * w.stat;
+    // 0127: a hybrid comp blends the primary stat with a secondary aptitude (the primary still dominates).
+    // No secondary ⇒ the pure single stat ⇒ byte-identical. The blend never changes the temperature/emotion/
+    // intent/rest terms — only which combined aptitude the stat base rewards.
+    const effectiveStat =
+      secondaryStat && secondaryStat !== stat
+        ? c.stats[stat] * (1 - w.mixedSecondaryWeight) + c.stats[secondaryStat] * w.mixedSecondaryWeight
+        : c.stats[stat];
+    const base = effectiveStat * w.stat;
     // Feature 0098: widen ONLY this competitor's seeded temperature span SYMMETRICALLY about its
     // unchanged center (0), by a bounded inverse-conviction factor clamped to the hard ceiling. The RAW
     // drawn `temperature` map is untouched (the seeded draw is unchanged) — only the SCORE's temperature
