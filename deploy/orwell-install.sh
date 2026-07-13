@@ -220,6 +220,12 @@ write_config() {
   # "first install" config block on the app config being absent, not on the file existing.
   if ! grep -qs '^ORWELL_PORT=' "${DATA_DIR}/.env"; then
     [[ -s "${DATA_DIR}/.env" ]] || cp "${APP_DIR}/frontend/.env.example" "${DATA_DIR}/.env" 2>/dev/null || touch "${DATA_DIR}/.env"
+    # Opt-in feature-flag defaults live in ONE shared source (deploy/orwell-env-defaults.sh), consumed
+    # BOTH here (fresh install) AND by orwell-update.sh's backfill (an existing box installed before a
+    # flag was added), so the two paths can never drift. Sourced post-checkout — the repo tree at
+    # ${APP_DIR}/deploy was pulled by checkout() above; a missing lib fails loudly under the ERR trap.
+    . "${APP_DIR}/deploy/orwell-env-defaults.sh" \
+      || { echo "ERROR: deploy/orwell-env-defaults.sh not found — cannot write feature-flag defaults." >&2; exit 1; }
     {
       echo ""
       echo "# --- orwell ---"
@@ -250,72 +256,13 @@ write_config() {
       # save outside data/ and made factory-reset miss it). Preserved across updates (data/ is
       # gitignored); scrubbed by orwell-factory-reset.sh.
       echo "ORWELL_DATA_DIR=${DATA_DIR}/saves"
-      # Semantic recall (ADR 0004 / audit E86a): the deploy default is the REAL local-ONNX
-      # embedding provider (fastembed, version-pinned). The model is prefetched above into
-      # data/models (offline thereafter; preserved by updates and both reset scripts). If the
-      # model is ever missing the engine logs loudly and falls back to deterministic recall —
-      # the game never breaks.
-      echo "ORWELL_EMBEDDINGS=fastembed"
-      echo "ORWELL_EMBED_CACHE=${DATA_DIR}/models"
-      # NPC campaigns (0085): the live game runs the strategic-campaign layer (hidden, adaptive
-      # agendas that tilt nominations/votes — engine-tallied, Vault-sealed). DEFAULT OFF in code so
-      # the seeded calibration gates stay byte-identical; the deploy opts in here.
-      echo "ORWELL_CAMPAIGNS=1"
-      # B2 (2026-07-05 activation): the rest of the built "living house" behavioral-fidelity layers
-      # that shipped OPT-IN behind their own env flag but were never wired into the deploy — so on a
-      # stock box no relationship arcs curdled (0087), no trigger secrets erupted (0091), no dormant
-      # secret drip-fed on a paced cadence (0092), no jury grudges accumulated (0100), and no seeded
-      # pre-show ties ever surfaced (0059 §5). Each ships its OWN calibration-neutral-when-off gate,
-      # and all five + campaigns were heavy-sim'd ON together (juryReach band + calibrationGradient
-      # active≥passive both hold). DEFAULT OFF in code so the seeded gates stay byte-identical; the
-      # deploy opts in here. The God-Mode "Living house" dial (setBehavioralFlags) overrides any of
-      # these per-sandbox at runtime; /health's `flags` block reports the boot state.
-      echo "ORWELL_TRAJECTORIES=1"
-      echo "ORWELL_TRIGGERS=1"
-      echo "ORWELL_SECRET_PACING=1"
-      echo "ORWELL_JURY_HOUSE=1"
-      echo "ORWELL_SEEDED_TIE_SURFACING=1"
-      # Strategic-drive off-screen cadence (0120): sharper/more-strategic houseguests initiate the
-      # hidden off-screen scheming a touch more often (a slight, bounded variance — never a wild skew).
-      # DEFAULT OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
-      echo "ORWELL_STRATEGIC_CADENCE=1"
-      # Deeper, daily NPC confessionals (0122): the five triggered facets (plan / standing / grudge /
-      # conversation aftermath / adjacent move) + the once-per-in-game-day sweep where most living NPCs
-      # confess unless their game is bare. Vault-only (sealed from player + admin, unchanged from 0040).
-      # DEFAULT OFF in code (+ additionally gated on the live in-game clock, pinned off in the golden
-      # driver) so the seeded gates + golden fixture stay byte-identical; the deploy opts in here.
-      echo "ORWELL_CONFESSIONAL_DEPTH=1"
-      # Deal depth (0121): the two ACTIVE-obligation deal kinds (comp-throw / veto-save) + the reliability
-      # rewards (loyalty streak, reliable-ally protection, and the diffusing "keeps their word" reputation).
-      # DEFAULT OFF in code (+ pinned off in the golden driver so the fixture stays byte-identical); the FE
-      # flag-gates the two new makeDeal kinds off /health's `flags.dealDepth`. The deploy opts in here.
-      echo "ORWELL_DEAL_DEPTH=1"
-      # NPC-initiated deal offers (0123): a motivated houseguest floats the player a deal at a lull
-      # (accept => a real deal via the same spine; decline => a small hidden cooling). Grounded, Vault-safe,
-      # bounded. DEFAULT OFF in code (+ only ever acts at a lull) so the seeded gates stay byte-identical;
-      # the deploy opts in here.
-      echo "ORWELL_NPC_DEAL_OFFERS=1"
-      # Deeper character evolution (0124): independent distress/confidence axes, strategic-temperament
-      # drift (a burned houseguest hardens, mean-reverting), and disposition-tuned reactivity (temperamental
-      # houseguests are more sensitive + settle slower). Hidden layer only, CHARACTER byte-stable. DEFAULT
-      # OFF in code so the seeded gates stay byte-identical; the deploy opts in here.
-      echo "ORWELL_SOUL_DEPTH=1"
-      # Expanded competition mechanics (0126): the mechanic pool grows 12 => 30 (15 HOH + 15 veto) drawn as
-      # a rolling shuffle, so a full season runs with NO repeated competition mechanic (real gameplay
-      # variety, layered under the 0125 themes). The new mechanics preserve the base stat mix so balance
-      # holds (juryReach re-run green flag-on). DEFAULT OFF in code (it changes seeded winners, so off keeps
-      # the seeded gates + golden byte-identical); the deploy opts in here.
-      echo "ORWELL_COMP_MECHANICS_PLUS=1"
-      # Mixed-type competitions (0127): a HYBRID comp (a physical challenge with a puzzle element) blends its
-      # secondary aptitude into the outcome, so a well-rounded houseguest edges a one-dimensional one. The
-      # primary stat still dominates (65/35). DEFAULT OFF in code (it edits the resolution core, so off keeps
-      # the seeded gates + golden byte-identical; juryReach re-run green flag-on); the deploy opts in here.
-      echo "ORWELL_COMP_MIXED=1"
-      # NPC competition intent (0006b, PO review 2026-06-28): in the live game every NPC carries a
-      # derived compete/throw/play-safe intent (a nominee fights; a lay-low houseguest with a strong
-      # ally throws to hand them power; a cautious target plays safe). DEFAULT OFF in code so the seeded
-      # calibration gates stay byte-identical; the deploy opts in here.
-      echo "ORWELL_COMP_INTENT=1"
+      # Opt-in feature-flag defaults — the ADR 0004 semantic-recall provider, the "living house"
+      # behavioral-fidelity layers, and the competition-variety set. SINGLE SOURCE (with the per-flag
+      # rationale): deploy/orwell-env-defaults.sh, sourced above and ALSO consumed by orwell-update.sh's
+      # backfill, so a fresh install and an updated old box get the identical set and the two paths
+      # cannot drift. Each flag DEFAULTs OFF in engine code (the seeded calibration + 0108 golden gates
+      # stay byte-identical); the deploy opts in. Add or change a flag in THAT file only.
+      orwell_optin_env_defaults "${DATA_DIR}"
       # Multi-user identity (audit E32): the FE ships with accounts ON by default, so the engine
       # must REQUIRE an asserted x-orwell-user — never silently collapse anonymous callers into a
       # shared "default" sandbox (cross-user isolation, feature 0021).
