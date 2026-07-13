@@ -238,7 +238,12 @@ many parallel agents, not typing every edit myself.
     (c) **batch API work at the window reset, PACED** (list once, act N times with small gaps, cache
     locally — an unpaced burst can trip GitHub's SECONDARY limits: ~100 concurrent, ~900 REST
     points/min; on any 403/429 honor `Retry-After` / `x-ratelimit-reset` instead of assuming the
-    hourly window); (d) evidence sweeps for issue-closing are 100% local (`git log --grep`, docs)
+    hourly window). **SERIALIZE mutations — the secondary/abuse limit trips on PARALLELISM, not just
+    volume: two `create_pull_request`/`merge_pull_request` calls fired in ONE assistant turn 403 BOTH
+    even with a full hourly budget (verified 2026-07-13: parallel PR-opens → both `Retry after ~2m`;
+    the SAME calls one-at-a-time succeeded instantly). Fire mutating GitHub MCP calls one at a time,
+    never batched in a single message — this bites a lot of agents who assume "I have hourly quota
+    left" means a burst is safe;** (d) evidence sweeps for issue-closing are 100% local (`git log --grep`, docs)
     — the API is only for the final read-confirm + close. Escalation paths when quota still binds:
     a GitHub App installation token (its OWN pool — the real fix), a machine-user account's PAT
     (second user pool), or GraphQL (separate PRIMARY quota only — secondary/concurrency/abuse limits are SHARED with
