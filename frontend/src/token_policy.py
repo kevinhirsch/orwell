@@ -81,6 +81,25 @@ _VALID_EFFORTS = ("off", "low", "medium", "high")
 _MIN_MAX_TOKENS = 256
 _MAX_MAX_TOKENS = 200_000
 
+# ── 0116 cast-genesis sketch sizing + the length-retry ceiling (the 2026-07-13 prod fix) ──────
+# The full-cast genesis SKETCH is ONE completion carrying the ENTIRE 15-NPC skeleton JSON
+# (names + identities + biographies + stats + 3-6 hidden elements each + ties ≈ 12-20K chars),
+# while the ``background-authoring`` class cap (3000) is sized for ONE NPC's profile JSON. Live
+# prod: the sketch ended ``finish_reason=length`` at out=3000/cap=3000 — truncated JSON →
+# unparseable → ``no-usable-proposal`` → committed 0 → the strict pre-finalize gate refused
+# casting. The sketch call therefore carries its own FLOOR: the resolved per-class cap (admin
+# override included) is raised to at least this many output tokens for the FULL-CAST call only.
+# An admin ``max_tokens_budget`` override LARGER than the floor still wins (max, not replace);
+# the per-NPC deep-authoring calls keep the untouched class cap (they finish well under it, and
+# they are pinned at cap 3000 in the committed golden fixture — raising the CLASS default would
+# stale it; the sketch call is not in the fixture).
+GENESIS_SKETCH_MIN_OUTPUT_TOKENS = 8000
+
+# When any JSON-authoring completion ends ``finish_reason=length`` (the model was CUT OFF by the
+# output cap, so the body is chopped mid-JSON and unparseable), the call is re-issued EXACTLY ONCE
+# at double its cap — never above this ceiling, and never more than one retry per call.
+LENGTH_RETRY_MAX_TOKENS = 16000
+
 # The class whose defaults stand in for an unknown call class (never crash).
 _FALLBACK_CLASS = "narration"
 

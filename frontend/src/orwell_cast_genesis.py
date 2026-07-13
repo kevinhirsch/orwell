@@ -42,6 +42,7 @@ pre-warm that overlaps the casting interview and is done by finalize; game start
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Awaitable, Callable, Optional
 
@@ -275,6 +276,78 @@ def _extract_json(text: str) -> Optional[dict]:
         return None
 
 
+def _salvage_truncated_npcs(text: str) -> Optional[dict]:
+    """2026-07-13 salvage guard: recover the COMPLETE leading npc entries from a TRUNCATED sketch
+    reply (a ``finish_reason=length`` completion chops the JSON mid-array, so ``_extract_json``
+    finds nothing). Scans the ``"npcs": [...`` array with a string-aware balanced-brace walk and
+    ``json.loads``-es each complete ``{...}`` element until the text runs out or breaks.
+
+    A partial-but-valid leading set IS committable by design: the engine envelope natively supports
+    a partial proposal (positional binding + the deterministic floor for every unproposed slot —
+    ``parse_genesis_proposal`` already forwards subsets), so half a model-authored cast beats a
+    whole deterministic floor. Returns ``{"npcs": [...]}`` (raw dicts — the caller's normal
+    per-entry filtering still applies) or ``None`` when nothing complete could be recovered. Ties
+    are deliberately NOT salvaged (they trail the npcs array, so truncation already ate them; the
+    engine treats absent ties as an empty graph)."""
+    if not isinstance(text, str) or not text:
+        return None
+    m = text.find('"npcs"')
+    if m == -1:
+        return None
+    start = text.find("[", m)
+    if start == -1:
+        return None
+    entries: list = []
+    i = start + 1
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch in " \t\r\n,":
+            i += 1
+            continue
+        if ch == "]":
+            break  # the array closed cleanly (truncation hit later — e.g. inside ties)
+        if ch != "{":
+            break  # unexpected shape — keep only what parsed so far
+        depth = 0
+        in_str = False
+        esc = False
+        j = i
+        end = -1
+        while j < n:
+            c = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = j
+                        break
+            j += 1
+        if end == -1:
+            break  # this element was cut off mid-object — stop; keep the complete ones before it
+        try:
+            one = json.loads(text[i:end + 1])
+        except (ValueError, TypeError):
+            break
+        if isinstance(one, dict):
+            entries.append(one)
+        i = end + 1
+    if not entries:
+        return None
+    return {"npcs": entries}
+
+
 def _clean_str(v, max_len: int = 500) -> Optional[str]:
     """A light FE pre-filter: a non-empty string, whitespace-collapsed + length-capped. The ENGINE
     re-neutralizes + caps everything again (C8), so this only keeps the payload tidy."""
@@ -294,6 +367,16 @@ def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
     usable was proposed (the deterministic floor then stands). PLAYER-BLIND — no player field is read or
     written; the engine seals the hidden half."""
     obj = _extract_json(text)
+    if obj is None:
+        # 2026-07-13 salvage guard: a cap-truncated reply (finish_reason=length survived even the
+        # doubled-cap retry) still carries complete leading npc objects — commit those (the engine
+        # positionally binds + floors the rest) instead of discarding the whole proposal.
+        obj = _salvage_truncated_npcs(text)
+        if obj is not None:
+            logger.warning(
+                "[cast-genesis] reply was truncated mid-JSON — salvaged %d complete leading "
+                "houseguest entr%s (the engine floors the rest)",
+                len(obj.get("npcs") or []), "y" if len(obj.get("npcs") or []) == 1 else "ies")
     if obj is None:
         return {}
     npcs_out: list = []
@@ -518,13 +601,17 @@ def _mark_committed(user: Optional[str], seed, committed: int) -> None:
 
 def reset_state(user: Optional[str] = None) -> None:
     """New-season scrub: clear the strict-failed latch + the idempotency latch so a fresh cast starts
-    clean (``user=None`` clears everyone)."""
+    clean (``user=None`` clears everyone). Also drops the in-flight dedup handles (the tasks
+    themselves self-clean and are never cancelled — an old-season run just finishes unobserved)."""
     if user is None:
         _STRICT_FAILED.clear()
         _COMMITTED.clear()
+        _IN_FLIGHT.clear()
     else:
         _STRICT_FAILED.discard(_key(user))
         _COMMITTED.pop(_key(user), None)
+        for k in [k for k in _IN_FLIGHT if k[0] == _key(user)]:
+            _IN_FLIGHT.pop(k, None)
 
 
 def refusal_message() -> str:
@@ -542,15 +629,44 @@ async def _resolve_llm_fn(owner: Optional[str]) -> Optional[LlmFn]:
     """Resolve the model for the cast-genesis SKETCH call. Genesis is expressive, end-to-end character
     work like deep authoring, so it routes to the cast-authoring resolver (NARRATION model by default, hot
     sampling temperature, explicit utility fallback). Returns None when no usable text model resolves —
-    genesis then silently no-ops and the engine's deterministic floor stands."""
+    genesis then silently no-ops and the engine's deterministic floor stands.
+
+    2026-07-13 (the prod cap fix): the sketch is ONE completion carrying the WHOLE 15-NPC skeleton
+    JSON, so the resolver is asked for the GENESIS output-cap floor
+    (``token_policy.GENESIS_SKETCH_MIN_OUTPUT_TOKENS`` ≥ 8000) — the one-NPC-sized class cap (3000)
+    chopped the proposal mid-JSON (``finish_reason=length`` → ``no-usable-proposal``). Signature-
+    tolerant: a legacy ``(owner)`` test stub for ``resolve_authoring_llm_fn`` keeps intercepting."""
     try:
         from src.orwell_cast_authoring import resolve_authoring_llm_fn
     except Exception:
         return None
     try:
-        return await resolve_authoring_llm_fn(owner)
+        try:
+            from src.token_policy import GENESIS_SKETCH_MIN_OUTPUT_TOKENS as _floor
+        except Exception:  # pragma: no cover - token_policy is a sibling pure module
+            _floor = 8000
+        try:
+            import inspect
+            params = inspect.signature(resolve_authoring_llm_fn).parameters
+            takes_floor = "min_output_tokens" in params or any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+        except (TypeError, ValueError):
+            takes_floor = False
+        if takes_floor:
+            return await resolve_authoring_llm_fn(owner, min_output_tokens=_floor)
+        return await resolve_authoring_llm_fn(owner)  # a legacy-signature stub (tests)
     except Exception:
         return None
+
+
+# 2026-07-13 in-flight dedup: genesis is kicked from TWO seams (the interview-open pre-warm and the
+# do_create_character pre-finalize belt). The `_COMMITTED` idempotency latch only engages AFTER a
+# commit, so a finalize that lands while the pre-warm's run is STILL GRINDING used to start a SECOND
+# full sketch grind (double LLM spend) — and, because the finalize kick is awaited inside the chat
+# turn, the player's casting chat hung for the WHOLE fresh grind. One task per (user, seed): the
+# second kick awaits the SAME in-flight run (shielded, so an awaiter's cancellation — e.g. a client
+# disconnect on the pre-warm route — never kills the shared run).
+_IN_FLIGHT: dict = {}
 
 
 async def run_genesis(roster: list, seed: int, owner: Optional[str], *,
@@ -561,13 +677,36 @@ async def run_genesis(roster: list, seed: int, owner: Optional[str], *,
     ledger entry + the strict-failed latch the loud pre-finalize gate reads (§4 / #1313 precedent).
 
     PLAYER-BLIND: no player identity is threaded in — the cast is proposed off the seeded brief alone.
-    Returns the ``seed_cast_genesis`` result dict (Vault-free counts)."""
+    Returns the ``seed_cast_genesis`` result dict (Vault-free counts). Concurrency-safe per
+    (user, seed): a second kick while a run is in flight AWAITS that run instead of re-grinding."""
     # Idempotency: genesis is kicked from BOTH the interview-open pre-warm AND the do_create_character
     # pre-finalize belt — if it already committed for THIS warmed seed, this second kick is a no-op (no
     # duplicate sketch call, no double fold).
     if genesis_committed(owner, seed):
         return {"committed": 0, "accepted": True, "varianceOk": True, "rerolls": 0,
                 "reason": "already-committed"}
+    k = (_key(owner), seed)
+    task = _IN_FLIGHT.get(k)
+    if task is None or task.done():
+        task = asyncio.get_running_loop().create_task(
+            _run_genesis_once(roster, seed, owner, write=write))
+        _IN_FLIGHT[k] = task
+
+        def _cleanup(t, _k=k):
+            if _IN_FLIGHT.get(_k) is t:
+                _IN_FLIGHT.pop(_k, None)
+        task.add_done_callback(_cleanup)
+    else:
+        logger.info("[cast-genesis] a run for this (user, seed) is already in flight — "
+                    "awaiting it instead of starting a second sketch grind")
+    # shield: if THIS awaiter is cancelled (e.g. the pre-warm HTTP request disconnects), the shared
+    # run keeps going so the other seam (the pre-finalize belt) still gets its result.
+    return await asyncio.shield(task)
+
+
+async def _run_genesis_once(roster: list, seed: int, owner: Optional[str], *,
+                            write: Optional[WriteFn] = None) -> dict:
+    """The single-flight body of ``run_genesis`` (see the dedup wrapper above)."""
     strict = False
     try:
         from src import enrichment_policy
