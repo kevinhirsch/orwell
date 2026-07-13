@@ -154,8 +154,12 @@ def test_discards_active_set_and_force_kicks_full_regeneration(tmp_portraits, cl
     assert body["kicked"] is True
     assert body["log"] == "portrait-log.jsonl"          # the viewer can follow it
     assert seen["force"] is True
-    assert seen["missing"] == ["player", "npc:1", "npc:3"]  # every active, juror excluded
-    assert body["queued"] == 3
+    # Every active NPC, juror excluded — and the PLAYER excluded too (bundle-audit fix
+    # 2026-07-13): the engine emits no portrait prompt for the player, so the regen kick never
+    # chases them (their discarded AI face re-applies from the chosen headshot / studio pick
+    # via the reconciler's pre-pass, not a prompt shoot).
+    assert seen["missing"] == ["npc:1", "npc:3"]
+    assert body["queued"] == 2
     # the juror's photo survived
     assert orwell_portraits.portrait_file("default", "npc:2") is not None
 

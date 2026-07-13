@@ -477,6 +477,12 @@ def _roster_payload(user: Optional[str], cards: list, *, stale: bool) -> dict:
         "portraitsPresent": counts["present"],
         "portraitsTotal": counts["total"],
     }
+    # Bundle-audit fix (2026-07-13): the player is EXEMPT from the prompt-shoot counters (their
+    # face is uploaded/chosen, never generated from an engine prompt — the engine emits none for
+    # them by design). Their separate track rides here so the panel can say "upload your photo"
+    # instead of counting an eternally-missing portrait. Absent/false ⇒ nothing owed.
+    if counts.get("playerAwaitingUpload"):
+        payload["playerAwaitingUpload"] = True
     if progress is not None:
         payload["generation"] = progress
     if stale:

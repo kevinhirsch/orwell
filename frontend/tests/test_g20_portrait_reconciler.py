@@ -85,6 +85,13 @@ _STATE = {
     ],
 }
 _ACTIVE_IDS = ["player", "npc:1", "npc:3"]  # the active cast in _STATE
+# The prompt-SHOOTABLE actives (bundle-audit fix 2026-07-13): the player is exempt from every
+# prompt-shoot seam — no engine prompt exists for them (#529; upload/casting-studio path).
+_SHOOTABLE_IDS = ["npc:1", "npc:3"]
+# Card names by id — stored manifests must carry the ROSTER name (as production writes do via the
+# engine's prompt/name), or the staleness heal reads a divergent name as a dead cast's face.
+_NAMES = {"player": "The Player", "npc:1": "Houseguest One",
+          "npc:2": "Houseguest Two", "npc:3": "Houseguest Three"}
 
 
 def _stub_state(monkeypatch, state=_STATE):
@@ -134,7 +141,7 @@ def _stub_gen(monkeypatch, ok=True):
 
 
 def _store_portrait(user, hid):
-    orwell_portraits._write_portrait(user, hid, b"\x89PNG-fake", "stored")
+    orwell_portraits._write_portrait(user, hid, b"\x89PNG-fake", _NAMES.get(hid, "stored"))
 
 
 def _counters(user):
@@ -154,9 +161,14 @@ def test_reconciler_fills_the_missing_set(tmp_portraits, monkeypatch):
     results = _run(orwell_portraits.reconcile_once())
 
     # `healed` (2026-07-13, the ADR 0013 staleness self-heal) rides the result additively.
-    assert results["user-a"] == {"missing": 3, "attempted": 3, "healed": 0}
-    for hid in _ACTIVE_IDS:
+    # The PLAYER is exempt from the prompt-shoot missing set (bundle-audit fix 2026-07-13):
+    # only the two shootable NPCs are missing/attempted.
+    assert results["user-a"] == {"missing": 2, "attempted": 2, "healed": 0}
+    for hid in _SHOOTABLE_IDS:
         assert orwell_portraits.portrait_file("user-a", hid) is not None
+    # The player has no chosen headshot on file — nothing is generated for them (their face is
+    # the upload/casting-studio path, never an engine-prompt shoot).
+    assert orwell_portraits.portrait_file("user-a", "player") is None
     # The jury houseguest is departed — never late-generated.
     assert orwell_portraits.portrait_file("user-a", "npc:2") is None
     # Success leaves no budget counters behind.
@@ -174,8 +186,8 @@ def test_reconciler_sweeps_every_seen_user_in_isolation(tmp_portraits, monkeypat
     results = _run(orwell_portraits.reconcile_once())
 
     assert set(results) == {"user-a", "user-b"}
-    assert (tmp_portraits / "user-a" / "player.png").exists()
-    assert (tmp_portraits / "user-b" / "player.png").exists()
+    assert (tmp_portraits / "user-a" / "npc_1.png").exists()
+    assert (tmp_portraits / "user-b" / "npc_1.png").exists()
 
 
 def test_reconciler_idles_pre_game_and_when_engine_down(tmp_portraits, monkeypatch):
@@ -213,7 +225,7 @@ def test_absence_idles_without_consuming_budget(tmp_portraits, monkeypatch):
     # failure is attempt 1 of RECONCILE_MAX_ATTEMPTS.
     holder["available"] = True
     _run(orwell_portraits.reconcile_once())
-    assert len(gen.calls) == 3  # one real attempt per missing active houseguest
+    assert len(gen.calls) == 2  # one real attempt per missing SHOOTABLE houseguest (player exempt)
     assert all(c["attempts"] == 1 for c in _counters("user-a").values())
 
 
@@ -407,7 +419,10 @@ def test_health_payload_carries_portrait_completeness(tmp_portraits, monkeypatch
     body = health_client.get("/api/admin/health").json()
     img = body["images"]
     assert img["available"] is True
-    assert img["portraits"] == {"total": 3, "present": 1, "missing": 2}
+    # The counters cover the prompt-SHOOTABLE cast (the NPCs); the player rides the separate
+    # `playerAwaitingUpload` flag (bundle-audit fix 2026-07-13).
+    assert img["portraits"] == {"total": 2, "present": 1, "missing": 1,
+                                "playerAwaitingUpload": True}
 
 
 def test_health_portraits_are_null_pre_game_and_engine_down(tmp_portraits, monkeypatch, health_client):
@@ -438,8 +453,10 @@ def test_roster_route_reports_present_and_total(tmp_portraits, monkeypatch, clie
     _store_portrait("default", "npc:1")
 
     body = client.get("/api/orwell/roster").json()
-    assert body["portraitsTotal"] == 3
+    # Shootable NPCs only (player exempt; their track is the flag below).
+    assert body["portraitsTotal"] == 2
     assert body["portraitsPresent"] == 1
+    assert body["playerAwaitingUpload"] is True
 
     # The fail-open shapes are PINNED pre-G20 ({roster, imagesAvailable} only — see
     # test_orwell_portraits.py): no counter keys ride along, and the panel's typeof

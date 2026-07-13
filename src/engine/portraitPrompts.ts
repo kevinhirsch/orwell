@@ -220,9 +220,16 @@ export function buildPortraitPrompt(
   if (genderPhrase) subjectParts.push(genderPhrase);
   subjectParts.push(`${age} years old`);
   if (ethnicity) subjectParts.push(`of ${ethnicity} heritage`);
-  // The name LAST, as an identifier — and re-state the gender cue alongside it so the proper noun never
-  // stands as the lone, dominant gender signal in the prompt.
-  subjectParts.push(genderPhrase ? `named ${name} (${genderPhrase})` : `named ${name}`);
+  // The name LAST, as a plain identifier. Bundle-audit fix (2026-07-13, owner-ruled): the #1140 form
+  // re-stated the gender cue in a parenthetical after the name ("named X (a woman (feminine
+  // presentation))"), but the gender phrase ALWAYS leads the subject clause above (pushed first the
+  // moment `genderPresentation` is set — which the engine carries for the whole cast), so the
+  // parenthetical was a pure in-line duplicate. It rides plain: the lead phrase already flanks the
+  // name from the front, and the #1317 `Build & hair styling:` clause carries per-facet gender cues
+  // further down the prompt. (A legacy no-gender card emits this same plain form — byte-identical to
+  // before the #1140 parenthetical, and to the dedup guard this replaced, which was unreachable
+  // because the lead phrase is unconditionally present whenever it is defined.)
+  subjectParts.push(`named ${name}`);
   // 0063: the observable DEMEANOR colors the EXPRESSION line — the face matches the personality (a blunt
   // person reads guarded, a warm one reads open) instead of every portrait sharing one default affect.
   const expressionLine = demeanor ? `${expression}, ${demeanor}` : expression;

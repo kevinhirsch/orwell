@@ -121,8 +121,13 @@ export interface GenesisNpcProposal {
   age?: number;
   stats?: GenesisStatProposal;
   hiddenElements?: GenesisHiddenElementProposal[];
-  // 0063 descriptive identity facets — routed through the unchanged repairDiversityLayer pipeline by the
-  // adapter (NOT validated here; this envelope only forwards them as a ProposedIdentityFacets map).
+  // 0063 descriptive identity facets — typed here ONLY so a proposal carrying them still parses; they are
+  // NOT validated, forwarded, or committed by this envelope (and the adapter drops them too — the port DTO
+  // deliberately omits them). Heritage/gender/orientation route EXCLUSIVELY through the separate
+  // `recordCastIdentity` (#544) pipeline, which the FE runs AFTER genesis so the identity model coheres
+  // each facet with the genesis-committed NAMES, and whose `repairDiversityLayer` floors/caps stay the one
+  // authority. (Bundle audit 2026-07-13: this comment previously claimed the adapter forwards these as a
+  // ProposedIdentityFacets map — it never did; corrected so nobody wires a duplicate facet path here.)
   ethnicity?: string;
   genderPresentation?: string;
   orientation?: string;

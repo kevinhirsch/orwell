@@ -104,6 +104,41 @@ describe("0051 — portrait prompts (Vault-free builder)", () => {
     expect(withoutNew.prompt).not.toContain("Occupation:");
   });
 
+  it("bundle-audit 2026-07-13 — the Subject line never repeats the gender phrase in a parenthetical", () => {
+    // The prod bundle showed "…nonbinary presentation, …, named X (a person of androgynous,
+    // nonbinary presentation)": the #1140 de-bias parenthetical duplicated the lead phrase inside
+    // one Subject line. Deduped: when the phrase already opens the subject clause, the name rides
+    // plain; the phrase still appears exactly once (the lead), and the #1317 build/hair clause
+    // still carries gendered styling further down.
+    for (const gender of ["man", "woman", "nonbinary"] as const) {
+      const r = buildPortraitPrompt("hg:1", "A Houseguest", {
+        appearance: "athletic, close-cropped hair, a warm smile",
+        age: 28,
+        presentation: "confident and easygoing",
+        genderPresentation: gender,
+      }, styleAnchor);
+      const subject = r.prompt.split(". ")[0]!; // the Subject clause
+      const phrase = gender === "man" ? "a man (masculine presentation)"
+        : gender === "woman" ? "a woman (feminine presentation)"
+        : "a person of androgynous, nonbinary presentation";
+      // Exactly ONE occurrence of the phrase in the subject clause — the lead, not a paren echo.
+      expect(subject.split(phrase).length - 1).toBe(1);
+      expect(subject).toContain("named A Houseguest");
+      expect(subject).not.toContain(`named A Houseguest (${phrase})`);
+    }
+  });
+
+  it("bundle-audit 2026-07-13 — no gender facet ⇒ the plain `named X` tag (byte-identical legacy path)", () => {
+    const r = buildPortraitPrompt("hg:1", "A Houseguest", {
+      appearance: "athletic, close-cropped hair, a warm smile",
+      age: 28,
+      presentation: "confident and easygoing",
+    }, styleAnchor);
+    const subject = r.prompt.split(". ")[0]!;
+    expect(subject).toContain("named A Houseguest");
+    expect(subject).not.toContain("named A Houseguest (");
+  });
+
   it("IMAGE_BUDGET bounds generation: per-turn cap < per-week cap, move-in exempt", () => {
     expect(IMAGE_BUDGET.perTurnCap).toBeGreaterThan(0);
     expect(IMAGE_BUDGET.perWeekCap).toBeGreaterThan(IMAGE_BUDGET.perTurnCap);
