@@ -77,6 +77,33 @@ describe("0051 — portrait prompts (Vault-free builder)", () => {
     expect(pp.prompt).toContain(npc.physicalCharacteristics!.hair);
   });
 
+  it("the AUTHORED storyline facets ride the prompt: freeform identity (0116) + vocation (L28/0058)", () => {
+    const result = buildPortraitPrompt("hg:1", "A Houseguest", {
+      appearance: "athletic, close-cropped hair, a warm smile",
+      age: 28,
+      presentation: "confident and easygoing",
+      identityConcept: "a chaos-agent podcaster who treats the house like a live show",
+      vocation: "true-crime podcaster",
+    }, styleAnchor);
+    // Both authored facets appear — the shot's wardrobe/vibe can match the person's storyline.
+    expect(result.prompt).toContain("a chaos-agent podcaster who treats the house like a live show");
+    expect(result.prompt).toContain("Occupation: true-crime podcaster");
+    // They ride BEFORE the shared season anchor (#1317: subject-specific content leads).
+    expect(result.prompt.indexOf("chaos-agent podcaster")).toBeLessThan(result.prompt.indexOf(styleAnchor));
+  });
+
+  it("absent storyline facets ⇒ byte-identical prompt (the deterministic floor cast is untouched)", () => {
+    const facets = {
+      appearance: "athletic, close-cropped hair, a warm smile",
+      age: 28,
+      presentation: "confident and easygoing",
+    };
+    const withoutNew = buildPortraitPrompt("hg:1", "A Houseguest", facets, styleAnchor);
+    // No identityConcept/vocation ⇒ no new clause of any kind sneaks in.
+    expect(withoutNew.prompt).not.toContain("Character:");
+    expect(withoutNew.prompt).not.toContain("Occupation:");
+  });
+
   it("IMAGE_BUDGET bounds generation: per-turn cap < per-week cap, move-in exempt", () => {
     expect(IMAGE_BUDGET.perTurnCap).toBeGreaterThan(0);
     expect(IMAGE_BUDGET.perWeekCap).toBeGreaterThan(IMAGE_BUDGET.perTurnCap);
@@ -135,9 +162,37 @@ describe("0051 — createCharacter portrait prompts (cast NPCs, Vault-free)", ()
     expect(adapter.getPortraitPrompt("npc:does-not-exist" as EntityId)).toBeNull();
   });
 
-  it("getPortraitPrompt returns null before any game has started", () => {
+  it("getPortraitPrompt returns null before any game has started (and before any pre-warm)", () => {
     const adapter = new GameSessionAdapter();
     expect(adapter.getPortraitPrompt(PLAYER)).toBeNull();
+  });
+
+  it("PRE-GAME, getPortraitPrompt serves the WARMED pre-seed cast (0065/ADR 0013 fresh-fetch)", () => {
+    const adapter = new GameSessionAdapter();
+    const warm = adapter.preSeedCast({});
+    expect(warm.warmed).toBe(true);
+    const npc = warm.house[0]!;
+    // No live house yet — the warmed roster serves the prompt.
+    const before = adapter.getPortraitPrompt(npc.id as EntityId);
+    expect(before).not.toBeNull();
+    expect(before!.houseguestId).toBe(npc.id);
+    expect(before!.prompt).toContain("photorealistic");
+    // A pre-game authoring write-back MUTATES the warm store — the served prompt must reflect the
+    // store AS IT STANDS (the per-NPC authored shoot fetches at shoot time, never a stale snapshot).
+    adapter.recordCastProfile({
+      houseguestId: npc.id as EntityId,
+      vocation: "storm-chasing meteorologist",
+      physicalCharacteristics: {
+        heightBuild: "tall and wiry", skinTone: "olive skin", hair: "windswept dark curls",
+        facialFeatures: "sharp cheekbones", distinguishingMark: "a sunburn line", ageLook: "early thirties",
+        style: "field jackets and scuffed boots",
+      },
+    });
+    const after = adapter.getPortraitPrompt(npc.id as EntityId)!;
+    expect(after.prompt).toContain("storm-chasing meteorologist");
+    expect(after.prompt).toContain("windswept dark curls");
+    // An unknown id still yields null pre-game.
+    expect(adapter.getPortraitPrompt("npc:does-not-exist" as EntityId)).toBeNull();
   });
 });
 
@@ -160,6 +215,12 @@ describe("0051 — sentinel sweep: hidden-layer content NEVER reaches a portrait
     };
     poison(snap.house!.npcs[0]! as unknown as Parameters<typeof poison>[0]);
     poison(snap.house!.player as unknown as Parameters<typeof poison>[0]);
+    // The AUTHORED storyline facets are PUBLIC — they may (and should) ride the prompt, proving the
+    // new fields draw from the public Character only, never dragging the poisoned hidden layer along.
+    (snap.house!.npcs[0]! as unknown as { character: { identityConcept?: string; vocation?: string } })
+      .character.identityConcept = "a retired rodeo clown chasing one last spotlight";
+    (snap.house!.npcs[0]! as unknown as { character: { identityConcept?: string; vocation?: string } })
+      .character.vocation = "rodeo clown";
 
     const adapter2 = new GameSessionAdapter();
     adapter2.restore(snap);
@@ -170,6 +231,8 @@ describe("0051 — sentinel sweep: hidden-layer content NEVER reaches a portrait
     expect(pp).not.toBeNull();
     expect(pp.prompt).not.toContain(SENTINEL);
     expect(pp.prompt).not.toContain("99999"); // no hidden stat leaked
+    expect(pp.prompt).toContain("a retired rodeo clown chasing one last spotlight"); // public facet rides
+    expect(pp.prompt).toContain("Occupation: rodeo clown");
     expect(adapter2.getPortraitPrompt(PLAYER)).toBeNull();
     // The full cast response is clean too.
     const fresh = new GameSessionAdapter();

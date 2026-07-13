@@ -2002,22 +2002,44 @@ export class GameSessionAdapter implements GameSession {
 
   /**
    * The portrait prompt for one houseguest by id (0051) — Vault-free. Built from PUBLIC appearance
-   * facets only (appearance/age/presentation) + the per-season style anchor. Returns null when no
-   * game is started or the id is unknown. No stats, soul, or hidden element ever reaches the prompt.
+   * facets only + the per-season style anchor. No stats, soul, or hidden element ever reaches the prompt.
+   *
+   * Serves the LIVE house when a season runs. PRE-GAME it falls back to the WARMED pre-seed cast
+   * (0065/ADR 0013, 2026-07-13): the pre-game `recordCastProfile` write-backs mutate the prewarm
+   * store, so the FE's per-NPC authored shoot must fetch the prompt AS THE STORE STANDS when that
+   * houseguest's authoring gate fires — never a snapshot captured before authoring landed (a face
+   * shot from a stale captured prompt is exactly the identity-mismatch ADR 0013 forbids). Returns
+   * null when neither a live house nor a warmed cast holds the id.
    */
   getPortraitPrompt(id: EntityId): { houseguestId: string; name: string; prompt: string } | null {
-    if (!this.house || !this.portraitStyleAnchor) return null;
-    const npc = this.house.npcs.find((n) => n.id === id);
-    const subject = id === this.house.player.id ? this.house.player : npc;
-    if (!subject) return null;
-    // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
-    // player portrait from a name hash. With no authored appearance (and no structured facet), there
-    // is nothing to draw, so emit no prompt at all rather than a fabricated one.
-    if (id === this.house.player.id
-      && !subject.character.appearance
-      && subject.character.physicalCharacteristics === undefined) {
-      return null;
+    if (this.house && this.portraitStyleAnchor) {
+      const npc = this.house.npcs.find((n) => n.id === id);
+      const subject = id === this.house.player.id ? this.house.player : npc;
+      if (!subject) return null;
+      // #529: the human authors no look, so the player's appearance stays empty — NEVER improvise a
+      // player portrait from a name hash. With no authored appearance (and no structured facet), there
+      // is nothing to draw, so emit no prompt at all rather than a fabricated one.
+      if (id === this.house.player.id
+        && !subject.character.appearance
+        && subject.character.physicalCharacteristics === undefined) {
+        return null;
+      }
+      return this.portraitPromptFor(subject, this.portraitStyleAnchor);
     }
+    // Pre-game: the warmed pre-seed roster (NPCs only — no player exists yet). Same builder, same
+    // public facets, the warm's own anchor — Vault-free by the same construction as the live path.
+    if (this.prewarm) {
+      const warmed = this.prewarm.npcs.find((n) => n.id === id);
+      if (warmed) return this.portraitPromptFor(warmed, this.prewarm.portraitStyleAnchor);
+    }
+    return null;
+  }
+
+  /** The shared Vault-free prompt build for one subject (live or prewarm) — PUBLIC facets only. */
+  private portraitPromptFor(
+    subject: { id: EntityId; name: string; character: GameHouse["npcs"][number]["character"] },
+    styleAnchor: string,
+  ): { houseguestId: string; name: string; prompt: string } {
     return buildPortraitPrompt(
       subject.id,
       subject.name,
@@ -2034,8 +2056,13 @@ export class GameSessionAdapter implements GameSession {
         ...(subject.character.ethnicity !== undefined ? { ethnicity: subject.character.ethnicity } : {}),
         ...(subject.character.genderPresentation !== undefined ? { genderPresentation: subject.character.genderPresentation } : {}),
         ...(subject.character.demeanor !== undefined ? { demeanor: subject.character.demeanor } : {}),
+        // The AUTHORED storyline facets (2026-07-13) — both PUBLIC HouseguestCard fields: the 0116
+        // freeform identity + the L28/0058 vocation, so the shot's wardrobe/vibe match the person's
+        // actual storyline (owner report: portraits didn't match storylines/aesthetics).
+        ...(subject.character.identityConcept !== undefined ? { identityConcept: subject.character.identityConcept } : {}),
+        ...(subject.character.vocation !== undefined ? { vocation: subject.character.vocation } : {}),
       },
-      this.portraitStyleAnchor,
+      styleAnchor,
     );
   }
 
@@ -4758,6 +4785,10 @@ export class GameSessionAdapter implements GameSession {
       ...(h.character.ethnicity !== undefined ? { ethnicity: h.character.ethnicity } : {}),
       ...(h.character.genderPresentation !== undefined ? { genderPresentation: h.character.genderPresentation } : {}),
       ...(h.character.demeanor !== undefined ? { demeanor: h.character.demeanor } : {}),
+      // The AUTHORED storyline facets (2026-07-13): the 0116 freeform identity + the L28/0058 vocation —
+      // both already on the public HouseguestCard — so the face matches the person's storyline/aesthetic.
+      ...(h.character.identityConcept !== undefined ? { identityConcept: h.character.identityConcept } : {}),
+      ...(h.character.vocation !== undefined ? { vocation: h.character.vocation } : {}),
     }));
     return buildCastPortraitPrompts(publicCast, styleAnchor);
   }

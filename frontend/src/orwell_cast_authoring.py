@@ -1371,7 +1371,20 @@ async def backfill_unauthored(missing_ids: list, user: Optional[str]) -> int:
     ]
     if not subset:
         return 0
-    written = await run_authoring(subset, user)
+
+    def _reshoot(hid):
+        # ADR 0013 (2026-07-13): this NPC's authoring JUST landed — (re)shoot its face from the now-
+        # authored prompt. This is the LATE-authoring seam (the game-start seams wire their own
+        # per-NPC shoots): without it, an NPC authored hours late kept whatever face was shot from
+        # the pre-authoring floor — permanently mismatched. The helper discards a stale-fingerprint
+        # face first (never carried as an img2img reference) and is fail-soft throughout.
+        try:
+            from src import orwell_portraits
+            orwell_portraits.kickoff_authored_reshoot(hid, user)
+        except Exception as e:
+            logger.info("[cast-authoring] authored re-shoot kick for %s failed: %s", hid, e)
+
+    written = await run_authoring(subset, user, on_authored=_reshoot)
     logger.info("[cast-authoring] backfill for %s: authored %d/%d requested",
                 _safe_user(user), written, len(subset))
     return written

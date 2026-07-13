@@ -153,7 +153,8 @@ def test_reconciler_fills_the_missing_set(tmp_portraits, monkeypatch):
     orwell_portraits.note_user_seen("user-a")
     results = _run(orwell_portraits.reconcile_once())
 
-    assert results["user-a"] == {"missing": 3, "attempted": 3}
+    # `healed` (2026-07-13, the ADR 0013 staleness self-heal) rides the result additively.
+    assert results["user-a"] == {"missing": 3, "attempted": 3, "healed": 0}
     for hid in _ACTIVE_IDS:
         assert orwell_portraits.portrait_file("user-a", hid) is not None
     # The jury houseguest is departed — never late-generated.

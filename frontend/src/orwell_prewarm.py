@@ -426,7 +426,14 @@ async def warm_portraits(user: Optional[str] = None, *, portraits=None,
             done_wait.cancel()
             mine_wait.cancel()
         if gate.is_set():
-            portraits.kickoff_generation([entry], user)
+            # 2026-07-13 (the stale-snapshot fix): shoot from the LIVE store, not the entry captured
+            # at pre-seed time. The gate fires only after THIS NPC's authoring write-back landed —
+            # which MUTATED the store (richer physical facet, vocation, identity), so the captured
+            # prompt predates the identity the face must match. `kickoff_authored_reshoot` re-fetches
+            # the CURRENT prompt via `getPortraitPrompt` (which pre-game serves the warmed pre-seed
+            # store) and shoots from that — ADR 0013's "photos always match authored identities" now
+            # holds for the prompt CONTENT, not just the shoot ORDER.
+            portraits.kickoff_authored_reshoot(_prompt_id(entry), user)
         # else: whole-cast done (or a hang) without THIS NPC authored — intentionally NO photo (ADR 0013).
 
     async def _run() -> None:
