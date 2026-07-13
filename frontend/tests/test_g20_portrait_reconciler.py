@@ -56,6 +56,7 @@ def tmp_portraits(tmp_path, monkeypatch):
     monkeypatch.setattr(orwell_portraits, "_SEEN_USERS", {})
     monkeypatch.setattr(orwell_portraits, "_PROVIDER_SEEN", {})
     monkeypatch.setattr(orwell_portraits, "_LAST_MISSING", {})
+    monkeypatch.setattr(orwell_portraits, "_LAST_GEN_ERROR_BY_ID", {})
     monkeypatch.setattr(orwell_portraits, "_RECONCILER_TASK", None)
     return d
 
@@ -129,7 +130,10 @@ class _Gen:
     async def __call__(self, prompt, user, reference_png=None):
         self.calls.append((prompt, user))
         if not self.ok:
-            orwell_portraits._note_gen_error("http-503")
+            # A genuine per-CONTENT failure (the model returned no image) — this DOES burn the
+            # permanent retry budget, which is what these backoff/cap tests exercise. Transient
+            # failures (402/429/5xx/transport) are covered in test_portrait_imagegen_error_masking.
+            orwell_portraits._note_gen_error("no-image-in-response")
             return None
         return b"\x89PNG-fake-" + prompt.encode()[:12]
 
