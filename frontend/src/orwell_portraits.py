@@ -1954,6 +1954,13 @@ def _clear_counters(safe_user: str) -> None:
         _save_reconcile_state(sidecar)
 
 
+def reconcile_budget(user: Optional[str]) -> dict:
+    """The G20 per-houseguest retry-budget counters for this user — ``{safeId: {attempts,
+    cooldown}}`` (admin/debug-bundle visibility). Vault-free: ids + counts only; a
+    missing/corrupt sidecar reads as an empty budget, never an error."""
+    return _user_counters(_load_reconcile_state(), _safe_user(user))
+
+
 def _user_counters(sidecar: dict, safe_user: str) -> dict:
     """One user's counters from the sidecar, shape-normalized (a tampered/corrupt file
     must degrade to a fresh budget, never crash the sweep)."""

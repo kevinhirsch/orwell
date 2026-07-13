@@ -20,7 +20,23 @@ silent placeholder failures were the trigger). Two read-only, admin-gated routes
                                  REDACTED settings/provider config, a Vault-free game/
                                  session-state summary (counts/phase/week only), system
                                  info (python/node/disk/memory), feature flags, and
-                                 recent chat-session METADATA (never transcripts).
+                                 recent chat-session METADATA — PLUS (schema 3, owner
+                                 ruling 2026-07-13: "include everything an operator/
+                                 debugger could need"): the full LLM I/O record tail
+                                 (0112), the complete chat store dump (bounded per
+                                 session), the whole FE log ring, the token ledger
+                                 (0069), the sync/divergence ledger + belt telemetry
+                                 (0065), the enrichment ledger, the overseer report
+                                 ring (0079), cast-authoring + house-entry detail,
+                                 portrait/image state, a REDACTED settings snapshot,
+                                 and the engine's per-sandbox health projection.
+
+Two exports, ONE assembler (owner ruling 2026-07-13): the STANDARD export (the default
+button/endpoint) is the complete schema-3 bundle, Vault-free; the UNSEALED export
+(?vault=1, behind require_vault_reveal + the explicit /admin/status spoiler affordance)
+is the IDENTICAL bundle PLUS the live producerVault dump, self-identifying as
+``"bundle": "orwell-debug-unsealed"`` with a ``_SPOILERS`` banner. They differ ONLY in
+the Vault section; credential redaction applies to BOTH (Vault ≠ credentials).
 
 Boundaries:
   * Vault-free by construction — everything here is operational metadata (the engine's
@@ -33,6 +49,7 @@ Boundaries:
     a broken DB, a down engine, or partial state degrade into a diagnostic, not a wall.
 """
 
+import asyncio
 import inspect
 import json
 import logging
@@ -617,6 +634,536 @@ def _token_economy(user: str | None) -> dict:
     return out
 
 
+# ── Schema 3: "include everything an operator/debugger could need" (owner, 2026-07-13) ──
+# Every helper below follows the same two hard lines as the rest of this module:
+#   * Vault-free by construction — each reads ONLY Vault-free FE ledgers/rings/stores or
+#     the engine's public/admin projections (NO new engine tools; `sandboxHealth` and the
+#     portrait-prompt read are existing admin/player-channel reads). The one sanctioned
+#     Vault crossing stays `_producer_vault_section`, reached ONLY on the unsealed export.
+#   * Secrets redacted — the assembled bundle passes through `_scrub_bundle` (key-shaped
+#     credential redaction + string scrubbing for bearer/vendor-key shapes) before it is
+#     serialized, so an Authorization header / api key can never ride out inside ANY
+#     section (incl. LLM I/O records, chat content, settings).
+# Each helper is fail-soft: a broken subsystem degrades to an {"error": ...} section (the
+# meta.sections index marks it), never a build error — the bundle must always assemble.
+
+BUNDLE_SCHEMA = 3
+_BUNDLE_CHAT_MSG_CAP = 500          # last N messages per session (bound the unbounded)
+_BUNDLE_LLM_IO_CAP = 200            # last N full LLM I/O records (the live ring's seed size)
+_BUNDLE_LLM_IO_TAIL_BYTES = 8 * 1024 * 1024  # bounded tail read of the durable archive
+_BUNDLE_RING_LIMIT = 100_000        # "everything the ring holds" (rings cap themselves)
+
+# Key shapes whose STRING values are credentials — redacted wherever they appear. Deliberately
+# `token(?!s)` so the plural *_tokens COUNT fields (inputTokens, maxTokens, prompt_tokens …)
+# survive while `token`/`access_token`/`api_token` values are masked (same discriminator as
+# src/llm_trace._scrub). Booleans/numbers are never redacted (presence flags like `hasApiKey`
+# and numeric budgets are not secrets).
+_BUNDLE_SECRET_KEY_RE = re.compile(
+    r"authorization|api[-_]?key|token(?!s)|secret|password|passwd|credential|bearer",
+    re.IGNORECASE)
+
+
+def _scrub_text(s: str) -> str:
+    """Defence-in-depth string scrub: vendor-prefixed api keys (sk-/ghp_/…), Authorization /
+    x-api-key header values, URL query-param secrets, and bare `Bearer <token>` shapes."""
+    try:
+        from src.secret_redaction import redact
+        s = redact(s)
+    except Exception:
+        pass
+    try:
+        from src.llm_trace import _scrub_str
+        s = _scrub_str(s)
+    except Exception:
+        pass
+    return s
+
+
+def _scrub_bundle(obj, redact_keys: bool = True):
+    """Recursively scrub a bundle object BEFORE serialization.
+
+    * a dict key matching `_BUNDLE_SECRET_KEY_RE` with a STRING value ⇒ the value is
+      replaced with the REDACTED marker (an `Authorization` header in a stored session's
+      headers, an `api_key` in a settings snapshot, …);
+    * every string value (any key) is passed through `_scrub_text`;
+    * dicts/lists recurse; other scalars cross unchanged.
+
+    `redact_keys=False` is used ONLY for the unsealed producerVault section: its game
+    "secrets" are the deliberately-revealed content (mandate #2 override), so key-shaped
+    game fields must survive — but the credential STRING scrub still applies (Vault ≠
+    credentials)."""
+    if isinstance(obj, str):
+        return _scrub_text(obj)
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if (redact_keys and isinstance(k, str) and isinstance(v, str) and v
+                    and _BUNDLE_SECRET_KEY_RE.search(k)):
+                out[k] = REDACTED
+            else:
+                out[k] = _scrub_bundle(v, redact_keys)
+        return out
+    if isinstance(obj, list):
+        return [_scrub_bundle(v, redact_keys) for v in obj]
+    return obj
+
+
+def _llm_io_section() -> dict:
+    """0112 — the full LLM I/O record tail: complete request/response records (system
+    prompts + messages + REASONING + tool calls + finish reasons + per-call class `kind`
+    + the applied maxTokens), from the durable `llm-io.jsonl` archive the LLMIO ring is
+    seeded from. Records were auth-scrubbed at write time (llm_trace._scrub) and are
+    re-scrubbed on export by `_scrub_bundle`. Bounded to the ring's natural seed size."""
+    from src import llm_trace
+    out: dict = {"meta": {"source": "llm-io.jsonl", "cap": _BUNDLE_LLM_IO_CAP,
+                          "truncated": False}, "records": []}
+    path = llm_trace.trace_path()
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        out["meta"]["note"] = "no LLM I/O archive on disk"
+        return out
+    out["meta"]["fileBytes"] = size
+    with open(path, "rb") as fh:
+        partial = size > _BUNDLE_LLM_IO_TAIL_BYTES
+        if partial:
+            fh.seek(size - _BUNDLE_LLM_IO_TAIL_BYTES)
+        chunk = fh.read()
+    lines = chunk.decode("utf-8", "replace").splitlines()
+    if partial and len(lines) > 1:
+        lines = lines[1:]  # drop the (likely truncated) first line from a mid-file seek
+    parsed = []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            rec = json.loads(ln)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(rec, dict):
+            parsed.append(rec)
+    out["meta"]["truncated"] = partial or len(parsed) > _BUNDLE_LLM_IO_CAP
+    out["records"] = parsed[-_BUNDLE_LLM_IO_CAP:]
+    return out
+
+
+def _chat_store_section() -> dict:
+    """The COMPLETE chat store dump: every session with its metadata AND its messages
+    (role, content, parsed metadata — reasoning / tool_events / round_texts /
+    client_msg_id / variants ride inside — seq, timestamps), capped at the LAST
+    `_BUNDLE_CHAT_MSG_CAP` messages per session (truncation noted in the meta).
+    Session `headers` are NEVER dumped (they can carry Authorization) — presence only."""
+    from sqlalchemy import func as _sqlfunc
+    from core.database import SessionLocal, Session as DbSession, ChatMessage as DbChatMessage
+    out: dict = {"meta": {"messageCapPerSession": _BUNDLE_CHAT_MSG_CAP,
+                          "truncatedSessions": [], "sessionCount": 0, "messageCount": 0},
+                 "sessions": []}
+    db = SessionLocal()
+    try:
+        rows = db.query(DbSession).order_by(DbSession.last_accessed.desc()).all()
+        for s in rows:
+            sid = getattr(s, "id", None)
+            entry: dict = {
+                "id": sid,
+                "name": getattr(s, "name", None),
+                "owner": getattr(s, "owner", None),
+                "model": getattr(s, "model", None),
+                "endpointUrl": getattr(s, "endpoint_url", None),
+                "mode": getattr(s, "mode", None),
+                "folder": getattr(s, "folder", None),
+                "archived": bool(getattr(s, "archived", False)),
+                "messageCount": getattr(s, "message_count", None),
+                "hasHeaders": bool(getattr(s, "headers", None)),  # presence only, never values
+                "createdAt": s.created_at.isoformat() if getattr(s, "created_at", None) else None,
+                "lastAccessed": s.last_accessed.isoformat() if getattr(s, "last_accessed", None) else None,
+                "lastMessageAt": s.last_message_at.isoformat() if getattr(s, "last_message_at", None) else None,
+                "messages": [],
+            }
+            try:
+                total = (db.query(_sqlfunc.count(DbChatMessage.id))
+                           .filter(DbChatMessage.session_id == sid).scalar()) or 0
+                msgs = (db.query(DbChatMessage)
+                          .filter(DbChatMessage.session_id == sid)
+                          .order_by(DbChatMessage.seq.desc(), DbChatMessage.timestamp.desc())
+                          .limit(_BUNDLE_CHAT_MSG_CAP).all())
+                msgs.reverse()  # chronological
+                for m in msgs:
+                    meta = None
+                    raw_meta = getattr(m, "meta_data", None)
+                    if raw_meta:
+                        try:
+                            meta = json.loads(raw_meta)
+                        except (ValueError, TypeError):
+                            meta = str(raw_meta)[:2000]
+                    entry["messages"].append({
+                        "id": getattr(m, "id", None),
+                        "seq": getattr(m, "seq", None),
+                        "role": getattr(m, "role", None),
+                        "content": getattr(m, "content", None),
+                        "timestamp": m.timestamp.isoformat() if getattr(m, "timestamp", None) else None,
+                        "metadata": meta,
+                    })
+                if total > _BUNDLE_CHAT_MSG_CAP:
+                    out["meta"]["truncatedSessions"].append(
+                        {"id": sid, "total": int(total), "included": len(entry["messages"])})
+                out["meta"]["messageCount"] += len(entry["messages"])
+            except Exception as e:
+                entry["messagesError"] = f"{type(e).__name__}: {e}"
+            out["sessions"].append(entry)
+        out["meta"]["sessionCount"] = len(out["sessions"])
+    finally:
+        db.close()
+    return out
+
+
+def _frontend_log_section() -> dict:
+    """The FULL front-end log ring (everything `log_rings.LIVE` holds — not just the
+    tail), plus the WARN/ERROR history filtered from it."""
+    _, lines = log_rings.LIVE.since(0, limit=_BUNDLE_RING_LIMIT)
+    warn_errors = [l for l in lines
+                   if str(l.get("level") or "").upper() in ("WARNING", "ERROR", "CRITICAL")]
+    return {"meta": {"count": len(lines), "warnErrorCount": len(warn_errors),
+                     "note": "the in-process ring (capped); older history lives in on-disk logs"},
+            "lines": lines, "warnErrors": warn_errors}
+
+
+def _token_ledger_section(user: str | None) -> dict:
+    """ADR 0010 / 0069 — the full per-turn token/cost ledger view (entries incl.
+    appliedMaxTokens + finishReason), via the same helper the admin route serves."""
+    return _token_economy(user)
+
+
+def _sync_ledger_section(user: str | None) -> dict:
+    """0065 Part D — the per-turn sync/divergence ledger + the belt-fire telemetry
+    aggregate (`get_belt_totals`)."""
+    from src import orwell_sync_ledger as _sl
+    recent = _sl.get_recent(user, limit=200)
+    return {"meta": {"count": len(recent)}, "recent": recent,
+            "beltTotals": _sl.get_belt_totals(user)}
+
+
+def _enrichment_section(user: str | None) -> dict:
+    """The enrichment policy + its LOUD failure ledger (call-class names, reasons,
+    timestamps — never content)."""
+    from src import enrichment_policy as _ep
+    fails = _ep.failures(user)
+    return {"meta": {"count": len(fails)}, "policy": _ep.current_policy(), "failures": fails}
+
+
+def _overseer_section(user: str | None) -> dict:
+    """0079 — the overseer report ring (the log_rings OVERSEER channel: diagnoses,
+    levers, beatSeq before→after), plus the opt-in verbose debug telemetry when on."""
+    _, lines = log_rings.OVERSEER.since(0, limit=_BUNDLE_RING_LIMIT)
+    out: dict = {"meta": {"count": len(lines)}, "reports": lines}
+    try:
+        from src import orwell_overseer_debug as _ovd
+        if _ovd.overseer_debug_enabled():
+            out["debug"] = {"tier": _ovd.overseer_debug_tier(),
+                            "recent": _ovd.get_recent(200, user=user)}
+    except Exception as e:
+        out["debugError"] = f"{type(e).__name__}: {e}"
+    return out
+
+
+async def _cast_authoring_section(user: str | None, state=None, cards=None) -> dict:
+    """Deep cast-authoring DETAIL: per-NPC authored/floored + attempts spent + give-ups,
+    the pre-game run state, and the completeness counters — all from the SAME helpers the
+    backfill acts on (Vault-free public roster projection only). `state`/`cards` are the
+    shared per-bundle reads (one engine round-trip for every section that needs them)."""
+    from src import orwell_cast_authoring as _ca
+    out: dict = {"meta": {}, "perNpc": []}
+    attempts = {}
+    try:
+        attempts = _ca.attempts_spent(user)
+        out["attemptsSpent"] = attempts
+    except Exception:
+        out["attemptsSpent"] = {}
+    try:
+        out["givenUp"] = _ca.giveups(user)
+    except Exception:
+        out["givenUp"] = []
+    if isinstance(state, dict) and state.get("started") is False:
+        out["pregame"] = True
+    elif isinstance(state, dict) and cards is not None:
+        try:
+            out["completeness"] = _ca.authoring_completeness(user, cards)
+            out["missingIds"] = _ca.unauthored_ids(user, cards)
+            given = set(out.get("givenUp") or [])
+            for c in cards:
+                if not isinstance(c, dict) or c.get("isPlayer") or c.get("id") == "player":
+                    continue
+                hid = str(c.get("id") or "")
+                out["perNpc"].append({
+                    "id": hid,
+                    "name": c.get("name"),
+                    "status": c.get("status"),
+                    "authored": bool(c.get("authored")),
+                    "attemptsSpent": int(attempts.get(hid, 0) or 0),
+                    "givenUp": hid in given,
+                })
+        except Exception as e:
+            out["rosterError"] = f"{type(e).__name__}: {e}"
+    out["meta"]["count"] = len(out["perNpc"])
+    return out
+
+
+def _house_entry_section(user: str | None) -> dict:
+    """The house-entry gate: the current HOLD/refusal marker (with its timestamp), whether
+    the background gate-clear WATCH is armed, and the operator floor-start escape hatch."""
+    from src import orwell_cast_authoring as _ca
+    out: dict = {}
+    try:
+        out["hold"] = _ca.house_entry_gate_status(user)
+    except Exception:
+        out["hold"] = None
+    try:
+        out["watchActive"] = _ca.house_ready_watch_active(user)
+    except Exception:
+        out["watchActive"] = None
+    try:
+        out["floorStartAllowed"] = _ca.floor_start_allowed()
+    except Exception:
+        out["floorStartAllowed"] = None
+    return out
+
+
+async def _portrait_section(user: str | None, state=None, cards=None) -> dict:
+    """0051 portrait/image state: the per-NPC manifest (file/name/source/prompt
+    fingerprint), completeness, last run + live progress, the G20 retry-budget counters,
+    the attempt log (its own capped ring), and the current Vault-free portrait prompts
+    re-derived from the engine's PUBLIC facets (an existing player-channel read).
+    `state`/`cards` are the shared per-bundle reads."""
+    from src import orwell_portraits as _op
+    out: dict = {"meta": {}}
+    try:
+        out["manifest"] = _op.load_manifest(user)
+    except Exception:
+        out["manifest"] = {}
+    try:
+        out["lastRun"] = _op.last_run_outcome(user)
+    except Exception:
+        out["lastRun"] = None
+    try:
+        out["progress"] = _op.generation_progress(user)
+    except Exception:
+        out["progress"] = None
+    try:
+        out["budget"] = _op.reconcile_budget(user)
+    except Exception:
+        out["budget"] = {}
+    try:
+        out["attemptLog"] = _op.read_attempt_log()
+    except Exception:
+        out["attemptLog"] = []
+    # The last Vault-free prompts (engine-built, public-facets-only). Bounded to the
+    # active cast; best-effort with an overall timeout — an unreachable engine ⇒ [].
+    prompts: list = []
+    active_ids: list = []
+    try:
+        if isinstance(state, dict) and state.get("started") is not False and cards:
+            active_ids = [c.get("id") for c in cards
+                          if isinstance(c, dict) and (c.get("status") or "active") == "active"
+                          and c.get("id")]
+            out["completeness"] = _op.completeness(user, cards)
+
+            async def _one(hid):
+                try:
+                    p = await orwell_engine.get_portrait_prompt(hid, user=user)
+                    return p if isinstance(p, dict) else None
+                except Exception:
+                    return None
+
+            results = await asyncio.wait_for(
+                asyncio.gather(*(_one(h) for h in active_ids)), timeout=10.0)
+            prompts = [r for r in results if r]
+    except Exception:
+        prompts = []
+    out.setdefault("completeness", None)
+    out["prompts"] = prompts
+    out["meta"]["count"] = len(out.get("manifest") or {})
+    return out
+
+
+def _settings_section() -> dict:
+    """The full settings snapshot (the admin already receives this dict via the admin
+    settings route) — every secret-shaped value is redacted by `_scrub_bundle` before
+    serialization; this helper just snapshots the dict."""
+    from src.settings import load_settings
+    s = load_settings() or {}
+    return {"settings": dict(s), "meta": {"count": len(s)}}
+
+
+async def _sandbox_health_section(user: str | None) -> dict:
+    """The engine's per-sandbox health/fault-ring projection — an EXISTING admin-channel
+    read (`sandboxHealth`); Vault-free by the engine's own admin-surface construction."""
+    h = await orwell_engine.sandbox_health(user=user)
+    return h if isinstance(h, dict) else {"error": "no sandbox health available"}
+
+
+# The schema-3 section registry: name → builder (sync or async). Drives both the
+# assembly and the meta.sections index, so a new section is one line here.
+# `state`/`cards` are the SHARED per-bundle reads (one engine round-trip + one roster
+# derivation for every section that needs them — an unreachable engine costs one
+# bounded failure, not one per section).
+def _bundle_v3_builders(user: str | None, state, cards) -> list:
+    return [
+        ("llmIo", _llm_io_section),
+        ("chatStore", _chat_store_section),
+        ("frontendLog", _frontend_log_section),
+        ("tokenEconomy", lambda: _token_ledger_section(user)),
+        ("syncLedger", lambda: _sync_ledger_section(user)),
+        ("enrichment", lambda: _enrichment_section(user)),
+        ("overseer", lambda: _overseer_section(user)),
+        ("castAuthoring", lambda: _cast_authoring_section(user, state, cards)),
+        ("houseEntry", lambda: _house_entry_section(user)),
+        ("portraits", lambda: _portrait_section(user, state, cards)),
+        ("settings", _settings_section),
+        ("sandboxHealth", lambda: _sandbox_health_section(user)),
+    ]
+
+
+async def _bundle_v3_sections(user: str | None) -> dict:
+    """Build every schema-3 section, each individually fail-soft: a broken subsystem
+    yields an {"error": ...} section (marked in the meta index), never a build error."""
+    # The shared engine reads (fail-soft: engine down ⇒ None ⇒ the sections that need
+    # them simply carry less).
+    state = None
+    cards = None
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        state = None
+    if isinstance(state, dict) and state.get("started") is not False:
+        try:
+            from routes.orwell_routes import roster_cards
+            cards = roster_cards(state, user)
+        except Exception:
+            cards = None
+    out: dict = {}
+    for name, builder in _bundle_v3_builders(user, state, cards):
+        try:
+            v = builder()
+            if inspect.isawaitable(v):
+                v = await v
+            out[name] = v
+        except Exception as e:
+            out[name] = {"error": f"{type(e).__name__}: {e}"}
+    return out
+
+
+# Ordered: the FIRST matching key is the section's natural item collection (e.g. the
+# token ledger's "entries" must win over its per-session cost map "sessions").
+_SECTION_COUNT_KEYS = ("records", "entries", "recent", "lines", "failures", "reports",
+                       "perNpc", "sessions", "manifest", "endpoints", "frontendTail",
+                       "logs", "settings")
+
+
+def _section_count(val):
+    """A best-effort per-section item count for the meta index."""
+    if isinstance(val, list):
+        return len(val)
+    if isinstance(val, dict):
+        for k in _SECTION_COUNT_KEYS:
+            v = val.get(k)
+            if isinstance(v, (list, dict)):
+                return len(v)
+        return None
+    return None
+
+
+def _sections_index(bundle: dict, names: list) -> dict:
+    """The meta.sections index: what's present / skipped (with the error), and per-
+    section item counts + truncation notes."""
+    idx: dict = {}
+    for name in names:
+        val = bundle.get(name)
+        entry: dict = {"present": val is not None}
+        if isinstance(val, dict):
+            err = val.get("error")
+            if err and isinstance(err, str):
+                entry["present"] = bool([k for k in val if k != "error"])
+                entry["error"] = err
+            meta = val.get("meta")
+            if isinstance(meta, dict):
+                if meta.get("truncated") or meta.get("truncatedSessions"):
+                    entry["truncated"] = True
+        count = _section_count(val)
+        if count is not None:
+            entry["items"] = count
+        idx[name] = entry
+    return idx
+
+
+# Every top-level content section, in bundle order (schema 2 carry-overs + schema 3).
+_BUNDLE_SECTION_NAMES = [
+    "health", "recentFailures", "config", "versions", "systemInfo", "featureFlags",
+    "logs", "opsStatus", "providerConfig", "gameState", "sessions", "overseerDebug",
+    "llmIo", "chatStore", "frontendLog", "tokenEconomy", "syncLedger", "enrichment",
+    "overseer", "castAuthoring", "houseEntry", "portraits", "settings", "sandboxHealth",
+]
+
+
+async def _assemble_bundle(user: str | None) -> dict:
+    """The ONE bundle assembler (owner ruling 2026-07-13): builds the complete, Vault-free
+    schema-3 bundle, secret-scrubbed and carrying the meta.sections index. The unsealed
+    export is THIS bundle plus the producerVault section — attached by the route, behind
+    the explicit unseal gate, so the two flavors can never drift."""
+    try:
+        snapshot = await _health_snapshot(user)
+    except Exception as e:
+        snapshot = {"generatedAt": datetime.now(timezone.utc).isoformat(),
+                    "error": f"health snapshot failed: {type(e).__name__}: {e}"}
+    try:
+        extras = await _bundle_extras(user)
+    except Exception as e:
+        extras = {"error": f"bundle extras failed: {type(e).__name__}: {e}"}
+    try:
+        v3 = await _bundle_v3_sections(user)
+    except Exception as e:
+        v3 = {"error": f"schema-3 sections failed: {type(e).__name__}: {e}"}
+    bundle: dict = {
+        "bundle": "orwell-debug",
+        "schema": BUNDLE_SCHEMA,
+        "generatedAt": snapshot.get("generatedAt") or datetime.now(timezone.utc).isoformat(),
+        "health": snapshot,
+        # The engine's recent-failure ring, hoisted for one-glance triage
+        # (tool name + sanitized error class + timing only — G1 engine side).
+        "recentFailures": (snapshot.get("engine") or {}).get("recentFailures", []),
+        "config": _redact_config(dict(os.environ)),
+        # ── BEEFED-UP sections (schema 2) — all Vault-free + secret-free by construction ──
+        "versions": extras.get("versions"),
+        "systemInfo": extras.get("systemInfo"),
+        "featureFlags": extras.get("featureFlags"),
+        "logs": extras.get("logs"),
+        "opsStatus": extras.get("opsStatus"),
+        "providerConfig": extras.get("providerConfig"),
+        "gameState": extras.get("gameState"),
+        "sessions": extras.get("sessions"),
+    }
+    if isinstance(extras, dict) and "overseerDebug" in extras:
+        bundle["overseerDebug"] = extras["overseerDebug"]
+    # ── schema-3 sections (each fail-soft; see _bundle_v3_sections) ──
+    if isinstance(v3, dict) and "error" in v3 and len(v3) == 1:
+        bundle["sectionsError"] = v3["error"]
+    else:
+        bundle.update(v3 if isinstance(v3, dict) else {})
+    # HARD LINE #2: credential redaction over the WHOLE assembled bundle (both flavors).
+    bundle = _scrub_bundle(bundle)
+    bundle["meta"] = {
+        "schema": BUNDLE_SCHEMA,
+        "sections": _sections_index(bundle, _BUNDLE_SECTION_NAMES),
+    }
+    # The Vault section row exists in BOTH flavors' index (self-describing); the route
+    # flips it to present on the unsealed export.
+    bundle["meta"]["sections"]["producerVault"] = {
+        "present": False,
+        "note": "vault-free export — the unsealed export (explicit ?vault=1 behind the "
+                "/admin/status spoiler affordance) adds the live Producer's Vault",
+    }
+    return bundle
+
+
 async def _bundle_extras(user: str | None) -> dict:
     """Assemble the BEEFED-UP sections of the debug bundle. Each is best-effort and
     Vault-free; the whole assembly is wrapped so the bundle always serializes."""
@@ -1115,70 +1662,53 @@ def setup_admin_health_routes() -> APIRouter:
     @router.get("/debug-bundle")
     async def debug_bundle(request: Request, vault: int = 0, include_vault: int = 0):
         require_admin(request)
+        # ── TWO exports, ONE assembler (owner ruling 2026-07-13) ──
+        # STANDARD (default): the complete schema-3 bundle, Vault-free. UNSEALED
+        # (?vault=1 / ?include_vault=1): the IDENTICAL bundle PLUS the live Producer's
+        # Vault — behind the SAME sanctioned, out-of-band producerVault unseal the
+        # status-page "Unseal" button uses (admin/God-Mode only, never a player path,
+        # never always-on, fired only from the explicit /admin/status spoiler
+        # affordance). The flavors differ ONLY in the Vault section. DO NOT widen it.
+        #
+        # SEC-4: the unsealed export demands the STRICT gate — a genuine authenticated
+        # admin, NOT the blanket AUTH_ENABLED=false bypass that require_admin (above)
+        # honors for the Vault-FREE bundle. Refused BEFORE any assembly/Vault read.
+        unsealed = bool(vault or include_vault)
+        if unsealed:
+            require_vault_reveal(request)
         user = None
         try:
             user = effective_user(request)
         except Exception:
             pass
         # P1: the bundle is the operator's last-resort diagnostic, so it must ALWAYS
-        # assemble — never 500. Each section is best-effort; the snapshot/extras calls
-        # are guarded so a single broken probe degrades to an error string, not a wall.
-        try:
-            snapshot = await _health_snapshot(user)
-        except Exception as e:
-            snapshot = {"generatedAt": datetime.now(timezone.utc).isoformat(),
-                        "error": f"health snapshot failed: {type(e).__name__}: {e}"}
-        try:
-            extras = await _bundle_extras(user)
-        except Exception as e:
-            extras = {"error": f"bundle extras failed: {type(e).__name__}: {e}"}
-        bundle = {
-            "bundle": "orwell-debug",
-            "schema": 2,  # bumped: the beefed-up bundle (versions/logs/ops/system/sessions/gameState)
-            "generatedAt": snapshot.get("generatedAt") or datetime.now(timezone.utc).isoformat(),
-            "health": snapshot,
-            # The engine's recent-failure ring, hoisted for one-glance triage
-            # (tool name + sanitized error class + timing only — G1 engine side).
-            "recentFailures": (snapshot.get("engine") or {}).get("recentFailures", []),
-            "config": _redact_config(dict(os.environ)),
-            # ── BEEFED-UP sections (owner) — all Vault-free + secret-free by construction ──
-            "versions": extras.get("versions"),
-            "systemInfo": extras.get("systemInfo"),
-            "featureFlags": extras.get("featureFlags"),
-            "logs": extras.get("logs"),
-            "opsStatus": extras.get("opsStatus"),
-            "providerConfig": extras.get("providerConfig"),
-            "gameState": extras.get("gameState"),
-            "sessions": extras.get("sessions"),
-        }
-        # ── OPT-IN ONLY: the Producer's Vault (owner-ruled DEBUG override of mandate #2) ──
-        # The DEFAULT bundle (no flag) is byte-identically Vault-free as today — the block
-        # below is reached ONLY behind an EXPLICIT ?vault=1 (alias ?include_vault=1) AND the
-        # require_admin gate already cleared above. It crosses the SAME sanctioned, out-of-band
-        # producerVault unseal that the status-page "Unseal" button uses (admin-only, never a
-        # player path, never always-on) via orwell_engine.producer_vault(). Fail-soft: a broken/
-        # absent unseal degrades to an {"error": ...} section, never a 500. This is an addition
-        # to the OPT-IN path ONLY; it never touches the default assembly above. DO NOT widen it.
-        #
-        # SEC-4: the Vault section demands the STRICT gate — a genuine authenticated admin, NOT the
-        # blanket AUTH_ENABLED=false bypass that require_admin (above) honors for the Vault-FREE
-        # bundle. On an auth-off, network-exposed box the old path let any unauthenticated caller
-        # dump the live Vault with ?vault=1 (a direct mandate #2 violation). require_vault_reveal
-        # refuses that regardless of AUTH_ENABLED; the default (Vault-free) bundle is unchanged.
-        if vault or include_vault:
-            require_vault_reveal(request)
+        # assemble — never 500. Every section inside is individually fail-soft.
+        bundle = await _assemble_bundle(user)
+        if unsealed:
+            # Self-identifying: a casually-shared file announces it carries spoilers.
+            bundle["bundle"] = "orwell-debug-unsealed"
             bundle["_SPOILERS"] = (
                 "Producer's Vault — live secret state (off-screen scheming, NPC confessionals, "
                 "hidden ties, sealed twists, true eviction votes). Owner-ruled DEBUG override of "
                 "mandate #2; do not share.")
-            bundle["producerVault"] = await _producer_vault_section(user)
+            # Credential redaction still applies (Vault ≠ credentials) — but NOT the
+            # secret-shaped-KEY redaction: the Vault's game "secrets" ARE the content
+            # this export deliberately reveals.
+            bundle["producerVault"] = _scrub_bundle(
+                await _producer_vault_section(user), redact_keys=False)
+            try:
+                bundle["meta"]["sections"]["producerVault"] = {"present": True, "unsealed": True}
+            except Exception:
+                pass
         import json as _json
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        flavor = "unsealed-" if unsealed else ""
         return Response(
             content=_json.dumps(bundle, indent=2, ensure_ascii=False, default=str),
             media_type="application/json",
             headers={
-                "Content-Disposition": f'attachment; filename="orwell-debug-bundle-{stamp}.json"',
+                "Content-Disposition":
+                    f'attachment; filename="orwell-debug-bundle-{flavor}{stamp}.json"',
                 "Cache-Control": "no-store",
             },
         )
