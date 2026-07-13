@@ -28,6 +28,13 @@ concurrency:
   group: golden-nightly
   cancel-in-progress: true
 
+# Money-safety: this workflow holds the real OPENROUTER_API_KEY and drives a full `createCharacter`
+# casting flow (which fire-and-forget kicks portrait generation). Set the image-spend KILL-SWITCH
+# at the WORKFLOW level so EVERY step — current and any future keyed step — inherits it and keyed
+# CI can provably never spend on real image generation. See orwell_portraits.image_gen_disabled().
+env:
+  ORWELL_DISABLE_IMAGE_GEN: "1"
+
 jobs:
   record:
     runs-on: ubuntu-latest
