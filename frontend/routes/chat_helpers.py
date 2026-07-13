@@ -3601,20 +3601,27 @@ async def ensure_turn_recorded(user, player_message, narration, tools_called) ->
             f"What happened: {text[:GAME_TURN_DIGEST_CHARS]}"
         )
         from src import orwell_engine
-        # 0065 Part A: this is an FE-ISSUED recordInteraction (the E22 fallback) — attach the current
-        # last-seen CAS token and refresh last-seen from its response. A stale 409 (the board moved
-        # under this fire-and-forget fallback) reconciles via the desync spine and SKIPS — the digest
-        # is re-derivable on the next under-called turn; never a stomp, never an exception escapes.
-        try:
-            _res = await orwell_engine.record_interaction(
-                digest, expected_beat_seq=last_beat_seq(user), user=user)
-        except Exception as _stale_e:
-            if _is_stale_beat_error(_stale_e):
-                await _handle_stale_beat(user, _stale_e)
-                return False
-            raise
-        _refresh_beat_seq(user, _res if isinstance(_res, dict) else {})
-        return True
+        from src.agent_loop import _backfill_with_cas
+        # #1537 / audit A-S3 / R1c: this floor digest is FREQUENTLY the scene's SOLE consequence fold —
+        # the turn made no engine write (that's what tripped this guard) AND the richer `_e22_rich_extract`
+        # above declined (no model / a solo beat / a hiccup). So a stale-409 that reconciled-and-SKIPPED it
+        # silently EVAPORATED the beat's only hidden-impact fold (mandate #4 / I4: "a novel move must never
+        # evaporate"). It used to do exactly that. Route it through the SAME CAS back-fill the richer
+        # fold-bearing belts use (`_auto_record_scene`/deal/confide/secret): it attaches the last-seen CAS
+        # token, RE-ATTEMPTS once against the reconciled beatSeq on a single stale-409 (#591 — the engine
+        # threw BEFORE folding, so a retry can't double-apply), and DEFERS on a double-409 (CON-11,
+        # `defer_fold=True`) into the bounded per-owner queue instead of dropping — the fold lands late,
+        # never never. A10/#591: ONE stable idempotency key threaded through every attempt (the initial
+        # call, the #591 retry, and every deferred-drain re-drive) makes it EXACTLY-once — if a racing
+        # attempt already committed the fold, the engine dedups the same-key re-drive and never double-
+        # folds. `_backfill_with_cas` re-raises a NON-stale error, so the outer `except` keeps the prior
+        # fail-soft posture; a `None` return ⇒ the write was DEFERRED (it lands on the next back-fill
+        # opportunity), not lost. Byte-identical when there's no last-seen token (expected_beat_seq=None
+        # ⇒ no CAS attached, exactly the pre-0065 request).
+        _res = await _backfill_with_cas(
+            user, orwell_engine.record_interaction, digest,
+            user=user, defer_fold=True, idempotency_key=_mint_idempotency_key())
+        return _res is not None
     except Exception as e:
         logger.warning("[orwell] E22 fallback recordInteraction failed for user=%s: %s", user, e)
         return False

@@ -258,8 +258,10 @@ def _capture_record(monkeypatch):
     calls = []
 
     async def fake_record(content, with_ids=None, initiator="player", kind=None,
-                          expected_beat_seq=None, user=None):
-        calls.append({"content": content, "user": user})
+                          expected_beat_seq=None, idempotency_key=None, user=None):
+        # #1537: the E22 floor digest now routes through _backfill_with_cas, which threads a stable
+        # at-most-once idempotency_key — accept it so the fake matches the real call shape.
+        calls.append({"content": content, "user": user, "idempotency_key": idempotency_key})
         return {"recorded": True}
 
     monkeypatch.setattr(orwell_engine, "record_interaction", fake_record)
@@ -324,7 +326,7 @@ def test_concurrent_same_user_fallbacks_do_not_stack(monkeypatch):
     calls = []
 
     async def slow_record(content, with_ids=None, initiator="player", kind=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         calls.append({"user": user})
         await gate.wait()  # hold the write 'in flight' like a slow late-season commit
         return {"recorded": True}
@@ -356,7 +358,7 @@ def test_a_different_user_is_never_blocked_by_anothers_in_flight_fallback(monkey
     calls = []
 
     async def record(content, with_ids=None, initiator="player", kind=None,
-                     expected_beat_seq=None, user=None):
+                     expected_beat_seq=None, idempotency_key=None, user=None):
         calls.append(user)
         if user == "A":
             await gate.wait()
@@ -382,7 +384,7 @@ def test_a_failed_fallback_releases_the_in_flight_slot(monkeypatch):
     """L18 — a raised recordInteraction must not wedge the slot shut (else one engine hiccup
     permanently disables the guard for that user). The finally-release proves it reopens."""
     async def boom(content, with_ids=None, initiator="player", kind=None,
-                   expected_beat_seq=None, user=None):
+                   expected_beat_seq=None, idempotency_key=None, user=None):
         raise RuntimeError("engine said no")
 
     monkeypatch.setattr(orwell_engine, "record_interaction", boom)
