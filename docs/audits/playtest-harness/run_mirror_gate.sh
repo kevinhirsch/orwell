@@ -152,8 +152,16 @@ rm -f "$FE_DATA/auth.json" "$FE_DATA/sessions.json" "$FE_DATA/app.db" "$FE_DATA/
 # server-injected flag OFF so transport selection is purely per-leg: an SSE leg (no init script) is
 # genuinely SSE/poll, and a WS leg forces `window.ORWELL_WS_TRANSPORT = true` before app JS (the
 # `/api/ws/session` route is registered regardless of the env flag, so the forced upgrade still works).
+# DETERMINISTIC-CONTENT pins for the transport-parity gate: this gate proves two windows RENDER the
+# same stream (a transport invariant), so the CONTENT must be deterministic — any per-turn variance
+# reads as a false "windows diverge". `ENRICHMENT_POLICY=soft` pins the legacy fold shapes; the
+# overseer (0080) + faithfulness (0081) dials default `active` since 2026-07-13, and active mode
+# injects nondeterministic mid-stream content (deterministic corrections / a judge reframe) that trips
+# the mid-stream snapshot — so pin BOTH off here (the live-harness-nightly covers active-mode parity
+# against the real model, where window B always replays window A's actual stream).
 ( cd "$ROOT/frontend" && ORWELL_GAME_BUILD=1 AUTH_ENABLED=true LOCALHOST_BYPASS=false \
     ORWELL_ENRICHMENT_POLICY=soft \
+    ORWELL_OVERSEER_MODE=off ORWELL_FAITHFULNESS_MODE=off \
     ORWELL_WS_TRANSPORT=0 \
     ORWELL_ENGINE_MCP_URL="$ENGINE_URL" ORWELL_DATA_DIR="$FE_DATA" \
     exec .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port $FE_PORT >"$LOGS/fe.log" 2>&1 ) & PIDS+=($!)
