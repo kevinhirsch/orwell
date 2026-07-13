@@ -181,7 +181,27 @@ def publish(session_id: str, event: str, data: Optional[dict] = None) -> None:
     """
     if not session_id:
         return
-    payload = _fmt(event, {"session": session_id, **(data or {}), "busSeq": _next_seq(session_id)})
+    data = dict(data or {})
+    # #1087 parity for the SSE fallback (the first-message self-echo double): stamp the CURRENT run id
+    # onto a `run-started` invitation. `session_events` is at-least-once — the sender receives its OWN
+    # `run-started` echo (and the ring replays it on a late connect) while its foreground POST is still
+    # rendering that very run; without a run identity the SSE client (sessionSync.js) could not tell its
+    # own echo from a genuine PEER run, so it deferred a peer-resume of its OWN run and, at stream end,
+    # re-attached to the just-finished run in the evict grace — painting a duplicate bubble the reconcile
+    # then had to collapse (the visible "appears twice then dedupes" flicker on the first message). The WS
+    # `state` edge already carries this id (ws_routes / #1087); this brings the SSE run-started to parity
+    # so the client can recognize and skip its own run. The SAME formatted payload rides the live fan-out
+    # AND the replay ring, so a live copy and a replayed copy carry the IDENTICAL runId. Lazy import avoids
+    # any import-time coupling; best-effort (an older run already gone ⇒ no id ⇒ unchanged behavior).
+    if event == "run-started" and "runId" not in data:
+        try:
+            from src import agent_runs as _agent_runs
+            _rid = _agent_runs.run_id(session_id)
+            if _rid:
+                data["runId"] = _rid
+        except Exception:
+            pass
+    payload = _fmt(event, {"session": session_id, **data, "busSeq": _next_seq(session_id)})
     # ADR 0012 §3.4b: append the ring-durable events to the per-session replay ring BEFORE the live
     # fan-out, so a window connecting in the publish→connect gap replays it. Independent of whether
     # anyone is currently subscribed (that is the whole point).
