@@ -244,6 +244,24 @@ export function applyOocClass(wrap, rawText, role) {
   return result;
 }
 
+// OOC retro-styling (metadata half): a message classified OUT-OF-CHARACTER *after the fact* — the
+// server marks the persisted row's metadata `ooc: true` — carries NO `((...))`/`ooc:` markers for
+// `detectOocAside` to see, so the marker scan above can never style it. This is the SECOND (and
+// only other) sanctioned classification input, shared by BOTH render paths so live and reload can
+// never drift (the #828 discipline): the settled/reload render (addMessage) reads it off the row's
+// metadata, and the reconcile ADOPT pass (chatReconcile.softReloadHistory) retro-applies it to the
+// ALREADY-RENDERED bubble the moment the row's metadata is observed — no refresh required.
+// DELIBERATELY additive-only: absent/false metadata never REMOVES a class the marker scan applied
+// (the two inputs OR together), and classification itself stays server/model-side — this renders a
+// server verdict, it never invents an OOC heuristic. Returns whether the class was applied.
+export function applyOocClassFromMetadata(wrap, metadata, role) {
+  if (!wrap || !((role === 'user' || role === 'assistant')) || !isGameBuild()) return false;
+  if (!metadata || metadata.ooc !== true) return false;
+  wrap.classList.add('msg-ooc');
+  if (role === 'assistant') wrap.classList.add('msg-ooc-producer');
+  return true;
+}
+
 // Re-render the attachment cards of an already-rendered message. Used to swap
 // in real upload ids (and image thumbnails) on the optimistic user bubble once
 // uploadPending() resolves — otherwise image previews only appear after a
@@ -2452,6 +2470,11 @@ export function addMessage(role, content, modelName, metadata) {
         wrap.classList.add('msg-ooc');
         if (role === 'assistant') wrap.classList.add('msg-ooc-producer');
         text = _ooc.text;
+      } else {
+        // OOC retro-styling: a marker-LESS message the server classified OOC after the fact
+        // (metadata `ooc: true`) styles identically — same classes, text untouched (no markers
+        // to strip). See applyOocClassFromMetadata (the shared metadata half of the seam).
+        applyOocClassFromMetadata(wrap, metadata, role);
       }
     }
 
@@ -2738,6 +2761,7 @@ const chatRenderer = {
   renderAssistantMessage,
   updateMessageAttachments,
   applyOocClass,
+  applyOocClassFromMetadata,
 };
 
 export default chatRenderer;
