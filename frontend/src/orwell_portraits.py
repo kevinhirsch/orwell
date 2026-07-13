@@ -263,6 +263,25 @@ RECONCILE_MAX_ATTEMPTS = 6
 # real attempts a houseguest already burned: {safeUser: {safeId: {attempts, cooldown}}}.
 RECONCILE_STATE_PATH = Path(DATA_DIR) / "portrait-reconcile.json"
 
+# ── ADR 0013 (2026-07-13): the LAZY seams enforce "no photo without a model-authored identity" ──
+# The prewarm/createCharacter seams already gate per-NPC (a face shoots only on its own authoring
+# write-back), but the lazy seams — the roster backfill, the manual lever, the G20 reconciler —
+# used to shoot ANY missing face from whatever the store held. On a box where authoring landed
+# LATE (or was floored for hours), those seams shot the whole cast from the PRE-authoring seeded
+# floor: exactly the identity-mismatch ADR 0013 forbids. `adr0013_allowed_ids` applies the SAME
+# fork as the #1313 house-entry gate: a real authoring model resolves ⇒ an ACTIVE NPC shoots only
+# once its deep profile is AUTHORED (the engine's Vault-free per-card flag); no model ⇒ the
+# deterministic floor IS the final cast, so a floor face is legitimate and everything passes.
+#
+# The staleness self-heal re-shoots at most this many faces per reconciler sweep — mirrors the
+# engine's IMAGE_BUDGET.perTurnCap (src/engine/imageConstants.ts) so an existing game's mismatched
+# cast heals over a few sweeps instead of flooding the provider.
+STALE_RESHOOT_PER_SWEEP = 3
+# Per-user watermark: the ACTIVE-authored count the staleness pass last verified clean at. The
+# fingerprint comparison needs one engine prompt-read per authored face, so it runs only when the
+# watermark moves (authoring landed for someone new / first sweep of a process) — never per-sweep.
+_STALE_AUTHORED_SEEN: dict = {}
+
 # Users seen by the roster/portrait read helpers this process (safe key → the raw identity
 # the routes asserted). The reconciler sweeps exactly these — per-user isolation holds; no
 # cross-user enumeration is invented.
@@ -1849,13 +1868,136 @@ def backfill_allowed(user: Optional[str]) -> bool:
     return last is None or (time.time() - last) >= BACKFILL_DEBOUNCE_S
 
 
+async def adr0013_allowed_ids(ids: list, user: Optional[str]) -> list:
+    """ADR 0013 filter for the lazy generation seams: the subset of `ids` whose faces may shoot NOW.
+
+    When a real authoring model resolves (the #1313 house-entry gate would be ON), an ACTIVE NPC's
+    face may only shoot once its deep profile is AUTHORED — the engine's Vault-free per-card
+    `authored` flag is the truth. Held ids are NOT dropped forever: the per-NPC authored re-shoot
+    (`kickoff_authored_reshoot`, fired from every authoring write-back seam) shoots them the moment
+    authoring lands, and the roster backfill / reconciler retry on their own cadence.
+
+    Fail-open by design (mirrors `house_entry_gate_active`'s own fail-soft posture): no model /
+    gate-check trouble / state-read trouble ⇒ everything passes (the deterministic floor is then
+    the final cast, so a floor face can never mismatch a later authored one). PRE-GAME (started is
+    False) everything passes too — the only pre-game callers are the per-NPC authored-shoot paths,
+    which fire only after that houseguest's write-back landed (the warm gates own ADR 0013 there).
+    The PLAYER is never authoring-gated (their face is chosen/human-owned, not model-authored)."""
+    ids = [str(h) for h in (ids or [])]
+    if not ids:
+        return ids
+    try:
+        from src import orwell_cast_authoring
+        gate_on = await orwell_cast_authoring.house_entry_gate_active(user)
+    except Exception:
+        gate_on = False
+    if not gate_on:
+        return ids
+    from src import orwell_engine
+    try:
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception:
+        return ids
+    if not isinstance(state, dict) or state.get("started") is False:
+        return ids
+    authored = {}
+    for hg in state.get("house") or []:
+        if isinstance(hg, dict) and hg.get("id"):
+            authored[str(hg["id"])] = hg.get("authored") is True
+    out, held = [], []
+    for hid in ids:
+        if _safe_id(hid) == PLAYER_PORTRAIT_ID or hid not in authored or authored[hid]:
+            out.append(hid)
+        else:
+            held.append(hid)
+    if held:
+        logger.info("[portraits] ADR 0013: holding %d un-authored face(s) for %s until authoring "
+                    "lands: %s", len(held), _safe_user(user), held)
+    return out
+
+
+def kickoff_authored_reshoot(hid, user: Optional[str]) -> bool:
+    """ADR 0013 — the per-NPC "authoring just landed" (re)shoot; returns True when a run was kicked.
+
+    Fired from every authoring write-back seam (the prewarm portrait warm's per-NPC gate, the
+    roster-driven / manual deep-authoring backfill). Two cases, one helper:
+      • no face on disk ⇒ plain backfill — the FIRST shoot, from the now-authored prompt (fetched
+        live via `getPortraitPrompt`, which pre-game serves the warmed pre-seed store);
+      • a face on disk whose stored prompt FINGERPRINT differs from the current (authored) prompt ⇒
+        the face was shot from a PRE-authoring identity the player was never given — it is
+        DISCARDED first (fresh first-shoot semantics: the wrong face must never ride along as an
+        img2img identity-carry reference), then regenerated from the authored prompt.
+    A face whose fingerprint MATCHES the current prompt is left alone (generate-once holds — the
+    backfill's own idempotency skips it). The player's literal uploaded photo is never touched
+    (`discard_portraits` locks `source == "upload"`). Best-effort/fail-soft throughout."""
+    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation/backfill.
+    if golden_path.active():
+        logger.info("[portraits] authored re-shoot skipped: golden record/replay mode (0108)")
+        return False
+    if not hid:
+        return False
+
+    async def _heal():
+        try:
+            sid = _safe_id(str(hid))
+            entry = load_manifest(user).get(sid)
+            if (isinstance(entry, dict) and entry.get("source") != "upload"
+                    and entry.get("fingerprint") and portrait_file(user, str(hid)) is not None):
+                from src import orwell_engine
+                try:
+                    p = await orwell_engine.get_portrait_prompt(str(hid), user=user)
+                except Exception:
+                    p = None
+                cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
+                if cur_fp and entry.get("fingerprint") != cur_fp:
+                    logger.info("[portraits] ADR 0013: %s's stored face predates its authored "
+                                "identity — discarding and re-shooting from the authored prompt", sid)
+                    discard_portraits(user, [str(hid)])
+            await backfill_missing([str(hid)], user)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.info("[portraits] authored re-shoot for %s failed: %s", hid, e)
+
+    # Stamp the lazy-path debounce like the other explicit kicks so an auto-poll seconds later
+    # can't pile a second run onto the same provider.
+    _LAST_BACKFILL_AT[_safe_user(user)] = time.time()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        task = loop.create_task(_heal())
+
+        def _done(t):
+            try:
+                t.result()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.info("[portraits] background authored re-shoot error: %s", e)
+
+        task.add_done_callback(_done)
+    else:  # non-async callers (tests drive the heal via the loop)
+        try:
+            asyncio.run(_heal())
+        except Exception as e:
+            logger.info("[portraits] sync authored re-shoot error: %s", e)
+    return True
+
+
 async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
     """Fetch each missing houseguest's prompt from the engine and generate + persist it.
 
     Best-effort throughout (never raises): a houseguest whose prompt can't be fetched is
     logged to the attempt ring and skipped; the rest still generate. Reuses the standard
-    `generate_and_store` pipeline (idempotent, beat-recording, availability-gated)."""
+    `generate_and_store` pipeline (idempotent, beat-recording, availability-gated).
+
+    ADR 0013 (2026-07-13): this is the ONE funnel every lazy seam routes through, so the
+    authoring gate lives here — an un-authored ACTIVE NPC's id is held (not shot) while a real
+    authoring model resolves; the authored re-shoot picks it up the moment its write-back lands."""
     from src import orwell_engine
+
+    try:
+        missing_ids = await adr0013_allowed_ids(missing_ids, user)
+    except Exception as e:  # pragma: no cover - defensive (the filter is itself fail-open)
+        logger.info("[portraits] ADR 0013 filter failed (proceeding unfiltered): %s", e)
 
     prompts = []
     for hid in missing_ids or []:
@@ -2023,7 +2165,25 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     from routes.orwell_routes import _roster_cards  # lazy: routes import this module at load
 
     cards = _roster_cards(state, user)
+
+    # (c2) ADR 0013 staleness self-heal (2026-07-13): a face ON DISK that was shot BEFORE its
+    # subject's authored identity landed (or before a portrait-prompt upgrade) re-shoots from the
+    # CURRENT authored prompt — discarded first (never carried as an img2img reference), capped at
+    # STALE_RESHOOT_PER_SWEEP per sweep so an existing game heals without flooding the provider.
+    healed = 0
+    try:
+        healed = await _heal_stale_authored_faces(user, cards)
+    except Exception as e:  # pragma: no cover - defensive; the heal is enrichment, never the sweep
+        logger.info("[portraits] staleness heal for %s failed: %s", safe, e)
+
     missing = missing_portrait_ids(user, cards)
+    # ADR 0013: an un-authored ACTIVE NPC may not shoot while an authoring model resolves — hold
+    # those out of the retry set entirely (their budget must not burn on faces that must WAIT; the
+    # authored re-shoot owns them the moment their write-back lands).
+    try:
+        missing = await adr0013_allowed_ids(missing, user)
+    except Exception:  # pragma: no cover - defensive (the filter is itself fail-open)
+        pass
     prev_missing = _LAST_MISSING.get(safe)
     _LAST_MISSING[safe] = len(missing)
     if not missing:
@@ -2032,7 +2192,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
             logger.info("[portraits] reconciler: portrait set complete for %s (%d/%d)",
                         safe, done["present"], done["total"])
         _clear_counters(safe)  # nothing to track when nothing is missing
-        return {"missing": 0, "attempted": 0}
+        return {"missing": 0, "attempted": 0, "healed": healed}
     if not prev_missing:
         logger.info("[portraits] reconciler: %d portrait(s) missing for %s — verify-and-retry engaged",
                     len(missing), safe)
@@ -2055,7 +2215,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     if not eligible:
         sidecar[safe] = counters
         _save_reconcile_state(sidecar)
-        return {"missing": len(missing), "attempted": 0}
+        return {"missing": len(missing), "attempted": 0, "healed": healed}
 
     # (e) retry through the standard pipeline; stamp the lazy-path debounce (see docstring).
     _LAST_BACKFILL_AT[safe] = time.time()
@@ -2074,7 +2234,77 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
                         "the roster backfill and the manual lever still work", sid, safe, attempts)
     sidecar[safe] = counters
     _save_reconcile_state(sidecar)
-    return {"missing": len(missing), "attempted": len(eligible)}
+    return {"missing": len(missing), "attempted": len(eligible), "healed": healed}
+
+
+async def _heal_stale_authored_faces(user: Optional[str], cards: list) -> int:
+    """The ADR 0013 staleness pass (2026-07-13): re-shoot faces that PREDATE their subject's
+    authored identity. Returns how many faces were re-shot this sweep (≤ STALE_RESHOOT_PER_SWEEP).
+
+    Detection is the 0065 prompt FINGERPRINT: the engine bakes every public facet into the
+    deterministic portrait prompt, so a stored face whose manifest fingerprint differs from the
+    CURRENT prompt's hash was shot from an older identity (the pre-authoring floor, or an older
+    prompt composition). Candidates are the ACTIVE, deep-AUTHORED (per the engine's Vault-free
+    card flag), non-player subjects with a fingerprinted face on disk — a legacy entry with NO
+    fingerprint is left alone (the quiet-backfill policy: never mass-re-shoot for a missing field).
+
+    Cost is bounded two ways: the per-user WATERMARK (`_STALE_AUTHORED_SEEN` — the fingerprint
+    comparison, one engine prompt-read per authored face, runs only when the authored count moves
+    or on the first sweep of a process, and only re-arms while stale faces remain) and the
+    per-sweep re-shoot cap (STALE_RESHOOT_PER_SWEEP — mirrors the engine's IMAGE_BUDGET.perTurnCap,
+    so a 15-face heal spreads over a few sweeps instead of flooding the provider). Stale faces are
+    DISCARDED before regeneration (fresh first-shoot semantics — the wrong face must never carry as
+    an img2img identity reference)."""
+    from src import orwell_engine
+
+    safe = _safe_user(user)
+    manifest = load_manifest(user)
+    candidates = []
+    authored_count = 0
+    for card in cards or []:
+        if not isinstance(card, dict):
+            continue
+        if (card.get("status") or "active") != "active":
+            continue
+        hid = card.get("id")
+        if not hid or card.get("isPlayer") or _safe_id(str(hid)) == PLAYER_PORTRAIT_ID:
+            continue
+        if card.get("authored") is not True:
+            continue
+        authored_count += 1
+        entry = manifest.get(_safe_id(str(hid)))
+        if not isinstance(entry, dict) or entry.get("source") == "upload":
+            continue
+        if not entry.get("fingerprint"):
+            continue  # legacy entry — backfills its fingerprint quietly, never a mass re-shoot
+        if portrait_file(user, str(hid)) is None:
+            continue
+        candidates.append((str(hid), entry["fingerprint"]))
+    if _STALE_AUTHORED_SEEN.get(safe) == authored_count:
+        return 0  # verified clean at this authoring watermark — no per-sweep prompt fetches
+    if not candidates:
+        _STALE_AUTHORED_SEEN[safe] = authored_count
+        return 0
+    stale = []
+    for hid, stored_fp in candidates:
+        try:
+            p = await orwell_engine.get_portrait_prompt(hid, user=user)
+        except Exception:
+            return 0  # engine trouble — verify nothing this sweep, try again next
+        cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
+        if cur_fp and cur_fp != stored_fp:
+            stale.append(hid)
+    if not stale:
+        _STALE_AUTHORED_SEEN[safe] = authored_count  # everything matches — verified clean
+        return 0
+    batch = stale[:STALE_RESHOOT_PER_SWEEP]
+    logger.info("[portraits] ADR 0013 staleness: %d face(s) predate their authored identity for %s "
+                "— re-shooting %d this sweep: %s", len(stale), safe, len(batch), batch)
+    discard_portraits(user, batch)
+    await backfill_missing(batch, user)
+    # Deliberately NOT stamping the watermark while stale faces remain — the next sweep continues
+    # the heal (and re-verifies the just-shot batch, whose fingerprints now match).
+    return len(batch)
 
 
 async def reconcile_once() -> dict:
@@ -2190,6 +2420,8 @@ def scrub_user(user: Optional[str]) -> None:
     _clear_counters(_safe_user(user))
     _PROVIDER_SEEN.pop(_safe_user(user), None)
     _LAST_MISSING.pop(_safe_user(user), None)
+    # ADR 0013: the staleness watermark describes the OLD cast — the new one verifies afresh.
+    _STALE_AUTHORED_SEEN.pop(_safe_user(user), None)
     # L15: a finished/old season's progress record must not linger into the new cast.
     _GEN_PROGRESS.pop(_safe_user(user), None)
 
@@ -2210,4 +2442,5 @@ def scrub_all() -> None:
         pass
     _PROVIDER_SEEN.clear()
     _LAST_MISSING.clear()
+    _STALE_AUTHORED_SEEN.clear()  # ADR 0013: the watermarks describe casts that no longer exist
     _GEN_PROGRESS.clear()  # L15: no run is in flight after a wholesale scrub

@@ -225,9 +225,10 @@ def test_backfill_unauthored_reauthors_only_the_requested_floor_npcs(monkeypatch
     _stub_state(monkeypatch)
     seen = {}
 
-    async def fake_run_authoring(cast, owner):
+    async def fake_run_authoring(cast, owner, on_authored=None):
         seen["ids"] = [c.get("id") for c in cast]
         seen["owner"] = owner
+        seen["on_authored"] = on_authored
         return len(cast)
     monkeypatch.setattr(A, "run_authoring", fake_run_authoring)
 
@@ -240,7 +241,7 @@ def test_backfill_unauthored_reauthors_only_the_requested_floor_npcs(monkeypatch
 
 
 def test_backfill_unauthored_noops_pre_game_and_on_empty(monkeypatch):
-    async def fake_run_authoring(cast, owner):
+    async def fake_run_authoring(cast, owner, on_authored=None):
         raise AssertionError("must not author pre-game / with nothing requested")
     monkeypatch.setattr(A, "run_authoring", fake_run_authoring)
 
@@ -257,7 +258,7 @@ def test_backfill_unauthored_skips_ids_not_in_the_live_house(monkeypatch):
     _stub_state(monkeypatch)
     seen = {}
 
-    async def fake_run_authoring(cast, owner):
+    async def fake_run_authoring(cast, owner, on_authored=None):
         seen["ids"] = [c.get("id") for c in cast]
         return len(cast)
     monkeypatch.setattr(A, "run_authoring", fake_run_authoring)
@@ -265,6 +266,30 @@ def test_backfill_unauthored_skips_ids_not_in_the_live_house(monkeypatch):
     # "player" + a stale/unknown id are filtered out; only the real floor NPC remains.
     written = _run(A.backfill_unauthored(["player", "npc:2", "npc:999"], "u"))
     assert written == 1 and seen["ids"] == ["npc:2"]
+
+
+def test_backfill_unauthored_wires_the_adr0013_portrait_reshoot(monkeypatch):
+    """ADR 0013 (2026-07-13): the LATE-authoring seam — each NPC authored via the backfill fires the
+    per-NPC portrait (re)shoot, so a face shot from the pre-authoring floor heals the moment its
+    authoring lands (and a face-less NPC gets its FIRST face from the authored prompt)."""
+    _stub_state(monkeypatch)
+    reshoots = []
+    orwell_portraits = importlib.import_module("src.orwell_portraits")
+    monkeypatch.setattr(orwell_portraits, "kickoff_authored_reshoot",
+                        lambda hid, user: reshoots.append((hid, user)) or True)
+
+    async def fake_run_authoring(cast, owner, on_authored=None):
+        # the real path fires on_authored per successful write-back — simulate both landing
+        for c in cast:
+            if on_authored:
+                on_authored(c.get("id"))
+        return len(cast)
+    monkeypatch.setattr(A, "run_authoring", fake_run_authoring)
+
+    written = _run(A.backfill_unauthored(["npc:2", "npc:4"], "iris"))
+    assert written == 2
+    assert sorted(h for h, _u in reshoots) == ["npc:2", "npc:4"]
+    assert all(u == "iris" for _h, u in reshoots)
 
 
 # ── the roster route kicks the authoring backfill ──────────────────────────────────────────

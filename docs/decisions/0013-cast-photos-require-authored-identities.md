@@ -96,3 +96,42 @@ the cutover, with Phase-2 portraits then shooting off the adopted, authored iden
 - `test_adr0013_photo_requires_authoring.py`: authored NPCs shoot; an un-authored NPC (gate never
   fired, whole-cast done) does NOT; nothing-authored ⇒ zero photos; no-author-warm ⇒ decline.
 - `test_0065_cast_prewarm.py`: the per-NPC gating cases + the new "unauthored ⇒ no face" case.
+
+## Addendum (2026-07-13) — the LAZY seams, the prompt CONTENT, and the staleness self-heal
+
+The owner reported live portraits that "don't match people's storylines or aesthetics." The audit
+found the 2026-06-21 decision held at the *warm/createCharacter* seams but leaked at three others,
+all now closed (FE: `orwell_portraits.py` / `orwell_prewarm.py` / `orwell_cast_authoring.py`;
+engine: `portraitPrompts.ts` / `GameSessionAdapter.getPortraitPrompt`):
+
+1. **The lazy seams shot un-authored faces.** The G9 roster backfill, the manual lever, and the G20
+   reconciler generated ANY missing face regardless of authoring — so when authoring landed late
+   (or was floored for hours), the whole cast shot from the pre-authoring seeded floor.
+   `adr0013_allowed_ids` now filters the ONE funnel (`backfill_missing`) with the same fork as the
+   #1313 house-entry gate: an authoring model resolves ⇒ an ACTIVE NPC shoots only once its deep
+   profile is AUTHORED (the engine's Vault-free per-card flag); no model ⇒ the floor is the final
+   cast and everything passes (fail-open). Pre-game passes (the per-NPC warm gates own it there).
+2. **The gated warm shot the right TIME but a stale PROMPT.** `_shoot_one` shot the prompt entry
+   captured at pre-seed time — which predates the very write-back that opened the gate. The per-NPC
+   authored shoot now goes through `kickoff_authored_reshoot`, which re-fetches the CURRENT prompt
+   via `getPortraitPrompt` (extended to serve the warmed pre-seed store pre-game), so the face is
+   shot from the store AS IT STANDS at shoot time.
+3. **No self-heal for a face that predates its authored identity.** A stale face on disk was never
+   re-entered into the pipeline (`missing_portrait_ids` only lists face-less subjects). Two healers
+   now exist: the LATE-authoring seam (`backfill_unauthored` wires `on_authored` → the per-NPC
+   re-shoot, which DISCARDS a fingerprint-mismatched face first — the wrong face must never carry
+   as an img2img identity reference — then regenerates from the authored prompt), and the G20
+   reconciler's **staleness pass** (`_heal_stale_authored_faces`: active + authored + fingerprinted
+   face whose stored 0065 prompt fingerprint differs from the current prompt's ⇒ discard +
+   re-shoot), capped at `STALE_RESHOOT_PER_SWEEP` (= the `IMAGE_BUDGET.perTurnCap` mirror) per
+   sweep with a per-user authored-count watermark, so an existing season heals over a few sweeps
+   without flooding the provider.
+
+Separately, the prompt now also *carries the storyline*: `portraitPrompts.ts` consumes the PUBLIC
+authored facets `identityConcept` (0116 freeform identity) and `vocation` (L28/0058) — both already
+on the HouseguestCard — as `Character:` / `Occupation:` clauses ahead of the season anchor, so
+wardrobe/grooming/attitude match who the person actually is. Absent facets ⇒ byte-identical prompt.
+Gates: `frontend/tests/test_adr0013_backfill_gate.py`, the updated
+`test_adr0013_photo_requires_authoring.py` / `test_0065_cast_prewarm.py` /
+`test_cast_authoring_backfill.py`, and `tests/unit/portraitPrompts.test.ts` (the storyline-facet +
+pre-game fresh-fetch + sentinel cases).

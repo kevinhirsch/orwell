@@ -44,6 +44,21 @@ export interface PublicAppearanceFacets {
   ethnicity?: string;
   genderPresentation?: "man" | "woman" | "nonbinary";
   demeanor?: string;
+  /**
+   * The AUTHORED storyline facets (owner report 2026-07-13: "portraits don't match people's
+   * storylines or aesthetics") — both PUBLIC HouseguestCard fields, so Vault-free by construction:
+   * - `identityConcept` (feature 0116): the model-authored FREEFORM identity in the model's own
+   *   words ("a chaos-agent podcaster who treats the house like a live show"). It is the single
+   *   strongest storyline/aesthetic signal the engine holds, so the shot's wardrobe/grooming/
+   *   attitude read as THAT person, not a generic contestant. C8-capped at genesis commit; absent
+   *   on a deterministic floor cast (where the archetype is the identity, and the prompt stays
+   *   byte-identical to before).
+   * - `vocation` (L28/0058): the public occupation noun phrase ("ER nurse") — a concrete grounding
+   *   cue for dress/grooming an image model reads well.
+   * NEVER a hidden element, stat, or soul field — the §5 Vault rule holds unchanged.
+   */
+  identityConcept?: string;
+  vocation?: string;
 }
 
 import {
@@ -154,7 +169,8 @@ export function buildPortraitPrompt(
   facets: PublicAppearanceFacets,
   styleAnchor: string,
 ): PortraitPromptResult {
-  const { appearance, age, presentation, physicalCharacteristics, ethnicity, genderPresentation, demeanor } = facets;
+  const { appearance, age, presentation, physicalCharacteristics, ethnicity, genderPresentation, demeanor,
+    identityConcept, vocation } = facets;
   const shot = fnv1a(`${houseguestId}|${styleAnchor}`);
   const expression = EXPRESSION_VARIANTS[shot % EXPRESSION_VARIANTS.length]!;
   const framing = FRAMING_VARIANTS[(shot >>> 8) % FRAMING_VARIANTS.length]!;
@@ -224,6 +240,11 @@ export function buildPortraitPrompt(
     // absent entirely (byte-identical to pre-#1317) otherwise.
     ...(genderedStyling ? [`Build & hair styling: ${genderedStyling}`] : []),
     `Presentation style: ${styleLine}`,
+    // The AUTHORED storyline facets (2026-07-13) — the strongest per-subject aesthetic signals, so
+    // they ride BEFORE the shared season anchor (the #1317 composition re-weight: subject-specific
+    // content leads, the anchor follows). Additive only: a floor cast without them is byte-identical.
+    ...(identityConcept ? [`Character: ${identityConcept} — reflect this in wardrobe, grooming, and attitude`] : []),
+    ...(vocation ? [`Occupation: ${vocation}`] : []),
     styleAnchor,
     `Facial structure: ${facialStructure}`,
     `Expression: ${expressionLine}`,
@@ -254,6 +275,8 @@ export function buildCastPortraitPrompts(
     ethnicity?: string;
     genderPresentation?: "man" | "woman" | "nonbinary";
     demeanor?: string;
+    identityConcept?: string;
+    vocation?: string;
   }>,
   styleAnchor: string,
 ): PortraitPromptResult[] {
@@ -271,6 +294,8 @@ export function buildCastPortraitPrompts(
           ...(hg.ethnicity !== undefined ? { ethnicity: hg.ethnicity } : {}),
           ...(hg.genderPresentation !== undefined ? { genderPresentation: hg.genderPresentation } : {}),
           ...(hg.demeanor !== undefined ? { demeanor: hg.demeanor } : {}),
+          ...(hg.identityConcept !== undefined ? { identityConcept: hg.identityConcept } : {}),
+          ...(hg.vocation !== undefined ? { vocation: hg.vocation } : {}),
         },
         styleAnchor,
       ),
