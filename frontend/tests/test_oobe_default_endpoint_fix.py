@@ -491,6 +491,49 @@ def test_utility_resolver_binds_the_configured_default_model(post_reset_settings
     assert cands and cands[0][1] == "qwen/qwen3.6-flash"
 
 
+@pytest.mark.parametrize("prefix", ["task", "faithfulness", "research"])
+def test_non_utility_prefix_falls_back_to_the_configured_utility_model_not_the_narrator(
+        prefix, post_reset_settings, rhino_is_admin):
+    """Greptile P1 repro (2026-07-13): a NON-utility prefix (task/faithfulness/research) whose own
+    endpoint is unconfigured falls back THROUGH the utility tier. With the shipped two-tier defaults
+    (utility_model=qwen/qwen3.6-flash, utility_endpoint_id EMPTY so it rides the default endpoint),
+    the resolved UTILITY model must be the CHEAP qwen tier — NOT the narrator (z-ai/glm-4.7). The
+    prior fix covered only the `utility` prefix's own block; this pins the non-utility fallback so
+    utility/background calls never silently run the expensive narrator model."""
+    _seed_single_openrouter_endpoint(owner=None)
+    url, model, _h = endpoint_resolver.resolve_endpoint(prefix, owner="rhino")
+    assert url and url.endswith("/chat/completions")
+    assert model == "qwen/qwen3.6-flash", (
+        f"the {prefix!r} utility-tier fallback must resolve the configured utility model (qwen), "
+        f"never the narrator; got {model!r}"
+    )
+
+
+def test_default_prefix_never_resolves_the_utility_model(post_reset_settings, rhino_is_admin):
+    """The mirror invariant: the `default`/narrator prefix must NEVER route through the utility
+    model. With default_endpoint_id empty + the single keyed endpoint, `default` still resolves the
+    narrator (glm-4.7), not qwen — the fallback block's utility-model pickup skips the default
+    prefix by design."""
+    _seed_single_openrouter_endpoint(owner=None)
+    url, model, _h = endpoint_resolver.resolve_endpoint("default", owner="rhino")
+    assert url and model == "z-ai/glm-4.7", (
+        f"the narrator prefix must resolve the default model, never the utility qwen tier; got {model!r}"
+    )
+
+
+def test_non_utility_prefix_inherits_default_model_only_when_utility_model_is_unset(
+        post_reset_settings, rhino_is_admin):
+    """When the configured utility_model is itself EMPTY, a non-utility fallback correctly inherits
+    the default_model (the qwen tier can't win if it isn't configured)."""
+    merged = post_reset_settings
+    merged["utility_model"] = ""
+    _seed_single_openrouter_endpoint(owner=None)
+    url, model, _h = endpoint_resolver.resolve_endpoint("task", owner="rhino")
+    assert url and model == "z-ai/glm-4.7", (
+        f"with no utility_model, the fallback inherits default_model; got {model!r}"
+    )
+
+
 def test_auto_default_declines_rather_than_picking_first_available(post_reset_settings,
                                                                    rhino_is_admin):
     """If the store somehow has NO configured default_model, the auto-default must stay
