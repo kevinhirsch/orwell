@@ -5,8 +5,11 @@ Query and cache model context window sizes from OpenAI-compatible APIs.
 Provides token estimation for context usage tracking.
 """
 
+import asyncio
 import logging
+import os
 import sys
+import time
 from typing import Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
@@ -81,7 +84,15 @@ def _is_local_endpoint(url: str) -> bool:
 # Constants
 # ---------------------------------------------------------------------------
 DEFAULT_CONTEXT = 128000
-REQUEST_TIMEOUT = 5
+# F-PY-3 (perf audit): a SHORT timeout on the /models + /slots probes so one slow/hung upstream
+# can't drag out the (now off-loaded) context-size lookup. Env-tunable; default 5s.
+REQUEST_TIMEOUT = float(os.environ.get("ORWELL_MODEL_PROBE_TIMEOUT") or "5")
+# F-PY-3: a short-TTL memo over the whole (blocking) resolution so a slow endpoint is probed at most
+# once per TTL window instead of on every turn. This complements the permanent `_context_cache`
+# below (which deliberately SKIPS local/default results so a restarted local server is re-read) —
+# the TTL layer still shields those hot paths from re-probing an upstream that's momentarily slow.
+# Env-tunable; default 60s.
+_CONTEXT_TTL_SECONDS = float(os.environ.get("ORWELL_MODEL_CONTEXT_TTL") or "60")
 
 # Known context windows for major API models (used as fallback when /models
 # endpoint doesn't report context_length).
@@ -209,6 +220,35 @@ KNOWN_CONTEXT_WINDOWS = {
 # Cache
 # ---------------------------------------------------------------------------
 _context_cache: Dict[Tuple[str, str], int] = {}
+
+# F-PY-3: short-TTL memo for the async path — value + monotonic expiry per (endpoint, model).
+_context_ttl_cache: Dict[Tuple[str, str], Tuple[int, float]] = {}
+
+
+async def get_context_length_async(endpoint_url: str, model: str) -> int:
+    """Async, event-loop-safe wrapper over :func:`get_context_length`.
+
+    F-PY-3 (perf audit): the sync resolution does blocking ``httpx.get`` probes to the endpoint's
+    ``/models`` and ``/slots``. Called directly from async request paths (e.g. ``maybe_compact``),
+    those synchronous probes run ON the event loop — so ONE slow upstream stalls EVERY concurrent
+    user's turn, not just the one whose context is being sized. This wrapper (1) serves a short-TTL
+    memo when fresh (so a slow endpoint is probed at most once per window), and (2) off-loads the
+    blocking resolution to a worker thread via ``asyncio.to_thread`` so the event loop stays free.
+
+    Fail-soft: any error in the off-loaded call degrades to ``DEFAULT_CONTEXT`` rather than
+    propagating (the caller's own guards already treat a missing size as the default)."""
+    key = (endpoint_url, model)
+    now = time.monotonic()
+    hit = _context_ttl_cache.get(key)
+    if hit is not None and hit[1] > now:
+        return hit[0]
+    try:
+        ctx = await asyncio.to_thread(get_context_length, endpoint_url, model)
+    except Exception as e:  # noqa: BLE001 — never let a context probe break the turn
+        logger.debug("get_context_length_async failed for %s: %s", model, e)
+        ctx = DEFAULT_CONTEXT
+    _context_ttl_cache[key] = (ctx, now + _CONTEXT_TTL_SECONDS)
+    return ctx
 
 
 def get_context_length(endpoint_url: str, model: str) -> int:

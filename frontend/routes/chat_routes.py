@@ -85,6 +85,17 @@ def _session_url_matches_endpoint(session_url: str, endpoint_base: str) -> bool:
     return sess in variants or sess.startswith(base + "/")
 
 
+# F-TR-1 (perf audit): anti-buffering headers for every token-carrying SSE response. A reverse
+# proxy in front of the app (nginx/Caddy/Cloudflare) will, by default, BUFFER a streaming body —
+# holding tokens until a chunk threshold is hit, which erases the point of streaming and makes the
+# send→first-visible-token wait read as a hang. `X-Accel-Buffering: no` tells nginx (and proxies
+# that honor it) never to buffer this response; `Cache-Control: no-cache` keeps any cache from
+# holding/replaying it. The persistent session-events SSE already sets exactly this dict — the
+# token-stream (`chat_stream`) and resume (`chat_resume`) responses were missing it. Applied to the
+# OUTER StreamingResponse of each token stream.
+SSE_STREAM_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
 def _sse_error_response(message: str, status: int = 400) -> StreamingResponse:
     """A one-shot SSE stream carrying a single ``event: error`` then ``[DONE]``.
 
@@ -1251,6 +1262,34 @@ def setup_chat_routes(
             # (Full robustness still wants a periodic heartbeat + raised proxy idle timeouts.)
             yield ": keepalive\n\n"
 
+            # F-PY-5 (perf audit) — PROGRESS SIGNAL. The heavy pre-stream prep (engine framing +
+            # any context compaction, in `build_chat_context`) has already run by the time this
+            # producer starts; what remains before the first visible token is the model call, whose
+            # first-token latency can be many seconds on a cold/loaded provider. Emit ONE lightweight
+            # status frame the instant the producer opens so the client can render "the model is
+            # thinking" and distinguish a working turn from a hung one (instead of a bare spinner).
+            #
+            # FRAME SHAPE (for the FE-JS lane consuming these): a normal `data:` SSE line whose JSON
+            # payload is `{"type": "status", "stage": "<stage>"}`. Stages, coarsest→finest:
+            #   "preparing"  — request accepted, pre-stream prep beginning (reserved; see note below)
+            #   "framing"    — engine framing / context assembly in flight (reserved)
+            #   "compacting" — a blocking context compaction is running (reserved)
+            #   "thinking"   — prep done, the model call is being made (emitted here)
+            # It carries NO reply text and is NOT persisted; it is a transient UI cue. Unknown-`type`
+            # frames are ignored by the current client, so this is purely additive and forward-
+            # compatible — the FE lane may light a "thinking…" affordance off `stage`.
+            #
+            # NOTE (deliberate scope): the "preparing"/"framing"/"compacting" stages are documented
+            # for the FE vocabulary but NOT emitted server-side here, because this producer only
+            # starts AFTER `build_chat_context` (the framing/compaction prep) has completed — the
+            # detached-run/run-keying architecture (ADR 0012) resolves the canonical session from the
+            # framing result BEFORE the producer is drained, so relocating that prep into the producer
+            # (to stream those earlier stages) is out of scope for this change. The real pre-producer
+            # wait is instead SHRUNK by the sibling perf fixes: tightened framing-read timeouts
+            # (F-PY-4), off-loaded/cached model-context probes (F-PY-3), and non-blocking compaction
+            # (F-PY-2). See the commit message for the deferral rationale.
+            yield f"data: {json.dumps({'type': 'status', 'stage': 'thinking'})}\n\n"
+
             if ctx.preprocessed.attachment_meta:
                 yield f"data: {json.dumps({'type': 'attachments', 'data': ctx.preprocessed.attachment_meta})}\n\n"
 
@@ -1919,7 +1958,7 @@ def setup_chat_routes(
         # the run keeps going and saves the assistant message on completion
         # regardless. Reconnect via /api/chat/resume.
         if compare_mode:
-            return StreamingResponse(_safe_stream(), media_type="text/event-stream")
+            return StreamingResponse(_safe_stream(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
         # ADR 0012 §3.1 — key the detached run on the CANONICAL game session for a framed turn, NOT
         # the per-tab session id this window happened to POST under. Two windows on one game (the
@@ -1956,8 +1995,8 @@ def setup_chat_routes(
                     yield f'data: {json.dumps({"type": "canonical_session", "id": run_key})}\n\n'
                     async for ev in agent_runs.subscribe(run_key):
                         yield ev
-                return StreamingResponse(_adopt_then_mirror(), media_type="text/event-stream")
-            return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream")
+                return StreamingResponse(_adopt_then_mirror(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+            return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
         # 0064 Part C (Messenger model): a GAME-framed turn QUEUES behind any in-flight run for the
         # CANONICAL session instead of cancelling it — two devices on the one game chat serialize
@@ -1981,9 +2020,9 @@ def setup_chat_routes(
                 yield f'data: {json.dumps({"type": "canonical_session", "id": run_key})}\n\n'
                 async for ev in agent_runs.subscribe(run_key):
                     yield ev
-            return StreamingResponse(_adopt_then_subscribe(), media_type="text/event-stream")
+            return StreamingResponse(_adopt_then_subscribe(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
-        return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream")
+        return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     # ------------------------------------------------------------------ #
     # GET /api/chat/events — persistent per-session SSE for cross-device sync.
@@ -2018,7 +2057,7 @@ def setup_chat_routes(
         # replays the finished run's buffer then ends, so the peer still mirrors the turn's tokens.
         if not agent_runs.has_run(session_id):
             raise HTTPException(404, "No active run for this session")
-        return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream")
+        return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     # ------------------------------------------------------------------ #
     # POST /api/chat/stop — cancel a detached run (Stop button). Closing the SSE

@@ -1261,7 +1261,13 @@ async def _capture_beat_signature(user) -> Optional[dict]:
     hiccup (engine blip, odd shape) returns None so the caller simply skips the checkpoint."""
     from src import orwell_engine
     try:
-        status = await orwell_engine.game_status(user=user)
+        # F-PY-4 (perf audit): these are PER-TURN framing reads — bound gameStatus to the tight
+        # framing timeout so a hung engine skips the checkpoint fast (fail-open below) instead of
+        # stalling the turn on gameStatus's 30s default. `wait_for` enforces the bound at the FE
+        # WITHOUT touching gameStatus's signature (a read, so cancelling it mid-flight is safe).
+        # get_game_state already carries the framing timeout in the engine client.
+        status = await asyncio.wait_for(
+            orwell_engine.game_status(user=user), orwell_engine._FRAMING_TIMEOUT)
         state = await orwell_engine.get_game_state(user=user)
         # 0065 Part A: both reads carry `beatSeq` — track the freshest so the next progression call
         # attaches the current token (never a self-409 from a stale last-seen).
@@ -2827,7 +2833,11 @@ async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
         pass
     try:
         from src import orwell_engine
-        delta = await orwell_engine.state_delta(last_seen_beat_seq, user=user)
+        # F-PY-4 (perf audit): the additive per-turn delta line is best-effort framing — bound it to
+        # the tight framing timeout (via wait_for, no signature change) so a slow engine fails it
+        # fast (the full context stands) instead of stalling the turn on stateDelta's 30s default.
+        delta = await asyncio.wait_for(
+            orwell_engine.state_delta(last_seen_beat_seq, user=user), orwell_engine._FRAMING_TIMEOUT)
         # Keep the last-seen token fresh from the delta's own beatSeq (it carries one like every read).
         _refresh_beat_seq(user, delta if isinstance(delta, dict) else {})
         return _render_delta_line(delta if isinstance(delta, dict) else {})
@@ -3232,7 +3242,11 @@ async def apply_game_framing(
         # source of truth; the fiction must not advance past an unresolved player pending. Best-
         # effort / fail-open: any hiccup must not break the turn.
         try:
-            _status = await orwell_engine.game_status(user=user)
+            # F-PY-4 (perf audit): the pending-barrier read is per-turn framing — bound it to the
+            # tight framing timeout (via wait_for, no signature change) so a hung engine skips the
+            # barrier fast (fail-open) rather than stalling the turn on gameStatus's 30s default.
+            _status = await asyncio.wait_for(
+                orwell_engine.game_status(user=user), orwell_engine._FRAMING_TIMEOUT)
             _barrier = _pending_barrier_directive((_status or {}).get("pending")) if isinstance(_status, dict) else None
             if _barrier:
                 gm_prompt = gm_prompt + "\n\n" + _barrier
