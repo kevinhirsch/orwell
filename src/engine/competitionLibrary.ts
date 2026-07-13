@@ -176,12 +176,12 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "hoh-cling", name: "Cling On", phase: "hoh", type: "endurance", governing: "physical",
-    format: "endurance",
+    id: "hoh-cling", name: "The Gauntlet", phase: "hoh", type: "physical", governing: "physical",
+    format: "skill",
     narrative: {
-      premise: "Press flat against a spinning wall and hang on as it tilts past vertical.",
-      beats: ["the spin starts gentle and lulls the field", "a jolt to full tilt sheds the first names", "two hang on past every warning"],
-      winReads: "sheer refusal to let the wall win",
+      premise: "A timed agility run: vault the hurdles, weave the poles, swing the rope, and slap the buzzer.",
+      beats: ["an early runner clips a hurdle and resets", "a clean, fast line sets the time to beat", "the last heat comes down to a hundredth of a second"],
+      winReads: "raw speed and footwork under the clock",
     },
   },
   {
@@ -258,12 +258,12 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-deadhang", name: "Dead Hang", phase: "veto", type: "endurance", governing: "physical",
-    format: "endurance",
+    id: "veto-deadhang", name: "Dead Eye", phase: "veto", type: "physical", governing: "physical",
+    format: "skill",
     narrative: {
-      premise: "Hang from a bar over a foam pit while the grips grow slicker every minute.",
-      beats: ["the first hands slip early", "a slick coat thins the field", "two dangle past the last warning"],
-      winReads: "who wanted it enough to burn for it",
+      premise: "Precision toss: land bean-bags and rings on distant targets, one throw per turn, points climbing.",
+      beats: ["early throws sail wide of the board", "someone finds the arc and stacks points", "the final throw needs a bullseye to win"],
+      winReads: "a steady arm and a cool aim",
     },
   },
   {
@@ -285,39 +285,39 @@ export const COMPETITION_LIBRARY_PLUS: CompetitionDef[] = [
     },
   },
   {
-    id: "veto-rewind", name: "Season Rewind", phase: "veto", type: "quiz", governing: "mental",
-    format: "quiz",
-    narrative: {
-      premise: "Buzz in with what happened each week: who won, who went, who wore the veto.",
-      beats: ["the recent weeks come easy", "an early-season detail splits the leaders", "sudden death on a forgotten vote"],
-      winReads: "who kept the whole season in their head",
-    },
-  },
-  {
-    id: "veto-spot", name: "Spot the Difference", phase: "veto", type: "memory", governing: "mental",
-    format: "quiz",
-    narrative: {
-      premise: "Two near-identical shots of a room flash up; name what changed between them.",
-      beats: ["the glaring changes fall fast", "a one-pixel difference stalls the room", "a lightning round settles it"],
-      winReads: "an eye that misses nothing",
-    },
-  },
-  {
-    id: "veto-countdown", name: "Countdown", phase: "veto", type: "mental", governing: "mental",
+    id: "veto-rewind", name: "Spellbound", phase: "veto", type: "puzzle", governing: "mental",
     format: "puzzle",
     narrative: {
-      premise: "Hit the target with the digits drawn — closest exact answer under the timer takes the veto.",
-      beats: ["rushed sums overshoot", "the steady solvers cluster near the number", "the nearest exact answer wins"],
-      winReads: "arithmetic nerve under a ticking clock",
+      premise: "A wall of scrambled letter tiles: unscramble the houseguest names and house words against the clock.",
+      beats: ["short words fall fast", "a long anagram jams the leaders", "the final word is spelled at the buzzer"],
+      winReads: "a nimble mind for letters and patterns",
     },
   },
   {
-    id: "veto-ballmaze", name: "Ball Maze", phase: "veto", type: "puzzle", governing: "mental", secondary: "physical",
-    format: "crapshoot",
+    id: "veto-spot", name: "Process of Elimination", phase: "veto", type: "mental", governing: "mental",
+    format: "puzzle",
     narrative: {
-      premise: "Tilt a giant hand-held maze to roll a ball past every trap-hole to the veto slot.",
-      beats: ["early balls drop through the first hole", "a delicate touch finds the line", "the ball rolls home on the last tilt"],
-      winReads: "a light, thinking touch over force",
+      premise: "A logic grid of clues — 'the veto is not behind a blue door', 'it is left of the red' — deduce the one true answer.",
+      beats: ["the first deductions rule out the easy options", "a contradiction forces a rethink", "one airtight chain of logic lands the answer"],
+      winReads: "cold deduction that never guessed",
+    },
+  },
+  {
+    id: "veto-countdown", name: "Crack the Safe", phase: "veto", type: "mental", governing: "mental",
+    format: "puzzle",
+    narrative: {
+      premise: "A locked safe and a secret combination — each guess lights how many digits are right and right-placed. Crack it in the fewest tries.",
+      beats: ["the opening guesses map the field", "the feedback narrows the code", "the last dial-in swings the door open"],
+      winReads: "deductive code-breaking under pressure",
+    },
+  },
+  {
+    id: "veto-ballmaze", name: "Total Recall", phase: "veto", type: "memory", governing: "mental", secondary: "physical",
+    format: "skill",
+    narrative: {
+      premise: "A growing sequence of house moments lights up on the wall; step out the whole order on the floor pads, adding one each round.",
+      beats: ["the short sequences are easy to walk", "a long chain trips a leader mid-step", "the final round is a marathon of memory"],
+      winReads: "a flawless memory that never broke stride",
     },
   },
   {
