@@ -9,9 +9,11 @@ future refinement". This lane closes that tail: the FE-issued `recordInteraction
   * attach `expected_beat_seq=chat_helpers.last_beat_seq(owner)` to the engine call;
   * refresh last-seen from the response IMMEDIATELY (these fire MID-TURN, after other mutations may
     have bumped beatSeq — without refreshing the FE would self-409 its own next call);
-  * on a stale 409 (`_is_stale_beat_error`) RECONCILE via `_handle_stale_beat` and SKIP the back-fill
-    (it is re-derivable next turn — NOT the double-apply case, so never retried), letting no
-    exception escape and counting it.
+  * on a stale 409 (`_is_stale_beat_error`) RECONCILE via `_handle_stale_beat`, letting no exception
+    escape and counting it. A FOLD-BEARING back-fill (`recordInteraction`/`makeDeal`/the trust levers
+    AND the E22 floor digest, #591/CON-11/#1537) then RE-ATTEMPTS once against the reconciled beatSeq
+    and DEFERS on a double-409 rather than dropping the scene's only consequence fold (mandate #4); a
+    purely positional belt (`moveTo`) still reconciles-and-skips (re-derivable next turn).
 
 The HARD requirement proved here: a NORMAL multi-call turn (read → record/deal/move → advance) must
 NEVER self-409, because last-seen is refreshed from every response. Roles only; the engine client is
@@ -129,8 +131,9 @@ def test_e22_fallback_record_attaches_token_and_refreshes(monkeypatch):
     captured = {}
 
     async def fake_record(content, with_ids=None, initiator="player", kind=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         captured["expected_beat_seq"] = expected_beat_seq
+        captured["idempotency_key"] = idempotency_key
         return {"recorded": True, "beatSeq": 8}
 
     monkeypatch.setattr(orwell_engine, "record_interaction", fake_record)
@@ -139,6 +142,8 @@ def test_e22_fallback_record_attaches_token_and_refreshes(monkeypatch):
     assert out is True
     assert captured["expected_beat_seq"] == 7
     assert chat_helpers.last_beat_seq("u") == 8
+    # #1537: the floor digest now carries a stable at-most-once key (routed via _backfill_with_cas).
+    assert isinstance(captured["idempotency_key"], str) and captured["idempotency_key"]
 
 
 # ── 2. THE HARD GUARD: a normal multi-call turn never self-409s ────────────────────────────────── #
@@ -499,12 +504,17 @@ def test_move_backfill_stale_409_is_reattempted(monkeypatch):
     assert chat_helpers.last_beat_seq("owner") == 23
 
 
-def test_e22_fallback_stale_409_is_skipped(monkeypatch):
-    """The E22 fallback also reconciles-and-skips a stale 409, releasing its single-flight slot."""
+def test_e22_fallback_stale_409_is_retried_then_deferred_never_dropped(monkeypatch):
+    """#1537 / audit A-S3: the E22 floor digest is FREQUENTLY the scene's SOLE consequence fold, so a
+    stale-409 must NOT reconcile-and-DROP it (mandate #4 — a novel move must never evaporate). It now
+    RETRIES once against the reconciled beatSeq (#591) and, if the board moved AGAIN, DEFERS the fold
+    into the CON-11 queue rather than skipping. The single-flight slot is still released."""
     chat_helpers._LAST_BEAT_SEQ["u"] = 1
 
+    # No model resolves (no utility endpoint in the test), so the rich extraction declines and the
+    # floor digest — the sole record — runs; it 409s on BOTH the initial attempt and the #591 retry.
     async def fake_record(content, with_ids=None, initiator="player", kind=None,
-                          expected_beat_seq=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, user=None):
         raise _stale_409(33)
 
     async def fake_status(user=None):
@@ -518,8 +528,9 @@ def test_e22_fallback_stale_409_is_skipped(monkeypatch):
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
     narration = "A long beat the model never recorded, recounted in full. " * 4
     out = _run(chat_helpers.ensure_turn_recorded("u", "m", narration, []))
-    assert out is False
-    assert chat_helpers.stale_beat_rejections() == 1
+    assert out is False                                     # not landed THIS call — but not dropped
+    assert chat_helpers.stale_beat_rejections() == 2        # the initial 409 + the #591 retry 409
+    assert chat_helpers.deferred_fold_count("u") == 1       # the sole fold is QUEUED, never evaporated
     assert chat_helpers.last_beat_seq("u") == 33
     assert chat_helpers.fallback_in_flight("u") is False    # the single-flight slot was released
 
@@ -564,6 +575,7 @@ def test_backfills_are_wired_through_the_cas_helper():
 
     with open(os.path.join(base, "routes", "chat_helpers.py"), encoding="utf-8") as fh:
         ch = fh.read()
-    # the E22 fallback also carries the CAS token + reconciles a stale 409
-    assert "expected_beat_seq=last_beat_seq(user)" in ch
-    assert "_is_stale_beat_error(_stale_e)" in ch
+    # #1537: the E22 floor digest now routes through the SAME CAS back-fill as the other fold-bearing
+    # belts — retry + CON-11 deferral + a stable at-most-once key — so its SOLE fold is never dropped.
+    assert "_backfill_with_cas(\n            user, orwell_engine.record_interaction, digest," in ch
+    assert "defer_fold=True, idempotency_key=_mint_idempotency_key()" in ch
