@@ -54,6 +54,11 @@ function _makeChatState() {
     _pendingReconcile: new Set(),
     _pendingPeerResume: new Set(),
     _forceRebuild: new Set(),
+    // sessionId -> the run id of THIS window's OWN foreground POST run (learned from our own
+    // `run-started` SSE self-echo). Lets sessionSync skip a peer-resume of our OWN just-rendered run
+    // (the first-message self-echo double), while a genuine PEER run — a DIFFERENT runId — still
+    // resumes/defers for the live two-window mirror. Cleared per foreground POST (chat.js). #1087 SSE parity.
+    _ownRunIds: {},
 
     // ── background / resume / research streams ───────────────────────────────
     _backgroundStreams: new Map(),    // sessionId -> { status, accumulated, sourcesHtml, … }

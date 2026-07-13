@@ -303,6 +303,30 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
            chatState._resumingStreams.has(sessionId);
   }
 
+  /**
+   * #1087 (SSE self-echo double): classify a `run-started` SSE edge as THIS window's OWN run vs a
+   * genuine PEER's. `session_events` is at-least-once, so the sender receives its OWN `run-started`
+   * echo (and the replay ring re-delivers it on a late connect). Learn our own run id the moment the
+   * echo arrives while our foreground POST is live for `id` (chat_routes publishes our run-started
+   * synchronously at POST, so the FIRST edge we see mid-stream is ours), then recognize it thereafter.
+   * A concurrent PEER run (GAP-1) carries a DIFFERENT runId, so it is NEVER swallowed — it still
+   * defers/resumes for the live two-window mirror. Returns true iff `runId` is our OWN run.
+   *
+   * Called by sessionSync's run-started handler. Fail-open: no runId (older server / unstamped edge)
+   * ⇒ returns false ⇒ the pre-#1087 defer/resume behavior, unchanged. The map entry is reset per
+   * foreground POST (handleChatSubmit) so each turn re-learns a fresh run id.
+   */
+  function noteRunStarted(sessionId, runId) {
+    if (!sessionId || !runId) return false;
+    // Only the FIRST run-started seen while OUR foreground POST is streaming `sessionId` is recorded
+    // as ours (`_streamSessionId === sessionId`). A LATER, different runId that arrives while we are
+    // still streaming is a genuine concurrent peer — never overwrite our own id with it.
+    if (chatState._streamSessionId === sessionId && !chatState._ownRunIds[sessionId]) {
+      chatState._ownRunIds[sessionId] = runId;
+    }
+    return chatState._ownRunIds[sessionId] === runId;
+  }
+
   /** ADR 0012 §2.2: stamp a live bubble's role-timestamp from the SERVER-minted ISO time (carried on
    * the message_saved event) so every window renders the identical time string — replacing the
    * speculative client `new Date()` the bubble was created with. Formats identically to
@@ -890,6 +914,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // Capture session ID for background stream detection
     const streamSessionId = sessionModule.getCurrentSessionId();
     chatState._streamSessionId = streamSessionId;
+    // #1087 (SSE self-echo double): a NEW foreground POST gets a NEW server run id, so forget last
+    // turn's own-run id for this session — the FIRST `run-started` self-echo seen while this POST is
+    // live (noteRunStarted, below) re-learns it. Without this reset, turn 2's own echo would carry an
+    // id != the stale recorded one and be mis-classified as a PEER run → deferred → resume-duplicated.
+    try { delete chatState._ownRunIds[streamSessionId]; } catch (_) {}
     const streamQuery = msg;
     _lastReaderActivity = Date.now();
 
@@ -5369,6 +5398,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     continueFrom,
     _appendViewReportLink,
     hasActiveStream,
+    noteRunStarted,   // #1087 (SSE self-echo double): classify a run-started edge as OUR own run vs a peer
     softReloadHistory,
     flushPendingReconcile,
     deferPeerResume,

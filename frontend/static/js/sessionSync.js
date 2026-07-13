@@ -272,6 +272,17 @@
     // id/seq-aware: it adopts our own optimistic bubbles with zero churn, defers past a live stream,
     // and rebuilds only when genuinely diverged — so reconciling on our own echo is a cheap no-op.
     if (type === 'run-started') {
+      // #1087 (SSE self-echo double): `session_events` is at-least-once, so WE receive our OWN
+      // `run-started` echo (and the replay ring re-delivers it on a late connect) while our foreground
+      // POST is STILL rendering that very run. Classify it NOW — synchronously, before the async
+      // convergeView — so `_streamSessionId` still reflects our live POST. `noteRunStarted` returns true
+      // for our OWN run (the runId the server stamped, #1087 SSE parity), false for a genuine PEER run
+      // (a different runId). Our own run is already painted by our POST and converged by softReloadHistory
+      // below; peer-resuming it would re-attach to the just-finished run in the evict grace and paint a
+      // DUPLICATE bubble the reconcile then has to collapse — the visible "appears twice then dedupes"
+      // first-message flicker. A peer run (different runId) is untouched and still mirrors live.
+      var _isOwnRun = false;
+      try { _isOwnRun = !!(cm.noteRunStarted && cm.noteRunStarted(id, data && data.runId)); } catch (_) {}
       // #985 (P2-C): a peer whose per-tab view hasn't converged still receives this invitation on the
       // canonical channel. Converge its VIEW onto the canonical session first (so the live attach +
       // reconcile land where the player sees them). When we ARE already on the session, convergeView is
@@ -286,7 +297,9 @@
         // its {id, seq} with zero churn (it carries data-db-id from the replayed message_saved) and
         // DEFERS past the live resume (hasActiveStream includes _resumingStreams), so it can never yank
         // the live bubble.
-        if (isWatchedSession(id) && cm.resumeStream) {
+        // #1087: NEVER (defer-)resume our OWN run — the sender's POST already renders it and
+        // softReloadHistory below converges it. Only a genuine PEER run (a different runId) resumes.
+        if (!_isOwnRun && isWatchedSession(id) && cm.resumeStream) {
           // ADR 0012 (GAP 1): if OUR OWN POST stream is in flight for this same (canonical) session,
           // resuming now would double-render our own run — DEFER the peer attach and let chat.js's
           // stream-end finally re-attempt it the moment our stream settles. When we're idle, attach
