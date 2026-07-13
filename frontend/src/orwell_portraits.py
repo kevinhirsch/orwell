@@ -282,6 +282,11 @@ _LAST_BACKFILL_AT: dict = {}
 # Provider ABSENCE idles and never consumes the budget; absent→present resets all counters.
 RECONCILE_INTERVAL_S = 5 * 60
 RECONCILE_MAX_ATTEMPTS = 6
+# A TRANSIENT/environmental failure (402 credits, 429, 5xx, transport — see `_is_transient_gen_error`)
+# does NOT burn a permanent attempt: it re-arms the slot with this small cooldown so the NEXT
+# eligible sweep retries it (bounded — one attempt per RECONCILE_INTERVAL_S, never a tight loop),
+# leaving the cast to self-heal the moment the operator adds credits / the provider recovers.
+RECONCILE_TRANSIENT_COOLDOWN = 1
 # The budget sidecar, persisted next to the attempt log so a restart cannot forget how many
 # real attempts a houseguest already burned: {safeUser: {safeId: {attempts, cooldown}}}.
 RECONCILE_STATE_PATH = Path(DATA_DIR) / "portrait-reconcile.json"
@@ -362,6 +367,92 @@ def _consume_gen_detail() -> Optional[str]:
     d = _LAST_GEN_DETAIL
     _LAST_GEN_DETAIL = None
     return d
+
+
+# ── Transient vs. genuine failure classification (image-provider errors) ────────────────────
+# A generation failure is TRANSIENT/environmental when a retry AFTER the operator changes
+# something OUT-OF-BAND (adds credits, the rate-limit window rolls over, the provider recovers,
+# the network settles) would plausibly succeed: a credit error (402), auth (401/403), a
+# rate-limit (429), a request-timeout (408), any 5xx, or a transport/network exception (surfaced
+# as its class name — no HTTP response at all). Everything else — a genuine 400 bad-prompt, a 404
+# model-/endpoint-not-found, an empty / no-image / undecodable response — is a per-CONTENT failure
+# that a blind retry cannot fix. Two consumers: (1) `_generate_via_chat_completions` skips the
+# nonsense tools-fallback (which would only mask the real cause with a 404) when #1 failed
+# transiently; (2) the G20 reconciler keeps a transiently-failing houseguest's slot ELIGIBLE
+# (never burning its permanent retry budget on an outage), while genuine content failures still
+# consume the budget and eventually stand the reconciler down.
+_TRANSIENT_TRANSPORT_MARKERS = (
+    "timeout", "connecterror", "connecttimeout", "readtimeout", "writetimeout",
+    "pooltimeout", "connectionerror", "networkerror", "protocolerror", "remoteprotocol",
+    "transporterror", "proxyerror", "readerror", "writeerror",
+)
+_TRANSIENT_HTTP_CODES = frozenset({401, 402, 403, 408, 429})
+
+
+def _http_status_of(error_class: Optional[str]) -> Optional[int]:
+    """The HTTP status embedded in an ``http-<n>`` / ``image-fetch-http-<n>`` error class, else
+    None (a transport/JSON/sentinel reason carries no HTTP status)."""
+    if not error_class:
+        return None
+    m = re.search(r"http-(\d{3})", str(error_class))
+    return int(m.group(1)) if m else None
+
+
+def _is_transient_gen_error(error_class: Optional[str]) -> bool:
+    """True when ``error_class`` is a transient/environmental failure (see the block comment) —
+    a credit/auth/rate-limit/timeout HTTP status, any 5xx, or a transport-exception class name."""
+    if not error_class:
+        return False
+    status = _http_status_of(error_class)
+    if status is not None:
+        return status in _TRANSIENT_HTTP_CODES or 500 <= status <= 599
+    low = str(error_class).strip().lower()
+    return any(marker in low for marker in _TRANSIENT_TRANSPORT_MARKERS)
+
+
+def _should_try_tools_fallback(status: Optional[int], reason: Optional[str]) -> bool:
+    """Whether the ``openrouter:image_generation`` server-TOOL fallback can plausibly help after
+    the native ``modalities`` attempt failed.
+
+    It is a GENUINE fallback ONLY for "this model didn't accept modalities image-output" — a
+    shape/param rejection (a 4xx such as 400/404) or a 200 that simply returned no image. It
+    CANNOT help — and only elicits the misleading 404 'No endpoints found that support tool use',
+    which would then MASK mechanism #1's real cause — when the modalities attempt failed for an
+    environmental/definitive reason: a credit error (402), auth (401/403), a rate-limit (429), any
+    5xx, or a transport error (no HTTP response at all). Conservative: skip on any doubt."""
+    if _is_transient_gen_error(reason):
+        return False  # credit / auth / rate-limit / 5xx / transport — tools can't fix it
+    if status is None:
+        return False  # no HTTP response ⇒ not a "modalities unsupported" shape rejection
+    return True
+
+
+# ── Per-(user, houseguest) last-failure class — the reconciler's transient signal ───────────
+# `generate_and_store` stamps the last failure CLASS per (safeUser, safeId) here (cleared on a
+# success) so the G20 reconciler's budget step can tell a TRANSIENT failure (which must NOT burn
+# the permanent retry budget) from a genuine per-content one (which does). Keyed by user so ids
+# reused across users (`npc:3`) never collide; process-local observability, never game state.
+_LAST_GEN_ERROR_BY_ID: dict = {}
+
+
+def _record_gen_result(user: Optional[str], houseguest_id: str, ok: bool,
+                       error_class: Optional[str] = None) -> None:
+    """Record one houseguest's generation outcome for the reconciler's budget decision. A success
+    clears any prior failure class; a failure stamps its class. Best-effort, never raises."""
+    try:
+        slot = _LAST_GEN_ERROR_BY_ID.setdefault(_safe_user(user), {})
+        sid = _safe_id(houseguest_id)
+        if ok:
+            slot.pop(sid, None)
+        elif error_class:
+            slot[sid] = str(error_class)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def last_gen_error_class(user: Optional[str], houseguest_id: str) -> Optional[str]:
+    """The last recorded generation-failure class for this (user, houseguest), or None."""
+    return _LAST_GEN_ERROR_BY_ID.get(_safe_user(user), {}).get(_safe_id(houseguest_id))
 
 
 # Text→image model classification now lives in src.llm_core (the single source of truth
@@ -825,11 +916,17 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
                                          reference_png: Optional[bytes] = None) -> Optional[bytes]:
     """OpenRouter (and compatible) image generation over /chat/completions.
 
-    Two mechanisms, tried in order: native image-output via `modalities: [image, text]`
-    (the image-collection models), then the `openrouter:image_generation` server tool (any
-    model orchestrates and returns an image URL). The image is extracted from the assistant
-    message (data: or https:) and decoded. Best-effort: returns None and records the most
-    informative reason on failure.
+    Two mechanisms: native image-output via `modalities: [image, text]` (mechanism #1 — the
+    CORRECT path for an image-output model), and the `openrouter:image_generation` server tool
+    (mechanism #2 — orchestration for a model that has no native image output). #1 runs first and
+    its failure reason is AUTHORITATIVE. #2 runs ONLY as a genuine "modalities not supported"
+    fallback and is SKIPPED when #1 failed for an environmental/definitive reason — a credit error
+    (402), auth, a rate-limit (429), a 5xx, or a transport error — because retrying with tools
+    there cannot help and only elicits the misleading 404 'No endpoints found that support tool
+    use' that would then MASK #1's real cause (the bug this guards: an image-output model whose
+    account was out of credits reported the tools-404 instead of the real 402). The image is
+    extracted from the assistant message (data: or https:) and decoded. Best-effort: returns None
+    and records the most informative reason on failure.
 
     G26: when `reference_png` is set (the player's uploaded headshot), it rides along as an
     image part in the user message — the model recreates THAT person in the requested style
@@ -847,47 +944,66 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
     # degradation: a model/provider that rejects the param (a 400) is retried once WITHOUT it, so
     # the square ask never blocks generation. The prompt already carries the framing cue too.
     square_cfg = {"image_config": {"aspect_ratio": PORTRAIT_ASPECT_RATIO}}
-    attempts = (
-        {**base_msg, "modalities": ["image", "text"], **square_cfg},
-        {**base_msg, "tools": [{"type": "openrouter:image_generation"}], **square_cfg},
-    )
-    last_reason, last_detail = "no-image", None
-    for payload in attempts:
+
+    async def _attempt(payload):
+        """Run ONE request shape (with the single `image_config`-strip degradation retry).
+        Returns ``(png|None, reason|None, detail|None, status|None)`` — `status` is None for a
+        transport/JSON-level failure (no usable HTTP status), else the response's HTTP status."""
         try:
             resp = await client.post(chat_url, json=payload, headers=headers)
-        except Exception as e:  # transport error — try the next mechanism
-            last_reason, last_detail = type(e).__name__, None
-            continue
-        if resp.status_code != 200:
+        except Exception as e:  # transport error — no HTTP response at all
+            return None, type(e).__name__, None, None
+        if (resp.status_code != 200 and 400 <= resp.status_code < 500 and "image_config" in payload
+                and not _is_transient_gen_error(f"http-{resp.status_code}")):
             # Graceful degradation: a 4xx may be the unrecognized `image_config` — retry the SAME
-            # mechanism once with it stripped before giving up on this attempt.
-            if 400 <= resp.status_code < 500 and "image_config" in payload:
-                logger.info("[portraits] openrouter chat %s with image_config — retrying square-free",
-                            resp.status_code)
-                stripped = {k: v for k, v in payload.items() if k != "image_config"}
-                try:
-                    resp = await client.post(chat_url, json=stripped, headers=headers)
-                except Exception as e:
-                    last_reason, last_detail = type(e).__name__, None
-                    continue
+            # mechanism once with it stripped before giving up. Gated to NON-transient 4xx only: a
+            # 402/credit, auth (401/403), or rate-limit (429) has nothing to do with the param, so a
+            # stripped retry is wasted and (worse) would risk overwriting the real reason.
+            logger.info("[portraits] openrouter chat %s with image_config — retrying square-free",
+                        resp.status_code)
+            stripped = {k: v for k, v in payload.items() if k != "image_config"}
+            try:
+                resp = await client.post(chat_url, json=stripped, headers=headers)
+            except Exception as e:
+                return None, type(e).__name__, None, None
         if resp.status_code != 200:
             logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
-            last_reason, last_detail = f"http-{resp.status_code}", _provider_error_reason(resp)
-            continue
+            return None, f"http-{resp.status_code}", _provider_error_reason(resp), resp.status_code
         try:
             data = resp.json()
         except Exception:
-            last_reason, last_detail = "bad-json", None
-            continue
+            return None, "bad-json", None, resp.status_code
         img_url = _extract_chat_image_url(data)
         if not img_url:
-            last_reason, last_detail = "no-image-in-response", _chat_text_hint(data)
-            continue
+            return None, "no-image-in-response", _chat_text_hint(data), resp.status_code
         png = await _image_bytes_from_url(client, img_url)
         if png:
+            return png, None, None, resp.status_code
+        return None, "image-decode-failed", None, resp.status_code
+
+    # Mechanism #1 — native image output. Its reason is the recorded cause on any failure.
+    png, reason1, detail1, status1 = await _attempt(
+        {**base_msg, "modalities": ["image", "text"], **square_cfg})
+    if png:
+        return png
+    reason, detail = reason1 or "no-image", detail1
+
+    # Mechanism #2 — the server-tool fallback, ONLY when #1's failure looks like a genuine
+    # "modalities image-output not supported" shape rejection (a 4xx/200-no-image), never on a
+    # credit/auth/rate-limit/5xx/transport failure it cannot fix (and whose real reason it would
+    # mask with the tools-404).
+    if _should_try_tools_fallback(status1, reason1):
+        png, reason2, detail2, _status2 = await _attempt(
+            {**base_msg, "tools": [{"type": "openrouter:image_generation"}], **square_cfg})
+        if png:
             return png
-        last_reason, last_detail = "image-decode-failed", None
-    _note_gen_error(last_reason, last_detail)
+        # Prefer mechanism #1's reason: it is the correct native path and (given the gate above)
+        # always failed with a real HTTP status to reach here, so it is the true cause — never let
+        # #2's generic tools-404 clobber it. Fall through to #2 only if #1 produced no reason.
+        if not reason1:
+            reason, detail = reason2 or "no-image", detail2
+
+    _note_gen_error(reason, detail)
     return None
 
 
@@ -1636,14 +1752,18 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             if ref and not png:
                 source = "generated"  # reference failed; the log carries the reason
             if not png:
-                log_attempt(str(hid), False, _consume_gen_error() or "generation-failed",
-                            duration_ms, detail=_consume_gen_detail())
+                reason = _consume_gen_error() or "generation-failed"
+                log_attempt(str(hid), False, reason, duration_ms, detail=_consume_gen_detail())
+                # Stamp the failure class so the G20 reconciler can spare a TRANSIENT failure
+                # (402 credits, 429, 5xx, transport) from the permanent retry budget.
+                _record_gen_result(user, str(hid), False, reason)
                 skipped += 1
                 continue
             try:
                 _write_portrait(user, str(hid), png, str(name), source=source, fingerprint=fp,
                                 ref_clean=ref_clean)
                 log_attempt(str(hid), True, None, duration_ms)
+                _record_gen_result(user, str(hid), True)  # success clears any prior failure class
                 generated += 1
                 _progress_tick(user)  # L15: one more face landed — the panel sees the live count move
                 _push_portrait_arrival(user)  # WS push edge: refresh the (poll-stood-down) cast panel now
@@ -1651,6 +1771,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             except Exception as e:
                 logger.info("[portraits] failed to persist %s: %s", hid, e)
                 log_attempt(str(hid), False, "persist-failed", duration_ms)
+                _record_gen_result(user, str(hid), False, "persist-failed")
                 skipped += 1
         finally:
             _INFLIGHT.get(_safe_user(user), set()).discard(sid)
@@ -2418,13 +2539,23 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     _LAST_BACKFILL_AT[safe] = time.time()
     await backfill_missing(list(eligible), user)
 
-    # (f) outcomes — success resets; a real failed attempt consumes one budget unit.
+    # (f) outcomes — success resets; a genuine per-CONTENT failure consumes one budget unit; a
+    # TRANSIENT/environmental failure (402 credits, 429, 5xx, transport) does NOT burn the
+    # permanent budget — it only cools the slot one cycle and stays ELIGIBLE, so once the operator
+    # adds credits / the provider recovers the next sweep retries it (bounded to one attempt per
+    # sweep, never a tight hammer loop) instead of the cast staying permanently given-up.
     for hid in eligible:
         sid = _safe_id(hid)
         if portrait_file(user, hid) is not None:
             counters.pop(sid, None)
             continue
-        attempts = (counters.get(sid) or {"attempts": 0}).get("attempts", 0) + 1
+        prev = counters.get(sid) or {"attempts": 0}
+        if _is_transient_gen_error(last_gen_error_class(user, hid)):
+            # Re-arm: keep the attempt count, apply a one-cycle cooldown, never approach the cap.
+            counters[sid] = {"attempts": int(prev.get("attempts", 0)),
+                             "cooldown": RECONCILE_TRANSIENT_COOLDOWN}
+            continue
+        attempts = int(prev.get("attempts", 0)) + 1
         counters[sid] = {"attempts": attempts, "cooldown": 2 ** attempts}
         if attempts == RECONCILE_MAX_ATTEMPTS:
             logger.info("[portraits] reconciler: gave up on %s for %s after %d failed attempts — "
@@ -2657,6 +2788,8 @@ def scrub_user(user: Optional[str]) -> None:
     _NO_PROMPT_LOGGED.pop(_safe_user(user), None)
     # L15: a finished/old season's progress record must not linger into the new cast.
     _GEN_PROGRESS.pop(_safe_user(user), None)
+    # The reconciler's transient-signal cache describes the OLD cast's ids.
+    _LAST_GEN_ERROR_BY_ID.pop(_safe_user(user), None)
 
 
 def scrub_all() -> None:
@@ -2678,3 +2811,4 @@ def scrub_all() -> None:
     _STALE_AUTHORED_SEEN.clear()  # ADR 0013: the watermarks describe casts that no longer exist
     _NO_PROMPT_LOGGED.clear()  # the once-only no-prompt logs describe casts that no longer exist
     _GEN_PROGRESS.clear()  # L15: no run is in flight after a wholesale scrub
+    _LAST_GEN_ERROR_BY_ID.clear()  # the reconciler's transient-signal cache is per-cast
