@@ -26,7 +26,7 @@ import json
 import os
 import re
 import time
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, Union
 
 try:  # the structured logger if present; a no-op stand-in keeps this importable in isolation
     from loguru import logger
@@ -617,7 +617,9 @@ def _classify_visible_body(text: str) -> str:
 
 # ── the orchestrator (injectable — fully unit-testable) ───────────────────────
 
-LlmFn = Callable[[list[dict]], Awaitable[str]]
+# The resolved completion fn accepts EITHER a chat `list[dict]` (the cast-authoring path) OR a
+# single prompt string (the faithfulness judge / overseer hooks) — normalized inside `_resolve_llm_fn._fn`.
+LlmFn = Callable[[Union[str, list[dict]]], Awaitable[str]]
 WriteFn = Callable[[dict], Awaitable[dict]]
 
 
@@ -1101,7 +1103,20 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                 pass
         return "".join(parts), _finish
 
-    async def _fn(messages: list[dict]) -> str:
+    async def _fn(messages) -> str:
+        # Shape-normalize the input. The cast-authoring path passes a proper `list[dict]` of chat
+        # messages, but the faithfulness judge (0081) and the runtime overseer (0079/0080) call this
+        # resolved fn with a single prompt STRING (`_llm(judge.build_prompt(...))`). A raw string was
+        # passed straight through to `stream_llm_with_fallback` → `_sanitize_llm_messages`, which
+        # iterates it CHAR-BY-CHAR (each char is not a dict) and yields an EMPTY messages array — so
+        # the provider rejected it with HTTP 400 "Input required: specify prompt or messages" and the
+        # judge NEVER ran (13/13 calls 400'd in a prod debug bundle). Wrap a bare string (or any
+        # non-list) as a single user message so the prompt actually reaches the wire. A list[dict]
+        # caller is byte-identical (no wrapping).
+        if isinstance(messages, str):
+            messages = [{"role": "user", "content": messages}]
+        elif not isinstance(messages, list):
+            messages = [{"role": "user", "content": str(messages)}]
         text, finish = await _once(messages, _max_tokens)
         # 2026-07-13 retry-on-length: `finish_reason == "length"` means the completion was CUT OFF
         # by the output cap — for a JSON-authoring call the body is chopped mid-object and

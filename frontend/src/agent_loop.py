@@ -2894,7 +2894,20 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         try:
             from src.orwell_cast_authoring import _resolve_llm_fn
             _llm = await _resolve_llm_fn(owner, prefix="faithfulness", fallbacks_key="faithfulness")
-        except Exception:
+        except Exception as _resolve_err:
+            # #1599: an EXCEPTION resolving the judge model is a GENUINE failure — the grounding guard
+            # is DOWN, so be LOUD (WARN + a RED-eligible health event), never a silent swallow. (A
+            # clean None return below is the documented no-model floor: expected, not a failure.)
+            logger.warning(f"[orwell] faithfulness judge model resolve failed — guard down: {_resolve_err}")
+            try:
+                from src import log_rings as _lr_res
+                _lr_res.record_overseer(
+                    "anomaly", "faith:resolve-failed",
+                    f"faithfulness judge model could not be resolved (guard down): "
+                    f"{type(_resolve_err).__name__}: {_resolve_err}",
+                    lever=None, beat_before=beat_before, ok=False, user=owner)
+            except Exception:
+                pass
             _llm = None
         if _llm is None:
             return
@@ -2902,9 +2915,26 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         _proj = projection if projection is not None else await _faith_build_projection(owner)
         judge = FaithfulnessJudge(_llm)
         import inspect as _faith_insp
-        _raw = _llm(judge.build_prompt(narration or "", _proj, context))
-        if _faith_insp.isawaitable(_raw):
-            _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
+        try:
+            _raw = _llm(judge.build_prompt(narration or "", _proj, context))
+            if _faith_insp.isawaitable(_raw):
+                _raw = await asyncio.wait_for(_raw, timeout=12)   # bounded: a slow judge must not hang
+        except Exception as _call_err:
+            # #1599: this is the EXACT site that failed 13/13 SILENTLY in prod (an empty-messages 400).
+            # The judge is a grounding GUARD — a failed call means the guard is DOWN and must be LOUD:
+            # WARN + a RED-eligible health event on /admin/status. Still fail-soft for the TURN (a
+            # broken judge must never hurt play), but never again invisible.
+            logger.warning(f"[orwell] faithfulness judge call failed — guard down: {_call_err}")
+            try:
+                from src import log_rings as _lr_call
+                _lr_call.record_overseer(
+                    "anomaly", "faith:call-failed",
+                    f"faithfulness judge could not run (guard down): "
+                    f"{type(_call_err).__name__}: {_call_err}",
+                    lever=None, beat_before=beat_before, ok=False, user=owner)
+            except Exception:
+                pass
+            return
         verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
         if verdict is None or not verdict.is_slip:
             return
@@ -2968,7 +2998,17 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
             f"{_msg}: {verdict.rationale}",
             lever=verdict.lever, beat_before=beat_before, ok=_applied, user=owner)
     except Exception as _e:
-        logger.debug(f"[orwell] faithfulness check skipped: {_e}")
+        # #1599: a genuine error anywhere in the faithfulness gate is the guard going down — be LOUD
+        # (WARN + a RED-eligible health event), never a silent debug. Still fail-soft for the turn.
+        logger.warning(f"[orwell] faithfulness check failed — guard down: {_e}")
+        try:
+            from src import log_rings as _lr_outer
+            _lr_outer.record_overseer(
+                "anomaly", "faith:gate-failed",
+                f"faithfulness gate errored (guard down): {type(_e).__name__}: {_e}",
+                lever=None, beat_before=beat_before, ok=False, user=owner)
+        except Exception:
+            pass
 
 
 # The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
@@ -4478,6 +4518,17 @@ async def _stream_agent_loop_impl(
             if _gbe_tools():
                 from src.agent_tools import GAME_NARRATOR_TOOL_DROP
                 disabled_tools.update(GAME_NARRATOR_TOOL_DROP)
+        except Exception:
+            pass
+        # Ground the game-master narration temperature (Bug 2). The player-facing narration/casting
+        # turn otherwise rides the app-wide DEFAULT_TEMPERATURE (1.0), which the owner reported reads
+        # as canonically incoherent ("as if temp were 1.3"). Override the incoming temperature with
+        # the owner-tunable `narration_temperature` (default 0.7) — SCOPED here to the Orwell
+        # narration path (game_mode truthy) so generic agent calls and the utility/cast-authoring
+        # lanes keep their own temperatures. Read per-turn (no restart); fail-soft to the passed value.
+        try:
+            from src.settings import narration_temperature as _narr_temp
+            temperature = _narr_temp()
         except Exception:
             pass
 
