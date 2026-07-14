@@ -64,11 +64,16 @@ const _shortModel = chatRenderer.shortModel;
 let _renderLiveStream = () => {};
 let _softReloadHistory = async () => {};
 let _senderLabel = (modelLabel) => (modelLabel || '');
+// Mount a "responding…" thinking spinner into an observer round's holder (best-effort UX). chat.js owns
+// the spinner module + label; injected so a bare test import stays inert. Returns a handle with
+// `.destroy()` (or null). Default is a no-op → the incremental render is unaffected if it's absent.
+let _mountThinkingSpinner = () => null;
 export function _setWsSpliceDeps(deps) {
   if (!deps) return;
   if (deps.renderLiveStream) _renderLiveStream = deps.renderLiveStream;
   if (deps.softReloadHistory) _softReloadHistory = deps.softReloadHistory;
   if (deps.senderLabel) _senderLabel = deps.senderLabel;
+  if (deps.mountThinkingSpinner) _mountThinkingSpinner = deps.mountThinkingSpinner;
 }
 
 // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
@@ -181,6 +186,48 @@ export function _onWsResync(ev) {
     Promise.resolve().then(() => _softReloadHistory(sid)).catch((e) => {
       try { console.error('[chatWsSplice #1596] ws-resync history reconcile FAILED for ' + sid + ':', e); } catch (_) {}
     });
+  }
+}
+
+// orwellWs re-attached to a genuinely-NEW run (`orwell:ws-run-boundary`; reconcile-by-id already applied
+// upstream, so this fires ONCE per new run, never on a stale replay). The OBSERVER must start a FRESH
+// live round for it: the server started a new per-run buffer and cancelled the old chat channel, so the
+// new run's replayed deltas are about to arrive — if the PRIOR run's holder is still `_wsRound`, those
+// deltas render into it (`_wsEnsureRound` reuses a connected holder) and B never mounts a fresh streaming
+// container → the mirror-parity WS-leg `incrementalStream=false` divergence, AND a mid-stream "responding…"
+// gap where the mirror sits blank until the first delta. Reset the round here so the new run mounts its
+// OWN holder, and mount that holder + a thinking spinner IMMEDIATELY so window B shows live feedback the
+// instant the peer's turn starts (bounding the blank window to edge-propagation, not first-delta time).
+//
+// Guard: skip when THIS window is the active SENDER — it pinned its own round via `_wsPinRound` and
+// settles it on its own `done`; resetting here would tear the sender's own live bubble down. The sender
+// holds `chatState._streamSessionId`; the observer never does. Mirrors the SSE observer's `!_isOwnRun`
+// filter (sessionSync.js), which is why the SSE leg never had this divergence.
+export function _onWsRunBoundary() {
+  try { if (chatState._streamSessionId) return; } catch (_) { /* observer path only */ }
+  const prior = _wsRound;
+  const priorRich = _wsRichRun;   // capture BEFORE _wsResetRound() clears it
+  if (prior && prior.holder) {
+    // Settle the PRIOR observer round like a synthetic `done`: release the #1570 live-render lock (so a
+    // reconcile of the prior run isn't deferred) and reset.
+    const priorSid = prior.sessionId ||
+                     (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) || null;
+    if (prior._spinner) { try { prior._spinner.destroy(); } catch (_) { /* best-effort */ } }
+    // A RICH (multi-round tool) run's live holder holds rounds 1..N MERGED — never adoptable (history
+    // reconstructs the run as N bubbles). Discard it, mirroring the `done` branch: otherwise
+    // softReloadHistory's orphan detection sees the merged holder mismatch the N-bubble reconstruction
+    // and forces a full DESTRUCTIVE rebuild instead of the cheap adopt path (avoidable churn — exactly
+    // the case this PR's interrupt-mid-tail scenario can hit). A plain (single-round) run's holder is
+    // adoptable by {id, seq}, so it stays in the DOM and its own settle/history reconcile adopts it.
+    if (priorRich) { try { prior.holder.remove(); } catch (_) { /* best-effort DOM cleanup */ } }
+    _wsResetRound();
+    if (priorSid) { try { chatState._resumingStreams.delete(priorSid); } catch (_) { /* Set may be absent in a bare import */ } }
+  }
+  // Mount the fresh round NOW (before the first delta) so the mirror shows immediate "responding…"
+  // feedback instead of a blank window; the new run's deltas then render into this same holder.
+  const round = _wsEnsureRound();
+  if (round && round.holder && !round._spinner) {
+    try { round._spinner = _mountThinkingSpinner(round.holder); } catch (_) { /* best-effort UX only */ }
   }
 }
 

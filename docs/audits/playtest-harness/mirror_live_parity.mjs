@@ -168,6 +168,22 @@ const prevAText = await A.page.evaluate(() => {
   const c = el.cloneNode(true); c.querySelectorAll('.thinking-content,.thinking,[class*=thinking],.msg-footer,.role').forEach((n) => n.remove());
   return (c.innerText || '').replace(/\s+/g, ' ').trim();
 });
+// Wait for A to OBSERVE the warm-up's beat ADVANCE before the measured send. The warm-up commits a beat
+// (game-updated), and `sendTurn` can fire turn-2 in the tiny window BEFORE that edge lands — so A attaches
+// a now-stale `expectedBeatSeq`, the engine 409s `stale-beat`, turn-2 never streams, and B has nothing to
+// mirror (a spurious FAIL that is a host-timing artifact, NOT a mirror-render defect — observed flaking
+// BOTH on CI and locally). A real player never sends turn-2 in that sub-second window; gate the send on
+// A's client beatSeq passing its CP0 value (via the OrwellWs diagnostics accessor). The warm-up run can
+// take ~25s to fully commit on a slow host, so the timeout is generous; fail-open — if the beat never
+// advances (e.g. a warm-up that didn't commit) fall through and let the existing settle/measurement run.
+// WS-mode only exposes lastBeatSeq; on SSE the accessor is absent so this is a no-op wait.
+if (!process.env.MIRROR_SKIP_WARMUP) {
+  const preBeat = (e0 && e0.A && typeof e0.A.beatSeq === 'number') ? e0.A.beatSeq : 0;
+  await A.page.waitForFunction((pb) => {
+    try { return !!(window.OrwellWs && window.OrwellWs.lastBeatSeq) && window.OrwellWs.lastBeatSeq() > pb; }
+    catch (_) { return false; }
+  }, preBeat, { timeout: 45000, polling: 100 }).catch(() => {});
+}
 const sendWall = Date.now();
 console.log(`\nCP2 A sends @${sendWall}: ${JSON.stringify(TURN)}`);
 await sendTurn(A.page, TURN);

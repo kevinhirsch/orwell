@@ -195,6 +195,36 @@ async function handshake(hasRunFirst, runId) {
       "an id-less run-started must fall back to the boolean guard (re-attach when not tailing)");
   }
 
+  // ── scenario 7 (the WS mirror-parity F5 fix — attach a genuinely-new run IMMEDIATELY, not deferred):
+  // while we are TAILING run "W", a GENUINELY-NEW run "M" (distinct id) starts. The observer must
+  // re-subscribe to M RIGHT NOW — the WS analog of the SSE observer's resumeStream(id)-per-run — NOT
+  // wait for W's `done`. Deferring (the pre-fix #1087 behaviour) mounted M's live round only AFTER W's
+  // possibly-late `done`, too late for the realtime mirror, so the peer window fell back to a
+  // full-repaint reconcile (B incrementalStream=false). The server cancels W's chat channel on the new
+  // subscribe (no double-tail); W's tail is moot (a new run began) and reconciles from history.
+  {
+    const WS = boot();
+    await tick();
+    await handshake(true, "W");        // tailing a live run W (the ack names it)
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "streaming W..." } });
+    await tick();
+    const base = chatSubs().length;    // 1 (the initial subscribe to W)
+
+    // A genuinely-NEW run M starts WHILE we're still tailing W (W has sent no `done`). Immediate re-attach.
+    down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "M" } });
+    await tick();
+    assert(chatSubs().length === base + 1,
+      "a genuinely-new run while tailing must RE-SUBSCRIBE immediately (not defer to the old run's done); got " + chatSubs().length);
+    assert(chatSubs()[base].d.fromSeq === 0, "the new run M attaches from seq 0");
+
+    // Reconcile-by-id still holds: once attached to M, a STALE replay of M's edge (same id) is ignored.
+    down({ t: "ack", ch: "chat", cid: chatSubs()[base].cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "M" } });
+    down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "M" } });
+    await tick();
+    assert(chatSubs().length === base + 1,
+      "a stale replay of the run we just attached (same id) must be ignored (reconcile-by-id); got " + chatSubs().length);
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -245,3 +275,35 @@ def test_reattach_reconciles_by_run_id():
     on_ack = WS.split("function _onAck")[1].split("\n  function ")[0]
     assert "runId" in on_ack and "_lastRunId" in on_ack, \
         "the chat subscribe ack's runId must be recorded for the reconcile-by-id guard"
+
+
+def test_new_run_reattaches_immediately_even_while_tailing():
+    # The WS mirror-parity F5 fix: a genuinely-new run-started (distinct id) must re-subscribe the chat
+    # channel IMMEDIATELY — even while still tailing the previous run — so the OBSERVER mirrors the new
+    # run live from its start (the WS analog of the SSE observer's resumeStream-per-run). Deferring to
+    # the old run's `done` mounted the new round too late → `B incrementalStream=false`. Pin the two
+    # invariants that make it safe: only an ID-LESS edge short-circuits while tailing, and a same-id
+    # replay is still skipped (reconcile-by-id) — so a distinct-id new run falls through to re-subscribe.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "runId === _lastRunId) return" in body, \
+        "reconcile-by-id must still skip a stale same-id replay"
+    assert "runId == null) return" in body, \
+        "only an ID-LESS edge may be ignored while tailing; a distinct-id new run must fall through to re-subscribe"
+    assert "_subscribeChat(0)" in body, "a genuinely-new run must re-subscribe from seq 0"
+
+
+def test_new_run_signals_the_render_layer_for_a_fresh_observer_round():
+    # The render half of the mirror fix: re-subscribing is necessary but NOT sufficient — the observer
+    # must also start a FRESH round for the new run, or the new run's replayed deltas render into the
+    # PRIOR run's still-connected holder and B never mounts a fresh streaming container (mirror-parity
+    # `incrementalStream=false`). orwellWs emits `orwell:ws-run-boundary` on a genuinely-new run;
+    # chatWsSplice resets the round (+ mounts an immediate "responding…" spinner) and chat.js wires it.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "orwell:ws-run-boundary" in body, \
+        "a genuinely-new run must emit orwell:ws-run-boundary so the observer starts a fresh render round"
+    splice = _read("static", "js", "chatWsSplice.js")
+    assert "_onWsRunBoundary" in splice and "_wsResetRound" in splice, \
+        "chatWsSplice must reset the observer round on the run boundary"
+    chat = _read("static", "js", "chat.js")
+    assert "'orwell:ws-run-boundary', _onWsRunBoundary" in chat, \
+        "chat.js must register the ws-run-boundary observer handler"
