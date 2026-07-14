@@ -39,9 +39,15 @@ classify_prefetch_outcome() {
 
   # (1) Explicit IMPORT/MODULE-EVALUATION crash signatures take precedence — these are the #1590
   #     class and MUST fail even if a network-ish word happens to co-occur in the output.
-  #     "does not provide an export named" is the literal tar@7 ESM break.
+  #     "does not provide an export named" is the literal tar@7 ESM break. These are all SPECIFIC
+  #     import-eval signatures — deliberately NOT the bare error-type names `typeerror`/`referenceerror`:
+  #     Node's built-in `fetch` reports a benign offline failure as `TypeError: fetch failed`, so a bare
+  #     `typeerror` here would swallow the network branch below and misclassify an outage as a #1590 crash
+  #     (Greptile P1). A genuine import TypeError still matches its specific token (`is not a function`,
+  #     `does not provide an export named`, …); a NOVEL import crash with no signature still fails via the
+  #     fail-safe default at (3) — so dropping the bare types loses no real-crash coverage.
   if printf '%s' "$out" | grep -qiE \
-      "does not provide an export named|cannot find module|err_module_not_found|err_require_esm|cannot use import statement|unexpected token|is not a function|is not a constructor|syntaxerror|referenceerror|typeerror|unknown fastembed model|no default export|__filename is not defined|require is not defined"; then
+      "does not provide an export named|cannot find module|err_module_not_found|err_require_esm|cannot use import statement|unexpected token|is not a function|is not a constructor|syntaxerror|unknown fastembed model|no default export|__filename is not defined|require is not defined"; then
     echo "import-fail"; return 0
   fi
 
@@ -84,6 +90,9 @@ _self_test_classify() {
   # Benign, offline-CI: the model CDN can't be reached. NOT a crash — tolerated.
   _expect network-skip 1 '[orwell] fastembed prefetch failed: getaddrinfo ENOTFOUND huggingface.co'
   _expect network-skip 1 '[orwell] fastembed prefetch failed: fetch failed'
+  # Node's built-in fetch reports a benign OFFLINE failure as `TypeError: fetch failed` — a network
+  # skip, NOT the #1590 import class. A bare `typeerror` in branch (1) used to swallow this (Greptile P1).
+  _expect network-skip 1 '[orwell] fastembed prefetch failed: TypeError: fetch failed'
   _expect network-skip 1 '[orwell] fastembed prefetch failed: connect ETIMEDOUT 1.2.3.4:443'
   _expect network-skip 1 '[orwell] fastembed prefetch failed: request to https://huggingface.co/... failed'
   # Fail-safe: an unrecognised non-zero exit must NOT silently pass — default to import-fail.
