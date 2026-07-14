@@ -290,3 +290,20 @@ def test_new_run_reattaches_immediately_even_while_tailing():
     assert "runId == null) return" in body, \
         "only an ID-LESS edge may be ignored while tailing; a distinct-id new run must fall through to re-subscribe"
     assert "_subscribeChat(0)" in body, "a genuinely-new run must re-subscribe from seq 0"
+
+
+def test_new_run_signals_the_render_layer_for_a_fresh_observer_round():
+    # The render half of the mirror fix: re-subscribing is necessary but NOT sufficient — the observer
+    # must also start a FRESH round for the new run, or the new run's replayed deltas render into the
+    # PRIOR run's still-connected holder and B never mounts a fresh streaming container (mirror-parity
+    # `incrementalStream=false`). orwellWs emits `orwell:ws-run-boundary` on a genuinely-new run;
+    # chatWsSplice resets the round (+ mounts an immediate "responding…" spinner) and chat.js wires it.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "orwell:ws-run-boundary" in body, \
+        "a genuinely-new run must emit orwell:ws-run-boundary so the observer starts a fresh render round"
+    splice = _read("static", "js", "chatWsSplice.js")
+    assert "_onWsRunBoundary" in splice and "_wsResetRound" in splice, \
+        "chatWsSplice must reset the observer round on the run boundary"
+    chat = _read("static", "js", "chat.js")
+    assert "'orwell:ws-run-boundary', _onWsRunBoundary" in chat, \
+        "chat.js must register the ws-run-boundary observer handler"

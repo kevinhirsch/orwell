@@ -55,7 +55,7 @@ import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
 // (_renderLiveStream — the R2 render seam; softReloadHistory — reconcile; _senderLabel — the single-
 // source sender label) via _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern. None of these
 // are on the chatModule public API. Imported here only, so #1399 single-eval holds.
-import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _onWsResync, _setWsSpliceDeps } from './chatWsSplice.js';
+import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _onWsResync, _onWsRunBoundary, _setWsSpliceDeps } from './chatWsSplice.js';
 // #1414 (R3 PR5): the per-message actions cluster — edit / resend / regenerate / variant-nav /
 // fork / delete / rewrite / continue. Behavior-preserving: the 8 action functions are called
 // cross-file by chatRenderer.js via window.chatModule.<fn> (the per-message footer buttons), so
@@ -5457,6 +5457,18 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     renderLiveStream: _renderLiveStream,
     softReloadHistory: softReloadHistory,
     senderLabel: _senderLabel,
+    // Best-effort "responding…" spinner for the OBSERVER's fresh round on a peer run boundary (so the
+    // mirror shows immediate feedback instead of a blank window). Mirrors the sender's spinner mount;
+    // the delta branch destroys `round._spinner` on the first token.
+    mountThinkingSpinner: (holder) => {
+      try {
+        if (!holder) return null;
+        const sp = spinnerModule.create('Responding', 'right', 'wave');
+        const body = holder.querySelector('.body');
+        if (body && sp) { body.appendChild(sp.createElement()); sp.start(); }
+        return sp;
+      } catch (_) { return null; }
+    },
   });
   // #1414 (R3 PR5): inject the three chat.js-internal deps the message-actions cluster
   // (chatMessageActions.js) needs — handleChatSubmit (the headless send + stream loop, which STAYS
@@ -5476,6 +5488,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // down any wedged live holder, releases the dead stream lock, and rebuilds from history. A
     // DISTINCT event from `orwell:gamechanged` (the g15 single-dispatcher rule is untouched).
     window.addEventListener('orwell:ws-resync', _onWsResync);
+    // orwellWs emits `orwell:ws-run-boundary` when it re-attaches to a genuinely-new run: the OBSERVER
+    // resets its live round so the new run mounts a FRESH incremental container (mirror-parity) + shows
+    // an immediate "responding…" spinner. DISTINCT from `orwell:gamechanged` (g15 rule untouched).
+    window.addEventListener('orwell:ws-run-boundary', _onWsRunBoundary);
   }
 
   // Public API

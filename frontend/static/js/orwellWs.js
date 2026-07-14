@@ -466,6 +466,12 @@
     if (runId != null) _lastRunId = runId; // provisional; the subscribe ack confirms/overwrites it
     _highestChatSeq = -1;          // a NEW run's buffer restarts at seq 0 — replay it from the top
     _chatSubscribed = false;
+    // Tell the render layer a genuinely-NEW run is beginning (reconcile-by-id already applied above, so
+    // this fires once per new run, never on a stale replay). The OBSERVER must start a FRESH live round
+    // for it — otherwise the new run's replayed deltas render into the PRIOR run's still-connected holder
+    // and B never mounts a fresh streaming container (mirror-parity `incrementalStream=false`). A DISTINCT
+    // window event (not `orwell:gamechanged`), so the g15 single-dispatcher rule is untouched.
+    _emitWindow("orwell:ws-run-boundary", { runId: runId != null ? runId : null });
     _subscribeChat(0).catch(function () { _chatTailActive = false; });
   }
 
