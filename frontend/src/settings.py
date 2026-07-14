@@ -150,13 +150,18 @@ DEFAULT_SETTINGS = {
     "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
-    # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
-    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1), AMENDED by ADR 0016: casting =
-    # medium (quality-sensitive, player-facing), narration = **low** (the GLM narrator — see the
-    # inline note below), background-authoring = low (background flavor), and **utility-extraction =
-    # off** — pure JSON
-    # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
-    # trace showed its reasoning tokens wasted.
+    # reasoning budget. Maps a call class to a reasoning effort. As shipped, ALL FOUR classes
+    # default to **"off"** (owner rulings, perf audit F-PY-1 2026-07-13 + casting 2026-07-14):
+    # on the GLM-4.7 narrator (via OpenRouter) the "low"/"medium" effort levels are INERT —
+    # llm_core._apply_reasoning_budget DROPS `effort` (OpenRouter 400s if both `effort` and
+    # `reasoning.max_tokens` are sent), so the model still bursts its default pre-token reasoning
+    # ("it HANGS then streams"). Only "off" resolves to an active reasoning:{"enabled":false} that
+    # STOPS the burst. narration + casting are player-facing but force-tool_choice-guarded, so off
+    # is tool-safe (see the inline notes below); utility-extraction + background-authoring are pure
+    # JSON extraction whose prompts forbid thinking. This SUPERSEDES the earlier ADR-0016 "low"
+    # (narration) / ADR-0010 "medium" (casting) seeds — both are stale. (The model-agnostic
+    # token_policy._DEFAULT_EFFORT code fallback still carries medium/low for a hypothetical
+    # NON-bursting reasoning model; these DEFAULT_SETTINGS values override it at runtime.)
     # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
     # token_policy.valid_efforts() ("off", "low", "medium", "high"). NOTE: "off" is
     # now a GENUINE disable, not an omission — token_policy resolves it and
@@ -303,11 +308,26 @@ DEFAULT_SETTINGS = {
     # calls (https://openrouter.ai/docs/guides/routing/provider-selection). A free-form dict of the
     # documented fields — e.g. {"sort": "throughput"}, {"order": ["deepinfra/turbo"],
     # "allow_fallbacks": false}, {"only": ["deepinfra"]}, {"max_price": {"prompt": 1, "completion": 2}},
-    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Default {} = OpenRouter's
-    # normal price-based load balancing. Edit at runtime via POST /api/settings (admin). It is the BASE
-    # routing config; the high-token pin (token_pin_threshold_tokens) overlays allow_fallbacks=false on
-    # large prompts. Only applied for OpenRouter-routed game turns; a non-dict value is ignored.
-    "openrouter_provider": {},
+    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Edit at runtime via POST
+    # /api/settings (admin). It is the BASE routing config; the high-token pin
+    # (token_pin_threshold_tokens) overlays allow_fallbacks=false on large prompts. Only applied for
+    # OpenRouter-routed game turns; a non-dict value is ignored.
+    #
+    # HARD PIN to Novita (owner ruling 2026-07-14, "pin hard, no fallback"). This is a LOAD-BEARING
+    # safety pin, not a preference: our anti-hang strategy depends on the provider honoring
+    # reasoning:{"enabled":false} (all four call classes run reasoning "off"). ADR 0016 §A warned
+    # reasoning control is flaky across OpenRouter sub-providers, and a direct probe (2026-07-14) of
+    # all 9 glm-4.7 sub-providers CONFIRMED it: StreamLake IGNORES reasoning-off and bursts ~560
+    # reasoning tokens before the first visible byte — which is exactly what hung a live narration
+    # turn and the golden record (a per-turn stream read that never settled). Novita honored
+    # reasoning-off 0/5 bursts across repeated probes, at fp8 quant (best prose fidelity, mandate #1),
+    # 204K context (longest), tight 4.6–7.0s latency with no spikes, on a large reliable provider
+    # (availability matters most under no-fallback). allow_fallbacks:false so OpenRouter can NEVER
+    # silently route a game turn to a burst-prone sub-provider (e.g. StreamLake) and reintroduce the
+    # hang — a fail-loud posture (ruling #1599) over a fail-soft one. The committed golden fixture is
+    # recorded WITH this pin so the gate tests what prod runs. Re-run the probe (/tmp probe scripts,
+    # or the OpenRouter /endpoints API) before changing the pinned provider.
+    "openrouter_provider": {"only": ["novita"], "allow_fallbacks": False},
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
