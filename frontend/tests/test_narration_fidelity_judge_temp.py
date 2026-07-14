@@ -82,17 +82,20 @@ def test_list_of_messages_is_passed_through_unchanged(monkeypatch, run):
     assert captured.get("messages") == msgs_in
 
 
-def test_faithfulness_judge_assess_reaches_a_verdict_over_the_resolved_fn(monkeypatch, run):
-    """End-to-end at the seam that broke: FaithfulnessJudge(_llm).assess(...) — where `_llm` is the
-    resolved fn — must produce a real verdict, not silently fail to the deterministic floor because
-    the underlying call 400'd. (The judge builds a string prompt; the fn must accept it.)"""
+_JUDGE_REPLY = ('{"dimension":"board","classification":"closed","lever":"reground",'
+                '"rationale":"contradicts the HOH on the board"}')
+
+
+def test_faithfulness_judge_over_the_resolved_async_fn_reaches_a_verdict(monkeypatch, run):
+    """The async-hook shape (what live `_faith_check` does): build the string prompt, call the
+    resolved async fn, AWAIT it, validate. Must yield a real verdict — the 400 path never got here
+    because the messages payload is now a valid non-empty list[dict]."""
     from src.faithfulness import FaithfulnessJudge
 
     async def fake_stream(candidates, messages, **kwargs):
         # Only reachable if `messages` is a valid non-empty list[dict] (else the real provider 400s).
         assert isinstance(messages, list) and messages and isinstance(messages[0], dict)
-        yield {"delta": '{"dimension":"board","classification":"closed","lever":"reground",'
-                        '"rationale":"contradicts the HOH on the board"}'}
+        yield {"delta": _JUDGE_REPLY}
 
     import src.endpoint_resolver as er
     import src.llm_core as lc
@@ -105,12 +108,51 @@ def test_faithfulness_judge_assess_reaches_a_verdict_over_the_resolved_fn(monkey
     _llm = run(ca._resolve_llm_fn("u", prefix="faithfulness", fallbacks_key="faithfulness"))
     assert _llm is not None
     judge = FaithfulnessJudge(_llm)
-    # judge.assess builds a string prompt and calls _llm(prompt); the fn returns a coroutine.
+    # the live async hook awaits _llm(prompt) itself (as _faith_check does).
     raw = run(_llm(judge.build_prompt("the narration", {"board": {}}, "in-game")))
     verdict = judge.verdict_from_reply(raw, "the narration", {"board": {}})
     assert verdict is not None and verdict.is_slip, \
         "a well-formed judge reply must yield a real verdict — the 400 path never got here"
     assert verdict.dimension == "board" and verdict.lever == "reground"
+
+
+def test_assess_resolves_both_a_sync_and_an_async_llm_fn():
+    """Greptile P1: the SYNC entrypoint `assess()` must resolve BOTH a sync stub AND an async stub
+    `_llm_fn`. The resolved `_fn` is ASYNC, so a coroutine passed unawaited to verdict_from_reply
+    parses as None — silently breaking the judge. assess() must actually await it."""
+    from src.faithfulness import FaithfulnessJudge
+
+    # sync stub
+    v_sync = FaithfulnessJudge(lambda prompt: _JUDGE_REPLY).assess("narr", {"board": {}}, "in-game")
+    assert v_sync is not None and v_sync.is_slip and v_sync.lever == "reground"
+
+    # async stub — the shape the resolved _fn actually has
+    async def _async_llm(prompt):
+        return _JUDGE_REPLY
+    v_async = FaithfulnessJudge(_async_llm).assess("narr", {"board": {}}, "in-game")
+    assert v_async is not None and v_async.is_slip and v_async.lever == "reground", \
+        "assess() must AWAIT an async _llm_fn — a coroutine parsed as a reply is always None"
+
+
+def test_assess_inside_a_running_loop_is_loud_not_silent(monkeypatch, run):
+    """#1599: assess() cannot block inside a running loop to await the async judge — it must record a
+    RED-eligible health event (faith:sync-in-async) and fall to the floor, never a silent None."""
+    import src.faithfulness as fa
+    events = []
+    monkeypatch.setattr("src.log_rings.record_overseer",
+                        lambda level, kind, diagnosis, **kw: events.append((kind, kw)))
+
+    async def _async_llm(prompt):
+        return _JUDGE_REPLY
+    judge = fa.FaithfulnessJudge(_async_llm)
+
+    async def _call_from_within_a_loop():
+        return judge.assess("narr", {"board": {}}, "in-game")
+
+    v = run(_call_from_within_a_loop())
+    assert v is None, "inside a running loop assess() must fall to the deterministic floor"
+    assert any(k == "faith:sync-in-async" and kw.get("ok") is False for (k, kw) in events), \
+        "the sync-in-async guard-down must be surfaced RED, not swallowed"
 
 
 # ── BUG 2: the game-master narration temperature knob ──────────────────────────────────

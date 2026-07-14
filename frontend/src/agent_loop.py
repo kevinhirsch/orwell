@@ -2906,8 +2906,8 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     f"faithfulness judge model could not be resolved (guard down): "
                     f"{type(_resolve_err).__name__}: {_resolve_err}",
                     lever=None, beat_before=beat_before, ok=False, user=owner)
-            except Exception:
-                pass
+            except Exception as _rec_err:
+                logger.debug(f"[orwell] faith:resolve-failed health-event write failed: {_rec_err}")
             _llm = None
         if _llm is None:
             return
@@ -2932,8 +2932,8 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     f"faithfulness judge could not run (guard down): "
                     f"{type(_call_err).__name__}: {_call_err}",
                     lever=None, beat_before=beat_before, ok=False, user=owner)
-            except Exception:
-                pass
+            except Exception as _rec_err:
+                logger.debug(f"[orwell] faith:call-failed health-event write failed: {_rec_err}")
             return
         verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
         if verdict is None or not verdict.is_slip:
@@ -3007,8 +3007,8 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                 "anomaly", "faith:gate-failed",
                 f"faithfulness gate errored (guard down): {type(_e).__name__}: {_e}",
                 lever=None, beat_before=beat_before, ok=False, user=owner)
-        except Exception:
-            pass
+        except Exception as _rec_err:
+            logger.debug(f"[orwell] faith:gate-failed health-event write failed: {_rec_err}")
 
 
 # The CASTING twin of _auto_record_scene. The casting preamble tells the model to "record the
@@ -4529,8 +4529,9 @@ async def _stream_agent_loop_impl(
         try:
             from src.settings import narration_temperature as _narr_temp
             temperature = _narr_temp()
-        except Exception:
-            pass
+        except Exception as _temp_err:
+            logger.debug(f"[orwell] narration_temperature lookup failed — "
+                         f"keeping the passed temperature {temperature}: {_temp_err}")
 
     if plan_mode:
         # Plan mode: investigate read-only, propose a plan, don't execute. The

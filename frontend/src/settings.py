@@ -253,8 +253,8 @@ DEFAULT_SETTINGS = {
     # DEFAULT_TEMPERATURE (1.0) ran the narration too hot — the owner reported prose that "doesn't
     # make sense canonically, as if temp were 1.3" (persona drift, invented facts, incoherence). 0.7
     # pulls meaningfully off 1.0 to restore canonical coherence while KEEPING enough variance for the
-    # reality-TV drama/richness mandate (#1) — 0.6 grounds harder but reads flatter. Clamped at read
-    # time to 0.0–2.0 (an admin can push higher; a fat-fingered value can never become live). Applies
+    # reality-TV drama/richness mandate (#1) - 0.6 grounds harder but reads flatter. Clamped at read
+    # time to 0.0-2.0 (an admin can push higher; a fat-fingered value can never become live). Applies
     # ONLY to the game/casting narration path (agent_loop game_mode); utility-extraction (0.1/0.2) and
     # cast-authoring (cast_authoring_temperature, 1.1) are untouched. Runtime-editable; read per-turn.
     "narration_temperature": 0.7,
@@ -757,18 +757,27 @@ _NARRATION_TEMPERATURE_MAX = 2.0
 
 def narration_temperature() -> float:
     """The game-master narration sampling temperature — default 0.7 (grounded), runtime-editable via
-    the ``narration_temperature`` setting, clamped to 0.0–2.0 (an admin can push higher; a
+    the ``narration_temperature`` setting, clamped to 0.0-2.0 (an admin can push higher; a
     fat-fingered value can never become the live temperature). Garbage/NaN ⇒ the default. Applies
     ONLY to the live narration / casting-producer agent turn; the utility-extraction and
     cast-authoring lanes keep their own temperatures."""
+    raw = None
     try:
         raw = get_setting("narration_temperature", None)
-        if raw is not None and not isinstance(raw, bool):
+    except Exception as exc:
+        # #1599 (no silent fail-soft): an UNEXPECTED settings-access failure (I/O, cache, a
+        # programming error) must not vanish — LOG it, then fall through to the safe default.
+        logger.warning("narration_temperature: settings read failed (%s: %s) — using default %s",
+                       type(exc).__name__, exc, _NARRATION_TEMPERATURE_DEFAULT)
+        return _NARRATION_TEMPERATURE_DEFAULT
+    if raw is not None and not isinstance(raw, bool):
+        try:
             v = float(raw)
-            if v == v:  # reject NaN
-                return min(_NARRATION_TEMPERATURE_MAX, max(_NARRATION_TEMPERATURE_MIN, v))
-    except Exception:
-        pass
+        except (ValueError, TypeError):
+            # Expected "bad value -> default" case (a hand-edited non-numeric): quiet, not a failure.
+            return _NARRATION_TEMPERATURE_DEFAULT
+        if v == v:  # reject NaN
+            return min(_NARRATION_TEMPERATURE_MAX, max(_NARRATION_TEMPERATURE_MIN, v))
     return _NARRATION_TEMPERATURE_DEFAULT
 
 
