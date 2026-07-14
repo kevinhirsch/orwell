@@ -1283,19 +1283,63 @@ export function hideWelcomeScreen() {
   if (ib) ib.style.display = ib.classList.contains('active') ? '' : 'none';
 }
 
+// OWN-1 (2026-07-14 theme audit §9) — the ONE shared "transcript has content" seam.
+// hideWelcomeScreen historically fired only from addMessage (history renders) and a few
+// explicit call sites, but several live paths mount bubbles DIRECTLY into #chat-history
+// without addMessage: the live streaming holder (chat.js handleChatSubmit), the CASTING
+// kickoff's hidden-cue stream (the player bubble is deliberately suppressed, so nothing
+// routed through addMessage), the WS mirror splice (chatWsSplice.js _wsEnsureRound), and
+// the resume/poll fallbacks (sessions.js _checkServerStream). On those paths the welcome
+// hero stayed mounted and its wordmark/tagline/tips ghosted through the translucent glass
+// bubbles while the conversation streamed (owner screenshot). Rather than patching every
+// mount site, this observer watches #chat-history childList: the moment ANY message bubble
+// (.msg) exists while the hero is still up, the hero hides. It is hide-only by design — it
+// never re-SHOWS welcome; an empty chat gets its welcome only via the explicit
+// showWelcomeScreen calls that follow a transcript clear.
+let _welcomeSyncBox = null;
+export function ensureWelcomeContentSync() {
+  const box = document.getElementById('chat-history');
+  if (!box || box === _welcomeSyncBox) return;
+  _welcomeSyncBox = box;
+  const sync = () => {
+    try {
+      if (!box.querySelector('.msg')) return;
+      const ws = document.getElementById('welcome-screen');
+      const cc = document.getElementById('chat-container');
+      const heroUp = (ws && !ws.classList.contains('hidden')) ||
+                     (cc && cc.classList.contains('welcome-active'));
+      if (heroUp) hideWelcomeScreen();
+    } catch (_) { /* the belt must never break a render */ }
+  };
+  new MutationObserver(sync).observe(box, { childList: true });
+  sync(); // content may already be mounted when the observer arms (resumed transcript)
+}
+// Arm at module init (DOM-ready-safe; chatRenderer loads as a deferred module so the node
+// normally exists already). Guarded so a non-browser evaluation of this file stays inert.
+if (typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { try { ensureWelcomeContentSync(); } catch (_) {} }, { once: true });
+  } else {
+    try { ensureWelcomeContentSync(); } catch (_) {}
+  }
+}
+
 export function showWelcomeScreen() {
   const ws = document.getElementById('welcome-screen');
   const cc = document.getElementById('chat-container');
-  // FE-render #7: during the casting→game cutover (createCharacter fires mid-stream,
-  // opening a fresh session) the still-finalizing tool beat / casting card keeps the OLD
-  // transcript mounted while createDirectChat tries to blank it to the welcome splash —
-  // for a beat the conversation appears to vanish at the most important moment. While the
-  // transition flag is set AND the history still holds real bubbles, suppress the splash;
-  // the post-swap render (a truly empty new session) re-runs this and shows welcome then.
-  if (window._orwellCastingTransition) {
-    const _box = document.getElementById('chat-history');
-    if (_box && _box.querySelector('.msg')) return;
-  }
+  // FE-render #7 + OWN-1 (2026-07-14 theme audit §9): never paint the welcome hero over a
+  // non-empty transcript. This guard began scoped to the casting→game cutover
+  // (window._orwellCastingTransition — createCharacter fires mid-stream, opening a fresh
+  // session while the still-finalizing tool beat / casting card keeps the OLD transcript
+  // mounted), but the same ghosting hit the casting STREAM itself: the hero's wordmark/
+  // tagline/tips bled through the translucent glass bubbles whenever a show call raced a
+  // live render. So the guard is now UNCONDITIONAL — any real bubble (.msg) in
+  // #chat-history suppresses the splash. Every legitimate "blank to welcome" caller clears
+  // #chat-history BEFORE calling this, so a genuinely empty chat still gets its welcome
+  // (pinned by tests/test_own1_welcome_hide.py; the FE-render #7 story is pinned by
+  // tests/test_g15_gamechanged.py).
+  const _box = document.getElementById('chat-history');
+  if (_box && _box.querySelector('.msg')) return;
   if (ws) ws.classList.remove('hidden');
   if (cc) cc.classList.add('welcome-active');
   // Entering the New Chat / welcome state: discard any stale draft left in the
@@ -2771,6 +2815,7 @@ const chatRenderer = {
   buildImageBubble,
   hideWelcomeScreen,
   showWelcomeScreen,
+  ensureWelcomeContentSync,
   createMsgFooter,
   displayMetrics,
   addMessage,
