@@ -272,8 +272,13 @@
   window._orwellMemoryEnsure = () => { ensurePanel(); return true; };
   window._orwellMemoryDrive = (items) => render(items || []);
 
-  async function refresh() {
+  async function refresh(opts) {
     if (!_open) return;
+    // #11 snappy UX: show the window's loading sliver ONLY on the interactive open
+    // (opts.loading), never on the 20-30s background poll — else the panel flickers
+    // its "refreshing" chrome every tick. Matches dossier/cast/retrospective.
+    const showLoad = !!(opts && opts.loading && _win && _win.setLoading);
+    if (showLoad) { try { _win.setLoading(true); } catch (_) {} }
     let data;
     try {
       data = await getJSON("/api/orwell/knowledge");
@@ -281,6 +286,8 @@
       if (window.OrwellReport) window.OrwellReport.fail("memory", "knowledge-poll", _); // G11: fail open, never silent
       _failures += 1;
       return; // keep the last-good window up through a transient hiccup
+    } finally {
+      if (showLoad) { try { _win.setLoading(false); } catch (_) {} }
     }
     _failures = 0;
     render((data && data.items) || []);
@@ -301,7 +308,7 @@
     if (show) {
       ensurePanel();
       _open = true;
-      refresh().then(scheduleNextPoll);
+      refresh({ loading: true }).then(scheduleNextPoll);
     } else {
       _open = false;
       if (_timer) { clearTimeout(_timer); _timer = null; }

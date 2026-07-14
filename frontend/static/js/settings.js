@@ -26,6 +26,13 @@ let _peekBtn = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) { return uiModule.esc(s); }
+// #11 snappy UX: a synchronous "Saving…" hint set BEFORE a settings POST so a model-config
+// <select> change isn't silent until the round-trip returns (and the user can't wonder if the
+// click registered). Mirrors the overseer-dial save that already does this. Each caller then
+// overwrites it with 'Saved' / 'Failed to save' after the await.
+function _savingHint(msg) {
+  if (msg) { msg.textContent = 'Saving…'; msg.style.color = 'var(--fg-muted)'; }
+}
 function safeRasterDataUrl(raw) {
   const value = String(raw || '').trim();
   return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value) ? value : '';
@@ -732,6 +739,7 @@ async function initDefaultChat() {
 
   async function saveDefault() {
     try {
+      _savingHint(msg);
       var clean = _fallbacks.filter(function(f) { return f.endpoint_id && f.model; });
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -803,6 +811,7 @@ async function initUtilityModel() {
   // no toggle, "—" means "unset, use chat").
   async function saveUtility() {
     try {
+      _savingHint(msg);
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -868,6 +877,7 @@ async function initFaithfulnessModel() {
 
   async function saveFaith() {
     try {
+      _savingHint(msg);
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1000,6 +1010,7 @@ async function initImageSettings() {
 
   async function saveSettings() {
     try {
+      _savingHint(msg);
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_gen_enabled: enabledToggle ? enabledToggle.checked : true, image_model: modelSel.value, image_quality: qualSel.value }) });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
@@ -1224,6 +1235,7 @@ async function initVisionSettings() {
 
   async function saveSettings() {
     try {
+      _savingHint(msg);
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vision_enabled: enabledToggle ? enabledToggle.checked : true, vision_model: vlSel.value }) });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
@@ -1949,6 +1961,7 @@ async function initResearchSettings() {
       }
     }
     try {
+      _savingHint(msg);
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
