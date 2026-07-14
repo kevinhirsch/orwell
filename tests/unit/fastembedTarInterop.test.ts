@@ -62,7 +62,7 @@ describe("fastembed ↔ tar interop (secure tar@7 kept, fastembed's default impo
     expect(minor > 5 || (minor === 5 && patch >= 16)).toBe(true);
   });
 
-  it("carries the patch-package machinery: a fastembed patch file + the postinstall hook + the devDependency", () => {
+  it("carries the patch-package machinery: a fastembed patch file + the postinstall hook + patch-package as a RUNTIME dependency", () => {
     // The patch is what lets tar@7 (ESM-only, no default export) coexist with fastembed's
     // default import. Without it, the 7.x override crashes warm-up.
     const patchesDir = resolve(repoRoot, "patches");
@@ -76,7 +76,12 @@ describe("fastembed ↔ tar interop (secure tar@7 kept, fastembed's default impo
 
     const pkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
     expect(pkg.scripts?.postinstall, "postinstall must run patch-package").toMatch(/patch-package/);
-    expect(pkg.devDependencies?.["patch-package"], "patch-package must be a devDependency").toBeTruthy();
+    // patch-package MUST be a RUNTIME dependency, not a devDependency (Greptile #1600 P1): the
+    // deploy runs `npm ci` then `npm prune --omit=dev`, and any `--omit=dev` install path still
+    // runs the root `postinstall` — if patch-package were dev-only it would be pruned/absent and
+    // `postinstall: patch-package` would fail, so the fastembed patch would never apply in prod.
+    expect(pkg.dependencies?.["patch-package"], "patch-package must be a runtime dependency").toBeTruthy();
+    expect(pkg.devDependencies?.["patch-package"], "patch-package must NOT be a devDependency").toBeFalsy();
   });
 
   it("resolves fastembed's tar to the secure 7.x build that exposes the extract API fastembed calls", () => {
