@@ -76,7 +76,7 @@ jobs:
         working-directory: frontend
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        # The two-tier production topology (owner, 2026-07-07): narration on GLM 5.2, the
+        # The two-tier production topology (owner; narrator reverted to GLM-4.7 on 2026-07-13): narration on GLM 4.7, the
         # utility/background call classes on the cheap qwen tier (locally-served in prod;
         # OpenRouter stands in here — request keys exclude the endpoint URL by design).
         run: |

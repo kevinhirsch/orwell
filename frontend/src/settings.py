@@ -308,7 +308,8 @@ DEFAULT_SETTINGS = {
     # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
     # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
     # read this resolved default) — OWNER RULING 2026-07-13 (live prod debug-bundle audit): back to
-    # the ADR 0016 narrator/utility default GLM-4.7 (the 2026-07-07 glm-5.2 two-tier retarget is
+    # the ADR 0016 NARRATOR default z-ai/glm-4.7 (utility is qwen/qwen3.6-flash — see utility_model
+    # below); the 2026-07-07 glm-5.2 two-tier retarget is
     # reverted; persisted stores keep whatever they carry — the owner flips his box in the UI). The
     # committed golden fixture is ALSO recorded on glm-4.7 (owner ruling 2026-07-14: the golden gate
     # must test what prod runs — the earlier glm-5.2 decoupling was papered-over debt, now removed).

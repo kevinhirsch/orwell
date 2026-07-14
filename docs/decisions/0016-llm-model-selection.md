@@ -1,4 +1,4 @@
-# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), GLM-4.7-Flash utility, Seedream portraits
+# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 Flash utility, Seedream portraits
 
 > **Status:** **Accepted** (PO direction, 2026-06-29 — the model-selection research thread).
 > **Re-amended (2026-07-13 / 2026-07-14 — reverted the narrator to `z-ai/glm-4.7`):** the owner
