@@ -1,7 +1,8 @@
 # Theme & element-kit visual audit — frosted / glass / flat (master backlog)
 
-**Date:** 2026-07-14 · **Branch:** `claude/theme-visual-audit-vt9ttm` · **Status:** IN PROGRESS —
-lanes landing. · **Scope:** the three base material tiers (Frosted = `body.theme-frosted`, the
+**Date:** 2026-07-14 · **Branch:** `claude/theme-visual-audit-vt9ttm` · **Status:** all four
+audit lanes landed + nine fixes shipped on this branch; walked-state lane BLOCKED on #1592
+(stale golden fixture on main). · **Scope:** the three base material tiers (Frosted = `body.theme-frosted`, the
 performant default; Glass = `body.theme-frosted.glass-full`; Flat = neither class), audited
 mobile-first (390×844) + desktop (1440×900), against the Apple HIG corpus
 (`docs/design/liquid-glass/`) by the APPLE_GENIUS review protocol (`docs/design/APPLE_GENIUS.md`).
@@ -70,6 +71,12 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
    false-matches the substring guard.
 7. **KIT-F-05 demo stylesheet parity** — the demo now loads `css/responsive-tokens.css` before
    `style.css` (as `index.html` does), so touch floors are verifiable on the reference page.
+
+8. **SET-01 Change-Password fields → `.ow-field`** — before: ≈1.02:1 (measured
+   rgb(21,23,28) box, rgb(22,25,31) ink on frosted/glass); after: the kit field chrome
+   (translucent ink veil + dark ink, verified computed + screenshot); flat unchanged.
+9. **SET-02 `.admin-card h2/h5` no-wrap + ellipsis** — headers truncate instead of wrapping
+   at the 320px window floor (mirrors the `.settings-nav-item` treatment).
 
 Before/after renders: PR #1589 (48 PNGs across frosted/glass/flat × 1440/390, plus the fix
 lane's measured computed-style evidence).
@@ -217,9 +224,45 @@ same-run A/B pixel diffs, pixel-sampled contrast). Ranked:**
 
 ## 4. Settings window — every panel
 
-*(lane landing)*
+**Lane report landed (apple-genius auditor; live-driven all 3 tiers × desktop/phone; full
+detail in the lane file + PR). Ranked:**
 
-Self-verified so far:
+- **SET-01 · P0 · Change Password fields ≈ 1.02:1 (unreadable) on frosted + glass; fine on
+  flat.** Root cause is TWO colliding mechanisms: the inputs are inline-styled
+  `background:var(--bg); color:var(--fg)` (index.html:2220-2222) AND the frosted admin reskin
+  redefines `--fg` locally to dark ink (style.css:23385-23401) with **no matching local
+  `--bg`** — so the box keeps the page-dark background while the ink goes dark too. Fix:
+  drop the inline styles, compose `.ow-field` (the existing reskin already handles it). —
+  FIXED ON THIS BRANCH.
+- **MOB-01 · P0 · the top system banner fully covers the hamburger on phone** (62px banner;
+  `#hamburger-btn` at y:11 h:44 inside it; `elementFromPoint` returns the banner) — while a
+  holding/reconnect banner shows, Settings and Theme are UNREACHABLE on mobile. Fix: reserve
+  the banner inset for the nav trigger (the `--on-banner-inset` seam exists — the sidebar/
+  hamburger must consume it; same family as APP-OV-1).
+- **SET-02 · P2 · header wrap (owner report) reproduces only at the window's 320px resize
+  floor** ("Utility Model (Recommended: Local Endpoint)" wraps at ≤360→320px; the ~420px
+  report did not reproduce). Root: `.admin-card h2` lacks the nowrap/ellipsis treatment
+  `.settings-nav-item` already has (style.css:15738-15742). Fix: same ellipsis + title
+  attribute. — FIXED ON THIS BRANCH.
+- **SET-03 · P1 · Agent Tools: 22 of 66 live game tools render as raw camelCase ids in an
+  "Other 22/22" bucket** (no TOOL_META entries; all are real feature levers). Fix: author the
+  22 entries under cat "Game".
+- **SET-04/05/06 · P3 · TOOL_META hygiene:** duplicate `manage_endpoints`/`manage_mcp` keys
+  (first defs dead); 2 fully-dead entries (`second_opinion`, `manage_rag`); 10 game-build-
+  dropped workspace entries — prune/comment.
+- **SET-07 · P2 · Flat only: nav-rail ACTIVE label is `color: var(--red)`** — accent hue on
+  text (style.css:15563-66); frosted/glass got the system-blue capsule fix (21527-33), flat
+  never did. Invisible today only because the default theme's `--red` is desaturated.
+- **SET-08 · P2 · Flat only: every legacy toggle family's ON track is `var(--red)`**
+  (`.vis-switch` 6465-67; `.admin-switch` 12291-92) — patched to system blue only under
+  frosted (21484-89). Extend to flat.
+- **SET-09 · P3 ·** pw/2FA cards are display:none under auth-off — why SET-01 shipped
+  invisibly; add a forced-visible shot to the visual harness.
+- **SET-10/11/12 · P3 · kit migration:** `.admin-btn-add`/`.admin-btn-delete` → `.ow-btn`
+  variants; `.vis-switch` is a parallel reimplementation of `.ow-switch` (the structural
+  cause of SET-08); Shortcuts' bespoke keycap buttons (low-pri).
+
+Overseer-verified (pre-lane):
 
 - **SET-OV-1 · P1 · Change Password inputs are non-kit, wrong polarity (owner-reported,
   confirmed).** `index.html:2220-2222` — inline-styled `background:var(--bg); color:var(--fg)`
@@ -247,9 +290,29 @@ Self-verified so far:
 
 ## 5. Theme window — Browse + Customize
 
-*(lane landing)*
+**Lane report landed. Ranked:**
 
-Self-verified so far:
+- **THM-01 · P1 · the Theme window is visually broken on EVERY phone open, every tier:** the
+  kit sheet-mode positions the window (y:405-844) but the promoted `#theme-popup` content
+  keeps a PRE-KIT `@media(max-width:768px)` rule (`position:fixed !important; height:65vh
+  !important`, style.css:7396-7419) that floats it OVER its own titlebar with ~400px dead
+  space. Settings' analogous legacy rule uses height:auto (why Settings is fine). Fix:
+  delete/neutralize the legacy `#theme-popup` mobile block — sheet mode owns phone
+  presentation now.
+- **THM-02 · P2 · Customize never reflows ≤600px:** the Colors 2-col grid (7168) and the
+  4-across Font & Layout flex row (7275, no flex-wrap/min-width:0) overflow to a horizontal
+  scrollbar at the 320px floor (matches the overseer's "Gla…" clip shot). Fix: flex-wrap +
+  min-width:0 + container-query collapse.
+- **THM-03 · verified NOT a defect:** the #1316 Browse quick picker and the Customize ladder
+  hold perfect lockstep (live-driven) — no desync.
+- **THM-04 · P3/low ·** possible momentary "Full" picker state before `glass-full` engages on
+  cold load (seen once; benign PE race).
+- **THM-05/06 · P3 · kit migration:** the whole Customize tab is pre-kit (only the two
+  `.theme-seg` controls are on-kit); native `<input type=color>` is an accepted gap (no Apple
+  analog — do not invent); consolidate `theme-io-btn`/`harmony-generate-btn` onto
+  `.ow-btn-secondary`.
+
+Overseer-verified (pre-lane):
 
 - **THM-OV-1 · P1 · The Themes/Customize tab pills render dark-on-dark on frosted**
   (`app_frosted_desktop_theme_customize.png`) — legacy `.admin-tab` styling inside the light kit
@@ -279,7 +342,16 @@ Self-verified so far:
 
 ## 7. Walked-game-state findings (decision card, slates, rail, cast/dossier/memory)
 
-*(tier crawl + 0114 gate landing)*
+**BLOCKED — the golden fixture is stale on main (issue #1592).** Since the #1582 engine-perf
+merge, every replay lane (golden-path, visual-regression 0-3, theme-consistency) fails at the
+first casting turn with a replay miss — on main itself, on this PR, and locally on a pristine
+checkout. The walked-state tier crawl and the 0114 light/dark token gate both ride that replay
+and cannot run until the fixture is re-recorded (live-key owner action) or the engine-side
+digest shift is reverted/fixed. The crawl script is ready
+(session scratchpad `tier_crawl.py`, composing `ThemeSweep`); re-run it the moment #1592
+closes. Also noteworthy: `ci-gate` resolved green while those lanes were red (both on main and
+on this PR) — the "stale fixture blocks merge" protection is not currently engaging; flagged
+in #1592 for an owner ruling.
 
 **Harness note (pre-existing, reproduced on clean main twice):** `scripts/browser_smoke.py`
 fails one check locally — `F3: the finale sheet stays full-width ({'f': {'top':0,'bottom':0,
@@ -293,8 +365,61 @@ card's Confirm row at 390×844 — move it or give the page bottom padding at ph
 
 ## 8. Kit-coverage table (per settings/theme panel)
 
-*(lane landing)*
+| Panel / surface | Coverage | Non-kit controls (file:line) |
+|---|---|---|
+| Settings window chrome | **full kit** | — (OrwellWindowKit) |
+| Settings nav rail | kit-consistent bespoke | `.settings-nav-item` (own frosted styling, correct container-query ladder) |
+| Account: user row / logout | partial | `#settings-logout-btn` inline-styled (index.html:2207) |
+| Account: Change Password | **legacy → FIXED here** | was inline-styled inputs + `.admin-btn-add` save |
+| Account: 2FA / Danger Zone / headshot | legacy (frosted-reskinned) | `.admin-danger-card`, `.admin-btn-delete` |
+| Appearance (Sidebar/Chat toggles) | legacy reskinned | `.vis-row`/`.vis-switch` — parallel switch impl (SET-11) |
+| Shortcuts | legacy | `.shortcut-key`/`.shortcut-action-btn` |
+| Tools (admin) | legacy | `.admin-tool-row`, `.admin-switch`/`.admin-slider` |
+| Theme window chrome | **full kit** | — (sheet-mode content bug = THM-01) |
+| Theme Browse | mixed | swatch grid bespoke (no Apple analog — fine); #1316 quick picker on the shared `.theme-seg` |
+| Theme Customize | legacy | `.theme-fd-select/-range`, `.theme-io-btn`, harmony btn; native color inputs (accepted gap) |
 
-## 9. Genuinely good — do not break
+**The pattern:** window chrome + the two tier segments are on-kit; nearly everything inside
+both windows is pre-kit markup individually retrofitted under `body.theme-frosted`
+(style.css:22185-22437), which is exactly why Flat regressions (SET-07/08) and reskin gaps
+(SET-01) keep appearing. The durable fix is #775-style migration to kit primitives, not more
+reskin rules.
 
-*(merged from lanes)*
+## 9. Genuinely good — do not break (merged from all lanes)
+
+- **Checkbox/radio/switch checked-state discipline** (frosted/glass): neutral at rest,
+  system-blue fill + white glyph only when checked; slider correctly system-green.
+- **Size ladder + shape-follows-size measures exactly to spec** (44/44/52/62px; sm/md
+  rounded-rect, lg/xl capsule) — real hierarchy.
+- **Concentric-radius math verified correct** in every sampled case (24−10=14).
+- **Accent-tint primary variant**: 11.6:1 label contrast, tint on background never label.
+- **Frosted CSS baseline carries the quality** — a standalone window diffs ≤5/255 from full
+  glass; refraction is genuinely a bonus, never load-bearing.
+- **Notice icon family**: coherent monochrome set, consistent stroke/size/alignment.
+- **Kit loading sliver + empty states** (per the 2026-07-09 audit's positive note).
+- **Settings sidebar container-query ladder** (full rail → compressed → stacked fade-mask) —
+  Apple-plausible and well executed; only `.settings-nav-item` carries it, keep it.
+- **Settings scroll architecture**: one scroll region, pinned rail, no double scrollbars.
+- **Theme #1316 quick picker ↔ Customize ladder lockstep** — live-verified, no desync.
+- **Window-chrome consistency** across both windows/all tiers (44px titlebar, traffic-light
+  cluster + Peek accessory placement).
+- **Traffic-light hover mechanism** (glyph reveal, focus ring, 44px invisible hit region) —
+  correct; only the demo's static simulation of it was wrong.
+
+## 10. Suggested build order for the backlog (owner sequencing: frosted → glass → flat)
+
+1. **Ship-now class (small, high-severity):** MOB-01 banner-vs-hamburger; THM-01 legacy
+   `#theme-popup` mobile block removal; KIT-F-02 prominent/secondary hierarchy retune;
+   KIT-F-03 check/radio 44px hit regions; SET-03 the 22 TOOL_META entries (+ SET-04/05/06
+   hygiene); THM-02 Customize reflow.
+2. **Frosted/glass polish:** KIT-F-06 danger-red token decision; KIT-F-08 placeholder floor;
+   KIT-OV-2 disabled-state unification; APP-OV-1/2/3 banner+sidebar chrome; the glass
+   refraction-cap tuning (KIT-G-01/02) + a realistic demo backdrop (KIT-G-03); KIT-G-04/05
+   glass-on-glass demo + nesting ruling.
+3. **The flat kit lane (biggest single item):** author the Normal-tier expression for every
+   kit primitive mirroring `.og-card`'s cross-tier pattern (KIT-N-01..10), then fix the
+   flat-only accent leaks (SET-07/08) as part of it.
+4. **Kit migration (the durable polarity fix):** change-password done here; continue
+   #775/#660 through the settings/theme panels per the §8 coverage table.
+5. **Blocked:** walked-state findings + the 0114 light/dark machine sweep resume when the
+   golden fixture is re-recorded (#1592).

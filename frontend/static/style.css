@@ -12224,6 +12224,13 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  /* SET-02 (2026-07-14 audit): a section header must never wrap to two lines when the
+     window is resized to its narrow floor — truncate with an ellipsis instead, the same
+     treatment .settings-nav-item already carries (owner report: "header lines for titles
+     ... become two lines when the window gets resized small enough"). */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .admin-danger-card {
   border-color: color-mix(in srgb, var(--color-error) 27%, transparent);
