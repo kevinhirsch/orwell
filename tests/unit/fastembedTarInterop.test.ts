@@ -1,29 +1,30 @@
 import { describe, it, expect } from "vitest";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, sep } from "node:path";
 
 /**
- * Regression guard: fastembed's `tar` dependency MUST resolve to a CommonJS build
- * (the 6.x line), never the pure-ESM tar@7.
+ * Regression guard: the engine keeps the SECURE tar@7 AND working embeddings.
  *
- * WHY THIS EXISTS (a real prod-breaker, 2026-06-27 → 2026-07-14): a `package.json`
- * override forced `"tar": "7.5.16"` for a security bump (issue #1069). But
- * fastembed@2.1.0's ESM build (`lib/esm/fastembed.js`) does `import tar from "tar"`,
- * and tar@7 is pure ESM with NO default export — so that import throws at module
- * evaluation:
+ * WHY THIS EXISTS (a real prod-breaker, 2026-06-27 → 2026-07-14):
  *
- *     The requested module 'tar' does not provide an export named 'default'
+ *   tar@7 was a real security bump (CVE-2026-29786 + siblings, issue #1069), so the
+ *   `package.json` `overrides.tar` pin MUST stay on the 7.x line. But fastembed@2.1.0's
+ *   builds do `import tar from "tar"` (ESM) / `__importDefault(require("tar"))` (CJS),
+ *   and tar@7 is pure ESM with NO default export — so the ESM entry throws at module
+ *   evaluation:
  *
- * The engine imports fastembed as its `EmbeddingProvider`; because the whole boot
- * warm-up threw, EVERY production boot fell back to `DeterministicEmbedding` and
- * semantic recall ran permanently DEGRADED (silently — the fallback is by design).
+ *       The requested module 'tar' does not provide an export named 'default'
  *
- * tar@6 is CommonJS, so Node's ESM↔CJS interop synthesizes a usable default export
- * (`module.exports`), and fastembed's `import tar from "tar"` works. fastembed
- * declares `tar: "^6.2.0"`, so the override must stay on the 6.x line — with 6.2.1
- * as the CVE-patched floor.
+ *   The engine imports fastembed as its `EmbeddingProvider`; because the whole boot
+ *   warm-up threw, EVERY production boot fell back to `DeterministicEmbedding` and
+ *   semantic recall ran permanently DEGRADED (silently — the fallback is by design).
+ *
+ * THE FIX (issue #1591): instead of DOWNGRADING tar to the insecure 6.x line (which
+ * reintroduced the CVEs), we KEEP tar@7 and patch fastembed's import via `patch-package`
+ * (`patches/fastembed+2.1.0.patch`): `import tar from "tar"` → `import * as tar from "tar"`
+ * (and the CJS mirror), binding fastembed's `tar.x` call to tar@7's NAMED `x` export.
  *
  * These checks run WITHOUT the real ONNX model (they never call `FlagEmbedding.init`),
  * so they are safe for the fast unit lane (`test:unit:fast`) / CI.
@@ -47,39 +48,43 @@ function fastembedResolvedTarPkg(): { version: string; type?: string } {
   return reqFromFastembed("tar/package.json") as { version: string; type?: string };
 }
 
-describe("fastembed ↔ tar interop (regression guard for the tar@7 ESM default-export prod break)", () => {
-  it("pins the package.json tar override to the 6.x line (NOT 7.x — tar@7 is ESM-only, no default export)", () => {
+describe("fastembed ↔ tar interop (secure tar@7 kept, fastembed's default import patched — issue #1591)", () => {
+  it("pins the package.json tar override to the SECURE 7.x line (NOT the CVE-vulnerable 6.x)", () => {
     const pkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
     const override: unknown = pkg.overrides?.tar;
     expect(override, "package.json overrides.tar must be set").toBeTruthy();
-    expect(String(override)).toMatch(/^6\./);
-    // Must satisfy the CVE-patched floor for the 6.x line.
+    expect(String(override), "tar override must be on the 7.x line — 6.x reintroduces the #1069 CVEs").toMatch(
+      /^7\./,
+    );
+    // Must satisfy the security floor for the 7.x line (the #1069 pin was 7.5.16).
     const { major, minor, patch } = parseSemver(String(override));
-    expect(major).toBe(6);
-    expect(minor > 2 || (minor === 2 && patch >= 1)).toBe(true);
+    expect(major).toBe(7);
+    expect(minor > 5 || (minor === 5 && patch >= 16)).toBe(true);
   });
 
-  it("documents WHY the pin is 6.x: fastembed still declares tar @ ^6.x", () => {
-    // If fastembed ever bumps its tar range across the 7.x major, this guard (and the
-    // override) must be revisited together — tar@7's ESM-only shape is the whole hazard.
-    const reqFromRepo = createRequire(resolve(repoRoot, "package.json"));
-    const feMain = reqFromRepo.resolve("fastembed");
-    const marker = `${sep}fastembed${sep}`;
-    const feRoot = feMain.slice(0, feMain.indexOf(marker) + marker.length - 1);
-    const fePkg = JSON.parse(readFileSync(resolve(feRoot, "package.json"), "utf8"));
-    const range = String(fePkg.dependencies?.tar ?? "");
-    expect(range).toMatch(/6\./);
-    expect(range).not.toMatch(/\^7\.|>=7\.|~7\./);
+  it("carries the patch-package machinery: a fastembed patch file + the postinstall hook + the devDependency", () => {
+    // The patch is what lets tar@7 (ESM-only, no default export) coexist with fastembed's
+    // default import. Without it, the 7.x override crashes warm-up.
+    const patchesDir = resolve(repoRoot, "patches");
+    expect(existsSync(patchesDir), "patches/ directory must exist").toBe(true);
+    const patchFiles = readdirSync(patchesDir).filter((f) => f.startsWith("fastembed") && f.endsWith(".patch"));
+    expect(patchFiles.length, "a patches/fastembed*.patch file must exist").toBeGreaterThan(0);
+
+    const patch = readFileSync(resolve(patchesDir, patchFiles[0]!), "utf8");
+    // The patch must convert fastembed's default tar import into a namespace import.
+    expect(patch).toMatch(/import \* as tar from "tar"/);
+
+    const pkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
+    expect(pkg.scripts?.postinstall, "postinstall must run patch-package").toMatch(/patch-package/);
+    expect(pkg.devDependencies?.["patch-package"], "patch-package must be a devDependency").toBeTruthy();
   });
 
-  it("resolves fastembed's tar to a CommonJS 6.x build that exposes the extract API fastembed's default import needs", () => {
+  it("resolves fastembed's tar to the secure 7.x build that exposes the extract API fastembed calls", () => {
     const tarPkg = fastembedResolvedTarPkg();
     const { major } = parseSemver(tarPkg.version);
-    expect(major, `fastembed resolved tar@${tarPkg.version}, expected the 6.x line`).toBe(6);
-    // CJS package => Node synthesizes the default export that `import tar from "tar"` binds to.
-    expect(tarPkg.type ?? "commonjs").toBe("commonjs");
+    expect(major, `fastembed resolved tar@${tarPkg.version}, expected the 7.x line`).toBe(7);
 
-    // And the actual module must expose the extraction API fastembed uses on that default.
+    // The named `x`/`extract` API fastembed's patched `import * as tar` binds to must exist.
     const reqFromRepo = createRequire(resolve(repoRoot, "package.json"));
     const feMain = reqFromRepo.resolve("fastembed");
     const marker = `${sep}fastembed${sep}`;
@@ -89,10 +94,10 @@ describe("fastembed ↔ tar interop (regression guard for the tar@7 ESM default-
     expect(typeof tar.x === "function" || typeof tar.extract === "function").toBe(true);
   });
 
-  it("imports fastembed's ESM entry without the tar 'no default export' error (the exact prod break)", async () => {
+  it("imports fastembed's ESM entry without the tar 'no default export' error under tar@7 (the exact prod break)", async () => {
     // The literal runtime failure this guards: `import tar from "tar"` throwing
     // "does not provide an export named 'default'". Loading fastembed's entry proves
-    // the tar import evaluates cleanly (does NOT download or init the ONNX model).
+    // the patched tar import evaluates cleanly (does NOT download or init the ONNX model).
     await expect(import("fastembed")).resolves.toBeTruthy();
   });
 });

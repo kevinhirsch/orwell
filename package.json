@@ -33,7 +33,8 @@
     "test:arch": "depcruise src --config .dependency-cruiser.cjs",
     "test:cov": "vitest run --coverage --coverage.provider=v8 --coverage.include='src/**' --coverage.exclude='src/ports/**' --coverage.exclude='src/main.ts' --exclude 'tests/uat/**' --exclude 'tests/property/juryReach.property.test.ts' --exclude 'tests/property/juryReachAggregate.property.test.ts' --exclude 'tests/property/juryReachShowrunnerReweight.property.test.ts' --exclude 'tests/property/calibrationGradient.property.test.ts' --exclude 'tests/property/calibrationGradientAggregate.property.test.ts' --exclude 'tests/property/calibrationGradientShowrunnerReweight.property.test.ts' --exclude 'tests/calibration/**'",
     "test": "npm run typecheck && npm run build && npm run test:unit && npm run test:bdd",
-    "test:ci": "npm run typecheck && npm run build && npm run test:unit:fast && npm run test:bdd"
+    "test:ci": "npm run typecheck && npm run build && npm run test:unit:fast && npm run test:bdd",
+    "postinstall": "patch-package"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^11.3.0",
@@ -43,6 +44,7 @@
     "dependency-cruiser": "^16.10.0",
     "esbuild": "^0.24.2",
     "fast-check": "^3.23.0",
+    "patch-package": "^8.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
@@ -53,7 +55,7 @@
     "sqlite-vec": "0.1.9"
   },
   "overrides": {
-    "tar": "6.2.1",
+    "tar": "7.5.16",
     "onnxruntime-node": "1.24.2"
   }
 }
