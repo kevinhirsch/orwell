@@ -1662,6 +1662,12 @@ def setup_chat_routes(
                             },
                             reasoning=full_reasoning,
                         )
+                        # M2-6: a partial beat is still an in-game beat — stamp the in-world moment so a
+                        # disconnect/stopped save reloads with the game moment, not the wall clock (the
+                        # exact bug M2-6 removes). Same source + casting gate as the [DONE] save above.
+                        _stopped_moment = current_game_moment(ctx.user) if ctx.game_active else None
+                        if _stopped_moment:
+                            _stopped_md["game_moment"] = _stopped_moment
                         sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
                         if not incognito:
                             session_manager.save_sessions()
@@ -1883,6 +1889,12 @@ def setup_chat_routes(
                                 },
                                 reasoning=full_reasoning,
                             )
+                            # M2-6: stamp the in-world moment on a partial/stopped beat too (same source +
+                            # casting gate as the [DONE] save), so a disconnect reloads with the game
+                            # moment instead of the wall clock.
+                            _stopped_moment2 = current_game_moment(ctx.user) if ctx.game_active else None
+                            if _stopped_moment2:
+                                _stopped_md2["game_moment"] = _stopped_moment2
                             sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
                             if not incognito:
                                 session_manager.save_sessions()

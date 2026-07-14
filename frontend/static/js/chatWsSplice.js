@@ -166,7 +166,17 @@ export function _onWsChatFrame(frame) {
     if (_wsRound && _wsRound.holder && typeof d.moment === 'string' && d.moment.trim()) {
       var _ts = _wsRound.holder.querySelector('.role-timestamp');
       if (_ts) {
-        _ts.dataset.wallClock = _ts.textContent;
+        // Demote the wall clock to hover/dataset BEFORE swapping the visible text to the moment,
+        // the SAME way chat.js _applyServerTimestamp / chatRenderer.js roleTimestamp do: prefer the
+        // SERVER-minted `d.ts` (the message_saved frame carries it) so the hover reads identically
+        // across windows; fall back to the bubble's existing wall-clock text if `ts` is absent/bad.
+        var _wd = d.ts ? new Date(d.ts) : null;
+        if (_wd && !isNaN(_wd.getTime())) {
+          _ts.title = _wd.toLocaleString();
+          _ts.dataset.wallClock = _wd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+          _ts.dataset.wallClock = _ts.textContent;
+        }
         _ts.textContent = d.moment.trim();
         _ts.classList.add('role-timestamp-moment');
       }

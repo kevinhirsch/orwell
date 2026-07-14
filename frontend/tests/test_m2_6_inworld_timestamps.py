@@ -136,9 +136,36 @@ def test_live_and_mirror_paths_carry_the_moment():
 def test_ws_splice_live_bubble_shows_the_moment():
     # WS transport (ADR 0017): the live mirror bubble (window B) applies the moment from the
     # message_saved frame during the stream, so it reads the in-world stamp like the sender — not
-    # the wall clock until the settle reconcile. Wall clock demoted to dataset (hover parity).
+    # the wall clock until the settle reconcile. The wall clock is demoted to hover (title) +
+    # metadata (dataset.wallClock) the SAME way chat.js _applyServerTimestamp / chatRenderer.js
+    # roleTimestamp do, sourcing the SERVER-minted `d.ts` the frame carries (identical hover across
+    # windows), with a fallback to the bubble's existing wall-clock text when `ts` is absent.
+    #
+    # This is a source-pin (like the sibling render-contract checks): the LIVE DOM behaviour of this
+    # exact WS message_saved path is exercised end-to-end by the mirror-parity WS gate
+    # (docs/audits/playtest-harness/mirror_live_parity.mjs — real two-window browser). A Node/browser
+    # unit here would need the whole chatWsSplice import graph (HTMLInputElement et al.), which
+    # balloons scope for a nitpick, so the pins below + the gate are the coverage.
     js = _read("static/js/chatWsSplice.js")
     assert "d.type === 'message_saved'" in js
     assert "typeof d.moment === 'string' && d.moment.trim()" in js
+    # moment leads the visible stamp + carries the marker class
     assert "_ts.textContent = d.moment.trim();" in js
+    assert "_ts.classList.add('role-timestamp-moment');" in js
+    # wall clock demoted to hover (title) + dataset, sourced from the server-minted `d.ts`
+    assert "var _wd = d.ts ? new Date(d.ts) : null;" in js
+    assert "_ts.title = _wd.toLocaleString();" in js
+    assert "_ts.dataset.wallClock = _wd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });" in js
+    # fallback preserves the existing wall clock when the frame has no ts
     assert "_ts.dataset.wallClock = _ts.textContent;" in js
+
+
+def test_disconnect_partial_save_stamps_game_moment():
+    # Greptile P1: a disconnect / stopped-partial save is still an in-game beat — it must stamp the
+    # in-world moment so the reloaded partial reads the game moment, not the wall clock (the bug M2-6
+    # removes). Both the chat-mode and agent-mode disconnect saves compute it, gated on game_active
+    # (casting → None ⇒ key absent), from the same source as the [DONE] save.
+    routes = _read("routes/chat_routes.py")
+    assert routes.count("current_game_moment(ctx.user) if ctx.game_active else None") >= 4  # 2 [DONE] + 2 disconnect
+    assert '_stopped_md["game_moment"] = _stopped_moment' in routes
+    assert '_stopped_md2["game_moment"] = _stopped_moment2' in routes
