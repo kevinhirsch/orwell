@@ -9374,6 +9374,19 @@ body.hide-thinking .thinking-section { display: none !important; }
   letter-spacing: 0.3px;
   font-size: 0.9em;
 }
+/* Under the frosted material the beat chip sits in the chat COLUMN over the (variable) mesh
+   backdrop, where the accent --red is desaturated to a near-neutral gray (colorless-glass rule)
+   and reads DIM/dark against the light/teal backdrop — the flagged "dark label" (owner: the beat
+   chip renders dark on the light/teal chat background; it should follow the active theme polarity).
+   Drive the plain beat label off the theme's own polarity ink (var(--fg): light on the glass/dark
+   backdrop themes, dark on the light palettes) with a var(--bg)-derived legibility halo (the same
+   theme-aware halo pattern the sidebar labels use) so it reads with the SAME polarity as the chat
+   content around it. The OUTCOME slate (.ow-slate-outcome — "the show speaking") keeps its accent
+   treatment untouched. */
+body.theme-frosted .agent-thread-node:not(.ow-slate-outcome) .agent-thread-tool {
+  color: var(--fg);
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--bg, #15171c) 55%, transparent);
+}
 .agent-thread-status {
   font-size: 0.85em;
   opacity: 0.5;
@@ -20356,6 +20369,11 @@ body.theme-frosted .model-picker-menu,
 body.theme-frosted .model-picker-btn,
 body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
+/* the jump-to-bottom FAB rides the ONE light glass like every other floating control —
+   its injected default is var(--panel) (correct on the Normal tier), which is DARK on the
+   glass theme and rendered a dark circle floating on the light-glass chrome (light-theme
+   chrome fix). Fold it onto the same material + dark ink (below) as .chat-top-bar. */
+body.theme-frosted #orwell-scroll-bottom,
 body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton {
   background-color: var(--ow-glass-light-color) !important;
@@ -20545,6 +20563,7 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
   body.theme-frosted .model-picker-btn,
   body.theme-frosted .toast,
   body.theme-frosted .tool-indicator,
+  body.theme-frosted #orwell-scroll-bottom,
   body.theme-frosted .attach-card,
   body.theme-frosted .attach-image-skeleton,
   /* and the glassed chat bubbles + transient pills (defined at EOF) */
@@ -20772,15 +20791,18 @@ body.theme-frosted #chat-history {
 body.theme-frosted #chat-history.edge-top    { --chat-edge-top: var(--chat-edge-fade); }
 body.theme-frosted #chat-history.edge-bottom { --chat-edge-bottom: var(--chat-edge-fade); }
 
-/* The title banner recedes (fades + lifts a hair) once the reader scrolls down into the
-   transcript, returning at the top. The conversation is the surface of record; its
-   chrome steps back so the content leads. */
+/* The top bar holds parity with the sidebar + gadgets — same ONE light-glass material, same
+   opacity (owner: "the top bar must not read at a different translucency than the sidebar +
+   gadgets"). It previously RECEDED (faded to .55) once the reader scrolled into the transcript,
+   which during live play left it visibly more see-through than the sidebar — the flagged
+   translucency mismatch. Keep the material identical at every scroll position; the transition is
+   retained only so any future state change eases rather than snaps. */
 body.theme-frosted .chat-top-bar {
   transition: opacity .2s ease, transform .2s ease;
 }
 body.theme-frosted #chat-container.chat-scrolled .chat-top-bar {
-  opacity: 0.55;
-  transform: translateY(-3px);
+  opacity: 1;
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -22466,15 +22488,17 @@ body.theme-frosted .attach-card {
 }
 /* The chat top bar (the "Orwell Chat · N msgs" title) is NOT its own bubble — just a
    quiet Apple-sidebar-style frosted strip: a gentle blur so the title stays legible
-   over content, with NO heavy border / rim / float. NOT squared-off — its corners use
-   the kit radius so it reads coherent with every other surface (just subtle, not a
-   bordered bubble). The faint veil comes from the material group + the adaptive layer. */
+   over content, with NO heavy border / rim / float. It sits FLUSH against the top of
+   #chat-container, which is `overflow: hidden` — so rounding its TOP corners clipped them
+   into a cut/notched top edge (owner: "cut off and not rounded correctly at the top corners").
+   Round only the BOTTOM corners so the strip anchors cleanly to the top edge (a top app bar)
+   and reads coherent with the kit radius below, with no clipped top. */
 body.theme-frosted .chat-top-bar {
   -webkit-backdrop-filter: blur(12px) saturate(110%);
   backdrop-filter: blur(12px) saturate(110%);
   border: none !important;
   box-shadow: none !important;
-  border-radius: var(--ow-glass-radius, 26px) !important;
+  border-radius: 0 0 var(--ow-glass-radius, 26px) var(--ow-glass-radius, 26px) !important;
 }
 /* the model picker button is a compact capsule control */
 body.theme-frosted .model-picker-btn { border-radius: var(--ow-radius-pill, 999px) !important; }
@@ -23216,6 +23240,10 @@ body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
 body.theme-frosted .export-dropdown-menu,
 body.theme-frosted .msg-overflow-menu,
+/* the jump-to-bottom FAB now carries the light glass (above), so its chevron takes the same
+   DARK ink as the rest of the light-glass chrome (its injected light var(--fg) ink would be
+   near-white-on-light-glass). */
+body.theme-frosted #orwell-scroll-bottom,
 body.theme-frosted .cp-popover {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.45) !important;
@@ -23273,6 +23301,18 @@ body.theme-frosted .icon-rail button {
     color: var(--fg, #eef1f4) !important;
     text-shadow: 0 1px 2px color-mix(in srgb, var(--bg, #15171c) 62%, transparent),
                  0 0 2px color-mix(in srgb, var(--bg, #15171c) 50%, transparent) !important;
+  }
+  /* The account icons beside the name (reload / theme / gear) sat on the sidebar's own DARK ink
+     (#16191f from `#sidebar *`) — so on the dark var(--bg) footer band below they rendered
+     DARK-ON-DARK (owner: "a dark block with dark-on-dark icons"), while the username right next to
+     them was correctly the theme's light --fg. Bring the icon buttons onto the SAME var(--fg)
+     polarity as the name so the whole footer cluster reads as one: light ink on the dark dock band
+     (glass/dark themes), dark ink on the light band (light palettes). (The avatar is NOT here — it
+     carries its OWN light var(--fg)-12% chip, so its glyph must stay the sidebar's dark ink to
+     contrast that light chip.) */
+  body.theme-frosted #sidebar .user-bar-btn,
+  body.theme-frosted #sidebar .user-bar-btn svg {
+    color: var(--fg, #eef1f4) !important;
   }
   /* The user-bar footer sits at the sidebar's BOTTOM, where the backdrop behind the glass is the
      most variable (it can render light OR dark depending on the game content below), so theme ink
