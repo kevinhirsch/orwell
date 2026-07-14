@@ -2389,6 +2389,29 @@ _EXTRACTION_UNTRUSTED_FENCE = (
 )
 
 
+def _resolve_belt_endpoint(owner, fallback_url, fallback_model, fallback_headers):
+    """Resolve the cheap UTILITY endpoint+model for the ``_auto_*`` error-correction extraction belts.
+
+    The belts (`_auto_record_scene`, `_auto_move_player`/`_auto_move_npc`, `_auto_record_deal`,
+    `_auto_confide`, `_auto_expose_secret`/`_auto_trade_secret`, `_auto_record_casting`) are pure JSON
+    extraction and always pass ``call_class="utility-extraction"``. But they were handed the session's
+    ``endpoint_url``/``model`` — the expensive NARRATION model (e.g. z-ai/glm-4.7) — because
+    ``call_class`` only sizes the token budget (``token_policy``); it never re-resolves the model. This
+    is the SAME class of bug ``endpoint_resolver.resolve_endpoint`` already fixed for the
+    ``_resolve_llm_fn`` path: the utility tier ships ``utility_model=qwen/qwen3.6-flash`` with
+    ``utility_endpoint_id`` deliberately "" so it RIDES the default endpoint. Resolve that tier the same
+    way (once per turn), and on ANY miss fall back to the narration params so a belt still fires — the
+    correction is never dropped, only its extraction moves to the cheap model."""
+    try:
+        from src.endpoint_resolver import resolve_endpoint
+        url, model, headers = resolve_endpoint("utility", owner=owner)
+        if url and model:
+            return url, model, headers
+    except Exception:
+        pass
+    return fallback_url, fallback_model, fallback_headers
+
+
 async def _auto_move_player(narration, last_user, endpoint_url, model, headers, owner) -> bool:
     """GUARANTEE whereabouts cohesion (L21/L24). When the player's turn walked them to a room but the
     model never called moveTo, a constrained extraction proposes the destination room and we call
@@ -4512,6 +4535,12 @@ async def _stream_agent_loop_impl(
     # account/provider/machinery-management tools from the narrator's schema — they survive the build for
     # the settings assistant, but the in-character host must neither call nor RECITE them ("list your
     # tools" leaked the full manifest to the player). Only game turns; a workspace/admin turn keeps them.
+    # The error-correction extraction belts run cheap. Resolve the UTILITY tier ONCE per turn (a game
+    # turn is the only place a belt fires) and route every `_auto_*` belt through it — they're pure JSON
+    # extraction that had been (mis)running on the expensive narration model. On any miss this falls back
+    # to the narration endpoint so a belt still fires (the correction is never dropped). See
+    # `_resolve_belt_endpoint`.
+    _belt_endpoint, _belt_model, _belt_headers = endpoint_url, model, headers
     if game_mode:
         try:
             from src.settings import game_build_enabled as _gbe_tools
@@ -4520,6 +4549,8 @@ async def _stream_agent_loop_impl(
                 disabled_tools.update(GAME_NARRATOR_TOOL_DROP)
         except Exception:
             pass
+        _belt_endpoint, _belt_model, _belt_headers = _resolve_belt_endpoint(
+            owner, endpoint_url, model, headers)
         # Ground the game-master narration temperature (Bug 2). The player-facing narration/casting
         # turn otherwise rides the app-wide DEFAULT_TEMPERATURE (1.0), which the owner reported reads
         # as canonically incoherent ("as if temp were 1.3"). Override the incoming temperature with
@@ -6076,7 +6107,7 @@ async def _stream_agent_loop_impl(
                     if _want_move:
                         _turn_move_nudges += 1  # once per turn
                         if await _auto_move_player(_turn_narration, _last_user_for_move,
-                                                   endpoint_url, model, headers, owner):
+                                                   _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — count only a REAL applied move (a room:null
                             # extraction / failed call is a no-op, not a correction)
                             _note_belt(owner, "auto-move-player")
@@ -6090,8 +6121,8 @@ async def _stream_agent_loop_impl(
                     if _want_npc_move:
                         _turn_npc_move_nudges += 1  # once per turn
                         _npc_moves_applied = int(await _auto_move_npc(_turn_narration, _last_user_for_move,
-                                                                      _house, endpoint_url, model,
-                                                                      headers, owner) or 0)
+                                                                      _house, _belt_endpoint, _belt_model,
+                                                                      _belt_headers, owner) or 0)
                         if _npc_moves_applied:
                             # gap #3 telemetry — count only ENGINE-APPLIED moves (the helper
                             # returns the applied count; a moves:[] extraction is a no-op)
@@ -6329,7 +6360,7 @@ async def _stream_agent_loop_impl(
                                                 # consequence is banked and the turn ends.
                                                 _ok = await _auto_record_scene(
                                                     cleaned_round, _extract_last_user_message(messages),
-                                                    _house, endpoint_url, model, headers, owner)
+                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner)
                                                 if _ok:
                                                     _ov_flow["act"] = "break"
                                                 return bool(_ok)
@@ -6564,7 +6595,7 @@ async def _stream_agent_loop_impl(
                     if _want_deal and _touched_deal:
                         _turn_deal_nudges += 1  # once per turn
                         if await _auto_record_deal(_turn_narration, _extract_last_user_message(messages),
-                                                   _house, endpoint_url, model, headers, owner):
+                                                   _house, _belt_endpoint, _belt_model, _belt_headers, owner):
                             _turn_record_nudges = max(_turn_record_nudges, 1)  # deal banked the fold
                             # gap #3 telemetry — only a genuinely BANKED deal counts (struck=false
                             # loose talk / a failed extraction is a no-op, not a correction)
@@ -6580,7 +6611,7 @@ async def _stream_agent_loop_impl(
                     if _want_confide and _touched_deal:
                         _turn_confide_nudges += 1  # once per turn
                         if await _auto_confide(_turn_narration, _last_user_for_confide,
-                                               _house, endpoint_url, model, headers, owner):
+                                               _house, _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — only a confide the belt actually FIRED counts
                             # (npcId:null / off-roster / failed extraction is a no-op)
                             _note_belt(owner, "auto-confide")
@@ -6592,7 +6623,7 @@ async def _stream_agent_loop_impl(
                     if _want_expose and _touched_deal:
                         _turn_expose_nudges += 1  # once per turn
                         if await _auto_expose_secret(_turn_narration, _last_user_for_confide,
-                                                     _house, endpoint_url, model, headers, owner):
+                                                     _house, _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — only an exposeSecret the belt actually FIRED counts
                             _note_belt(owner, "auto-expose-secret")
                     # 0099: the player traded a secret they already know to a specific houseguest but the
@@ -6602,13 +6633,13 @@ async def _stream_agent_loop_impl(
                     if _want_trade and _touched_deal:
                         _turn_trade_nudges += 1  # once per turn
                         if await _auto_trade_secret(_turn_narration, _last_user_for_confide,
-                                                    _house, endpoint_url, model, headers, owner):
+                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — only a tradeSecret the belt actually FIRED counts
                             _note_belt(owner, "auto-trade-secret")
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
                         if await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
-                                                    _house, endpoint_url, model, headers, owner):
+                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — only a recordInteraction the belt actually FIRED
                             # counts (a withIds:[] extraction / failed call is a no-op)
                             _note_belt(owner, "auto-record-scene")
@@ -6665,7 +6696,7 @@ async def _stream_agent_loop_impl(
                         and (_emitted_visible or _turn_had_error)):
                     if await _auto_record_casting(
                             _extract_last_user_message(messages), cleaned_round,
-                            endpoint_url, model, headers, owner):
+                            _belt_endpoint, _belt_model, _belt_headers, owner):
                         _turn_casting_record_belt += 1  # FE back-filled the player's casting answer
                         _note_belt(owner, "casting-record-belt")  # gap #3 telemetry
                 # ── Casting finalize fallback (the game won't START): the model under-calls
@@ -7557,7 +7588,7 @@ async def _stream_agent_loop_impl(
                 _turn_narration_full, claim_bearing=_faith_claim,
                 engaged_scene=bool(_want_record), owner=owner,
                 beat_before=_ledger_beat_seq_before,
-                endpoint_url=endpoint_url, model=model, headers=headers,
+                endpoint_url=_belt_endpoint, model=_belt_model, headers=_belt_headers,
                 last_user=_extract_last_user_message(messages))
         except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
             logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
@@ -7572,7 +7603,7 @@ async def _stream_agent_loop_impl(
             _cast_proj = await _faith_build_casting_projection(owner)
             await _faith_check(
                 _cast_narr, claim_bearing=False, engaged_scene=True, owner=owner,
-                endpoint_url=endpoint_url, model=model, headers=headers,
+                endpoint_url=_belt_endpoint, model=_belt_model, headers=_belt_headers,
                 last_user=_extract_last_user_message(messages),
                 projection=_cast_proj, context="casting")
         except Exception as _cast_faith_err:  # fail-soft: never hurt the casting turn
