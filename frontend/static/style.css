@@ -24774,3 +24774,41 @@ body.signin-entrance .chat-history {
 body.theme-frosted #welcome-screen .welcome-tip {
   opacity: 0.85;
 }
+
+/* ── Session-switch loading affordance (#11 snappy UX) ─────────────────────
+   A thin indeterminate progress bar pinned to the top of the chat pane while
+   selectSession() awaits GET /api/history — so a slow history load no longer
+   leaves the pane looking frozen on the PREVIOUS chat's stale content. It is
+   purely additive: it never touches #chat-history's DOM (the "never eat a
+   message" rescue in selectSession stays intact) and is cleared in that
+   function's finally on every exit path. */
+.chat-container.chat-switching::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 6;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent,
+    var(--hl-function, #5b8def),
+    transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: chatSwitchSlide 1.05s ease-in-out infinite;
+}
+@keyframes chatSwitchSlide {
+  0%   { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* No sliding animation — show a steady, non-animated tint bar instead so the
+     "we're loading" signal still exists without motion (WCAG 2.3.3 / 2.2.2). */
+  .chat-container.chat-switching::after {
+    animation: none;
+    background: var(--hl-function, #5b8def);
+    opacity: 0.5;
+  }
+}
