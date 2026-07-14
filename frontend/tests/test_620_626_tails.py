@@ -15,9 +15,10 @@ it needed a code change:
     (the #1166/A9 fix): `casting` was dropped from both `token_policy._DEFAULT_MAX_TOKENS` and
     `settings.DEFAULT_SETTINGS["max_tokens_budget"]`, so it now resolves to the model-aware cap
     (≫2048 — see test_narration_maxtokens_no_truncate.py) instead of the flat 2048 that caused
-    the truncation. `reasoning_budget.casting = "medium"` is an explicit, ADR-0010-ratified
-    owner ruling (2026-06-21) — left as-is; the truncation VECTOR is what NARR-6 flagged, and
-    removing the flat max_tokens cap closes it regardless of reasoning effort.
+    the truncation. (`reasoning_budget.casting` was later moved "medium" → "off" on 2026-07-14:
+    on the reverted GLM-4.7 narrator the reasoning-EFFORT knob is inert, so "medium" only
+    front-loaded the burst that HANGS casting — it never shaped output. Orthogonal to NARR-6:
+    the truncation VECTOR was closed by removing the flat max_tokens cap, regardless of effort.)
 
   UX-2 (#626) — the gadget-rail collapsed-strip duplicate `aria-label="The Cast"` (both
     orwell-cast and orwell-cast-pin). ALREADY SHIPPED — the registry differentiates them

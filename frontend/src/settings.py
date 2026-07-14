@@ -187,7 +187,18 @@ DEFAULT_SETTINGS = {
         # golden trio is non-blocking; the re-record is a separate owed task; golden files untouched).
         "narration": "off",
         "utility-extraction": "off",
-        "casting": "medium",
+        # casting: OFF (2026-07-14). The "medium" ruling (2026-06-21, ADR-0010) predated the
+        # GLM-4.7 narrator revert and assumed reasoning-EFFORT ("low"/"medium") actually shaped
+        # output. On GLM-4.7 via OpenRouter it does NOT: the effort knob is inert — the model
+        # either front-loads a long reasoning BURST (regardless of the effort value) or, with
+        # reasoning:{enabled:false} ("off"), skips it. So "medium" bought casting zero shaped
+        # output and instead front-loaded the burst that HANGS the casting turn — LIVE-CONFIRMED
+        # as both a prod casting hang and the golden-record hang (the record's per-turn stream
+        # never settled). "off" is tool-SAFE here: createCharacter is force-called via
+        # _forced_tool_choice_for_casting, so stripping reasoning can't regress the tool call
+        # (same rationale that justified narration="off", F-PY-1 2026-07-13). Casting quality is
+        # unaffected — the burst produced nothing the player sees, only latency.
+        "casting": "off",
         # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
         # task — the strict-JSON prompt forbids thinking. On a reasoning model (deepseek-v4-pro)
         # an enabled reasoning channel burned ~1300 tokens BEFORE any visible JSON, blowing the

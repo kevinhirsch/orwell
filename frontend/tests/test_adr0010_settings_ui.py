@@ -62,7 +62,10 @@ def test_keys_present_in_default_settings():
         # active reasoning:{enabled:false} that STOPS the burst. Supersedes the ADR-0016 "low" seed.
         "narration": "off", "utility-extraction": "off",
         # #1007: background-authoring is "off" — structured JSON extraction, not a reasoning task.
-        "casting": "medium", "background-authoring": "off",
+        # casting "off" (2026-07-14): on GLM-4.7 the reasoning-effort knob is inert, so the old
+        # "medium" only front-loaded the burst that HANGS casting (prod + golden-record). off is
+        # tool-safe (createCharacter is force-called).
+        "casting": "off", "background-authoring": "off",
     }
     assert DEFAULT_SETTINGS["openrouter_provider"] == {}
     assert DEFAULT_SETTINGS["token_spend_alert_usd"] == 0.0
