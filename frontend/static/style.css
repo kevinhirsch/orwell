@@ -15398,6 +15398,20 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
      the space it actually occupies, not the viewport behind the sidebar. */
   container-type: inline-size;
   container-name: settings-overlay;
+  /* #977-class regression fix: `container-type: inline-size` applies INLINE-SIZE
+     CONTAINMENT — this window's own width is computed WITHOUT regard to its contents.
+     The OrwellWindow kit's resize CAP (#902/#896, static/js/windowResize.js) measures
+     the window at `width: max-content` (naturalContentWidth) to learn how wide the
+     content genuinely wants; a size-contained window with NO intrinsic-size placeholder
+     reports ~0 there, so the cap collapses to the kit minimum (320px) and the window can
+     no longer be dragged wider on the width axis — exactly the cast-window #977 bug, here
+     on Settings. `contain-intrinsic-size` is the standard companion to size containment:
+     it supplies the intrinsic width the cap reads, so the window resizes freely on BOTH
+     axes up to min(this, viewport − margin). It affects ONLY intrinsic sizing — the kit's
+     inline width still governs the live render, and the ≤768px sheet tier (which skips
+     floating resize) is untouched. The width clears the settings content's full range
+     (the .settings-modal-content `clamp(560px, 58cqw, 880px)` + window chrome). */
+  contain-intrinsic-size: 1080px 720px;
 }
 .settings-modal-content {
   width: clamp(560px, 58cqw, 880px);
