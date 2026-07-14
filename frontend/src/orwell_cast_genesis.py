@@ -212,10 +212,14 @@ _SYSTEM = (
     f"{_STAT_MIN} and {_STAT_MAX}, whose TOTAL lands roughly between {_TOTAL_LO} and {_TOTAL_HI}. "
     "VARY the totals WIDELY across the cast — real competition beasts (high totals) AND real floaters "
     "(low totals), never fifteen identical mid-liners. These describe raw aptitude, not who wins.\n"
-    f'  "hiddenElements": an array of {GENESIS_HIDDEN_MIN}-{GENESIS_HIDDEN_MAX} SECRETS, each '
+    f'  "hiddenElements": an array of {GENESIS_HIDDEN_MIN} to {GENESIS_HIDDEN_MAX} SECRETS, each '
     '{ "kind", "detail" } where kind is one of "secret-motive" (AT MOST ONE per houseguest), '
     '"pre-game-tie", or "divergent-persona", and detail is one vivid sentence in your own words. '
-    "Ground each secret in THIS person's specific life.\n"
+    "Ground each secret in THIS person's specific life. "
+    f"HARD REQUIREMENT: EVERY houseguest MUST have AT LEAST {GENESIS_HIDDEN_MIN} hidden elements "
+    f"(aim for {GENESIS_HIDDEN_MIN}-{GENESIS_HIDDEN_MAX}). A houseguest with fewer than "
+    f"{GENESIS_HIDDEN_MIN} is INVALID and forces the ENTIRE cast to be re-rolled — count the array "
+    "for each houseguest before moving to the next.\n"
     '"ties": an array of 0 to ' + str(GENESIS_TIE_BUDGET) + " pre-show connections between houseguests "
     '(sparse by design — often just one, sometimes none), each { "a", "b", "nature", "backstory" } '
     "where a and b are two DIFFERENT houseguest ids from the roster, nature is one of "

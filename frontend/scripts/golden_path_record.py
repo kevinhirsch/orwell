@@ -43,6 +43,13 @@ def main() -> int:
     # first GLM 5.2 run reached veto at 60 turns without hitting eviction. 120 covers the
     # golden week with headroom; replay walks the same trajectory, budget-capped identically.
     ap.add_argument("--turn-budget", type=int, default=120)
+    # Per-turn stream-silence timeout. The casting-finalize turn kicks background cast-genesis,
+    # which on glm-4.7 emits the whole 15-NPC skeleton JSON as one ~4400-token completion (~6 min
+    # of stream silence) — under the driver's 420s default only when it does NOT re-roll. We raise
+    # the ceiling to 900s (record-only; prod is untouched) so a single genesis pass plus a possible
+    # re-roll can complete without a false genuine-hang timeout. The re-roll itself is separately
+    # reduced by the strengthened hidden-element minimum in orwell_cast_genesis.build_genesis_messages.
+    ap.add_argument("--turn-timeout", type=int, default=900)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
 
@@ -64,7 +71,7 @@ def main() -> int:
     d = run_once(mode="record", fixture=args.fixture, model=args.model,
                  utility_model=utility_model,
                  provider_url=args.base_url, provider_key=args.api_key,
-                 turn_budget=args.turn_budget)
+                 turn_budget=args.turn_budget, turn_timeout=args.turn_timeout)
     rep = d.report(args.report or None)
 
     print(f"\nfixture: {args.fixture} "
