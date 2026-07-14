@@ -18,7 +18,10 @@
   // refuses inline scripts (script-src 'self'). Deep-linkable via location.hash
   // (#tier=frosted|glass|flat); FROSTED is the default (the app default). Self-contained —
   // deliberately does NOT load theme.js; flat's dark tokens are demo scaffolding CSS
-  // (.ek-flat) mirroring the `dark` preset in js/theme.js THEMES.
+  // (.ek-flat) — a DELIBERATE COPY of the `dark` preset in js/theme.js THEMES (keep in
+  // sync; see the tripwire comment in element_kit_demo.html). The tier→body-class map
+  // below likewise mirrors theme.js applyGlassTier's contract, minus the glassTierCeiling
+  // clamp — this page must show all three tiers on demand.
   function initTierSwitcher() {
     var VALID = { frosted: 1, glass: 1, flat: 1 };
     function tierFromHash() {
@@ -42,8 +45,9 @@
     }
     document.querySelectorAll("#ek-tier button").forEach(function (btn) {
       btn.addEventListener("click", function () {
+        var already = tierFromHash() === btn.dataset.tier;
         location.hash = "tier=" + btn.dataset.tier;   // deep-linkable; hashchange applies
-        apply(btn.dataset.tier);                       // and apply now (same-hash clicks)
+        if (already) apply(btn.dataset.tier);          // same-hash re-click fires no hashchange
       });
     });
     window.addEventListener("hashchange", function () { apply(tierFromHash()); });

@@ -12224,10 +12224,16 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
-  /* SET-02 (2026-07-14 audit): a section header must never wrap to two lines when the
-     window is resized to its narrow floor — truncate with an ellipsis instead, the same
-     treatment .settings-nav-item already carries (owner report: "header lines for titles
-     ... become two lines when the window gets resized small enough"). */
+}
+/* SET-02 (2026-07-14 audit): a section header must never wrap to two lines when the
+   window is resized to its narrow floor — truncate with an ellipsis instead, the same
+   treatment .settings-nav-item already carries (owner report: "header lines for titles
+   ... become two lines when the window gets resized small enough"). Scoped AWAY from the
+   inline display:flex headers: on those, nowrap makes the text min-content unshrinkable so
+   overflow:hidden would CLIP the trailing control (e.g. the Vision / In-Game Time header
+   toggles) — and text-overflow is a no-op on flex containers anyway (review finding). */
+.admin-card h2:not([style*="display:flex"]),
+.admin-card h5:not([style*="display:flex"]) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -20737,20 +20743,14 @@ body.theme-frosted .ow-window > .ow-body .on-card {
 
 /* The decision card in CHAT is a glass surface nested inside the chat scroll column
    (the conversation is its container). It derives its corner concentrically from the
-   chat surface radius rather than carrying a bespoke fixed radius. */
+   chat surface radius rather than carrying a bespoke fixed radius. ONE rule for both the
+   kit's root CLASS (`.odec` — orwellDecision.js scopes its injected structural CSS there;
+   the element-kit demo's reference cards compose the class alone) and the live card's id.
+   The ID selector stays LAST in the list so test_ow_design_system.py's pinned form
+   (`body.theme-frosted #orwell-decision-card {`) keeps matching — one source of truth for
+   the concentric math instead of a hand-synced twin. */
+body.theme-frosted .odec,
 body.theme-frosted #orwell-decision-card {
-  --ow-parent-radius: var(--ow-glass-radius);
-  --ow-parent-inset: 8px;    /* the card's gutter inside the chat column */
-  --ow-radius-concentric: max(
-    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
-  border-radius: var(--ow-radius-concentric) !important;
-}
-/* Duplicate of the rule above for the kit's root CLASS: orwellDecision.js scopes its injected
-   structural CSS to `.odec` (the live card carries id + class; the element-kit demo's reference
-   cards compose the class alone), so any .odec surface gets the same concentric corner. The
-   ID-keyed rule above is deliberately left byte-identical — test_ow_design_system.py pins its
-   exact form — this is the class-scoped twin, not a replacement. */
-body.theme-frosted .odec {
   --ow-parent-radius: var(--ow-glass-radius);
   --ow-parent-inset: 8px;    /* the card's gutter inside the chat column */
   --ow-radius-concentric: max(
@@ -20891,12 +20891,14 @@ body.theme-frosted .og-card [style*="font-weight:300"] {
    chrome inside these containers — this generic vibrant-fill rule's higher specificity
    ((0,3,2)/(0,2,2) vs the variants' (0,2,1)) was silently flattening every nested
    .ow-btn-prominent/-secondary/-destructive to the same neutral fill (a nested Destructive
-   measured 1.43:1 label contrast). The :not([class*="ow-btn"]) guard scopes this rule to
-   PLAIN buttons only; kit buttons ride their own kit rules. (No app class contains the
-   substring "ow-btn" other than the kit family — verified at fix time.) */
-body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]),
-body.theme-frosted .on-card button:not([class*="ow-btn"]),
-body.theme-frosted .og-card button:not([class*="ow-btn"]),
+   measured 1.43:1 label contrast). The :not(.ow-btn) guard scopes this rule to
+   PLAIN buttons only; kit buttons ride their own kit rules. Exact-class deliberately, not
+   [class*="ow-btn"] — every kit button carries the literal base .ow-btn beside its variant
+   (verified across all composers), and an exact match can never accidentally exclude a
+   future non-kit "window-btn"/"arrow-btn"-style class. */
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn),
+body.theme-frosted .on-card button:not(.ow-btn),
+body.theme-frosted .og-card button:not(.ow-btn),
 body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
@@ -20914,12 +20916,12 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
    is untouched, and the Normal (non-frosted) tier keeps its own borders. The gadget-card
    controls also get the light inset top highlight; the DOCK chip keeps only the border
    change (its own Control-Center box-shadow / tile depth below stays intact). */
-body.theme-frosted .og-card button:not([class*="ow-btn"]),
+body.theme-frosted .og-card button:not(.ow-btn),
 body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-color: rgba(255,255,255,0.14);
 }
-body.theme-frosted .og-card button:not([class*="ow-btn"]),
+body.theme-frosted .og-card button:not(.ow-btn),
 body.theme-frosted .og-card .og-act {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
 }
@@ -20933,14 +20935,14 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 2px 8px rgba(0,0,0,0.18);
 }
-body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):hover,
-body.theme-frosted .on-card button:not([class*="ow-btn"]):hover,
-body.theme-frosted .og-card button:not([class*="ow-btn"]):hover,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):hover,
+body.theme-frosted .on-card button:not(.ow-btn):hover,
+body.theme-frosted .og-card button:not(.ow-btn):hover,
 body.theme-frosted .og-card .og-act:hover,
 body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
-body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):focus-visible,
-body.theme-frosted .on-card button:not([class*="ow-btn"]):focus-visible,
-body.theme-frosted .og-card button:not([class*="ow-btn"]):focus-visible,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):focus-visible,
+body.theme-frosted .on-card button:not(.ow-btn):focus-visible,
+body.theme-frosted .og-card button:not(.ow-btn):focus-visible,
 body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   /* lighten + glass-bloom + a touch of lift (the control "comes to life") */
   background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
@@ -20953,9 +20955,9 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   transform: translateY(-1px) scale(1.015);
   filter: brightness(1.08);
 }
-body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):active,
-body.theme-frosted .on-card button:not([class*="ow-btn"]):active,
-body.theme-frosted .og-card button:not([class*="ow-btn"]):active,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):active,
+body.theme-frosted .on-card button:not(.ow-btn):active,
+body.theme-frosted .og-card button:not(.ow-btn):active,
 body.theme-frosted .og-card .og-act:active,
 body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   transform: translateY(0) scale(0.97);   /* depress on press */
@@ -20963,16 +20965,16 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   transition-duration: .08s;
 }
 @media (prefers-reduced-motion: reduce) {
-  body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]),
-  body.theme-frosted .on-card button:not([class*="ow-btn"]),
-  body.theme-frosted .og-card button:not([class*="ow-btn"]),
+  body.theme-frosted .ow-window .ow-body button:not(.ow-btn),
+  body.theme-frosted .on-card button:not(.ow-btn),
+  body.theme-frosted .og-card button:not(.ow-btn),
   body.theme-frosted .og-card .og-act,
   body.theme-frosted #minimized-dock .minimized-dock-chip {
     transition: none;
   }
-  body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):hover,
-  body.theme-frosted .on-card button:not([class*="ow-btn"]):hover,
-  body.theme-frosted .og-card button:not([class*="ow-btn"]):hover,
+  body.theme-frosted .ow-window .ow-body button:not(.ow-btn):hover,
+  body.theme-frosted .on-card button:not(.ow-btn):hover,
+  body.theme-frosted .og-card button:not(.ow-btn):hover,
   body.theme-frosted #minimized-dock .minimized-dock-chip:hover {
     transform: none;   /* no motion under reduced-motion; color/bloom still change */
   }

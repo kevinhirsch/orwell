@@ -2220,7 +2220,8 @@
               <!-- SET-01 (2026-07-14 audit): these were inline-styled background:var(--bg)/color:var(--fg)
                    boxes — on frosted/glass the admin reskin redefines --fg to dark ink locally but never
                    --bg, so they rendered ~1.02:1 (dark-on-dark). The .ow-field kit primitive carries the
-                   correct per-tier chrome; flat keeps the generic input reset (unchanged look). -->
+                   correct per-tier chrome; on flat they ride the global input reset (style.css ~1870:
+                   padded/bordered/var(--bg) — near-identical to the old inline look). -->
               <input id="settings-pw-current" class="ow-field" type="password" placeholder="Current password" autocomplete="current-password">
               <input id="settings-pw-new" class="ow-field" type="password" placeholder="New password (min 8)" autocomplete="new-password">
               <input id="settings-pw-confirm" class="ow-field" type="password" placeholder="Confirm new password" autocomplete="new-password">

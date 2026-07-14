@@ -250,12 +250,15 @@
       // BANNER-ONLY dismiss centering: the base .on-dismiss pins `top: .15rem`, which centers a
       // 44px-tall button in a tall stacked card but rides ~5px BELOW the centerline of the thin
       // (~38px) banner band (measured: top 2.4px → glyph center +5.4px off the band center).
-      // Center the button's 44px box on the band's own midline instead — `calc(50% - 22px)` (half
-      // the 44px min-height), NOT a transform (the frosted quiet-dismiss rule in style.css sets
-      // `transform: none !important` and would undo a translateY). The ≥44px hit area is fully
-      // preserved; the box just overflows the band symmetrically (~3px each side). Scoped to the
+      // Center the button's box on the band's own midline instead — absolute auto-margin
+      // centering (`top:0; bottom:0; margin-block:auto` on a definite-height box), transform-
+      // free (the frosted quiet-dismiss rule in style.css sets `transform: none !important`
+      // and would undo a translateY). The definite height auto-margin centering requires is
+      // tied to the SAME token as the tap floor (`--tap-min`, 44px fallback), so a future
+      // floor retune moves both together instead of re-drifting the glyph. The ≥44px hit area
+      // is fully preserved; the box just overflows the thin band symmetrically. Scoped to the
       // banner host id so the stacked notice cards / toasts keep their corner placement.
-      "#" + BANNER_ID + " .on-card .on-dismiss { top: calc(50% - 22px); }" +
+      "#" + BANNER_ID + " .on-card .on-dismiss { top: 0; bottom: 0; height: var(--tap-min, 44px); margin-block: auto; }" +
       // Desktop: the banner respects the SAME side gutters the floating sidebar/dock do
       // (those float inset at left/right: 10px). So instead of bleeding true edge-to-edge,
       // inset the banner host by 10px on both sides and re-round / re-border the now-detached

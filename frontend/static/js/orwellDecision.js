@@ -129,8 +129,15 @@
       _portraitById = map;
     } catch (_) { /* fail open — every option renders the monogram fallback */ }
   }
-  _refreshRosterCache(true);
-  window.addEventListener("orwell:gamechanged", () => _refreshRosterCache(true));
+  // Boot side-effects run only in the APP SHELL. The element-kit demo page loads this module
+  // purely for ensureStyles() — there, a roster fetch is pointless network noise and the
+  // backstop below would arm a timer with nothing to poll. The shell probe mirrors render()'s
+  // own boot-readiness signals (#chat-history / .chat-input-bar).
+  const _inAppShell = !!(document.getElementById("chat-history") || document.querySelector(".chat-input-bar"));
+  if (_inAppShell) {
+    _refreshRosterCache(true);
+    window.addEventListener("orwell:gamechanged", () => _refreshRosterCache(true));
+  }
 
   // The injected structural CSS is scoped to the root CLASS `.odec` (render() adds it beside
   // the element id) — NOT to `#orwell-decision-card` — so any card composing the kit's classes
@@ -1094,13 +1101,17 @@
     if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
     if (!_wsActive()) _backstopTimer = setInterval(_backstopPending, 2500);
   }
-  _startBackstop();
-  // Cancel the poll the instant the socket goes live; resume it if it falls back to SSE
-  // (_startBackstop re-arms only while !_wsActive()).
-  window.addEventListener("orwell:ws-active", () => {
-    if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
-  });
-  window.addEventListener("orwell:ws-inactive", _startBackstop);
+  // Armed only in the app shell — the kit demo page loads this module for ensureStyles()
+  // alone and must not run a forever-interval (see the _inAppShell probe above).
+  if (_inAppShell) {
+    _startBackstop();
+    // Cancel the poll the instant the socket goes live; resume it if it falls back to SSE
+    // (_startBackstop re-arms only while !_wsActive()).
+    window.addEventListener("orwell:ws-active", () => {
+      if (_backstopTimer) { clearInterval(_backstopTimer); _backstopTimer = null; }
+    });
+    window.addEventListener("orwell:ws-inactive", _startBackstop);
+  }
 
   window.addEventListener("orwell:pending", (e) => {
     try {

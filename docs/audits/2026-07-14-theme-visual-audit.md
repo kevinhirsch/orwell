@@ -78,6 +78,26 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
 9. **SET-02 `.admin-card h2/h5` no-wrap + ellipsis** — headers truncate instead of wrapping
    at the 320px window floor (mirrors the `.settings-nav-item` treatment).
 
+10. **Code-review pass (8-angle) refinements:** SET-02 truncation scoped away from the inline
+    `display:flex` headers (it clipped their trailing toggles — e.g. the Vision header's
+    switch — and text-overflow is a no-op on flex anyway; verified: flex headers normal/visible
+    + toggle intact, block headers nowrap/ellipsis); the KIT-F-01 guard tightened from the
+    `[class*="ow-btn"]` substring to exact-class `:not(.ow-btn)` (every kit button carries the
+    base class; a future `window-btn` can never be silently excluded); banner × centering moved
+    to size-independent auto-margin tied to `--tap-min`; the style.css `.odec` twin merged into
+    the pinned selector list (one source of truth for the concentric math — the ID form stays
+    last so the pinned regex still matches); orwellDecision.js boot side-effects (roster fetch +
+    backstop interval) gated on the app shell so the demo page loads styles only; tripwire
+    sync comments on the demo's copied dark-preset tokens.
+
+    Review verdicts on the rest: the demo's default-tier change (glass→frosted) is intended
+    (owner: frosted is the default; no harness pinned the old default); the flat `--accent`
+    omission is FAITHFUL (theme.js never sets `--accent` — it falls back to `--red` in-app
+    too); the ID→class cascade flip on chip/confirm font-weight lands ON the style.css frosted
+    block's own documented intent (Apple Medium/Semibold on text buttons) — noted, not a
+    regression; the flat password fields ride the global input reset (style.css ~1870) with
+    ~1px padding drift vs the old inline styles — accepted.
+
 Before/after renders: PR #1589 (48 PNGs across frosted/glass/flat × 1440/390, plus the fix
 lane's measured computed-style evidence).
 
