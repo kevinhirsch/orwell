@@ -9590,6 +9590,9 @@ export class GameSessionAdapter implements GameSession {
         moment, view, this.storyFacts(moment), this.worldContext(moment), this.producerVoice(moment),
         this.freshSurfacedFacts(),
       ),
+      // The producer's public name — the byline the FE renders as the chat sender (producer-persona
+      // feature). Vault-free: `producer()` is public voice flavor only.
+      producerName: this.producer().name,
     };
   }
 

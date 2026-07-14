@@ -808,6 +808,10 @@ export interface MomentPromptView {
   moment: string;
   /** The composed system prompt to inject for this moment — base persona + beat fragment + Vault-free context. */
   systemPrompt: string;
+  /** The producer persona's public name — the casting-interview voice / narrator byline (producer-persona
+   *  feature). Vault-free (public voice flavor only). The FE uses it as the chat sender name so the
+   *  producer reads as a real person, not the generic "Production" label. Always present. */
+  producerName: string;
 }
 
 /**

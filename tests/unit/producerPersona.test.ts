@@ -90,6 +90,45 @@ describe("the producer is voiced in the casting interview, consistently", () => 
     const prompt = s.getMomentPrompt({ moment: "social" }).systemPrompt;
     expect(prompt).not.toMatch(/WHO YOU ARE \(the producer/);
   });
+
+  it("the casting prompt tells the producer to INTRODUCE THEMSELVES by name first", () => {
+    const s = new GameSessionAdapter();
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    // The interview opens with the producer naming who they are (the self-introduction beat), before
+    // the headshot ask — so the player meets the producer as a person, not a faceless "Production".
+    expect(prompt).toMatch(/INTRODUCE YOURSELF FIRST/);
+    expect(prompt).toMatch(/naming who you are/);
+    // The headshot is no longer the OPENING — it's the first QUESTION after the introduction.
+    expect(prompt).toMatch(/THIS IS YOUR FIRST QUESTION/);
+  });
+});
+
+describe("the producer's public name is exposed for the chat byline (Vault-free)", () => {
+  it("getMomentPrompt returns the seeded producer's name as producerName", () => {
+    const s = new GameSessionAdapter();
+    const view = s.getMomentPrompt({});
+    const seededName = producerForSeed(s.snapshot().producerSeed!).name;
+    // The byline the FE renders as the chat sender — the SAME producer the prompt voices.
+    expect(view.producerName).toBe(seededName);
+    expect(view.producerName.length).toBeGreaterThan(0);
+  });
+
+  it("producerName is present on EVERY moment (byline is stable across phases), and is stable per season", () => {
+    const s = new GameSessionAdapter();
+    const preGame = s.getMomentPrompt({}).producerName;
+    s.createCharacter({ playerName: "The Player", seed: 5 });
+    // The producer persists into the season (adopted seed), so the byline name does not change phase-to-phase.
+    const inHouse = s.getMomentPrompt({ moment: "social" }).producerName;
+    expect(inHouse).toBe(preGame);
+    expect(inHouse.length).toBeGreaterThan(0);
+  });
+
+  it("producerName carries no Vault vocabulary (it is public voice flavor only)", () => {
+    const s = new GameSessionAdapter();
+    const name = s.getMomentPrompt({}).producerName.toLowerCase();
+    // The Vault sentinel sweeps hunt the stat-key substrings; a producer name is a plain given name.
+    for (const needle of ["physical", "mental", "social"]) expect(name).not.toContain(needle);
+  });
 });
 
 // The producer's first NAME is drawn from the same given-name corpus as the cast, so a producer name
