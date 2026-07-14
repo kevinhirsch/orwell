@@ -35,6 +35,9 @@
 // only, no setInterval), and never fetches: all data comes from the kit cache / OrwellAvatar.
 (function () {
   "use strict";
+  // Monotonic per-page generation of the player's ACCOUNT avatar — bumped on every
+  // orwell:avatarchanged so a replaced photo mints a fresh face sig + fetch url.
+  let _avatarGen = 0;
 
   function gameBuild() {
     return !!(document.body && document.body.hasAttribute("data-game-build"));
@@ -87,7 +90,12 @@
     if (kind === "user") {
       const pc = deps.playerCard ? deps.playerCard() : null;
       let portrait = (pc && pc.portrait) || null;
-      if (!portrait && deps.avatarPresent && deps.avatarPresent()) portrait = "/api/orwell/avatar";
+      // The avatar route is a FIXED url, so a REPLACED avatar would reuse the old sig and the
+      // signature-gated decorate() would skip the refresh — ride the avatarchanged generation
+      // into the url so both the sig and the <img> fetch move with the new photo.
+      if (!portrait && deps.avatarPresent && deps.avatarPresent()) {
+        portrait = "/api/orwell/avatar?v=" + (deps.avatarGen ? deps.avatarGen() : 0);
+      }
       const name = (pc && pc.name) || (deps.playerName ? deps.playerName() : null) || "You";
       return {
         sig: "u|" + (portrait || "mono:" + name),
@@ -141,6 +149,7 @@
       const A = window.OrwellAvatar;
       return !!(A && typeof A.present === "function" && A.present());
     },
+    avatarGen: function () { return _avatarGen; },
     playerName: accountName,
   };
 
@@ -234,7 +243,8 @@
   // fetch a beat to land, then upgrade monogram → portrait in place (signature-gated).
   function resweepSoon() { sweep(); setTimeout(sweep, 1200); }
   window.addEventListener("orwell:gamechanged", resweepSoon);
-  window.addEventListener("orwell:avatarchanged", resweepSoon);
+  // Bump the generation FIRST so the resweep resolves a fresh avatar sig (see resolveFaceDescriptor).
+  window.addEventListener("orwell:avatarchanged", function () { _avatarGen++; resweepSoon(); });
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot, { once: true });
   else boot();

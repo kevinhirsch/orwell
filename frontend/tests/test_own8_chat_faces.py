@@ -246,7 +246,9 @@ def test_face_resolver_player_npc_production_portrait_first():
     assert u["crop"] is True and u["forceMono"] is False
     # pre-season: the finalized account avatar backstops the roster card
     ua = r["userAvatarOnly"]
-    assert ua["card"]["portrait"] == "/api/orwell/avatar" and ua["crop"] is True
+    # The avatar url carries the avatarchanged generation (?v=N) so a REPLACED photo mints a
+    # fresh sig + fetch — the headless driver has no listener wired, so the gen reads 0.
+    assert ua["card"]["portrait"] == "/api/orwell/avatar?v=0" and ua["crop"] is True
     # nothing on file: the designed monogram fallback (no phantom photo)
     un = r["userNothing"]
     assert un["card"]["portrait"] is None and un["crop"] is False

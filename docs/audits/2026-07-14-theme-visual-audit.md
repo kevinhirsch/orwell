@@ -131,6 +131,23 @@ KIT-G-03/04 + KIT-F-04/07 (busy demo backdrop w/ 7.7× measured glass-vs-frosted
 solid section wrappers, status-gadget garble fixed, colored traffic lights) · #1603(b)
 (buttons re-ranked above notices in the refraction priority; cap-raise half stays open).
 
+**Wave-2 CI round (PR #1613 red → green):** the flat traffic lights (KIT-N-08) had shrunk the
+window-control tap target to the bare 12px disc — the frosted 44px invisible `::after` hit
+region was never mirrored (browser_smoke's ≥24px cluster gate caught it; rule added). The G15
+decision probe was found to be *transport-racy*: when the WS Phase-1 handshake lands before the
+probe (host-timing — it races the per-tab session id), the confirm rides a WS frame the probe's
+HTTP route-fake can never see; the probe now pins the HTTP branch (the WS path keeps its own
+gates). The a11y-matrix `user-bar-name` FAIL was root-caused to the **settings-scrim context**
+(`desktop-1366+settings`): the APP-OV-3 chip measures ~13:1 un-scrimmed (pixel-verified) but the
+modal scrim dims it to ~3.4:1, the same inert-chrome class as the pre-existing #1375-e/-f
+entries — registered as XFAIL #1375-i (no chip brightness clears 4.5:1 under the scrim; needs
+pre-scrim luminance > 255). CodeRabbit review remediations in the same round: flat-tier
+`color-mix()` sums normalized to 100% (an under-100 sum alpha-thins the "solid" flat surfaces —
+css-color-5), `.admin-tab.active` moved to the #1375-c AA blue `#0a5cc4`, the chat-face account
+avatar now busts on `orwell:avatarchanged` generation (a replaced photo re-renders in place),
+check/radio hit padding derived from `--tap-min`, and the user-bar test's rule regexes hardened
+against at-rule nesting.
+
 ## 2. Element kit — Frosted (default tier) findings
 
 **Lane report landed (apple-genius auditor, measured via Playwright DOM geometry + pixel

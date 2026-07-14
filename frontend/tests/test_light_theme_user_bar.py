@@ -74,7 +74,9 @@ def test_frosted_sidebar_label_ink_derives_from_theme_fg():
         "the legibility halo must follow the theme's bg polarity, not a fixed dark shadow"
     # APP-OV-3: no frosted rule may force the username back onto var(--fg) — light ink on the
     # light-glass chip is the polarity bug this fix removes.
-    for sel, rule_body in re.findall(r"([^{}]+)\{([^}]*)\}", CSS):
+    # `[^{}]*` (not `[^}]*`) in the body so an @media wrapper can't swallow its first nested
+    # rule — each innermost rule pairs with its own selector even one level inside an at-rule.
+    for sel, rule_body in re.findall(r"([^{}]+)\{([^{}]*)\}", CSS):
         if "#user-bar-name" in sel and "theme-frosted" in sel:
             assert "var(--fg" not in rule_body, (
                 "a frosted rule flips #user-bar-name back to var(--fg) — on the light-glass "
@@ -84,7 +86,7 @@ def test_frosted_sidebar_label_ink_derives_from_theme_fg():
 def test_user_bar_carries_no_other_hardcoded_background():
     """Belt-and-braces: no OTHER .sidebar-user-bar rule may (re)introduce a polarity-fixed
     background — every background it paints is transparent or token/material-derived."""
-    for m in re.finditer(r"[^{}]*\.sidebar-user-bar[^{}]*\{[^}]*\}", CSS, re.S):
+    for m in re.finditer(r"[^{}]*\.sidebar-user-bar[^{}]*\{[^{}]*\}", CSS, re.S):
         rule = m.group(0)
         for decl in re.findall(r"background(?:-color)?\s*:\s*([^;]+);", rule):
             v = decl.strip()

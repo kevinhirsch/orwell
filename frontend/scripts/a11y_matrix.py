@@ -106,6 +106,14 @@ XFAIL = {
     "#1375-e": "contrast:sidebar:span.grow",
     # The sidebar "Orwell" brand title — 3.48:1 dark text on the translucent sidebar glass.
     "#1375-f": "contrast:sidebar:span.sidebar-brand-title",
+    # The user-bar username under the SETTINGS SCRIM (the only context that fires it): the APP-OV-3
+    # fix gives the footer a light chip + dark ink that measures ~13:1 un-scrimmed (pixel-verified),
+    # but the settings modal's dark overlay dims the chip to mid-gray (~108) and the sweep — which
+    # samples pixels scrim-and-all — reads the INERT, deliberately de-emphasized background chrome at
+    # ~3.4:1. Same class as #1375-e/-f above (both fire in this scrimmed state at ~4.2:1); no chip
+    # brightness can clear 4.5:1 under the scrim (needs pre-scrim luminance > 255). REMOVE if the
+    # sweep ever learns to skip modal-inerted chrome.
+    "#1375-i": "contrast:sidebar:span#user-bar-name.user-bar-name",
     # The post-season retro window (#orwell-retro) is a SYSTEMIC low-contrast surface: dark text +
     # dark window-kit controls (× – ⇲), the "The Season, Watched Back" title, the winner headline,
     # and the eviction list all render at ~3.6:1 on its light-ish glass. Its body is filled by a

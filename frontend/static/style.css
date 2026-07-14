@@ -21731,7 +21731,9 @@ body.theme-frosted .ow-window .ow-body button.admin-tab:hover:not(.active) {
   color: var(--ow-control-ink, #16191f);
 }
 body.theme-frosted .ow-window .ow-body button.admin-tab.active {
-  background-color: var(--ow-ios-blue, #0a84ff);
+  /* #1375-c precedent: #0a84ff under white ink is only ~3.29:1 — the darker system blue
+     the .settings-nav-item.active fix (~L21640) established clears AA for the white label. */
+  background-color: #0a5cc4;
   color: #fff;
   box-shadow: none;
 }
@@ -22365,9 +22367,13 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
 /* ╚══════════════════════════════════════════════════════════════════════════╝ */
 body:not(.theme-frosted) {
   /* Flat-tier control tokens, scoped so they never leak onto frosted/glass. */
-  --own-flat-fill: color-mix(in srgb, var(--panel, #111) 85%, var(--fg, #fff) 4%);
-  --own-flat-fill-hover: color-mix(in srgb, var(--panel, #111) 74%, var(--fg, #fff) 9%);
-  --own-flat-fill-strong: color-mix(in srgb, var(--panel, #111) 52%, var(--fg, #fff) 22%);
+  /* Single-percentage form: the omitted side takes the remainder, so every mix sums to
+     100% — an under-100 sum multiplies the result's ALPHA by the sum (css-color-5), which
+     silently made these "solid" flat surfaces semi-opaque. Ratios preserved from the
+     original 85/4, 74/9, 52/22 weights. */
+  --own-flat-fill: color-mix(in srgb, var(--panel, #111) 96%, var(--fg, #fff));
+  --own-flat-fill-hover: color-mix(in srgb, var(--panel, #111) 89%, var(--fg, #fff));
+  --own-flat-fill-strong: color-mix(in srgb, var(--panel, #111) 70%, var(--fg, #fff));
   --own-flat-border: var(--border, #355a66);
   --own-flat-border-strong: color-mix(in srgb, var(--fg, #fff) 45%, var(--border, #355a66));
 }
@@ -22428,7 +22434,8 @@ body:not(.theme-frosted) .ow-btn:hover {
   transform: translateY(-1px);
 }
 body:not(.theme-frosted) .ow-btn-prominent:hover {
-  background-color: color-mix(in srgb, var(--own-flat-fill-strong) 88%, var(--fg, #fff) 6%);
+  /* single-percentage form so the mix sums to 100% (no alpha-thinning remainder) */
+  background-color: color-mix(in srgb, var(--own-flat-fill-strong) 94%, var(--fg, #fff));
 }
 body:not(.theme-frosted) .ow-btn-plain:hover {
   background: color-mix(in srgb, var(--fg, #fff) 7%, transparent);
@@ -22588,7 +22595,8 @@ body:not(.theme-frosted) .ow-switch {
 body:not(.theme-frosted) .ow-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
 body:not(.theme-frosted) .ow-switch .ow-switch-track {
   position: absolute; inset: 0; border-radius: 999px;
-  background-color: color-mix(in srgb, var(--border, #355a66) 88%, var(--fg, #fff) 6%);
+  /* single-percentage form so the mix sums to 100% (no alpha-thinning remainder) */
+  background-color: color-mix(in srgb, var(--border, #355a66) 94%, var(--fg, #fff));
   transition: background-color .2s ease;
 }
 body:not(.theme-frosted) .ow-switch .ow-switch-track::before {
@@ -22687,6 +22695,15 @@ body:not(.theme-frosted) .ow-controls .ow-min:focus-visible,
 body:not(.theme-frosted) .ow-controls .ow-dock:focus-visible {
   outline: 2px solid var(--ow-ios-blue, #0a84ff);
   outline-offset: 2px;
+}
+/* the >=44px hit region (invisible) — WCAG 2.5.5 on the 12px discs, mirroring the frosted
+   cluster's rule; the glyph rides ::before, so ::after is free to carry the tap target.
+   Without this the flat discs are a 12px tap target (browser_smoke's >=24px cluster gate). */
+body:not(.theme-frosted) .ow-controls .ow-close::after,
+body:not(.theme-frosted) .ow-controls .ow-min::after,
+body:not(.theme-frosted) .ow-controls .ow-dock::after {
+  content: ""; position: absolute; top: 50%; left: 50%;
+  width: 44px; height: 44px; transform: translate(-50%, -50%);
 }
 body:not(.theme-frosted) .ow-controls button:hover { transform: none; box-shadow: none; }
 

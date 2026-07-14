@@ -2509,6 +2509,16 @@ def main() -> int:
                   f"G15: the status HUD refresh fired event-driven, inside one debounce ({g15_direct})")
             # The decision card's POST path: a routed fake stands in for the engine, the
             # card's success branch must nudge the panels the same way.
+            # TRANSPORT PIN: this probe's engine fake is an HTTP route — but when the WS
+            # Phase-1 handshake happens to land (it races the per-tab session id, so it is
+            # host-timing dependent), the card sends the decision as a WS FRAME the route fake
+            # can never see, and the probe fails on fast hosts / passes on slow ones. Pin the
+            # card to the HTTP branch for this probe only (the WS decision path has its own
+            # gates: the ws lanes + mirror-parity); restored right after.
+            page.evaluate("""() => {
+              const ws = window.OrwellWs;
+              if (ws && ws.isActive) { window._g15wsActive = ws.isActive; ws.isActive = () => false; }
+            }""")
             page.route("**/api/orwell/decision",
                        lambda route: route.fulfill(status=200, content_type="application/json",
                                                    body='{"ok": true}'))
@@ -2534,6 +2544,8 @@ def main() -> int:
                   f"G15: a bound decision refreshes the panels without waiting a poll period ({g15_decision})")
             page.unroute("**/api/orwell/decision")
             page.evaluate("""() => {
+              const ws = window.OrwellWs;
+              if (ws && window._g15wsActive) { ws.isActive = window._g15wsActive; delete window._g15wsActive; }
               const c = document.getElementById('orwell-decision-card'); if (c) c.remove();
               const b = document.getElementById('message'); if (b) b.value = '';
             }""")
