@@ -1802,6 +1802,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       // yet are a real, completed turn — NOT the empty-turn-with-no-recourse case. Set true on those so
       // the empty-turn Retry never spuriously fires after one.
       let _producedVisibleOutput = false;
+      // CASTING-RESUME-HANG Fix 3 (P1 review): a turn-scoped "did this turn call any tool?" flag.
+      // The tool RAIL (`.agent-thread` → `.agent-thread-node`) is appended to `#chat-history` as a
+      // SIBLING of the assistant `holder` (see the tool_start branch: `chatBox.appendChild`), so
+      // `holder.querySelector('.agent-thread-node')` never sees it and always read false — a
+      // tool-only casting turn could then wrongly trip the empty-reply re-prompt. Set true in the
+      // tool_start branch below and read by `_isCastingEmptyReplyReprompt`'s `usedTools` gate.
+      let _usedToolsThisTurn = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2641,6 +2648,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
 
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
+                _usedToolsThisTurn = true;   // this turn called a tool → not a no-tool empty completion
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 // Force-close thinking if still open — tools are real content, not thinking
@@ -3770,9 +3778,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
               seasonStarted: isSeasonStarted(),
               sawDone: _streamSawDone,
               cancelled: _turnWasCancelled,
-              usedTools: !!holder.querySelector('.agent-thread-node'),
+              usedTools: _usedToolsThisTurn,   // turn-scoped flag — the tool rail is a SIBLING of holder, not inside it
               producedVisible: _producedVisibleOutput,
               visibleReply: _castingVisibleReply,
+              // reasoning-present (non-blank merged `accumulated`) — mutually exclusive with the
+              // clean-empty Retry path (_isEmptyTurnNoSave requires BLANK accumulated). A fully-silent
+              // casting turn thus takes ONLY the Retry banner, never both recoveries (review #1595).
+              hadReasoning: !!(accumulated && String(accumulated).trim()),
               alreadyReprompted: _castingEmptyRepromptSent,
             })) {
           _castingEmptyRepromptSent = true;    // hard loop-guard: at most ONE auto re-prompt per streak

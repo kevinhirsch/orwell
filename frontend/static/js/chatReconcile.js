@@ -221,14 +221,22 @@ export function _setReconcileDeps(deps) {
    * on a clean empty completion. This pure predicate decides whether to fire exactly ONE bounded
    * re-prompt: true iff we're in the CASTING register (game build, season NOT started), the stream ended
    * cleanly (a `[DONE]`, not thrown/cancelled), the turn used NO tools and produced NO visible artifact,
-   * the VISIBLE reply is empty, and the one-shot re-prompt has not already fired. SCOPED to casting —
-   * in-game empty turns keep their existing behavior. Pure so it is gated without a live stream.
+   * the VISIBLE reply is empty, THE TURN HAD REASONING (`hadReasoning` — a non-blank `accumulated`), and
+   * the one-shot re-prompt has not already fired. SCOPED to casting — in-game empty turns keep their
+   * existing behavior. Pure so it is gated without a live stream.
+   *
+   * The `hadReasoning` gate is load-bearing (review #1595): it makes this predicate MUTUALLY EXCLUSIVE
+   * with `_isEmptyTurnNoSave` above (which fires only when `accumulated` is BLANK). A fully-silent
+   * completion (no reasoning, no reply) is the no-content case → it takes ONLY the clean-empty Retry
+   * path; a reasoning-only completion (non-blank `accumulated`, empty visible reply) is THIS case → it
+   * takes ONLY the bounded re-prompt. Without it, a silent turn would trip BOTH — a Retry banner AND an
+   * auto re-prompt in the same turn.
    */
   export function _isCastingEmptyReplyReprompt({
-    gameBuild, seasonStarted, sawDone, cancelled, usedTools, producedVisible, visibleReply, alreadyReprompted,
+    gameBuild, seasonStarted, sawDone, cancelled, usedTools, producedVisible, visibleReply, hadReasoning, alreadyReprompted,
   } = {}) {
     return !!gameBuild && !seasonStarted && !!sawDone && !cancelled &&
-      !usedTools && !producedVisible && !alreadyReprompted &&
+      !usedTools && !producedVisible && !!hadReasoning && !alreadyReprompted &&
       (visibleReply == null || String(visibleReply).trim() === '');
   }
 

@@ -622,7 +622,8 @@ def _eval_casting_reprompt_predicate(cases):
 
 def test_casting_empty_reply_reprompt_predicate_truth_table():
     base = dict(gameBuild=True, seasonStarted=False, sawDone=True, cancelled=False,
-                usedTools=False, producedVisible=False, visibleReply="", alreadyReprompted=False)
+                usedTools=False, producedVisible=False, visibleReply="", hadReasoning=True,
+                alreadyReprompted=False)
 
     def m(**over):
         d = dict(base)
@@ -630,7 +631,7 @@ def test_casting_empty_reply_reprompt_predicate_truth_table():
         return d
 
     cases = [
-        m(),                                     # 0: THE hang — casting, clean [DONE], empty reply, no tools → fire
+        m(),                                     # 0: THE hang — casting, clean [DONE], reasoning, empty reply, no tools → fire
         m(visibleReply="Welcome to the house"),  # 1: a real producer line landed → don't fire
         m(seasonStarted=True),                   # 2: in-game (season started) — scoped OUT of casting
         m(gameBuild=False),                      # 3: non-game build → never
@@ -640,9 +641,10 @@ def test_casting_empty_reply_reprompt_predicate_truth_table():
         m(cancelled=True),                       # 7: user-cancelled → don't fire
         m(alreadyReprompted=True),               # 8: the one-shot latch is already spent → hard loop-guard
         m(visibleReply="   "),                   # 9: whitespace-only reply is still empty → fire
+        m(hadReasoning=False),                   # 10: fully-silent turn (no reasoning) → clean-empty Retry path ONLY, don't fire
     ]
     out = _eval_casting_reprompt_predicate(cases)
-    assert out == [True, False, False, False, False, False, False, False, False, True], out
+    assert out == [True, False, False, False, False, False, False, False, False, True, False], out
 
 
 def test_casting_empty_reply_reprompt_is_wired_and_bounded():
@@ -656,8 +658,23 @@ def test_casting_empty_reply_reprompt_is_wired_and_bounded():
     # and keyed on the empty VISIBLE reply — not `accumulated` (which carries reasoning).
     assert "gameBuild: isGameBuild()" in seg
     assert "seasonStarted: isSeasonStarted()" in seg
-    assert "usedTools: !!holder.querySelector('.agent-thread-node')" in seg
+    # `usedTools` reads the TURN-SCOPED flag, not `holder.querySelector('.agent-thread-node')`: the
+    # tool rail is appended to `#chat-history` as a SIBLING of `holder`, so the DOM query always read
+    # false and a tool-only casting turn could wrongly trip the re-prompt (P1 review, #1595). The flag
+    # is declared with `_producedVisibleOutput` and set true in the tool_start branch.
+    assert "usedTools: _usedToolsThisTurn" in seg
+    assert "holder.querySelector('.agent-thread-node')" not in seg, \
+        "the dead DOM query must not gate usedTools — the tool rail is a sibling of holder"
+    assert "let _usedToolsThisTurn = false;" in js, "the turn-scoped tool flag must be declared"
+    # the flag must actually flip on a tool call, or it would be a constant-false (same bug, hidden)
+    _ts = js[js.index("else if (json.type === 'tool_start')"):]
+    _ts = _ts[: _ts.index("_cancelThinkingTimer();")]
+    assert "_usedToolsThisTurn = true" in _ts, "tool_start must set the turn-scoped tool flag"
     assert "visibleReply: _castingVisibleReply" in seg
+    # reasoning-present gate — makes the casting re-prompt mutually exclusive with _isEmptyTurnNoSave
+    # (which requires BLANK accumulated), so a fully-silent turn never trips both recoveries (#1595).
+    assert "hadReasoning:" in seg
+    assert "hadReasoning" in recon, "the predicate must accept a hadReasoning gate"
     assert "alreadyReprompted: _castingEmptyRepromptSent" in seg
     # a HARD one-shot: the latch is set BEFORE the deferred send, and the re-prompt only RE-ASKS the
     # model (a hidden cue) — it never engine-authors content.
