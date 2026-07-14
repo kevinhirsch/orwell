@@ -298,6 +298,18 @@
         // buffer replays/tails). Record it so a later ring-replayed `run-started` for the SAME run
         // is recognized as stale and ignored.
         if (frame.d && frame.d.runId != null) _lastRunId = frame.d.runId;
+        // #1087 orphaned-invitation drain (the WS mirror-parity F5 flake): a subscribe that resolved
+        // to a FINISHED/empty run (`hasRun:false`) clears the tail via this `done`-less ack — but a
+        // genuinely-NEW run whose `run-started` edge QUEUED behind this in-flight subscribe (stashed in
+        // `_pendingRunId` because `_chatTailActive` was optimistically true) would otherwise NEVER drain
+        // (a run that isn't live never sends a chat `done` frame — the only OTHER drain site, above at
+        // the `_chatDone` branch). Orphaned, the peer window (window B) receives zero delta frames,
+        // never mounts `_wsEnsureRound`/`_renderLiveStream`, and converges only via a full-repaint
+        // history reconcile — exactly the `B incrementalStream=false` two-window divergence. Drain now
+        // that the tail is provably free (this is the symmetric second drain site to the `done` one).
+        // Safe/idempotent: `_lastRunId` is set FIRST above, so a redundant same-id pending is a no-op
+        // via `_onRunStarted`'s `=== _lastRunId` skip; a genuinely-new run (distinct id) attaches live.
+        if (frame.d && frame.d.hasRun === false) _drainPendingRun();
       }
       try { q.resolve(frame); } catch (_) {}
       return;
