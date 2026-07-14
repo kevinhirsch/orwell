@@ -852,13 +852,18 @@
           </div>
           <div class="theme-fd-group" id="theme-glass-tier-group">
             <label class="theme-fd-label">Glass</label>
-            <!-- 3-way Liquid Glass tier (shared contract id). Full = CSS material
-                 + Chromium SVG refraction; Frosted = the blur baseline; Off = flat.
-                 style.css styles #theme-glass-tier / its [data-tier] buttons. -->
+            <!-- 3-way Liquid Glass tier (shared contract id). Glass (data-tier "full") =
+                 CSS material + Chromium SVG refraction; Frosted = the blur baseline;
+                 Flat (data-tier "normal") = no glass.
+                 style.css styles #theme-glass-tier / its [data-tier] buttons.
+                 THM-OV-3 (2026-07-14 audit): ONE tier vocabulary everywhere —
+                 Glass / Frosted / Flat (owner ruling), matching the Browse quick control
+                 (#theme-glass-tier-quick). Labels/titles only: the data-tier attribute
+                 VALUES (full | frosted | normal) are the wire contract — never rename them. -->
             <div id="theme-glass-tier" class="theme-seg" role="group" aria-label="Glass tier" data-value="full">
-              <button type="button" class="theme-seg-btn" data-tier="full" aria-pressed="true" title="Liquid Glass — material + refraction">Full</button>
+              <button type="button" class="theme-seg-btn" data-tier="full" aria-pressed="true" title="Liquid Glass — material + refraction">Glass</button>
               <button type="button" class="theme-seg-btn" data-tier="frosted" aria-pressed="false" title="Frosted — blur material only">Frosted</button>
-              <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false" title="No glass — flat chrome">Off</button>
+              <button type="button" class="theme-seg-btn" data-tier="normal" aria-pressed="false" title="No glass — flat, solid chrome">Flat</button>
             </div>
           </div>
           <div class="theme-fd-group" id="theme-glass-tint-group">

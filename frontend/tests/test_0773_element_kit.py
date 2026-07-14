@@ -335,3 +335,142 @@ def test_demo_driver_is_demo_only_not_shipped():
     assert "orwellElements.js" in DEMO
     index = _read("static", "index.html")
     assert "orwellElements.js" not in index, "demo driver must not ship in the app shell"
+
+
+# ── 2026-07-14 theme-visual-audit demo-fidelity pins (KIT-G-03 / KIT-G-04 / KIT-F-04 / KIT-F-07) ──
+
+def _no_comments_css(s):
+    """CSS/HTML sources minus /* … */ and <!-- … --> comments (pins must bind
+    DECLARATIONS, never the explanatory prose that names the forbidden token)."""
+    return re.sub(r"<!--.*?-->", "", re.sub(r"/\*.*?\*/", "", s, flags=re.S), flags=re.S)
+
+
+def _no_comments_js(s):
+    """JS source minus // line comments and /* … */ blocks."""
+    return re.sub(r"(^|\s)//[^\n]*", r"\1", re.sub(r"/\*.*?\*/", "", s, flags=re.S))
+
+
+def test_demo_section_cards_are_solid_no_glass_on_glass():
+    # KIT-G-04: the demo's section wrappers must be SOLID — a wrapper carrying its own
+    # backdrop-filter around independently-sampling kit controls is the exact
+    # "never glass on glass" anti-pattern the corpus forbids (§1). No demo-chrome rule
+    # may reintroduce a backdrop sample: the page's own CSS carries NO backdrop-filter
+    # DECLARATION at all (the kit surfaces get theirs from style.css / the kit modules).
+    assert "backdrop-filter" not in _no_comments_css(DEMO), (
+        "KIT-G-04: the demo page's own CSS must not compose backdrop-filter — "
+        "solid section cards only (glass-on-glass anti-pattern)"
+    )
+    card = re.search(r"\.ek-card\s*\{(.*?)\}", _no_comments_css(DEMO), re.S)
+    assert card, ".ek-card rule missing from the demo"
+    assert re.search(r"background:\s*#[0-9a-fA-F]{3,8}\s*;", card.group(1)), (
+        "KIT-G-04: .ek-card must carry an opaque (hex) fill, not a translucent color-mix"
+    )
+
+
+def test_demo_live_windows_float_on_the_wallpaper_not_in_a_card():
+    # KIT-G-04/G-03: the live windows host sits OUTSIDE the solid section cards, directly
+    # over the wallpaper, so the window/modal glass samples the REAL backdrop (glass over
+    # a solid plate shows no refraction at all — the tier A/B would be unverifiable).
+    assert re.search(r'<div class="ek-wins ek-onwall" id="ek-windows">', DEMO), (
+        "the #ek-windows host must wear .ek-onwall (floated on the wallpaper)"
+    )
+    assert '<div class="ek-wins" id="ek-windows">' not in DEMO, (
+        "the old in-card #ek-windows host must not come back"
+    )
+    # …and the host is NOT nested inside any section card (source-order check: the
+    # windows section closes before the host opens).
+    host = DEMO.index('id="ek-windows"')
+    last_section_open = DEMO.rfind("<section", 0, host)
+    last_section_close = DEMO.rfind("</section>", 0, host)
+    assert last_section_close > last_section_open, (
+        "KIT-G-04: #ek-windows must sit outside the <section class=ek-card> wrappers"
+    )
+
+
+def test_demo_busy_backdrop_is_default_and_deep_linkable():
+    # KIT-G-03: the demo defaults to a BUSY, photo-like backdrop (the smooth pastel wash
+    # measured glass-vs-frosted A/B diffs <=14/255 — too smooth to bend). Structure layers
+    # in CSS + a seeded canvas noise tile from the driver; #bg=busy|smooth deep-link.
+    assert "body.ek-bg-busy" in DEMO and "repeating-linear-gradient" in DEMO
+    assert "--ek-noise-tile" in DEMO and "--ek-noise-tile" in DRIVER
+    assert 'data-bg="busy"' in DEMO and 'data-bg="smooth"' in DEMO
+    # busy is the DEFAULT (the driver's hash fallback), and the tile is seeded so every
+    # screenshot sees the same texture.
+    assert re.search(r'return \(m && VALID_BG\[m\[1\]\]\) \? m\[1\] : "busy"', DRIVER), (
+        "KIT-G-03: the driver's bg hash fallback must be 'busy'"
+    )
+    assert "getContext" in DRIVER and "toDataURL" in DRIVER, (
+        "KIT-G-03: the driver must synthesize the canvas noise tile"
+    )
+    # flat keeps its dark backdrop — the busy rule must carry the :not(.ek-flat) guard.
+    assert "body.ek-bg-busy:not(.ek-flat)" in DEMO
+
+
+def test_demo_status_gadget_mounts_the_real_panel_id():
+    # KIT-F-04: orwellStatusPanel.js scopes its injected row CSS to the literal
+    # #orwell-status; the old demo mount (ek-g-status) never matched it, so the rows
+    # rendered run-together ("HOHYou"). The swatch mounts under the REAL id…
+    assert '"orwell-status"' in DRIVER, "the demo status gadget must mount as id orwell-status"
+    assert "ek-g-status" not in _no_comments_js(DRIVER), (
+        "the mismatched ek-g-status mount must not come back"
+    )
+    # …opts out of collapse persistence (same-origin localStorage — the demo must never
+    # read/write the app's own collapse key for this id)…
+    m = re.search(r'id: "orwell-status".*?persistCollapsed:\s*false', DRIVER, re.S)
+    assert m, "the demo orwell-status gadget must set persistCollapsed: false"
+    # …and injects the row CSS under the SAME guard id the real panel uses.
+    assert 'st.id = "orwell-status-css"' in DRIVER
+
+
+def test_demo_status_css_copy_stays_in_sync_with_the_panel():
+    # KIT-F-04 tripwire: the demo's injected status CSS is a DELIBERATE COPY of the
+    # subset of rules the swatch composes — every copied rule must still exist,
+    # declaration-for-declaration, in orwellStatusPanel.js (whitespace-insensitive).
+    panel = _read("static", "js", "orwellStatusPanel.js")
+    panel_norm = " ".join(panel.split())
+    m = re.search(r'st\.textContent = `(.*?)`;', DRIVER, re.S)
+    assert m, "the demo's injected status-CSS block not found in the driver"
+    rules = re.findall(r'([^{}]+\{[^{}]*\})', m.group(1))
+    assert len(rules) >= 8, f"expected the copied rule set, found {len(rules)}"
+    for rule in rules:
+        norm = " ".join(rule.split())
+        assert norm in panel_norm, (
+            "KIT-F-04: demo status-CSS copy drifted from orwellStatusPanel.js — "
+            f"update the copy in orwellElements.js in the same change: {norm[:80]}…"
+        )
+
+
+def test_demo_traffic_swatches_ride_a_real_titlebar_context():
+    # KIT-F-07: the glyph reveal rides an ANCESTOR rule (.ow-titlebar:hover …::before) in
+    # style.css — the old swatch forced BUTTON opacity, which never revealed the ::before
+    # glyphs. The swatch must wrap the cluster in a real .ow-titlebar…
+    assert re.search(r'<div class="ow-titlebar[^"]*"><div class="ow-controls', DEMO), (
+        "each traffic swatch must nest .ow-controls inside a real .ow-titlebar context"
+    )
+    assert "opacity: 1 !important" not in DEMO, (
+        "the old broken glyph force (button opacity) must not come back"
+    )
+    # …force the app's own reveal for the still (the ::before color flip)…
+    assert re.search(
+        r"\.ek-traffic-hot \.ow-controls \.ow-close::before[\s\S]{0,200}?"
+        r"color:\s*rgba\(0,\s*0,\s*0,\s*0?\.6\)", DEMO), (
+        "the hot swatch must mirror style.css's ::before color reveal"
+    )
+    # …and show BOTH window-focus states, colors byte-matched to style.css (sync tripwire).
+    assert "ek-traffic-focused" in DEMO and "ek-traffic-unfocused" in DEMO
+    for hexc in ("#ff5f57", "#febc2e", "#28c840"):
+        assert hexc in DEMO, f"swatch missing the focused traffic-light color {hexc}"
+        assert hexc in CSS, f"style.css no longer uses {hexc} — update the demo copy too"
+    # the demo copy explains that grey = unfocused BY DESIGN.
+    assert re.search(r"unfocused[^<]*grey|grey[^<]*unfocused", DEMO, re.I), (
+        "the demo copy must note that unfocused windows show grey lights by design"
+    )
+
+
+def test_demo_windows_are_forced_focused_for_the_reference():
+    # KIT-F-07: 2 of 3 live demo windows rendered permanently-grey lights (the kit keeps
+    # ONE window focused). The driver forces .ow-focused on all three so the reference
+    # shows the colored cluster; the unfocused state has its own labeled swatch.
+    assert re.search(r'classList\.add\("ow-focused"\)', DRIVER), (
+        "the demo driver must force .ow-focused on the live demo windows"
+    )
