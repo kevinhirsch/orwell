@@ -59,13 +59,15 @@ def test_j5_20_card_applies_risk_class():
     assert re.search(r'classList\.add\("odec-risk"\)', js), \
         "render() must add the 'odec-risk' marker class for high-stakes kinds"
     # The risk skin must be defined as a card modifier rule in the injected styles.
-    assert re.search(r"#\$\{CARD_ID\}\.odec-risk\s*\{", js), \
+    # (The injected CSS is scoped to the .odec root CLASS — render() adds it beside the
+    # element id — so the kit demo's static cards style identically to the live card.)
+    assert re.search(r"\.odec\.odec-risk\s*\{", js), \
         "ensureStyles() must define the .odec-risk card modifier rule"
 
 
 def test_j5_20_risk_signal_is_token_driven():
     js = _read("static", "js", "orwellDecision.js")
-    risk_rule = re.search(r"#\$\{CARD_ID\}\.odec-risk\s*\{([^}]+)\}", js)
+    risk_rule = re.search(r"\.odec\.odec-risk\s*\{([^}]+)\}", js)
     assert risk_rule, ".odec-risk rule not found"
     body = risk_rule.group(1)
     # The tint must come from the project tokens (--color-error / --red), never a hard-coded hex
@@ -124,8 +126,9 @@ def test_j5_21_dismiss_x_positioned_in_corner_by_css():
     body = x_rule.group(1)
     assert "position: absolute" in body and "right:" in body, \
         ".odec-x must be position:absolute with a right offset to stay in the corner after the DOM move"
-    # The card must be a positioning context for the absolute ×.
-    card_rule = re.search(r"#\$\{CARD_ID\}\s*\{([^}]+)\}", js)
+    # The card must be a positioning context for the absolute ×. (The base card rule is
+    # scoped to the .odec root class — the first `.odec {` block in the injected styles.)
+    card_rule = re.search(r"\.odec\s*\{([^}]+)\}", js)
     assert card_rule and "position: relative" in card_rule.group(1), \
         "the card must be position:relative to anchor the absolutely-positioned ×"
 

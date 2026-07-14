@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   OrwellElement kit — DEMO / verification render (issue #773).
-  Self-contained: instantiates EVERY kit primitive in EVERY state over a light
-  wallpaper at Full Glass + Frosted, for screenshot verification. NOT in app nav.
+  Self-contained: instantiates EVERY kit primitive in EVERY state, for screenshot
+  verification, across ALL THREE glass tiers via the fixed tier switcher (bottom-right):
+    • Frosted (default — the app default): body.theme-frosted, light wallpaper
+    • Glass (Full): body.theme-frosted.glass-full, light wallpaper + SVG refraction
+    • Flat: no tier class — the app's default DARK theme tokens + dark backdrop, so the
+      kit-less flat rendering is shown as it truly is in-app (the kit CSS is
+      theme-frosted-scoped by design; flat has no kit chrome).
+  Deep-linkable: #tier=frosted | #tier=glass | #tier=flat. NOT in app nav.
   Open at /static/element_kit_demo.html.
 -->
 <html lang="en">
@@ -10,6 +16,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OrwellElement kit — demo</title>
+  <!-- KIT-F-05 (2026-07-14 audit): load responsive-tokens.css BEFORE style.css exactly like
+       index.html does — it owns --tap-min and the whole coarse-pointer touch-floor system, so
+       without it this reference page cannot verify any real mobile tap-target behavior. -->
+  <link rel="stylesheet" href="/static/css/responsive-tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <style>
     /* This is a tall DOC/demo page, not the app shell. The app's style.css clamps
@@ -79,13 +89,72 @@
     .ek-wins .og-card { position: static !important; display: block !important; width: 280px; }
     #ek-notices .on-card, #ek-chathint .on-card, #ek-chathint .orwell-chat-hint {
       position: static !important; inset: auto !important; transform: none !important; margin: 0 !important; max-width: 100%; }
+
+    /* ── TIER SWITCHER (demo chrome, not app chrome) ─────────────────────────────
+       Fixed neutral colors so the toolbar itself stays legible on all three tiers
+       (light wallpaper AND the flat dark backdrop). Deep-linkable via #tier=…. */
+    #ek-tier {
+      position: fixed; right: 14px; bottom: 14px; z-index: 12000;
+      display: inline-flex; gap: 4px; padding: 5px;
+      background: rgba(24, 27, 33, 0.92); border: 1px solid rgba(255,255,255,.18);
+      border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
+      font-family: var(--ow-ui-font);
+    }
+    #ek-tier button {
+      appearance: none; border: none; cursor: pointer;
+      padding: 7px 14px; border-radius: 999px;
+      background: transparent; color: #e8ecf2;
+      font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .01em;
+    }
+    #ek-tier button:hover { background: rgba(255,255,255,.12); }
+    #ek-tier button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+    #ek-tier button.ek-tier-on { background: #0a84ff; color: #fff; }
+    /* The fixed switcher must never occlude the last section's controls on a phone —
+       reserve scroll room past the content for it (it is ~44px tall + 14px inset). */
+    @media (max-width: 768px) { .ek-page { padding-bottom: 140px; } }
+
+    /* ── FLAT tier scaffolding (html/body get .ek-flat) ──────────────────────────
+       On flat the app's surfaces are dark --panel with light --fg — the light demo
+       wallpaper + the dark chrome-ink override would render flat as illegible
+       dark-on-dark over a light page (not representative). Swap in the app's default
+       DARK theme tokens + a dark backdrop.
+       DELIBERATE COPY — keep in sync with js/theme.js THEMES.dark (this page is
+       CSP-self-contained and cannot load theme.js). If the `dark` preset is ever
+       retuned, update these literals in the same change or this reference page
+       silently misrepresents the real in-app flat rendering (same copy-is-tripwire
+       convention as 0113's harness copies). Two more notes: --accent is deliberately
+       NOT set — theme.js never sets it either, so in-app it falls back to --red
+       exactly as it does here; and the app's #777-3 glassTierCeiling clamp is
+       deliberately NOT applied — this page must render all three tiers on demand
+       even on a constrained device, where the real app would cap Glass to Frosted. */
+    html.ek-flat, body.ek-flat {
+      background: #282c34 !important;   /* the flat app --bg, full-bleed */
+    }
+    body.ek-flat #__wp { background: #282c34; }
+    body.ek-flat {
+      --bg: #282c34; --fg: #9cdef2; --panel: #111111; --border: #355a66; --red: #e06c75;
+    }
+    /* flat: undo the glass-surface dark-ink simulation — the app's flat ink is light --fg */
+    body.ek-flat .ek-page { --fg: #9cdef2; }
+    /* flat: the demo section cards read as the app's flat panels, not glass slabs */
+    body.ek-flat .ek-card {
+      background: var(--panel, #111);
+      -webkit-backdrop-filter: none; backdrop-filter: none;
+      border: 1px solid var(--border, #355a66);
+      box-shadow: none;
+    }
   </style>
 </head>
-<body class="theme-frosted glass-full">
+<body class="theme-frosted">
   <div id="__wp"></div>
+  <div id="ek-tier" role="group" aria-label="Glass tier">
+    <button type="button" data-tier="frosted" aria-pressed="false">Frosted</button>
+    <button type="button" data-tier="glass" aria-pressed="false">Glass</button>
+    <button type="button" data-tier="flat" aria-pressed="false">Flat</button>
+  </div>
   <div class="ek-page">
     <h1 class="ek-h1">Orwell kit reference</h1>
-    <p class="ek-sub">Every kit surface — atomic ELEMENTS + the COMPOSITE kits (windows / notices / gadget / decision) · Full Glass + Frosted · over a light wallpaper (#773)</p>
+    <p class="ek-sub">Every kit surface — atomic ELEMENTS + the COMPOSITE kits (windows / notices / gadget / decision) · Frosted / Full Glass / Flat via the tier switcher (#773)</p>
     <h2 class="ek-section-h">Atomic elements — OrwellElement (.ow-* / .ow-btn)</h2>
 
     <!-- BUTTONS -->
@@ -273,25 +342,32 @@
     <!-- DECISION (OrwellDecision kit) -->
     <section class="ek-card">
       <h2>Decision — OrwellDecision (.odec-*)</h2>
-      <p class="ek-note">The decision card the kit renders above the composer: prompt + selectable option buttons + a confirm action + an instruction note. (Static composition of the kit's <code>.odec-*</code> classes — the live card is driven by game state.)</p>
-      <div id="orwell-decision-card" role="form" aria-label="Cast your eviction vote">
-        <div class="odec-head"><span class="odec-title">Cast your eviction vote</span></div>
-        <p class="odec-prompt">Two houseguests are on the block. Choose who you want to send home this week.</p>
+      <p class="ek-note">The decision card the kit renders above the composer: prompt + selectable option buttons + a confirm action + an instruction note. Static composition of the kit's <code>.odec</code> root class + <code>.odec-*</code> internals with the REAL button classes the live card composes (<code>ow-btn ow-btn-prominent</code>); the structural CSS is injected by <code>orwellDecision.js</code> via <code>window.OrwellDecisionStyles.ensureStyles()</code>. Low-stakes example: a comp-intent (the live eviction vote is a HIGH-STAKES kind and wears the risk skin — see the second card).</p>
+      <div id="orwell-decision-card" class="odec" role="form" aria-label="Competition — set your approach">
+        <div class="odec-head"><span class="odec-title">Competition — set your approach</span></div>
+        <p class="odec-prompt">How will you play this competition? Declare your intent before it starts — you can’t change it once the comp is underway.</p>
         <div class="odec-opts">
-          <button class="odec-opt" type="button" aria-pressed="false">Nominee A</button>
-          <button class="odec-opt" type="button" aria-pressed="true">Nominee B</button>
+          <button class="ow-btn ow-btn-prominent odec-opt" type="button" aria-pressed="true">compete</button>
+          <button class="ow-btn ow-btn-prominent odec-opt" type="button" aria-pressed="false">throw</button>
+          <button class="ow-btn ow-btn-prominent odec-opt" type="button" aria-pressed="false">play-safe</button>
         </div>
         <div class="odec-row">
-          <button class="odec-confirm" type="button">Lock in vote</button>
-          <span class="odec-note" id="orwell-decision-card-note">Your vote is secret. You can change it until you lock it in.</span>
+          <span class="odec-note" id="orwell-decision-card-note">This sets how you play the comp. Your selection only — make it with the buttons.</span>
+          <button class="ow-btn ow-btn-prominent odec-confirm" type="button">Lock in your approach</button>
         </div>
       </div>
-      <div class="ek-label" style="margin-top:14px">Risk variant (.odec-risk — binding / irreversible)</div>
-      <div id="ek-decision-risk" class="odec-risk" role="form" aria-label="Self-evict">
-        <div class="odec-head"><span class="odec-title">Use your power</span><span class="odec-risk-badge" role="note">⚠ Irreversible — binding</span></div>
-        <p class="odec-prompt">This action is binding and cannot be undone.</p>
-        <div class="odec-opts"><button class="odec-opt" type="button" aria-pressed="true">Confirm choice</button></div>
-        <div class="odec-row"><button class="odec-confirm" type="button">Confirm</button><span class="odec-note">There is no taking this back.</span></div>
+      <div class="ek-label" style="margin-top:14px">Risk variant (.odec-risk — a high-stakes, binding / irreversible kind, e.g. the eviction vote)</div>
+      <div id="ek-decision-risk" class="odec odec-risk" role="form" aria-label="Eviction — cast your vote — Irreversible, binding">
+        <div class="odec-head"><span class="odec-title">Eviction — cast your vote</span><span class="odec-risk-badge" role="note">⚠ Irreversible — binding</span></div>
+        <p class="odec-prompt">Two houseguests are on the block. Choose who you want to send home this week.</p>
+        <div class="odec-opts">
+          <button class="ow-btn ow-btn-prominent odec-opt" type="button" aria-pressed="false">Nominee A</button>
+          <button class="ow-btn ow-btn-prominent odec-opt" type="button" aria-pressed="true">Nominee B</button>
+        </div>
+        <div class="odec-row">
+          <span class="odec-note">Once you confirm, it’s locked in and plays out — there’s no taking it back.</span>
+          <button class="ow-btn ow-btn-prominent odec-confirm" type="button">Confirm — this is binding</button>
+        </div>
       </div>
     </section>
   </div>
@@ -308,12 +384,22 @@
     .ek-traffic-hot .ow-min, .ek-traffic-hot .ow-close { opacity: 1 !important; }
   </style>
 
+  <!-- The tier switcher logic lives in the demo driver (orwellElements.js) — the app serves
+       /static with a CSP that refuses inline scripts (script-src 'self'), so no inline JS here.
+       It sets the body tier classes, mirrors .ek-flat onto <html> for the full-bleed backdrop,
+       and nudges the SVG-refraction layer (OrwellLiquidGlass.refresh) on a tier change. -->
+
   <!-- The COMPOSITE kits + their deps (same files index.html loads), then the demo driver. -->
   <script type="module" src="/static/js/orwellSlots.js"></script>
   <script type="module" src="/static/js/orwellWindow.js"></script>
   <script src="/static/js/orwellGadgetRail.js"></script>
   <script src="/static/js/orwellGadget.js"></script>
   <script src="/static/js/orwellNotice.js"></script>
+  <!-- The decision kit: its ensureStyles() injects ALL the .odec-* structural CSS (scoped to
+       the .odec root class) that the static Decision cards above compose; the demo driver
+       (orwellElements.js) calls window.OrwellDecisionStyles.ensureStyles(). Fail-open: its live
+       pending/poll seams are inert here (the static card occupies the CARD_ID slot). -->
+  <script src="/static/js/orwellDecision.js"></script>
   <!-- The real SVG-refraction layer: it generates the #owlg-thumb concave lip-bezel
        filter the .ow-switch / .ow-slider knobs reference at body.glass-full, so the
        switches render as LIQUID GLASS (Chromium-only progressive enhancement; the CSS
