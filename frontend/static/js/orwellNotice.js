@@ -247,6 +247,15 @@
       "  box-shadow: 0 2px 10px rgba(0,0,0,.4); text-align: center;" +
       "  padding: .5rem 2.2rem .5rem .8rem; }" +   // room for the corner × on the right
       "#" + BANNER_ID + " .on-card .on-head { padding-right: 0; justify-content: center; align-items: center; }" +
+      // BANNER-ONLY dismiss centering: the base .on-dismiss pins `top: .15rem`, which centers a
+      // 44px-tall button in a tall stacked card but rides ~5px BELOW the centerline of the thin
+      // (~38px) banner band (measured: top 2.4px → glyph center +5.4px off the band center).
+      // Center the button's 44px box on the band's own midline instead — `calc(50% - 22px)` (half
+      // the 44px min-height), NOT a transform (the frosted quiet-dismiss rule in style.css sets
+      // `transform: none !important` and would undo a translateY). The ≥44px hit area is fully
+      // preserved; the box just overflows the band symmetrically (~3px each side). Scoped to the
+      // banner host id so the stacked notice cards / toasts keep their corner placement.
+      "#" + BANNER_ID + " .on-card .on-dismiss { top: calc(50% - 22px); }" +
       // Desktop: the banner respects the SAME side gutters the floating sidebar/dock do
       // (those float inset at left/right: 10px). So instead of bleeding true edge-to-edge,
       // inset the banner host by 10px on both sides and re-round / re-border the now-detached
