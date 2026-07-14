@@ -99,6 +99,9 @@ def test_seeded_entry_numbers_and_cost_total(monkeypatch, tmp_ledger):
     assert summ["totalCost"] == pytest.approx(0.0123)
     assert summ["latestContextPercent"] == pytest.approx(42.5)
     assert summ["turns"] == 1
+    # Cost-observability: the DERIVED cache-hit rate = cachedTokens / inputTokens (300 / 1200).
+    assert summ["cachedTokens"] == 300
+    assert summ["cacheHitRate"] == pytest.approx(0.25)
 
 
 # ── (3) the soft alert flips true below the accumulated cost ─────────────────────────────────

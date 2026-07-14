@@ -630,6 +630,15 @@ def _token_economy(user: str | None) -> dict:
             pass
     if entries:
         summary["latestContextPercent"] = entries[-1].get("contextPercent")
+    # Cost-observability: the DERIVED prompt-cache hit rate (feature 0069 / cost lane). The raw
+    # cachedTokens are already tracked per turn (OpenRouter usage.prompt_tokens_details.cached_tokens),
+    # but the operator had no at-a-glance measure of how well provider prompt-caching is actually
+    # landing. cachedTokens is the cached SUBSET of inputTokens (== usage.prompt_tokens, cached
+    # inclusive), so the fraction is well-defined in [0,1]; null when there is no input yet (avoids a
+    # divide-by-zero and reads as "no data" rather than a fake 0%). Vault-free scalar — pure arithmetic
+    # over two Vault-free counters. This is the meter you watch when tuning the cacheable prefix.
+    _inp = summary["inputTokens"]
+    summary["cacheHitRate"] = round(summary["cachedTokens"] / _inp, 4) if _inp > 0 else None
     out["summary"] = summary
     return out
 
