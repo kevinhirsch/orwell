@@ -47,12 +47,18 @@ def test_casting_pill_carries_take_your_cast_photo():
 
 def test_premiere_carries_the_champagne_toast_register():
     # CHAMPAGNE CIRCLE (0111): the premiere surfaces speak the move-in / champagne-toast register, not the
-    # retired "Meet the house" checklist framing (the whole house is met at the toast).
-    tut = _read("static/js/orwellPremiereTutorial.js")
-    assert "champagne toast" in tut
-    assert "Meet the house" not in tut  # the retired premiere verb must be gone
-    panel = _read("static/js/orwellStatusPanel.js")
-    assert "Move-in night" in panel     # the premiere objective row speaks the same register
+    # retired "Meet the house" checklist framing (the whole house is met at the toast). The retired-verb
+    # check is scoped to RENDER sites (textContent/innerHTML) — a comment mentioning "Meet the house" (its
+    # own history) must not fail this gate.
+    import re
+    def renders(rel):
+        return "".join(re.findall(r"(?:textContent|innerHTML)\s*[+=]=?\s*[^;]+;", _read(rel)))
+    tut = renders("static/js/orwellPremiereTutorial.js")
+    panel = renders("static/js/orwellStatusPanel.js")
+    assert "champagne toast" in tut          # the tutorial speaks the champagne-toast register
+    assert "Move-in night" in panel          # the premiere objective row speaks the same register
+    # the retired premiere verb must be gone from what the surfaces actually RENDER (comments may keep it)
+    assert "Meet the house" not in tut
     assert "Meet the house" not in panel
 
 

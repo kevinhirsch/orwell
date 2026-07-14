@@ -4300,9 +4300,14 @@ export class GameSessionAdapter implements GameSession {
   /**
    * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
    * answer to "who's met, who's still to introduce?". Only ACTIVE NPCs count (the cast at move-in);
-   * the player is implicitly met (counted in `metCount`/`total`), so `total` is the whole cast. The
-   * narrator reads `remaining` to drive the next introduction; `complete` is the structural gate the
-   * first HOH waits on. `null` outside the premiere.
+   * the player is implicitly met (counted in `metCount`/`total`), so `total` is the whole cast. `null`
+   * outside the premiere.
+   *
+   * CHAMPAGNE CIRCLE (owner ruling 2026-07-14): `premiereMet`/`premiereHotReads` are SEEDED at premiere
+   * entry (`meetWholeHouseAtChampagneCircle`) — the whole house is introduced at once at the toast, so
+   * during a live premiere every active NPC is already met: `remaining` is empty, `complete` is true, and
+   * `powerReachable` is true (the first HOH is ready the moment the toast is done — no manual roll-call).
+   * The narrator reads `met` (the whole cast) for the observable reads it voices at the circle.
    */
   premiereIntros(): PremiereIntrosView | null {
     this.clearPremiereIfOver();
@@ -4340,10 +4345,14 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * Mark a houseguest as introduced/met during the premiere (feature #380 follow-on). The structural
-   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for an
-   * unknown houseguest, the player (auto-met), an evicted/departed seat, or once the premiere is over.
-   * Persists (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
+   * Mark a houseguest as introduced/met during the premiere (feature #380 follow-on).
+   *
+   * CHAMPAGNE CIRCLE (owner ruling 2026-07-14): the whole house is met at the toast at premiere entry
+   * (`meetWholeHouseAtChampagneCircle`), so this is no longer the PRIMARY tracker — it is now an
+   * idempotent BACKSTOP (the model or the FE name-belt may still call it, but every active NPC is already
+   * met, so it is a no-op in the normal flow). Still a no-op for an unknown houseguest, the player
+   * (auto-met), an evicted/departed seat, or once the premiere is over. Persists only on a real change
+   * (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
    */
   markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null {
     this.clearPremiereIfOver();

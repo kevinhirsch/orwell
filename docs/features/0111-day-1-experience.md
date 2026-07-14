@@ -123,9 +123,13 @@ These are a mix of **FE framing** (prompts/flow — the model voices; never engi
 path or a new outcome authority.
 
 - **`src/engine/momentPrompts.ts`** — the **casting prompt** (Pillar 1) steers to self-belief/tells over a
-  declared kill-list; the **premiere/meet moment** (Pillar 3) frames asymmetric first reads + "stragglers in
-  motion"; the **curiosity needle** (Pillar 2) is a Vault-free producer line sourced only from public/seeded
-  framing. These are *facts handed to the model to voice*, never scripts.
+  declared kill-list; the **premiere/meet moment** (Pillar 3) frames the **champagne circle** — production
+  convenes the whole house for a champagne toast and everyone is introduced at once (the engine records the
+  meetings deterministically via `meetWholeHouseAtChampagneCircle`; the model does NOT drive progressive
+  `markHouseguestMet`, there are no stragglers to chase, and the model still *narrates* the toast); the
+  **curiosity needle** (Pillar 2) is a Vault-free producer line sourced only from public/seeded framing.
+  These are *facts handed to the model to voice*, never scripts. The first HOH stays a real, un-rigged,
+  seeded `runCompetition`.
 - **`frontend/routes/chat_helpers.py` (`apply_game_framing`) + `frontend/src/agent_loop.py`** — carry the
   Pillar-1 casting reframe and the Pillar-2 needle into the live framing; the Pillar-4 beat rides the
   existing `_auto_record_scene` (0055) error-correction so the early beat **always folds** even if the model

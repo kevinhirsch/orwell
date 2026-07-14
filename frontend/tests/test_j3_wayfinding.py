@@ -27,6 +27,22 @@ def _panel() -> str:
         return f.read()
 
 
+def _fn_body(src: str, name: str) -> str:
+    """Slice a top-level `function name(...) { ... }` by brace-matching from its signature — the real
+    function boundary, not a fixed-width window (which would let moved logic pass while the UI regresses)."""
+    start = src.index("function " + name + "(")
+    i = src.index("{", start)
+    depth = 0
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : j + 1]
+    raise AssertionError("unterminated function " + name)
+
+
 # ── J3-07 / J3-08 — the premiere objective + "X of N met" counter in the panel ── #
 
 def test_premiere_progress_is_rendered_from_state():
@@ -44,7 +60,7 @@ def test_premiere_shows_no_progress_count_or_still_to_meet_checklist():
     # the premiere gadget is now a pure cast ROSTER — NO "X of 15 met" counter and NO "still to meet"
     # checklist. Pin that the removed tracker copy is gone from the renderer.
     src = _panel()
-    body = src[src.index("function renderPremiere("): src.index("function renderPremiere(") + 1400]
+    body = _fn_body(src, "renderPremiere")
     assert "met + \" of \" + total + \" met\"" not in body, "the X-of-15 counter must be gone"
     assert "Still to meet:" not in body, "the still-to-meet checklist must be gone"
     # the count/left elements are emptied/hidden, not populated (they stay in the DOM but carry no tracker)
@@ -57,7 +73,7 @@ def test_premiere_progress_shown_throughout_the_premiere_not_gated_on_complete()
     # of `complete` (everyone is met at the toast, so complete is always true during the premiere). It hides
     # the instant the first HOH begins (the engine drops the `premiere` field ⇒ the `!prem` guard fires).
     src = _panel()
-    body = src[src.index("function renderPremiere("): src.index("function renderPremiere(") + 1400]
+    body = _fn_body(src, "renderPremiere")
     assert "prem.complete" not in body, "the premiere block must NOT gate on complete anymore"
     assert "!prem || typeof prem !== \"object\"" in body
     assert "wrap.hidden = true" in body
@@ -66,7 +82,7 @@ def test_premiere_progress_shown_throughout_the_premiere_not_gated_on_complete()
 def test_premiere_renders_the_cast_roster_strip():
     # The premiere gadget's only content is now the sixteen-tile cast roster strip (color, not a tracker).
     src = _panel()
-    body = src[src.index("function renderPremiere("): src.index("function renderPremiere(") + 1400]
+    body = _fn_body(src, "renderPremiere")
     assert "renderPremiereStrip(el, state)" in body
     assert 'id="os-prem-left"' in src  # the (now-hidden) element still exists in the markup
 
@@ -75,7 +91,7 @@ def test_premiere_progress_is_vault_free():
     # Public facets only: the render touches premiere counts + houseguest NAMES, never a hidden stat,
     # soul, or relationship field.
     src = _panel()
-    body = src[src.index("function renderPremiere("): src.index("function renderPremiere(") + 1400]
+    body = _fn_body(src, "renderPremiere")
     import re
     accessed = set(re.findall(r"\.(\w+)", body))
     leaky = {"trust", "affinity", "threat", "stats", "physical", "mental", "social",
