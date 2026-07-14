@@ -22344,6 +22344,394 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
 
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */
+/* ║  ── ELEMENT KIT: NORMAL (FLAT) TIER ──  (2026-07-14 theme audit, §3,      ║ */
+/* ║  KIT-N-01..10)                                                            ║ */
+/* ║  Every rule in the ELEMENT KIT block above is `body.theme-frosted`-scoped ║ */
+/* ║  — on Normal (neither `.theme-frosted` nor `.glass-full`, which always     ║ */
+/* ║  rides ON TOP of `.theme-frosted`) every kit-classed control fell through  ║ */
+/* ║  to the bare app-wide reset (`input,textarea,button,select{...}` ~L1870), ║ */
+/* ║  so all five `.ow-btn` variants rendered pixel-identical, `.ow-switch`     ║ */
+/* ║  structurally collapsed to a bare 13px checkbox, and `.ow-select` went     ║ */
+/* ║  native dark-on-dark again (the exact bug the class exists to fix).       ║ */
+/* ║  This section authors the SAME primitives — identical geometry/type/     ║ */
+/* ║  focus/tap contract as frosted — but SOLID theme-token fills and NO       ║ */
+/* ║  blur/backdrop-filter, mirroring the cross-tier `.og-card` pattern         ║ */
+/* ║  (`color-mix(--panel)` + `var(--fg)`, no frosted gate) that already works  ║ */
+/* ║  coherently on every tier. Unlike the frosted kit — which needs a FIXED    ║ */
+/* ║  neutral ink because glass sits ambiguously across themes (§0 of the      ║ */
+/* ║  audit) — Flat has no such ambiguity: the theme's OWN `--panel`/`--fg`/    ║ */
+/* ║  `--border` already read correctly against the Flat `--bg`, so this       ║ */
+/* ║  section composes those tokens directly instead of a fixed dark ink.      ║ */
+/* ╚══════════════════════════════════════════════════════════════════════════╝ */
+body:not(.theme-frosted) {
+  /* Flat-tier control tokens, scoped so they never leak onto frosted/glass. */
+  --own-flat-fill: color-mix(in srgb, var(--panel, #111) 85%, var(--fg, #fff) 4%);
+  --own-flat-fill-hover: color-mix(in srgb, var(--panel, #111) 74%, var(--fg, #fff) 9%);
+  --own-flat-fill-strong: color-mix(in srgb, var(--panel, #111) 52%, var(--fg, #fff) 22%);
+  --own-flat-border: var(--border, #355a66);
+  --own-flat-border-strong: color-mix(in srgb, var(--fg, #fff) 45%, var(--border, #355a66));
+}
+
+/* ── BUTTON: .ow-btn + the five variants (KIT-N-01) ──────────────────────────── */
+body:not(.theme-frosted) .ow-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--ow-space-2, 8px);
+  min-height: var(--ow-tap-min, 44px); padding: var(--ow-space-2, 8px) var(--ow-space-4, 16px);
+  border-radius: var(--ow-btn-radius, 999px);
+  border: 1px solid var(--own-flat-border);
+  background-color: var(--own-flat-fill);
+  color: var(--fg);
+  font-family: var(--ow-ui-font); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background-color .15s ease, border-color .15s ease,
+              transform .14s cubic-bezier(.34,1.56,.64,1), filter .15s ease, opacity .15s ease;
+}
+/* SECONDARY — the standard action: a bit more filled than the bare base. */
+body:not(.theme-frosted) .ow-btn-secondary {
+  background-color: var(--own-flat-fill-hover);
+  border-color: var(--own-flat-border);
+}
+/* PLAIN — borderless / low-emphasis text action. */
+body:not(.theme-frosted) .ow-btn-plain {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+/* DESTRUCTIVE — solid system-red fill + legible on-red ink (HIG role). */
+body:not(.theme-frosted) .ow-btn-destructive {
+  background-color: var(--ow-danger, #ff453a);
+  border-color: color-mix(in srgb, #000 16%, var(--ow-danger, #ff453a));
+  color: var(--ow-on-danger, #fff);
+}
+body:not(.theme-frosted) .ow-btn-destructive.ow-btn-destructive-solid {
+  background-color: var(--ow-danger, #ff453a);
+  border-color: color-mix(in srgb, #000 20%, var(--ow-danger, #ff453a));
+}
+/* PROMINENT — the single default action: the STRONGEST fill + STRONGEST border in
+   the set (mirrors frosted's "primary reads first" hierarchy, KIT-F-02's fix). */
+body:not(.theme-frosted) .ow-btn-prominent {
+  background-color: var(--own-flat-fill-strong);
+  border-color: var(--own-flat-border-strong);
+  border-width: 1.5px;
+  color: var(--fg);
+  font-weight: var(--ow-fw-semibold, 600);
+}
+/* ICON — circular icon-only disc. */
+body:not(.theme-frosted) .ow-btn-icon {
+  min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
+  background-color: var(--own-flat-fill-hover);
+}
+/* STATES — same contract as frosted: hover lift, iOS press dim+scale, system-blue
+   focus ring, a clear (opaque) disabled state. */
+body:not(.theme-frosted) .ow-btn:hover {
+  background-color: var(--own-flat-fill-hover);
+  transform: translateY(-1px);
+}
+body:not(.theme-frosted) .ow-btn-prominent:hover {
+  background-color: color-mix(in srgb, var(--own-flat-fill-strong) 88%, var(--fg, #fff) 6%);
+}
+body:not(.theme-frosted) .ow-btn-plain:hover {
+  background: color-mix(in srgb, var(--fg, #fff) 7%, transparent);
+  transform: none;
+}
+body:not(.theme-frosted) .ow-btn-destructive:hover { filter: brightness(1.08); }
+body:not(.theme-frosted) .ow-btn:active {
+  transform: translateY(0) scale(0.97);
+  filter: brightness(0.94);
+  transition-duration: .08s;
+}
+body:not(.theme-frosted) .ow-btn:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+/* Disabled — the SAME opaque philosophy KIT-OV-2 unified frosted onto (never
+   opacity-only): a flat muted fill + muted ink, both drawn from the theme tokens
+   (frosted's fixed #d6d6d9/#57575c were tuned for glass-over-any-backdrop; Flat's own
+   --panel/--border/--fg already give a legible, theme-adaptive muted pair). */
+body:not(.theme-frosted) .ow-btn:disabled,
+body:not(.theme-frosted) .ow-btn[disabled],
+body:not(.theme-frosted) .ow-btn[aria-disabled="true"],
+body:not(.theme-frosted) .ow-btn.is-disabled {
+  opacity: 1;
+  background-color: var(--own-flat-fill);
+  color: color-mix(in srgb, var(--fg, #fff) 40%, var(--panel, #111));
+  border-color: var(--own-flat-border);
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: none;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  body:not(.theme-frosted) .ow-btn { transition: background-color .15s ease, filter .15s ease; }
+  body:not(.theme-frosted) .ow-btn:hover,
+  body:not(.theme-frosted) .ow-btn:active { transform: none; }
+}
+
+/* ── FIELD: .ow-field (solid --panel-mix fill, --border rim, --fg ink) ───────── */
+body:not(.theme-frosted) .ow-field {
+  display: block;
+  width: 100%;
+  min-height: var(--ow-tap-min, 44px);
+  padding: var(--ow-space-2, 8px) var(--ow-space-3, 12px);
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--own-flat-border);
+  background-color: var(--own-flat-fill);
+  color: var(--fg);
+  font-family: var(--ow-ui-font);
+  font-size: var(--ow-fs-body, 0.875rem);
+  font-weight: var(--ow-fw-regular, 400);
+  box-shadow: none;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+body:not(.theme-frosted) textarea.ow-field { min-height: calc(var(--ow-tap-min, 44px) * 1.6); resize: vertical; line-height: 1.45; }
+body:not(.theme-frosted) .ow-field::placeholder {
+  color: color-mix(in srgb, var(--fg, #fff) 50%, transparent);
+  opacity: 1;
+}
+body:not(.theme-frosted) .ow-field:hover { border-color: var(--own-flat-border-strong); }
+body:not(.theme-frosted) .ow-field:focus,
+body:not(.theme-frosted) .ow-field:focus-visible {
+  outline: none;
+  border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: 0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 40%, transparent);
+}
+body:not(.theme-frosted) .ow-field[aria-invalid="true"],
+body:not(.theme-frosted) .ow-field.is-invalid { border-color: var(--ow-danger, #ff453a); }
+body:not(.theme-frosted) .ow-field[aria-invalid="true"]:focus,
+body:not(.theme-frosted) .ow-field.is-invalid:focus {
+  box-shadow: 0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-danger, #ff453a) 40%, transparent);
+}
+body:not(.theme-frosted) .ow-field:disabled,
+body:not(.theme-frosted) .ow-field.is-disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── SELECT: .ow-select — kills the native dark-on-dark <select> on Flat too    */
+/*    (KIT-N-04/05 — the exact admin-select bug the class exists to fix).       */
+body:not(.theme-frosted) select.ow-select {
+  -webkit-appearance: none; appearance: none;
+  min-height: var(--ow-tap-min, 44px);
+  padding: var(--ow-space-2, 8px) calc(var(--ow-space-5, 24px) + 10px) var(--ow-space-2, 8px) var(--ow-space-3, 12px);
+  border-radius: var(--ow-radius-inner, 12px);
+  border: 1px solid var(--own-flat-border);
+  background-color: var(--own-flat-fill);
+  color: var(--fg);
+  font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, 0.875rem); font-weight: var(--ow-fw-medium, 500);
+  cursor: pointer;
+  /* a neutral chevron (currentColor ink, no accent) */
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 16px center, right 11px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+body:not(.theme-frosted) select.ow-select:hover { border-color: var(--own-flat-border-strong); }
+body:not(.theme-frosted) select.ow-select:focus-visible {
+  outline: none; border-color: var(--ow-focus-ring, #0a84ff);
+  box-shadow: 0 0 0 var(--ow-focus-ring-w, 3px) color-mix(in srgb, var(--ow-focus-ring, #0a84ff) 40%, transparent);
+}
+body:not(.theme-frosted) select.ow-select option {
+  background-color: var(--select-option-bg, var(--panel, #111));
+  color: var(--select-option-fg, var(--fg, #fff));
+}
+body:not(.theme-frosted) select.ow-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── CHECKBOX / RADIO: .ow-check / .ow-radio (KIT-N-06) ──────────────────────── */
+body:not(.theme-frosted) .ow-check,
+body:not(.theme-frosted) .ow-radio {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; flex: 0 0 auto;
+  margin: 0; display: inline-grid; place-content: center;
+  border: 1.5px solid var(--own-flat-border);
+  background-color: var(--own-flat-fill);
+  cursor: pointer;
+  transition: background-color .14s ease, border-color .14s ease;
+}
+body:not(.theme-frosted) .ow-check { border-radius: 6px; }
+body:not(.theme-frosted) .ow-radio { border-radius: 50%; }
+body:not(.theme-frosted) .ow-check:hover,
+body:not(.theme-frosted) .ow-radio:hover { border-color: var(--own-flat-border-strong); }
+/* CHECKED → the same sanctioned system-blue fill + white glyph as frosted/glass —
+   never the theme's red accent (the check/switch accent is ALWAYS system blue). */
+body:not(.theme-frosted) .ow-check:checked,
+body:not(.theme-frosted) .ow-radio:checked {
+  background-color: var(--ow-ios-blue, #0a84ff);
+  border-color: var(--ow-ios-blue, #0a84ff);
+}
+body:not(.theme-frosted) .ow-check:checked::before {
+  content: "";
+  width: 11px; height: 11px;
+  background: #fff;
+  clip-path: polygon(41% 67%, 14% 42%, 4% 53%, 41% 88%, 96% 22%, 85% 12%);
+}
+body:not(.theme-frosted) .ow-radio:checked::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff;
+}
+body:not(.theme-frosted) .ow-check:focus-visible,
+body:not(.theme-frosted) .ow-radio:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+body:not(.theme-frosted) .ow-check:disabled,
+body:not(.theme-frosted) .ow-radio:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── SWITCH: .ow-switch — fixes the structural collapse (KIT-N-02) ───────────── */
+/* On Flat every rule below was frosted-scoped, so `.ow-switch` fell through to a
+   bare 13x13px native checkbox beside a zero-width `.ow-switch-track` span — no
+   toggle affordance at all. Same 51x31 geometry as frosted; a solid track + a solid
+   white knob, no glass/blur. */
+body:not(.theme-frosted) .ow-switch {
+  position: relative; display: inline-flex; align-items: center;
+  width: 51px; height: 31px; flex: 0 0 auto; cursor: pointer;
+  vertical-align: middle;
+}
+body:not(.theme-frosted) .ow-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+body:not(.theme-frosted) .ow-switch .ow-switch-track {
+  position: absolute; inset: 0; border-radius: 999px;
+  background-color: color-mix(in srgb, var(--border, #355a66) 88%, var(--fg, #fff) 6%);
+  transition: background-color .2s ease;
+}
+body:not(.theme-frosted) .ow-switch .ow-switch-track::before {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 27px; height: 27px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.32);
+  transition: transform .2s cubic-bezier(.34,1.4,.64,1);
+}
+body:not(.theme-frosted) .ow-switch input:checked + .ow-switch-track {
+  background-color: var(--ow-ios-blue, #0a84ff);
+}
+body:not(.theme-frosted) .ow-switch input:checked + .ow-switch-track::before { transform: translateX(20px); }
+body:not(.theme-frosted) .ow-switch input:focus-visible + .ow-switch-track {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+body:not(.theme-frosted) .ow-switch input:disabled + .ow-switch-track { opacity: 0.45; }
+body:not(.theme-frosted) .ow-switch input:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  body:not(.theme-frosted) .ow-switch .ow-switch-track,
+  body:not(.theme-frosted) .ow-switch .ow-switch-track::before { transition: none; }
+}
+
+/* ── GROUPED BUTTONS: .ow-btn-group (KIT-N-09) ────────────────────────────────── */
+/* A solid capsule wrapper (no shared-glass-sample concern on Flat — there's no
+   glass to sample); members square off, the group owns the outer capsule corners. */
+body:not(.theme-frosted) .ow-btn-group {
+  display: inline-flex; align-items: stretch;
+  border-radius: var(--ow-radius-pill, 9999px);
+  border: 1px solid var(--own-flat-border);
+  overflow: hidden;
+}
+body:not(.theme-frosted) .ow-btn-group > .ow-btn {
+  border-radius: 0;
+  border-width: 0;
+  box-shadow: none;
+}
+body:not(.theme-frosted) .ow-btn-group > .ow-btn + .ow-btn {
+  box-shadow: inset 1px 0 0 var(--own-flat-border);
+}
+body:not(.theme-frosted) .ow-btn-group > .ow-btn:first-child {
+  border-top-left-radius: var(--ow-radius-pill, 9999px);
+  border-bottom-left-radius: var(--ow-radius-pill, 9999px);
+}
+body:not(.theme-frosted) .ow-btn-group > .ow-btn:last-child {
+  border-top-right-radius: var(--ow-radius-pill, 9999px);
+  border-bottom-right-radius: var(--ow-radius-pill, 9999px);
+}
+
+/* ── WINDOW CONTROLS: .ow-controls traffic lights (KIT-N-08) ─────────────────── */
+/* Flat fell back to the kit's own pre-frosted 24x32px rectangles with literal
+   "-"/"x" glyphs — no window-control identity. Same 12px colored-disc stoplight
+   semantics as frosted (red=close, yellow=minimize, green=dock), just theme-token
+   colored glyphs/rims instead of the fixed dark-on-light chrome ink (Flat's
+   titlebar is the theme's own --panel, typically dark, so the glyph needs to be
+   LIGHT — the opposite polarity from frosted's light glass). */
+body:not(.theme-frosted) .ow-controls .ow-close,
+body:not(.theme-frosted) .ow-controls .ow-min,
+body:not(.theme-frosted) .ow-controls .ow-dock {
+  width: 12px; height: 12px; min-width: 12px; min-height: 12px;
+  border-radius: 50%; padding: 0; opacity: 1;
+  border: 0.5px solid color-mix(in srgb, var(--fg, #fff) 25%, transparent);
+  box-shadow: none;
+  font-size: 0; line-height: 12px; text-indent: 0;
+  position: relative;
+}
+body:not(.theme-frosted) .ow-controls .ow-close::before { content: "\00d7"; }
+body:not(.theme-frosted) .ow-controls .ow-min::before   { content: "\2212"; }
+body:not(.theme-frosted) .ow-controls .ow-dock::before        { content: "\2913"; }
+body:not(.theme-frosted) .ow-window.ow-docked
+  .ow-controls .ow-dock::before                          { content: "\2912"; }
+body:not(.theme-frosted) .ow-controls .ow-close::before,
+body:not(.theme-frosted) .ow-controls .ow-min::before,
+body:not(.theme-frosted) .ow-controls .ow-dock::before {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; line-height: 1; color: transparent; pointer-events: none;
+}
+body:not(.theme-frosted) .ow-controls .ow-dock::before { font-size: 10px; }
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-close::before,
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-min::before,
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-dock::before,
+body:not(.theme-frosted) .ow-controls button:focus-visible::before {
+  color: color-mix(in srgb, var(--fg, #fff) 75%, transparent);
+}
+body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-close { background: #ff5f57; }
+body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-min   { background: #febc2e; }
+body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-dock  { background: #28c840; }
+body:not(.theme-frosted) .ow-window:not(.ow-focused) .ow-controls .ow-close,
+body:not(.theme-frosted) .ow-window:not(.ow-focused) .ow-controls .ow-min,
+body:not(.theme-frosted) .ow-window:not(.ow-focused) .ow-controls .ow-dock {
+  background: color-mix(in srgb, var(--fg, #fff) 26%, transparent);
+}
+body:not(.theme-frosted) .ow-controls .ow-close:focus-visible,
+body:not(.theme-frosted) .ow-controls .ow-min:focus-visible,
+body:not(.theme-frosted) .ow-controls .ow-dock:focus-visible {
+  outline: 2px solid var(--ow-ios-blue, #0a84ff);
+  outline-offset: 2px;
+}
+body:not(.theme-frosted) .ow-controls button:hover { transform: none; box-shadow: none; }
+
+/* ── KIT-N-10: ONE shared surface radius for window/gadget/notice on Flat ────── */
+/* Windows/gadgets/notices already share the 26px `--ow-radius` family on
+   frosted/glass (body.theme-frosted's `--ow-glass-radius` override, ~L20752); on
+   Flat they fell back to three DIFFERENT legacy radii (.og-card 10px, .on-card
+   12px, .ow-window whatever the kit runtime's own base is) — one surface family
+   became three. `--ow-radius` (26px) is already an UNSCOPED :root token (~L57), so
+   this reuses the SAME value, not a new magic number. */
+body:not(.theme-frosted) .ow-window,
+body:not(.theme-frosted) .og-card,
+body:not(.theme-frosted) .on-card {
+  border-radius: var(--ow-radius, 26px) !important;
+}
+body:not(.theme-frosted) .ow-window .ow-titlebar {
+  border-radius: var(--ow-radius, 26px) var(--ow-radius, 26px) 0 0 !important;
+}
+
+/* ── SET-07: Flat nav-rail ACTIVE label drops the accent-red hue ─────────────── */
+/* Frosted/glass got the system-blue filled-capsule fix (~L21640); Flat never did,
+   so `.settings-nav-item.active` still read `color: var(--red)` (invisible today
+   only because the default theme's --red is desaturated) — mirror the SAME
+   filled-capsule, white-label treatment here. */
+body:not(.theme-frosted) .settings-nav-item.active {
+  background: #0a5cc4;
+  color: #fff;
+}
+body:not(.theme-frosted) .settings-nav-item.active svg { opacity: 1; color: #fff; }
+
+/* ── SET-08: every legacy toggle family's ON track is system blue on Flat too ── */
+/* The frosted fix (~L21571) patched .toggle/.vis-switch/.admin-switch/
+   .toggle-switch/.cookbook-checkbox onto the sanctioned system blue and never
+   extended to Flat — same selector list, same !important (some of these tracks
+   carry their own more-specific hover/checked overrides elsewhere). */
+body:not(.theme-frosted) .toggle input:checked + .slider,
+body:not(.theme-frosted) .vis-row input:checked + .vis-switch,
+body:not(.theme-frosted) .admin-switch input:checked + .admin-slider,
+body:not(.theme-frosted) .toggle-switch input:checked + .toggle-slider,
+body:not(.theme-frosted) .cookbook-checkbox:checked {
+  background: var(--ow-ios-blue, #0a84ff) !important;
+}
+/* ── END ELEMENT KIT: NORMAL (FLAT) TIER ──────────────────────────────────────── */
+
+/* ╔══════════════════════════════════════════════════════════════════════════╗ */
 /* ║  ── ADMIN GLASS RESKIN ──  (issue #765)                                    ║ */
 /* ║  Folds the admin / health / status / deployment / reset surfaces onto the  ║ */
 /* ║  Liquid-Glass element kit. The .admin-card material, dark legible ink, and  ║ */
