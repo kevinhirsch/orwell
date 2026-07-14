@@ -222,7 +222,9 @@ async function handshake(hasRunFirst, runId) {
 
     // W's subscribe resolves hasRun:false (W was already finished) → clears the tail. The orphan-drain
     // must now attach the queued live run M (pre-fix: M is orphaned and NEVER subscribed → the flake).
-    down({ t: "ack", ch: "chat", cid: subW.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false, runId: "W" } });
+    // Contract-valid: a `hasRun:false` ack carries NO runId (W's provisional id was already recorded by
+    // `_onRunStarted("W")`), so the pending-run drain is still exercised without an off-contract field.
+    down({ t: "ack", ch: "chat", cid: subW.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
     await tick();
     assert(chatSubs().length === base + 2,
       "the orphaned pending run M must attach after the hasRun:false ack drains it; got " + chatSubs().length);
@@ -289,5 +291,7 @@ def test_on_ack_drains_orphaned_pending_run():
     # the incremental renderer (the mirror-parity WS leg's `B incrementalStream=false`). Symmetric with
     # the chat-`done` drain.
     on_ack = WS.split("function _onAck")[1].split("\n  function ")[0]
-    assert "hasRun === false" in on_ack and "_drainPendingRun()" in on_ack, \
-        "a hasRun:false chat subscribe ack must drain an orphaned pending run (the WS mirror-parity orphan-drain)"
+    # Pin the drain to the hasRun:false BRANCH specifically (a same-line guarded call), not merely the
+    # co-occurrence of the two substrings anywhere in _onAck — so moving the drain out of this branch fails.
+    assert "hasRun === false) _drainPendingRun()" in on_ack, \
+        "a hasRun:false chat subscribe ack must drain an orphaned pending run IN THAT BRANCH (the WS mirror-parity orphan-drain)"
