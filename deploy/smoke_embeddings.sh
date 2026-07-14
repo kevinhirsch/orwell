@@ -51,7 +51,7 @@ classify_prefetch_outcome() {
   #     boilerplate error banner "...preFETCH FAILED:" that opens EVERY prefetch error message
   #     (that substring-collision would misclassify every real crash as benign — a silent #1590).
   if printf '%s' "$out" | grep -qiE \
-      "getaddrinfo|enotfound|eai_again|econnrefused|econnreset|etimedout|epipe|(^|[^a-z])fetch failed|network|socket hang up|could not resolve host|request to .* failed|dns|tls|certificate|self-signed|unable to (get|verify)|ssl|timed out|timeout|econnaborted|ehostunreach|enetunreach|status code 4|status code 5|http 4|http 5|429|403 forbidden|proxy|download failed|failed to download|no such host"; then
+      "getaddrinfo|enotfound|eai_again|econnrefused|econnreset|etimedout|epipe|(^|[^a-z])fetch failed|network|socket hang up|could not resolve host|request to .* failed|dns|tls|certificate|self-signed|unable to (get|verify)|ssl|timed out|timeout|econnaborted|ehostunreach|enetunreach|status code 4|status code 5|http 4|http 5|(^|[^0-9])429([^0-9]|$)|403 forbidden|proxy|download failed|failed to download|no such host"; then
     echo "network-skip"; return 0
   fi
 

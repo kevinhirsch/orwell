@@ -203,12 +203,18 @@ fi
 #   • INTENTIONAL fallback (ORWELL_EMBEDDINGS unset ⇒ deterministic, degraded:false) — MUST PASS.
 #   • REAL failure (fastembed requested + warm-up CRASHES on import/exception) — MUST FAIL loudly.
 echo "==> [A12] embeddings warm-up integrity (fastembed import path + provider health)"
+# Unpredictable per-run log paths (CWE-377): a fixed /tmp/orwell-smoke-emb-*.log is a symlink/clobber
+# target and collides between concurrent runs. mktemp mints a fresh 0600 file; all three are cleaned
+# up at the end of the block.
+EMB_SELFTEST_LOG="$(mktemp /tmp/orwell-smoke-emb-selftest-XXXXXX.log)"
+EMB_PREFETCH_LOG="$(mktemp /tmp/orwell-smoke-emb-prefetch-XXXXXX.log)"
+EMB_ENGINE_LOG="$(mktemp /tmp/orwell-smoke-emb-engine-XXXXXX.log)"
 # (a) Unit-test the assertion helper IN THIS lane. deploy-smoke path-triggers on deploy/**, so the
 #     classifier is gated here — a deploy-only PR that broke it would go red on THIS job.
-if bash "${ROOT}/deploy/smoke_embeddings.sh" --self-test >/tmp/orwell-smoke-emb-selftest.log 2>&1; then
+if bash "${ROOT}/deploy/smoke_embeddings.sh" --self-test >"$EMB_SELFTEST_LOG" 2>&1; then
   pass "prefetch-outcome classifier self-test (import-crash vs unreachable-model separation)"
 else
-  fail "prefetch-outcome classifier self-test"; sed 's/^/    /' /tmp/orwell-smoke-emb-selftest.log
+  fail "prefetch-outcome classifier self-test"; sed 's/^/    /' "$EMB_SELFTEST_LOG"
 fi
 # (b) Leg A — INTENTIONAL fallback. The engine above booted WITHOUT ORWELL_EMBEDDINGS (the smoke's
 #     default), so the deterministic provider is the DESIGNED default: /health must report
@@ -229,9 +235,9 @@ fi
 # shellcheck source=deploy/smoke_embeddings.sh
 . "${ROOT}/deploy/smoke_embeddings.sh"
 EMB_CACHE="$(mktemp -d /tmp/orwell-smoke-emb-XXXXXX)"
-node dist/embedWorker.js --prefetch --cache-dir "$EMB_CACHE" >/tmp/orwell-smoke-emb-prefetch.log 2>&1
+node dist/embedWorker.js --prefetch --cache-dir "$EMB_CACHE" >"$EMB_PREFETCH_LOG" 2>&1
 emb_rc=$?
-emb_class="$(classify_prefetch_outcome "$emb_rc" "$(cat /tmp/orwell-smoke-emb-prefetch.log)")"
+emb_class="$(classify_prefetch_outcome "$emb_rc" "$(cat "$EMB_PREFETCH_LOG")")"
 case "$emb_class" in
   ok)
     pass "ORWELL_EMBEDDINGS=fastembed warm-up import/extract path works (prefetch exit 0 — #1590 guard)"
@@ -241,7 +247,7 @@ case "$emb_class" in
     fb_port=$((PORT + 1)); fb_base="http://127.0.0.1:${fb_port}"
     env ORWELL_ENGINE_PORT="$fb_port" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" ORWELL_EMBEDDINGS=fastembed \
         ORWELL_EMBED_CACHE="$EMB_CACHE" ORWELL_EMBED_WARMUP_MS=60000 "${SHIPPED_FLAGS[@]}" \
-        node dist/main.js >/tmp/orwell-smoke-emb-engine.log 2>&1 &
+        node dist/main.js >"$EMB_ENGINE_LOG" 2>&1 &
     fb_pid=$!
     fb_up=0
     for _ in $(seq 1 60); do
@@ -261,10 +267,10 @@ case "$emb_class" in
         pass "fastembed engine warms up healthy: /health provider=fastembed, degraded=false (NOT the #1590 silent degrade)"
       else
         fail "fastembed requested + model cached, but /health never upgraded to a healthy fastembed: ${fb_health}"
-        echo "    engine log:"; sed 's/^/      /' /tmp/orwell-smoke-emb-engine.log | tail -n 15
+        echo "    engine log:"; sed 's/^/      /' "$EMB_ENGINE_LOG" | tail -n 15
       fi
     else
-      fail "fastembed engine did not become healthy on :${fb_port} (see /tmp/orwell-smoke-emb-engine.log)"
+      fail "fastembed engine did not become healthy on :${fb_port} (see ${EMB_ENGINE_LOG})"
     fi
     kill "$fb_pid" 2>/dev/null; wait "$fb_pid" 2>/dev/null
     ;;
@@ -272,17 +278,17 @@ case "$emb_class" in
     echo "  WARN — fastembed model is UNREACHABLE in this sandbox (a benign, offline-CI condition, NOT the"
     echo "         #1590 import crash — the import succeeded, only the model download failed). Skipping the"
     echo "         live fastembed-boot assertion. Prefetch output:"
-    sed 's/^/           /' /tmp/orwell-smoke-emb-prefetch.log
+    sed 's/^/           /' "$EMB_PREFETCH_LOG"
     pass "fastembed import path did not CRASH (model download unavailable — tolerated, logged loudly)"
     ;;
   *)
     fail "ORWELL_EMBEDDINGS=fastembed warm-up CRASHED on import/exception (the #1590 class — semantic recall"
     echo "         would run permanently DEGRADED on every boot). This is a build/dependency defect, NOT a"
     echo "         network problem. Prefetch output:"
-    sed 's/^/           /' /tmp/orwell-smoke-emb-prefetch.log
+    sed 's/^/           /' "$EMB_PREFETCH_LOG"
     ;;
 esac
-rm -rf "$EMB_CACHE"
+rm -rf "$EMB_CACHE" "$EMB_SELFTEST_LOG" "$EMB_PREFETCH_LOG" "$EMB_ENGINE_LOG"
 
 # ── [4/4] the SYSTEM works (B71/ops A7): engine auth ON + the real front-end + a real turn ──────
 # A green engine alone is compatible with a broken FE; this stage boots the actual app against a
