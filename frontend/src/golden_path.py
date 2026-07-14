@@ -679,8 +679,16 @@ VAULT_KEY_PATTERNS = (
     # false-failed a leak-clean fixture. Engine Vault state can never reach these bytes
     # structurally; the scan hunts engine FIELD NAMES echoed back, not the sanctioned
     # authoring direction.
-    r'"soul"', r'"trust"', r'"threat"', r'"affinity"', r'"hidden(?:Target|Agenda)"',
-    r'"grudge"', r'"scheme"', r'"confession(?:al)?"',
+    # KEY POSITION ONLY (trailing `\s*:`). These are all engine Vault FIELD NAMES, and every one
+    # is also a common English word the NARRATOR legitimately says (trust/threat/soul/grudge/
+    # scheme/confession). A real engine echo is always a JSON key with its value — `{"trust": 0.7}`
+    # — so it always carries the colon; a bare narration VALUE (`{"delta": "trust"}`, e.g. the word
+    # "untrustworthy" streamed token-by-token) is NOT a Vault leak and must not trip the gate. Without
+    # the colon anchor the scan false-fails a leak-clean fixture on ordinary narration prose (it would
+    # block essentially every re-record). Requiring key position loses no true-positive coverage: the
+    # secret is the NUMBER, which only ever reaches bytes as a `"<field>": <value>` pair.
+    r'"soul"\s*:', r'"trust"\s*:', r'"threat"\s*:', r'"affinity"\s*:',
+    r'"hidden(?:Target|Agenda)"\s*:', r'"grudge"\s*:', r'"scheme"\s*:', r'"confession(?:al)?"\s*:',
 )
 SECRET_PATTERNS = (r"Bearer\s+[A-Za-z0-9._\-]{8,}", r"\bsk-[A-Za-z0-9._\-]{8,}\b")
 
