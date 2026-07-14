@@ -554,9 +554,12 @@ later, set `qm set <vmid> --agent enabled=1` host-side and the pre-installed age
   `threat`) leaks from a player surface, that the **A4 credential helper** hands git the `.env`
   token, and that no deploy script fetches from `raw.githubusercontent.com` (E84). It runs
   offline, locally and in CI (`.github/workflows/ci.yml`).
-- **On-host validation** remains the full Proxmox-LXC provisioning (provision → one-liner install →
-  curl the UI → update → assert the save survived) — that part can't run in GitHub Actions (no LXC)
-  and is the on-box test.
+- **On-host validation** (the full Proxmox-LXC provisioning: provision → one-liner install → curl the
+  UI → update → assert the save survived) is **WON'T-DO** — owner ruling 2026-07-14: no hardware
+  validation will be run, so the previously-owed real-Proxmox `orwell.sh`/`orwell-update.sh` host smoke
+  (#0010) is **retired, not owed**. The `pct`/`pvesh` host-bridge paths (provision, systemd, chown)
+  are covered by `install.sh`-parity tracing + the deploy-reconcile drift test, not by a live host run.
+  Everything that CAN run without hardware runs in CI (the automated smoke above, offline).
 - Two pieces complete the end-to-end game and are owned outside these scripts:
   1. the engine's **HTTP MCP transport** + `build`/`start` entrypoint (the implementer);
   2. the **Orwell → engine MCP** client wiring (`frontend/INTEGRATION.md`).

@@ -31,10 +31,41 @@ config must never crash the turn.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
+
+logger = logging.getLogger(__name__)
+
+
+def _record_faith_guard_down(kind: str, diagnosis: str) -> None:
+    """#1599 - surface a faithfulness-GUARD failure LOUDLY (WARN + a RED-eligible health event on
+    /admin/status), never a silent swallow. The WARN fires FIRST, so even if the health-event write
+    fails the diagnosis is never fully invisible. Fail-soft by construction: logging must never hurt a
+    turn, so each step is best-effort."""
+    warned = False
+    try:
+        logger.warning("[orwell] %s", diagnosis)
+        warned = True
+    except Exception:
+        # The logger itself is unavailable — nowhere left to write. Terminal, not a swallowed
+        # business error (this guards the LOGGING path, per "logging must never hurt the app").
+        pass
+    try:
+        from src import log_rings as _lr
+        _lr.record_overseer("anomaly", kind, diagnosis, lever=None, ok=False)
+    except Exception as _rec_err:
+        # The RED health-event write failed — but the WARN above already surfaced the diagnosis, so
+        # this is not the silent-fail #1599 bans. Note the telemetry-write failure at debug.
+        if warned:
+            try:
+                logger.debug("[orwell] faith guard-down health-event write failed: %s", _rec_err)
+            except Exception:
+                pass
 
 # Feature 0081 — the 3-state faithfulness dial, independent of the 0079/0080 overseer_mode():
 #   'off'    — the judge never runs.
@@ -381,8 +412,41 @@ class FaithfulnessJudge:
         (the live hook), since its inputs come from the turn, not from the narration alone."""
         try:
             raw = self._llm_fn(self._prompt(narration, projection, context))
+            # The resolved completion fn is ASYNC (orwell_cast_authoring._resolve_llm_fn._fn), so the
+            # call returns a COROUTINE — passing it straight to verdict_from_reply parses a coroutine
+            # as a reply (always None), silently breaking the sync judge. Resolve an awaitable result
+            # before validating.
+            if inspect.isawaitable(raw):
+                try:
+                    asyncio.get_running_loop()
+                    loop_running = True
+                except RuntimeError:
+                    loop_running = False
+                if loop_running:
+                    # assess() is the SYNC entrypoint (live code uses the async _faith_check). Inside a
+                    # running loop we cannot block to await — #1599: be LOUD + fall to the floor, never
+                    # silently None. Close the orphaned coroutine to avoid a 'never awaited' warning.
+                    if hasattr(raw, "close"):
+                        try:
+                            raw.close()
+                        except Exception:
+                            pass
+                    _record_faith_guard_down(
+                        "faith:sync-in-async",
+                        "faithfulness sync assess() called inside a running event loop — cannot "
+                        "resolve the async judge; use the async _faith_check hook. Guard down for "
+                        "this turn.")
+                    return self._fallback.assess(narration, projection)
+                raw = asyncio.run(raw)
             return self.verdict_from_reply(raw, narration, projection)
-        except Exception:
+        except Exception as _err:
+            # #1599: a genuine judge-call error is the grounding guard going down — be LOUD, never a
+            # silent swallow. Still fail-soft to the deterministic floor for the turn. (A merely
+            # unparseable/out-of-contract reply is NOT an error — verdict_from_reply routes that to
+            # the floor without raising, so it does not reach here and is not flagged.)
+            _record_faith_guard_down(
+                "faith:call-failed",
+                f"faithfulness judge could not run (guard down): {type(_err).__name__}: {_err}")
             try:
                 return self._fallback.assess(narration, projection)
             except Exception:

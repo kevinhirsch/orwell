@@ -403,15 +403,30 @@ echo "==> embedding model prefetch into ${EMBED_CACHE_DIR} (no-op when cached)"
 # expose ORT's intraOpNumThreads to silence it at the source). Filter that one benign stderr line so
 # the update output doesn't look alarming; every other message still surfaces. The trailing `|| true`
 # is load-bearing: `grep -v` exits 1 when it filters out ALL input (the affinity warning is often the
-# only stderr a successful prefetch emits), so its no-match status must never read as a failure. This
-# script has no ERR trap today, but the guard keeps the pattern safe if one is ever added — see
-# orwell-install.sh's prefetch_model, where errtrace makes the identical stray exit-1 fatal.
-if ! node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "$EMBED_CACHE_DIR" \
-     2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2 || true); then
-  echo "WARN: embedding model prefetch FAILED — semantic recall will run DEGRADED (deterministic"
-  echo "      fallback) until the model is cached. The engine retries the prefetch at boot; if it keeps"
-  echo "      failing, check the engine boot log (journalctl -u ${ENGINE_SVC}) for the real ONNX/RAM/download error."
+# only stderr a successful prefetch emits), so its no-match status must never read as a failure.
+#
+# We CAPTURE the combined output and CLASSIFY the failure class per the owner no-silent-failure ruling
+# (2026-07-14): a genuine warm-up CRASH (the #1590 tar-import class) is a REAL defect that degrades
+# EVERY boot and must be shown RED; a plain model-download failure stays a benign WARN (the engine
+# retries at boot). Non-fatal either way — an update must not brick the box on embeddings.
+# shellcheck source=deploy/smoke_embeddings.sh
+. "${APP_DIR}/deploy/smoke_embeddings.sh"
+_pf_log="$(mktemp)"; _pf_rc=0
+if node "${APP_DIR}/dist/embedWorker.js" --prefetch --cache-dir "$EMBED_CACHE_DIR" >"$_pf_log" 2>&1; then :; else _pf_rc=$?; fi
+grep -vE 'pthread_setaffinity_np.*error code: 22' "$_pf_log" >&2 || true
+if [[ "$_pf_rc" -ne 0 ]]; then
+  if [[ "$(classify_prefetch_outcome "$_pf_rc" "$(cat "$_pf_log")")" == "import-fail" ]]; then
+    echo "!! REAL FAILURE (embeddings): fastembed CRASHED on import/warm-up — NOT a download problem." >&2
+    echo "   Semantic recall will run DEGRADED (deterministic) on EVERY boot until this is fixed. This is a" >&2
+    echo "   build/dependency defect (e.g. the tar@7 ESM regression, #1590), not a transient. Reproduce with:" >&2
+    echo "     node ${APP_DIR}/dist/embedWorker.js --prefetch --cache-dir ${EMBED_CACHE_DIR}" >&2
+  else
+    echo "WARN: embedding model prefetch FAILED — semantic recall will run DEGRADED (deterministic"
+    echo "      fallback) until the model is cached. The engine retries the prefetch at boot; if it keeps"
+    echo "      failing, check the engine boot log (journalctl -u ${ENGINE_SVC}) for the real ONNX/RAM/download error."
+  fi
 fi
+rm -f "$_pf_log"
 
 echo "==> refresh front-end deps"
 ops_progress_step 3 "refreshing front-end deps"

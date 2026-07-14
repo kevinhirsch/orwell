@@ -188,17 +188,33 @@ prefetch_model() {
   # output (it can't be silenced via fastembed-js's API; the pool just runs unpinned). Everything
   # else still surfaces.
   #
-  # The trailing `|| true` inside the process substitution is LOAD-BEARING — do not "clean it up".
-  # `grep -v` exits 1 when it filters out ALL of its input, and on an LXC the affinity warning is
-  # often the ONLY thing the worker writes to stderr — so a SUCCESSFUL prefetch (node exits 0, model
-  # cached) leaves grep matching nothing and exiting 1. Under `set -Eeuo pipefail`, errtrace (-E)
-  # propagates the ERR trap into the process-substitution subshell, so that stray exit-1 fires on_err
-  # and reports a bogus "INSTALL FAILED during: embedding model prefetch" for a prefetch that in fact
-  # succeeded. Swallowing grep's no-match status keeps this step genuinely non-fatal (as intended).
-  if ! node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" \
-       2> >(grep -vE 'pthread_setaffinity_np.*error code: 22' >&2 || true); then
-    echo "WARN: embedding model prefetch failed — the engine will retry at boot and fall back to deterministic recall meanwhile"
+  # We CAPTURE the combined output (rather than streaming through a process substitution) so we can
+  # CLASSIFY the failure class per the owner no-silent-failure ruling (2026-07-14): a genuine warm-up
+  # CRASH (the #1590 tar-import class) is a REAL defect — every boot will silently run DEGRADED recall
+  # — and must be shown RED, even though it stays non-fatal to the install (the engine still boots on
+  # the deterministic fallback). A mere model-download failure stays a benign WARN. errtrace-safe: the
+  # run is guarded by an `if`, so its non-zero rc never trips the ERR trap under `set -Eeuo pipefail`.
+  # shellcheck source=deploy/smoke_embeddings.sh
+  . "${APP_DIR}/deploy/smoke_embeddings.sh"
+  local _pf_log _pf_rc=0
+  _pf_log="$(mktemp)"
+  if node dist/embedWorker.js --prefetch --cache-dir "${DATA_DIR}/models" >"$_pf_log" 2>&1; then :; else _pf_rc=$?; fi
+  # A11: show everything EXCEPT onnxruntime's harmless LXC affinity noise. The trailing `|| true` is
+  # LOAD-BEARING — `grep -v` exits 1 when it filters out ALL input (that affinity line is often the
+  # only stderr a SUCCESSFUL prefetch emits), and that stray exit-1 must never read as a failure.
+  grep -vE 'pthread_setaffinity_np.*error code: 22' "$_pf_log" >&2 || true
+  if [[ "$_pf_rc" -ne 0 ]]; then
+    if [[ "$(classify_prefetch_outcome "$_pf_rc" "$(cat "$_pf_log")")" == "import-fail" ]]; then
+      echo "!! REAL FAILURE (embeddings): fastembed CRASHED on import/warm-up — NOT a download problem." >&2
+      echo "   Every engine boot will silently run DEGRADED (deterministic) semantic recall until fixed." >&2
+      echo "   This is a build/dependency defect (e.g. the tar@7 ESM regression, #1590). Non-fatal to the" >&2
+      echo "   install, but it MUST be fixed. Reproduce with:" >&2
+      echo "     node ${APP_DIR}/dist/embedWorker.js --prefetch --cache-dir ${DATA_DIR}/models" >&2
+    else
+      echo "WARN: embedding model prefetch failed (model unreachable/transient) — the engine retries at boot and falls back to deterministic recall meanwhile"
+    fi
   fi
+  rm -f "$_pf_log"
 }
 
 frontend_deps() {

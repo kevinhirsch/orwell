@@ -84,12 +84,14 @@ export class FileSaveStore implements UserSaveStore {
   saveFor(user: string, snapshot: SessionSnapshot): void {
     const dir = this.userDir(user);
     mkdirSync(dir, { recursive: true });
-    const file = this.fileFor(dir, this.latestVersion(dir) + 1);
-    // Atomic + DURABLE write (audit E2 + E8): a crash mid-write must never leave a truncated file
-    // as the "latest" version — write a temp, fsync the temp's CONTENT, rename (atomic on the same
-    // filesystem), then fsync the DIRECTORY so the rename itself survives power loss. Without the
-    // fsyncs, a power cut could quarantine the newest save (`.corrupt`) and silently step the game
-    // back several turns on the next boot (non-degradation, feature 0007/0030).
+    const version = this.latestVersion(dir) + 1;
+    const file = this.fileFor(dir, version);
+    // Atomic + DURABLE write (audit E2 + E8): a crash mid-write must never leave a truncated file as
+    // the "latest" version — write a temp, fsync the temp's CONTENT, then rename (atomic on the same
+    // filesystem). The content fsync + atomic rename ALONE guarantee a torn/partial file can never be
+    // "latest": a power cut either loses the rename entirely (the prior COMPLETE version stays latest)
+    // or keeps it (the content was already flushed to disk) — never a truncated winner. That is what
+    // protects non-degradation (feature 0007/0030) against a mid-write crash.
     const tmp = `${file}.tmp`;
     const fd = openSync(tmp, "w");
     try {
@@ -99,11 +101,29 @@ export class FileSaveStore implements UserSaveStore {
       closeSync(fd);
     }
     renameSync(tmp, file);
-    try {
-      const dirFd = openSync(dir, "r");
-      try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
-    } catch { /* best-effort: some platforms refuse directory fsync — the data fsync above held */ }
-    this.prune(dir, this.latestVersion(dir));
+    // F-EN-1 (#1562): the DIRECTORY fsync ONLY hardens the rename's directory ENTRY against a sudden
+    // power loss (the OS's own dirty-page writeback makes that entry durable within a few seconds
+    // regardless). It is a SECOND blocking `fsyncSync` on the single Node thread, sitting on the hot
+    // per-turn commit path — it stalls EVERY concurrent user on every committed beat (in tension with
+    // "unlimited users concurrently"). Since the content fsync + atomic rename above already guarantee
+    // a truncated file can NEVER win, we AMORTIZE the directory fsync to the periodic checkpoint cadence
+    // (the same CHECKPOINT_EVERY boundary `prune` keeps in the long-tail archive): the long-lived
+    // checkpoint renames get a hard power-loss guarantee. The un-hardened window is the directory entries
+    // for the renames SINCE the last checkpoint — up to CHECKPOINT_EVERY-1 of them — whose durability the
+    // amortized fsync no longer forces synchronously; in practice the OS's own dirty-page writeback makes
+    // those entries durable within a few seconds regardless, so a power cut in that narrow window loses at
+    // most that un-hardened tail, never the newest durable checkpoint and never a corrupt "latest".
+    // (RETAIN_RECENT governs RETENTION — how many recent versions we keep on disk — not durability; the two
+    // are independent.) Owner-sanctioned in #1562 ("drop/amortize the second (directory) fsync").
+    if (version % FileSaveStore.CHECKPOINT_EVERY === 0) {
+      try {
+        const dirFd = openSync(dir, "r");
+        try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+      } catch { /* best-effort: some platforms refuse directory fsync — the content fsync above held */ }
+    }
+    // `version` IS the newest on disk after the rename (single-threaded write), so `prune` needs no
+    // second readdir to rediscover the latest — one fewer directory scan on the hot path, byte-identical.
+    this.prune(dir, version);
   }
 
   /** Bounded retention (B58/audit E4): keep the recent window + the newest periodic checkpoints. */
