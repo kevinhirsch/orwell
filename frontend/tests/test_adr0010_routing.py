@@ -147,6 +147,11 @@ def test_loop_passes_admin_provider_object(monkeypatch):
     def fake_get_setting(key, default=None):
         if key == "openrouter_provider":
             return {"sort": "throughput"}
+        # The provider pin is scoped to the narration model (review 2026-07-14): it attaches
+        # only when the call's model == default_model, so the utility tier can never inherit a
+        # narrator-only provider pin. Align default_model with this call's model so the pin applies.
+        if key == "default_model":
+            return "deepseek/deepseek-v4-pro"
         return default
 
     monkeypatch.setattr(al, "get_setting", fake_get_setting)

@@ -321,7 +321,7 @@ DEFAULT_SETTINGS = {
     # reasoning tokens before the first visible byte — which is exactly what hung a live narration
     # turn and the golden record (a per-turn stream read that never settled). Novita honored
     # reasoning-off 0/5 bursts across repeated probes, at fp8 quant (best prose fidelity, mandate #1),
-    # 204K context (longest), tight 4.6–7.0s latency with no spikes, on a large reliable provider
+    # 204K context (longest), tight 4.6-7.0s latency with no spikes, on a large reliable provider
     # (availability matters most under no-fallback). allow_fallbacks:false so OpenRouter can NEVER
     # silently route a game turn to a burst-prone sub-provider (e.g. StreamLake) and reintroduce the
     # hang — a fail-loud posture (ruling #1599) over a fail-soft one. The committed golden fixture is
