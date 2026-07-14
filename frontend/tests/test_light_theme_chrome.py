@@ -17,7 +17,14 @@ with open(os.path.join(FRONTEND, "static", "style.css"), encoding="utf-8") as _f
 
 
 def _blocks_with(selector_literal):
-    """(selector-list, body) for every declaration block whose selector list contains the literal."""
+    """(selector-list, body) for every declaration block whose selector list contains the literal.
+
+    LIMITATION: the flat ([^{}]+){[^{}]*} matcher cannot represent NESTED at-rules — a
+    `@media (…) { .chat-top-bar { … } }` is captured as the INNER `.chat-top-bar { … }` rule
+    only; the returned `sel` never carries the enclosing @media prelude. So callers must NOT
+    rely on `sel` reflecting at-rule context (e.g. a `"prefers-reduced-motion" not in sel`
+    filter is a documented no-op here — it is kept as intent, and the reduced-motion block's
+    own rule is distinguished by its body value instead)."""
     out = []
     for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", CSS):
         if selector_literal in m.group(1):
@@ -66,6 +73,9 @@ def test_top_bar_rounds_only_the_bottom_corners():
             break
     assert radius is not None, "no frosted .chat-top-bar border-radius rule found"
     parts = radius.split()
+    assert len(parts) >= 2, (
+        f"the top bar radius must be the 4-value shorthand that squares the TOP corners "
+        f"(0 0 … …), not a single-value shorthand; got border-radius: {radius!r}")
     assert parts[0] == "0" and parts[1] == "0", (
         f"the top bar must square its TOP corners (0 0 …); got border-radius: {radius!r}")
 
@@ -74,16 +84,22 @@ def test_top_bar_holds_opacity_parity_when_scrolled():
     """The recede-on-scroll fade (opacity .55) left the top bar more see-through than the sidebar
     in live play (owner: it must match the sidebar + gadgets). The .chat-scrolled top-bar rule
     must keep full opacity."""
-    scrolled = [
-        body for (sel, body) in _blocks_with(".chat-scrolled .chat-top-bar")
-        if "prefers-reduced-motion" not in sel  # (the reduce block already forces opacity:1)
-    ]
+    # NOTE: this matches BOTH the main scrolled rule and the reduced-motion @media copy — the flat
+    # parser can't see the @media prelude (see _blocks_with), so we do NOT filter by it; both
+    # already force full opacity, and we assert an opacity value was actually found so the test
+    # can't pass vacuously if the declaration is ever renamed/removed.
+    scrolled = [body for (_sel, body) in _blocks_with(".chat-scrolled .chat-top-bar")]
     assert scrolled, "no .chat-scrolled .chat-top-bar rule found"
+    checked = 0
     for body in scrolled:
         m = re.search(r"opacity:\s*([\d.]+)", body)
         if m:
+            checked += 1
             assert float(m.group(1)) >= 1.0, (
                 f"the scrolled top bar must hold full opacity to match the sidebar; got {m.group(1)}")
+    assert checked >= 1, (
+        "no opacity declaration found on any .chat-scrolled .chat-top-bar rule — the parity fix "
+        "(opacity:1) must be pinned, not silently absent")
 
 
 # ── the beat chip label follows theme polarity over the mesh backdrop ─────────────────────────
