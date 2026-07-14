@@ -195,9 +195,18 @@ _SYSTEM = (
     "around it): an object with two keys, \"npcs\" and \"ties\".\n"
     "\"npcs\": an array, ONE object PER houseguest id given below (keep the SAME ids, same order), each with:\n"
     '  "id": the exact houseguest id from the roster below (echo it verbatim).\n'
-    '  "name": a realistic, common, pronounceable FIRST and LAST name (two words) for a reality-TV '
-    "contestant — diverse and ordinary, NEVER invented/fantasy/gibberish, and UNIQUE across the cast. "
-    "Do NOT use the names Ryne, Marcus, or Felix.\n"
+    '  "name": an ordinary, everyday, pronounceable FIRST and LAST name (EXACTLY two words) for a real '
+    "modern American reality-TV contestant — the kind of unremarkable name you meet daily. HARD NAME "
+    "RULES (a name that breaks ANY of these is REJECTED and forces the whole cast to be redrawn — get "
+    "them right the FIRST time): (1) EXACTLY two plain words, a given name then a surname — NEVER a "
+    "single word, NEVER three-plus words, NEVER a lone name. (2) NO titles, honorifics, initials, "
+    "middle names, nicknames-in-quotes, hyphenated compounds, numerals, punctuation, emoji, or ANY "
+    "markup — letters only, plausible everyday human length (roughly 3-12 letters per word). "
+    "(3) NEVER invented, fantasy, gibberish, or stage-name shaped. (4) UNIQUE across the ENTIRE cast — "
+    "no two houseguests may share a first name OR a surname; scan the names you have already written "
+    "before adding each new one. (5) Prefer common CONTEMPORARY American given names and AVOID overtly "
+    "Biblical / scriptural given names (e.g. do NOT use Ryne, Marcus, or Felix, and steer clear of the "
+    "old-testament / gospel name set generally).\n"
     '  "identity": ONE vivid sentence capturing who this person IS — their concept in your own words '
     "(this is what the show voices; make each unmistakably distinct).\n"
     f'  "archetype": the single nearest fit from EXACTLY this list: {", ".join(_ARCHETYPES)}.\n'
