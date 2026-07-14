@@ -67,12 +67,24 @@ describe("fastembed ↔ tar interop (secure tar@7 kept, fastembed's default impo
     // default import. Without it, the 7.x override crashes warm-up.
     const patchesDir = resolve(repoRoot, "patches");
     expect(existsSync(patchesDir), "patches/ directory must exist").toBe(true);
+    // Read the EXACT versioned patch for the installed fastembed (deterministic — a stale
+    // `fastembed*.patch` for a different version must not satisfy this test): the filename is
+    // `fastembed+<version>.patch` where <version> is the pinned dependency.
+    const pkgForVersion = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
+    const feVersion = pkgForVersion.dependencies?.fastembed;
+    const versionedPatch = `fastembed+${feVersion}.patch`;
     const patchFiles = readdirSync(patchesDir).filter((f) => f.startsWith("fastembed") && f.endsWith(".patch"));
-    expect(patchFiles.length, "a patches/fastembed*.patch file must exist").toBeGreaterThan(0);
+    expect(patchFiles, `the versioned patch ${versionedPatch} must exist for the pinned fastembed@${feVersion}`)
+      .toContain(versionedPatch);
 
-    const patch = readFileSync(resolve(patchesDir, patchFiles[0]!), "utf8");
-    // The patch must convert fastembed's default tar import into a namespace import.
-    expect(patch).toMatch(/import \* as tar from "tar"/);
+    const patch = readFileSync(resolve(patchesDir, versionedPatch), "utf8");
+    // BOTH runtime paths must be patched so neither regresses unnoticed:
+    //  - ESM (`lib/esm/fastembed.js`): the default import → a namespace import.
+    expect(patch, "ESM path: default tar import → namespace import").toMatch(/import \* as tar from "tar"/);
+    //  - CJS (`lib/cjs/fastembed.js`): the `__importDefault(require("tar"))` → `{ default: require("tar") }`
+    //    shim, so tar@7's named exports resolve under the CommonJS build too.
+    expect(patch, "CJS path: require('tar') rebound to tar@7's named exports")
+      .toMatch(/\{ default: require\("tar"\) \}/);
 
     const pkg = JSON.parse(readFileSync(resolve(repoRoot, "package.json"), "utf8"));
     expect(pkg.scripts?.postinstall, "postinstall must run patch-package").toMatch(/patch-package/);
