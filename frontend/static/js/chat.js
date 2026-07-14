@@ -435,6 +435,28 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         if (_modeToggle) _modeToggle.style.display = 'none';
       }
     } catch (_) {}
+    // M2-7 — diegetic rename of the reasoning-surface Settings toggle in the GAME BUILD only.
+    // game-trim.css KEEPS the "Thinking Process" toggle (it changes the in-fiction chat), but its
+    // debug copy ("Show <think> collapsible bars") should read as the show's "Production Notes"
+    // family — matching the beat-chip register and the accordion label. The full inherited
+    // workspace (ORWELL_GAME_BUILD=0) keeps the technical operator wording untouched. Same
+    // belt-and-suspenders shape as the mode-toggle gate above; fail-safe if the node is absent.
+    try {
+      if (isGameBuild()) {
+        const _thinkRow = document.querySelector('.vis-row:has(input[data-ui-key="show-thinking"]) .vis-label');
+        if (_thinkRow) {
+          const _hint = _thinkRow.querySelector('.vis-hint');
+          if (_hint) _hint.textContent = 'Show the show’s production notes';
+          // Rewrite the leading label text node ("Thinking Process ") in place, keeping the hint span.
+          for (const node of _thinkRow.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+              node.textContent = 'Production Notes ';
+              break;
+            }
+          }
+        }
+      }
+    } catch (_) {}
     // Wire the slash-command autocomplete popup on the chat composer. The
     // dispatcher already handles the typed command — this just surfaces the
     // registry as a discoverable menu when the user starts a message with /.
@@ -1882,7 +1904,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   accumulated = accumulated.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                   roundText = roundText.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                 }
-                if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                 if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                 if (_liveThinkTimerEl && _elapsedDone) {
                   _liveThinkTimerEl.textContent = _elapsedDone + 's';
@@ -2205,7 +2227,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                     accumulated = accumulated.replace(/<think>/i, '<think time="' + elapsed + '">');
                     roundText = roundText.replace(/<think>/i, '<think time="' + elapsed + '">');
                   }
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Move timer to right side of header
                   if (_liveThinkTimerEl && elapsed) {
@@ -2653,7 +2675,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   isThinking = false;
                   cancelAnimationFrame(_thinkTimerRAF);
                   var _elapsed2 = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                   if (_liveThinkTimerEl) _liveThinkTimerEl.textContent = _elapsed2 ? _elapsed2 + 's' : '';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Assign stable IDs
@@ -4408,9 +4430,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         const sec = document.createElement('div');
         sec.className = 'thinking-section';
         const domId = 'resume-think-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        // M2-7 — game build reads the reasoning accordion as diegetic "Production notes".
+        const _thinkLabel = isGameBuild() ? 'Production notes' : 'View thinking process';
         sec.innerHTML =
           '<div class="thinking-header" data-thinking-id="' + domId + '">' +
-            '<div class="thinking-header-left"><span class="live-think-header-text">View thinking process</span></div>' +
+            '<div class="thinking-header-left"><span class="live-think-header-text">' + _thinkLabel + '</span></div>' +
             '<span class="thinking-toggle live-think-toggle" id="' + domId + '-toggle"></span>' +
           '</div>' +
           '<div class="thinking-content" id="' + domId + '"><div class="thinking-content-inner live-think-inner"></div></div>';
