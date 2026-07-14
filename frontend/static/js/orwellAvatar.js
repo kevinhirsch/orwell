@@ -51,6 +51,10 @@
     if (!el.querySelector(".ow-avatar-glyph")) el.innerHTML = PERSON_GLYPH;
   }
 
+  // OWN-8: the last probe's verdict, exposed via OrwellAvatar.present() so sibling face
+  // consumers (the chat-row faces) can reuse THIS probe instead of re-fetching the avatar.
+  let _present = false;
+
   async function apply() {
     let present = false;
     try {
@@ -59,6 +63,7 @@
       // 200 as present so the no-avatar case stays a clean no-op.
       present = r.status === 200;
     } catch (_) { present = false; }
+    _present = present;
     const url = present ? "/api/orwell/avatar?t=" + Date.now() : null;
     TARGETS.forEach((id) => {
       const el = document.getElementById(id);
@@ -74,7 +79,7 @@
     });
   }
 
-  window.OrwellAvatar = { refresh: apply };
+  window.OrwellAvatar = { refresh: apply, present: function () { return _present; } };
   // A finalized headshot dispatches this — the circle updates immediately.
   window.addEventListener("orwell:avatarchanged", apply);
 

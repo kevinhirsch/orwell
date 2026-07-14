@@ -20,6 +20,7 @@ L6b/#1047 suites).
 
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -288,6 +289,57 @@ def test_multiple_speaker_lines_each_get_their_own_chip():
     assert two["restored"].count('class="ow-speaker-chip"') == 2
     assert 'data-hg-name="Faith Willis"' in two["restored"]
     assert 'data-hg-name="Deja Monroe"' in two["restored"]
+
+
+# ── OWN-8b — a DETACHED attribution anchors to its speech (no floating discs) ────────────── #
+#
+# The narrator sometimes emits the tag ALONE on its own line — a blank line between the tag and
+# the quote, or the tag trailing the quote. mdToHtml then wrapped the lone placeholder as its own
+# empty paragraph and the face chip rendered as a disc floating BETWEEN prose blocks (owner
+# screenshot: one disc between two paragraphs, one dangling after the last line). The fix lives
+# in extractSpeakerTags: a tag-only line joins FORWARD onto the speech it introduces; a trailing
+# tag-only line anchors BACKWARD, leading the paragraph it attributes. Same-line tags untouched.
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_detached_leading_attribution_anchors_forward_to_the_speech():
+    r = _run_battery({
+        "detached": '@[Maya Velez]\n\n"The house has eyes," she says, not looking up.',
+    })
+    d = r["detached"]
+    assert len(d["chips"]) == 1
+    # the placeholder and the speech share ONE line/paragraph — never a chip-only paragraph
+    assert "___OWSPK_0___ \"The house has eyes,\"" in d["text"]
+    restored = d["restored"]
+    assert restored.count('class="ow-speaker-line"') == 1
+    assert "The house has eyes" in restored
+    # no empty speaker paragraph: the speaker line must carry the dialogue, not just the chip
+    assert not re.search(r'<p class="ow-speaker-line">(?:(?!</p>).)*</span></p>', restored), \
+        "chip floats alone in an empty paragraph"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_trailing_attribution_anchors_backward_to_the_quote():
+    r = _run_battery({
+        "trailing": '"I know what you did last week."\n\n@[Marcus Chen]',
+    })
+    t = r["trailing"]
+    assert len(t["chips"]) == 1
+    # the placeholder relocates to LEAD the quote it attributes (chip in the speech's gutter)
+    assert t["text"].startswith('___OWSPK_0___ "I know what you did last week."')
+    restored = t["restored"]
+    assert restored.count('class="ow-speaker-line"') == 1
+    assert "I know what you did last week" in restored
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_same_line_tags_are_untouched_by_the_anchor_joins():
+    # the sanctioned form (tag + same-line dialogue) must stay byte-identical through the joins
+    r = _run_battery({
+        "sameline": '@[Faith Willis] "Nothing changes for me."\n\nShe shrugs.',
+    })
+    s = r["sameline"]
+    assert s["text"].startswith('___OWSPK_0___ "Nothing changes for me."')
+    assert "\nShe shrugs." in s["text"]  # the separate narration paragraph is NOT swallowed
 
 
 # ── #1323 — multi-paragraph speech indent (only the FIRST line was gutter-aligned) ───────── #
