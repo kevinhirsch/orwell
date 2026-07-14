@@ -17,8 +17,8 @@ walked state). Cross-referenced against `docs/audits/2026-07-09-hig-audit.md` (n
 filed there is re-filed here) and 0114's documented-intentional list (stoplight traffic lights,
 scoped frosted material rules, the onboarding `--bg` card are NOT re-flagged).
 
-**Fixes in flight on this branch:** see §1 (each entry gains its before/after evidence when the
-fix lane lands; until then §1 items are IN PROGRESS, not verified-shipped).
+**Fixes shipped on this branch:** see §1 (each entry carries its measured before/after; all
+verified live + full FE suite green).
 
 ---
 
@@ -47,7 +47,7 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
 ## 1. Fixed on this branch (landed, measured before/after)
 
 1. **Decision-card CSS rescoped `#orwell-decision-card` → `.odec` root class**
-   (`orwellDecision.js`; element keeps its id; `window.OrwellDecisionKit.ensureStyles` exposed
+   (`orwellDecision.js`; element keeps its id; `window.OrwellDecisionStyles.ensureStyles` exposed
    for the demo; the newer #651/#1375-a/WCAG-2.1.1 rules preserved through the rescope) — the
    demo now composes the REAL card (both variants) through the real styles.
 2. **Frosted selected-pill dark-on-dark fixed** — before: `color-mix(var(--fg) 96%)` computed
@@ -405,7 +405,40 @@ both windows is pre-kit markup individually retrofitted under `body.theme-froste
 (SET-01) keep appearing. The durable fix is #775-style migration to kit primitives, not more
 reskin rules.
 
-## 9. Genuinely good — do not break (merged from all lanes)
+## 9. Owner-reported live findings (2026-07-14 screenshots — casting interview + cast-photo dialog)
+
+- **OWN-1 · P1 · the welcome hero ghosts THROUGH the live conversation.** In the casting
+  screenshot the wordmark ("Orwell"), the tagline, and the rotating tip render behind/through
+  the Production message bubble — overlapping text layers mid-bubble. Root: `#welcome-screen`
+  inside `.chat-container.welcome-active` (index.html:1258-1294) stays visible while messages
+  stream; the glass `.msg-ai` bubble is translucent, so the hero bleeds through instead of
+  being occluded. Fix: drop `welcome-active` (hide the hero) the moment the first message
+  exists — the seam must fire on the casting stream too, not only on normal chat sends.
+- **OWN-2 · P1 · dark-slab message bubble vs light composer in one view** (§0 polarity class):
+  the `.msg-ai` bubble renders as a dark veil while the composer + action-button capsule row
+  are light glass — two materials in one column. Needs a one-material ruling for the chat
+  column on frosted/glass.
+- **OWN-3 · P2 · cast-photo dialog is a dark panel over the light chat** (§0 class): the
+  pre-game "Your Cast Photo" sheet renders `--panel`-dark with light ink while the surrounding
+  chrome is light glass; its buttons (`.hs-btn`) are legacy pills, not kit `.ow-btn`.
+- **OWN-4 · P2 · candidate portrait tiles render as wide letterbox strips** (faces cropped to
+  forehead/eyes bands) — the source intends square tiles (`.hs-cand { aspect-ratio: 1 }`,
+  orwellHeadshot.js:109, `object-fit: cover` :115) but the live pre-game dialog lays them out
+  as ~16:5 strips: the aspect-ratio is being defeated by the row layout (needs live repro at
+  the casting beat — the walked-state crawl covers this once #1592 unblocks).
+- **OWN-5 · P3 · "Use this one" disabled state is opacity-grey-on-grey** (correct state — it
+  IS disabled until a tile is selected — but the disabled treatment is the ambiguous
+  opacity-only pattern, and no tile carries a visible "selected" affordance ring until
+  clicked; add the kit disabled treatment + a visible selection ring).
+- **OWN-6 · P3 · redundant copy in the dialog:** title "Your Cast Photo" immediately followed
+  by body text beginning "Your cast photo." — drop the duplicated lead-in.
+- **OWN-7 · P3 (diegetic) · the composer model chip shows the raw model id** ("glm-4.7") inside
+  the game build's fiction — consider a diegetic label or hiding it in game build (owner
+  call; the M2 "Production" naming direction suggests the chrome should stay in-world).
+- *(Not re-filed: the "View thinking process" label (M2-7 rename is in flight on #1586) and
+  the wall-clock timestamp (M2-6, #1585).)*
+
+## 10. Genuinely good — do not break (merged from all lanes)
 
 - **Checkbox/radio/switch checked-state discipline** (frosted/glass): neutral at rest,
   system-blue fill + white glyph only when checked; slider correctly system-green.
@@ -426,7 +459,7 @@ reskin rules.
 - **Traffic-light hover mechanism** (glyph reveal, focus ring, 44px invisible hit region) —
   correct; only the demo's static simulation of it was wrong.
 
-## 10. Suggested build order for the backlog (owner sequencing: frosted → glass → flat)
+## 11. Suggested build order for the backlog (owner sequencing: frosted → glass → flat)
 
 1. **Ship-now class (small, high-severity):** MOB-01 banner-vs-hamburger; THM-01 legacy
    `#theme-popup` mobile block removal; KIT-F-02 prominent/secondary hierarchy retune;
