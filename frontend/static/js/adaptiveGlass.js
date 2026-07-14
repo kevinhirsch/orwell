@@ -37,14 +37,15 @@
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
   // The ONLY surface that adapts under the glass theme: the RECEIVED chat bubble. #1601 /
-  // OWN-2 — the chat column is ONE LIGHT-GLASS FAMILY, so the received bubble is now a FIXED
-  // light glass (a LIGHT frost + DARK ink) matching the composer/chrome; it no longer FLIPS to
-  // a dark frost + light ink over a dark wall (that dark-bubble-vs-light-composer split was the
-  // OWN-2 bug). What still adapts is the scrim OPACITY: resolveBubbleScrim escalates
-  // --ai-scrim-alpha per-bubble so the dark ink clears APCA over ANY backdrop (the light frost
-  // climbs toward opaque near-white over a dark/busy wall — the fixed-light-glass move). Chrome
-  // does NOT adapt (also fixed light glass), and the SENT (blue) bubble never adapts (blue +
-  // white). So this is just .msg-ai.
+  // OWN-2 — the chat column is ONE LIGHT-GLASS FAMILY, so the received bubble now PREFERS a
+  // fixed light glass (a LIGHT frost + DARK ink) matching the composer/chrome, instead of the
+  // old wallpaper-driven flip to a dark frost + light ink (that dark-bubble-vs-light-composer
+  // split was the OWN-2 bug). resolveBubbleScrim keeps a rare alternate-polarity / harden
+  // fallback purely as a legibility terminator, but the light frost essentially always wins by
+  // adapting the scrim OPACITY: it escalates --ai-scrim-alpha per-bubble so the dark ink clears
+  // APCA over ANY backdrop (the frost climbs toward opaque near-white over a dark/busy wall —
+  // the fixed-light-glass move). Chrome does NOT adapt (also fixed light glass), and the SENT
+  // (blue) bubble never adapts (blue + white). So this is just .msg-ai.
   var BUBBLE_ADAPTIVE = ".msg-ai";
   // ── #763 — the WELCOME HERO over the bare wallpaper ───────────────────────────
   // The hero (the big "Orwell" wordmark, the subtitle, the inline "type /setup" link)

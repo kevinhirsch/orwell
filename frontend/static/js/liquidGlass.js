@@ -282,7 +282,10 @@
   // in CSS (body.theme-frosted glass-ancestor > card). A top-level card (rides the wallpaper
   // directly) still refracts normally.
   var GLASS_CARD_SEL = ".og-card, .on-card";
-  var GLASS_ANCESTOR_SEL = ".ow-window, .admin-card, .modal-content, .og-card, .on-card";
+  // Mirrors the CSS de-glass ancestor set (style.css, body.theme-frosted …) exactly, incl.
+  // `.ow-body` — a window body can render outside its `.ow-window` wrapper (sheet mode), so the
+  // JS refraction gate and the CSS blur-glass fallback must de-glass the SAME nested cards.
+  var GLASS_ANCESTOR_SEL = ".ow-window, .ow-body, .admin-card, .modal-content, .og-card, .on-card";
   function isNestedGlassCard(el) {
     try {
       if (!el.matches || !el.matches(GLASS_CARD_SEL)) return false;         // not a glass card → no extra gate
