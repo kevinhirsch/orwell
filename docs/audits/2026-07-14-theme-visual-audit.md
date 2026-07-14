@@ -16,7 +16,8 @@ walked state). Cross-referenced against `docs/audits/2026-07-09-hig-audit.md` (n
 filed there is re-filed here) and 0114's documented-intentional list (stoplight traffic lights,
 scoped frosted material rules, the onboarding `--bg` card are NOT re-flagged).
 
-**Fixed in this branch (verified, before/after in PR):** see §1.
+**Fixes in flight on this branch:** see §1 (each entry gains its before/after evidence when the
+fix lane lands; until then §1 items are IN PROGRESS, not verified-shipped).
 
 ---
 
@@ -42,11 +43,11 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
   token-driven solid expression (same geometry/typography/focus, `--panel`/`--fg`/`--border`
   fills, no blur) — inventoried in §3.
 
-## 1. Fixed in this branch
+## 1. Fixes in flight on this branch (IN PROGRESS — not yet verified-shipped)
 
-*(populated as the fix lane lands — demo decision-section fidelity, `.odec` style scoping +
-selected-pill fix, banner dismiss-× centering, demo tier switcher with theme-correct flat
-scaffolding.)*
+*(populated with before/after evidence as the fix lane lands — demo decision-section fidelity,
+`.odec` style scoping + selected-pill fix, banner dismiss-× centering, demo tier switcher with
+theme-correct flat scaffolding.)*
 
 ## 2. Element kit — Frosted (default tier) findings
 
@@ -59,7 +60,8 @@ Self-verified so far (overseer measurements):
   getBoundingClientRect). The left `.on-icon` is box-centered (−0.5px) but optically low-weight.
   Fix: center the × visually while keeping the ≥44px hit region. (`orwellNotice.js` injected
   banner CSS.) — IN FIX THIS BRANCH.
-- **KIT-OV-2 · P1 · disabled-state philosophy split · all tiers.** Kit `.ow-btn:disabled` uses
+- **KIT-OV-2 · P1 · disabled-state philosophy split · frosted + glass (the tiers with kit rules;
+  Flat has no kit expression — see §0).** Kit `.ow-btn:disabled` uses
   0.42 opacity (ELEMENT_KIT.md contract), while `.send-btn`/`.odec-*`/`.ow-window .ow-body
   button:disabled` were deliberately moved to an OPAQUE fixed-color treatment (`#d6d6d9`/`#57575c`,
   style.css ~21383-21399) precisely because opacity-only disabling fails over glass (measured
