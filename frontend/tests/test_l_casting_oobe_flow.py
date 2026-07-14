@@ -673,7 +673,12 @@ def test_casting_empty_reply_reprompt_is_wired_and_bounded():
     assert "visibleReply: _castingVisibleReply" in seg
     # reasoning-present gate — makes the casting re-prompt mutually exclusive with _isEmptyTurnNoSave
     # (which requires BLANK accumulated), so a fully-silent turn never trips both recoveries (#1595).
-    assert "hadReasoning:" in seg
+    # It MUST derive from the dedicated reasoning channel `roundReasoningText`, NOT the merged
+    # `accumulated` (which carries reply text + synthetic <think> delimiters — an empty <think></think>
+    # would falsely read as reasoning; the channel split is a hard coding guideline).
+    assert "hadReasoning: !!(roundReasoningText" in seg
+    assert "hadReasoning: !!(accumulated" not in seg, \
+        "hadReasoning must not be inferred from the merged accumulated buffer"
     assert "hadReasoning" in recon, "the predicate must accept a hadReasoning gate"
     assert "alreadyReprompted: _castingEmptyRepromptSent" in seg
     # a HARD one-shot: the latch is set BEFORE the deferred send, and the re-prompt only RE-ASKS the

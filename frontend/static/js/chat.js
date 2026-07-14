@@ -3781,10 +3781,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
               usedTools: _usedToolsThisTurn,   // turn-scoped flag — the tool rail is a SIBLING of holder, not inside it
               producedVisible: _producedVisibleOutput,
               visibleReply: _castingVisibleReply,
-              // reasoning-present (non-blank merged `accumulated`) — mutually exclusive with the
-              // clean-empty Retry path (_isEmptyTurnNoSave requires BLANK accumulated). A fully-silent
-              // casting turn thus takes ONLY the Retry banner, never both recoveries (review #1595).
-              hadReasoning: !!(accumulated && String(accumulated).trim()),
+              // reasoning-present — derived from the DEDICATED reasoning channel `roundReasoningText`
+              // (deltas with json.thinking truthy), NOT the merged `accumulated` (which carries reply
+              // text + synthetic <think> delimiters, so `<think></think>` would falsely read as
+              // reasoning). Keeps the reply/reasoning channel split intact (hard coding guideline —
+              // never infer reasoning from the merged buffer) and gates the re-prompt on a REAL
+              // thinking trace, so the reasoning-only hang self-recovers while a genuinely silent turn
+              // stays on the clean-empty Retry path (review #1595).
+              hadReasoning: !!(roundReasoningText && roundReasoningText.trim()),
               alreadyReprompted: _castingEmptyRepromptSent,
             })) {
           _castingEmptyRepromptSent = true;    // hard loop-guard: at most ONE auto re-prompt per streak
