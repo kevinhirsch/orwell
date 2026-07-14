@@ -12,6 +12,45 @@
 (function () {
   "use strict";
 
+  // ── TIER SWITCHER (demo chrome) ────────────────────────────────────────────
+  // Drives the fixed Frosted / Glass / Flat toolbar (#ek-tier in element_kit_demo.html).
+  // Lives HERE, not inline in the demo page: the app serves /static under a CSP that
+  // refuses inline scripts (script-src 'self'). Deep-linkable via location.hash
+  // (#tier=frosted|glass|flat); FROSTED is the default (the app default). Self-contained —
+  // deliberately does NOT load theme.js; flat's dark tokens are demo scaffolding CSS
+  // (.ek-flat) mirroring the `dark` preset in js/theme.js THEMES.
+  function initTierSwitcher() {
+    var VALID = { frosted: 1, glass: 1, flat: 1 };
+    function tierFromHash() {
+      var m = /tier=(\w+)/.exec(location.hash || "");
+      return (m && VALID[m[1]]) ? m[1] : "frosted";   // FROSTED is the app default
+    }
+    function apply(tier) {
+      var b = document.body, h = document.documentElement;
+      b.classList.remove("theme-frosted", "glass-full", "ek-flat");
+      h.classList.remove("ek-flat");
+      if (tier === "glass") { b.classList.add("theme-frosted", "glass-full"); }
+      else if (tier === "frosted") { b.classList.add("theme-frosted"); }
+      else { b.classList.add("ek-flat"); h.classList.add("ek-flat"); }
+      document.querySelectorAll("#ek-tier button").forEach(function (btn) {
+        var on = btn.dataset.tier === tier;
+        btn.classList.toggle("ek-tier-on", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      // re-target the Chromium SVG refraction layer for the new tier (no-op elsewhere)
+      try { window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh(); } catch (_) {}
+    }
+    document.querySelectorAll("#ek-tier button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        location.hash = "tier=" + btn.dataset.tier;   // deep-linkable; hashchange applies
+        apply(btn.dataset.tier);                       // and apply now (same-hash clicks)
+      });
+    });
+    window.addEventListener("hashchange", function () { apply(tierFromHash()); });
+    apply(tierFromHash());
+  }
+  if (document.getElementById("ek-tier")) initTierSwitcher();
+
   // The kit globals load as async modules — wait for them, then build once.
   function whenReady(cb) {
     var tries = 0;
@@ -210,9 +249,22 @@
     );
   }
 
+  // The Decision section composes the kit's .odec/.odec-* classes STATICALLY in the demo
+  // markup — the structural CSS lives in orwellDecision.js's ensureStyles() (scoped to the
+  // .odec root class), so inject it here. Fail-open: absent kit ⇒ the section renders
+  // unstyled rather than breaking the rest of the reference page.
+  function buildDecision() {
+    try {
+      if (window.OrwellDecisionKit && window.OrwellDecisionKit.ensureStyles) {
+        window.OrwellDecisionKit.ensureStyles();
+      }
+    } catch (e) { console.warn("[kit-demo] decision styles failed", e); }
+  }
+
   whenReady(function () {
     buildWindows();
     buildNotices();
     buildGadgets();
+    buildDecision();
   });
 })();
