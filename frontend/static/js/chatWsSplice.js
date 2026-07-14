@@ -126,8 +126,62 @@ export function _wsEnsureRound() {
   _wsRound = { holder: holder, contentDiv: holder.querySelector('.stream-content'),
                state: {}, reply: '', reasoning: '',
                sessionId: (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null };
+  // #1570 — the OBSERVER/peer live render (window B mirroring a peer's turn) mounts ITS OWN holder
+  // here; the SENDER pins its holder via `_wsPinRound` and already holds `chatState._streamSessionId`.
+  // Without a lock on B, `hasActiveStream(sid)` is FALSE, so a racing `softReloadHistory` (fired by a
+  // `state` edge / `orwell:gamechanged`) REBUILDS the turn destructively and B lands on the static
+  // reconcile path instead of this shared incremental renderer — the mirror-parity race that trips
+  // `bUsesIncrementalRenderer=false`. Register the session as an active resume stream so the reconcile
+  // DEFERS to the live render; released at `done` (and on a resync teardown). Mirrors resumeStream's
+  // `_resumingStreams` re-attach lock (both are "a live reader owns this session's render right now").
+  try { if (_wsRound.sessionId) chatState._resumingStreams.add(_wsRound.sessionId); } catch (_) {}
   uiModule.scrollHistory();
   return _wsRound;
+}
+
+// #1596 — the engine restarted mid-stream (power outage): `orwellWs` detected its committed beatSeq
+// went BACKWARDS, or a reconnect found the run we were tailing GONE, and emitted `orwell:ws-resync`.
+// A wedged live render will NEVER receive its `done` (the run is dead), so its holder sits half-painted
+// and its active-stream lock keeps a reconcile permanently deferred. Break the wedge: tear the stale
+// holder down, RELEASE the lock (so the reconcile below is not deferred by `hasActiveStream`), then
+// rebuild from the authoritative history (idempotent — a converged session is a cheap no-op). This is a
+// DISTINCT window event, not `orwell:gamechanged`, so the g15 single-dispatcher rule is untouched.
+export function _onWsResync(ev) {
+  const reason = (ev && ev.detail && ev.detail.reason) || 'unknown';
+  const sid = (ev && ev.detail && ev.detail.canonicalId) ||
+              (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) ||
+              (sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId()) || null;
+  const round = _wsRound;
+  const wasWedged = !!(round && round.holder);
+  // #1599 — a resync is the AUTO-CORRECTION of a real interruption (engine restart mid-stream). It is
+  // not a routine event: log it at WARN with disposition (reason + whether a wedged holder was torn
+  // down) so the heal is observable, never silent. TODO(#1599): raise a RED client-health event once
+  // the client health ring lands (the proactive-observability lane that follows this one).
+  try {
+    console.warn('[chatWsSplice #1596] ws-resync (' + reason + ') — reconciling from history' +
+      (wasWedged ? '; tore down a wedged live holder' : '') + ' (auto-corrected).');
+  } catch (_) {}
+  if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) { /* best-effort DOM cleanup */ } }
+  if (round && round.holder) { try { round.holder.remove(); } catch (_) { /* best-effort DOM cleanup */ } }
+  _wsResetRound();
+  // Release the active-stream lock whether it was pinned to the canonical id OR the tab's OWN
+  // round.sessionId (Greptile #1609): after canonical adoption those DIFFER, and the sender lock in
+  // `chatState._streamSessionId` holds `round.sessionId` (from `_wsPinRound`). Clearing only on `sid`
+  // would leave `hasActiveStream(round.sessionId)` true, so the history reconcile keeps deferring and
+  // the wedge remains. Release both, and drop both from the resuming-streams set.
+  const pinnedSid = round && round.sessionId;
+  if (sid) { try { chatState._resumingStreams.delete(sid); } catch (_) { /* Set may be absent in a bare test import */ } }
+  if (pinnedSid && pinnedSid !== sid) { try { chatState._resumingStreams.delete(pinnedSid); } catch (_) { /* best-effort */ } }
+  if (chatState._streamSessionId && (chatState._streamSessionId === sid || chatState._streamSessionId === pinnedSid)) {
+    chatState._streamSessionId = null;
+  }
+  if (sid) {
+    // A reconcile that THROWS is a real render failure — surface it (never swallow), then let the next
+    // reconcile trigger retry. TODO(#1599): raise a RED client-health event on this path too.
+    Promise.resolve().then(() => _softReloadHistory(sid)).catch((e) => {
+      try { console.error('[chatWsSplice #1596] ws-resync history reconcile FAILED for ' + sid + ':', e); } catch (_) {}
+    });
+  }
 }
 
 // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
@@ -198,6 +252,9 @@ export function _onWsChatFrame(frame) {
     // Mirrors the SSE observer's rich resume contract (mirror-toolturn parity, #1087).
     if (rich && round && round.holder) { try { round.holder.remove(); } catch (_) {} }
     _wsResetRound();
+    // #1570 — release the OBSERVER live-render lock (added in _wsEnsureRound) so the settle reconcile
+    // below can actually rebuild. Harmless no-op for the SENDER (it never took the resuming lock).
+    if (sid) { try { chatState._resumingStreams.delete(sid); } catch (_) {} }
     if (sid && chatState._streamSessionId === sid) chatState._streamSessionId = null; // release the active-stream lock
     if (sid) { try { _softReloadHistory(sid); } catch (_) {} }
     return;

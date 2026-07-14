@@ -55,7 +55,7 @@ import { openAttachment, _setAttachmentsApiBase } from './chatAttachments.js';
 // (_renderLiveStream — the R2 render seam; softReloadHistory — reconcile; _senderLabel — the single-
 // source sender label) via _setWsSpliceDeps, mirroring the PR2/PR3 injection pattern. None of these
 // are on the chatModule public API. Imported here only, so #1399 single-eval holds.
-import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _setWsSpliceDeps } from './chatWsSplice.js';
+import { _wsChatActive, _wsResetRound, _wsPinRound, _wsRegisterChat, _onWsResync, _setWsSpliceDeps } from './chatWsSplice.js';
 // #1414 (R3 PR5): the per-message actions cluster — edit / resend / regenerate / variant-nav /
 // fork / delete / rewrite / continue. Behavior-preserving: the 8 action functions are called
 // cross-file by chatRenderer.js via window.chatModule.<fn> (the per-message footer buttons), so
@@ -5471,6 +5471,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   if (typeof window !== 'undefined') {
     if (window.OrwellWs) _wsRegisterChat();
     else window.addEventListener('orwell:ws-ready', _wsRegisterChat, { once: true });
+    // #1596 — the engine-restart / reconnect-run-gone reconcile. orwellWs emits `orwell:ws-resync`
+    // when it heals a backwards beatSeq or reconnects onto a vanished run; the splice handler tears
+    // down any wedged live holder, releases the dead stream lock, and rebuilds from history. A
+    // DISTINCT event from `orwell:gamechanged` (the g15 single-dispatcher rule is untouched).
+    window.addEventListener('orwell:ws-resync', _onWsResync);
   }
 
   // Public API

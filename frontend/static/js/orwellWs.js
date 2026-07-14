@@ -238,6 +238,33 @@
 
   function _noteBeat(b) { if (typeof b === "number" && b > _beatSeq) _beatSeq = b; }
 
+  // #1596 — AUTHORITATIVE beat adoption (handshake ack on reconnect + the stale-beat CAS refusal).
+  // Unlike `_noteBeat` (monotonic-forward — the right rule for replayable `state`/`hud`/`event` push
+  // frames, which can arrive out of order or be ring-replayed), an AUTHORITATIVE source that reports a
+  // beat LOWER than our last-seen is the engine telling us its committed head moved BACKWARDS. That is
+  // the engine-restart signal (a power-outage restart whose in-memory beatSeq reset): if we cling to
+  // our now-FUTURE `_beatSeq`, every up-frame attaches a stale `expectedBeatSeq` and 409s forever (the
+  // wedge). So HEAL DOWNWARD to the engine's real head and emit a one-shot `orwell:ws-resync` so the
+  // chat reconciles + re-renders instead of sitting wedged on a half-painted bubble. A forward/equal
+  // beat is just a normal advance. `b <= 0` is the "no beat" sentinel — never adopt it downward.
+  function _adoptBeat(b) {
+    if (typeof b !== "number" || !(b > 0)) return;
+    if (b < _beatSeq) {
+      // #1599 — a backwards engine head is a REAL anomaly (engine restart / rollback). It is being
+      // AUTO-CORRECTED here (heal downward + resync), but a correction is NOT a cloak: log it at WARN
+      // with disposition so it is never silently swallowed. TODO(#1599): also raise a RED client-health
+      // event on /admin/status once the client health ring lands (the proactive-observability lane).
+      try {
+        console.warn("[orwellWs #1596] engine beatSeq went BACKWARDS (" + _beatSeq + " -> " + b +
+          ") — restart detected; healed downward + emitting ws-resync (auto-corrected).");
+      } catch (_) {}
+      _beatSeq = b;
+      _emitWindow("orwell:ws-resync", { canonicalId: _canonicalId, beatSeq: b, reason: "beat-backwards" });
+      return;
+    }
+    if (b > _beatSeq) _beatSeq = b;
+  }
+
   function _onAck(frame) {
     var cid = frame.cid;
     var d = frame.d || {};
@@ -286,9 +313,12 @@
     // caller (a turn/decision/subscribe/hello) fails the RIGHT request.
     if (cid && _pending[cid]) {
       var p = _pending[cid]; delete _pending[cid];
-      // stale-beat: the engine refused a 0065 CAS BEFORE any write. Surface the
-      // fresh beatSeq so the caller reconciles + retries (§3.5).
-      if (d.code === "stale-beat" && typeof d.beatSeq === "number") _noteBeat(d.beatSeq);
+      // stale-beat: the engine refused a 0065 CAS BEFORE any write. The surfaced beatSeq is the
+      // engine's AUTHORITATIVE current head — "the fresh beat the client reconciles to" (§3.5). Adopt
+      // it even if it is LOWER than our last-seen: a lower head means the engine went backwards (a
+      // restart), and clinging to our now-future value would 409 every retry forever (#1596). `_adoptBeat`
+      // heals downward (and emits a resync) or advances forward, exactly matching the reconcile contract.
+      if (d.code === "stale-beat" && typeof d.beatSeq === "number") _adoptBeat(d.beatSeq);
       var err = new Error(d.code || "ws-error");
       err.code = d.code; err.detail = d;
       try { p.reject(err); } catch (_) {}
@@ -650,7 +680,11 @@
     }, HELLO_TIMEOUT_MS);
 
     sock.onopen = function () {
-      _hello(perTabId).then(function () {
+      // #1596 — capture reconnect-ness BEFORE `_activate()` clears `_reconnectFails`. A reconnect
+      // handshake is a fresh authoritative sync point (used for the engine-restart beatSeq self-heal
+      // + the run-gone reconcile below).
+      var wasReconnect = _reconnectFails > 0 || _highestChatSeq >= 0;
+      _hello(perTabId).then(function (helloAck) {
         _clearHelloTimer();
         if (!_live) {
           // Bound to a not-yet-live id (§2.4) — pre-game / casting hasn't produced a live
@@ -660,10 +694,51 @@
           _goFallback("pregame-not-live");
           return;
         }
+        // #1596 — on a RECONNECT, adopt the ack's beatSeq AUTHORITATIVELY. `_onAck` already
+        // `_noteBeat`d it (monotonic-forward), so if the engine RESTARTED and its committed head is
+        // now LOWER than our last-seen, `_beatSeq` is still stale-high; `_adoptBeat` heals it down
+        // (and resyncs) so the first post-reconnect up-frame doesn't 409 forever.
+        if (wasReconnect) {
+          try {
+            var _hb = helloAck && helloAck.d && helloAck.d.beatSeq;
+            if (typeof _hb === "number") _adoptBeat(_hb);
+          } catch (_) {}
+        }
         _activate();
         // Fresh window ⇒ full replay from 0; a reconnect resumes from the gap.
-        _subscribeChat(_reconnectFails > 0 || _highestChatSeq >= 0 ? _highestChatSeq + 1 : 0)
-          .catch(function () { /* subscribe refused — chat stays on the SSE fallback */ });
+        _subscribeChat(wasReconnect ? _highestChatSeq + 1 : 0)
+          .then(function (subAck) {
+            // #1596 — a reconnect whose re-subscribe finds NO live run (`hasRun:false`) means the run
+            // we were mid-tail on was INTERRUPTED by the engine restart and is gone. Never sit wedged
+            // on the half-painted bubble: emit a resync so the chat tears it down and reconciles from
+            // the authoritative history (idempotent — a converged session is a cheap no-op).
+            if (wasReconnect && subAck && subAck.d && subAck.d.hasRun === false) {
+              // #1599 — the run we were tailing vanished across the reconnect (engine restart mid-turn).
+              // This is a REAL interruption being AUTO-CORRECTED (resync → history reconcile); log it with
+              // disposition rather than swallowing. TODO(#1599): raise a RED client-health event too.
+              try {
+                console.warn("[orwellWs #1596] reconnect found NO live run for the canonical — the " +
+                  "mid-stream run was interrupted (engine restart); emitting ws-resync to reconcile " +
+                  "(auto-corrected).");
+              } catch (_) {}
+              _emitWindow("orwell:ws-resync",
+                { canonicalId: _canonicalId, beatSeq: _beatSeq, reason: "reconnect-run-gone" });
+            }
+          })
+          .catch(function (e) {
+            // #1599 — a subscribe REFUSAL is a genuine failure (chat degrades to the SSE fallback for
+            // this session): log it at WARN with disposition, never swallow it silently.
+            // TODO(#1599): raise a RED client-health event once the client health ring lands.
+            try {
+              console.warn("[orwellWs #1596] chat subscribe refused on " +
+                (wasReconnect ? "reconnect" : "connect") + " — chat falls back to SSE for this session:",
+                (e && e.message) || e);
+            } catch (_) {}
+            // Actually PERFORM the handoff the warning promises: without this the window stays in WS
+            // mode with chat inactive (silently dead) — a soft failure. `_goFallback` tears down the
+            // socket and emits `orwell:ws-inactive` so the SSE resume path picks chat back up.
+            _goFallback("chat-subscribe-refused");
+          });
         // Arm the state/hud push edge too (§4). This runs on EVERY successful
         // handshake — a fresh connect AND a reconnect (both re-enter this onopen) —
         // so a dropped socket re-arms all three channels, not just chat.
