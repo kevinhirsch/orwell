@@ -194,6 +194,96 @@ else
   pass "embedding-prefetch noise filter keeps the '|| true' guard (A11; a good prefetch can't fail it)"
 fi
 
+# ── [A12] embeddings warm-up integrity — the #1590/#1600 silent-degrade guard ────────────────────
+# WHY: fastembed's ESM build does `import tar from "tar"`; a tar@7 (ESM-only, no default export)
+# override made that import THROW at module-eval time — BEFORE any network fetch — so every engine
+# boot caught it and fell back to the DESIGNED deterministic provider (degraded:true), running
+# semantic recall permanently DEGRADED. No gate saw it: the smoke booted the engine but never
+# asserted the embedding provider warmed up. This section closes that gap, separating the two cases:
+#   • INTENTIONAL fallback (ORWELL_EMBEDDINGS unset ⇒ deterministic, degraded:false) — MUST PASS.
+#   • REAL failure (fastembed requested + warm-up CRASHES on import/exception) — MUST FAIL loudly.
+echo "==> [A12] embeddings warm-up integrity (fastembed import path + provider health)"
+# (a) Unit-test the assertion helper IN THIS lane. deploy-smoke path-triggers on deploy/**, so the
+#     classifier is gated here — a deploy-only PR that broke it would go red on THIS job.
+if bash "${ROOT}/deploy/smoke_embeddings.sh" --self-test >/tmp/orwell-smoke-emb-selftest.log 2>&1; then
+  pass "prefetch-outcome classifier self-test (import-crash vs unreachable-model separation)"
+else
+  fail "prefetch-outcome classifier self-test"; sed 's/^/    /' /tmp/orwell-smoke-emb-selftest.log
+fi
+# (b) Leg A — INTENTIONAL fallback. The engine above booted WITHOUT ORWELL_EMBEDDINGS (the smoke's
+#     default), so the deterministic provider is the DESIGNED default: /health must report
+#     provider=deterministic AND degraded=false. An unset provider is NOT a failure — this is the
+#     exact case a naive "is it degraded?" check would wrongly red.
+emb_health="$(curl -fsS "${BASE}/health" 2>/dev/null)"
+if have "$emb_health" '"provider":"deterministic"' && ! printf '%s' "$emb_health" | grep -Eq '"degraded":[[:space:]]*true'; then
+  pass "unset ORWELL_EMBEDDINGS ⇒ deterministic provider, NOT degraded (intentional fallback passes)"
+else
+  fail "intentional deterministic fallback misreported on /health: ${emb_health}"
+fi
+# (c) Leg B — REAL-failure gate. Request fastembed and prove the warm-up IMPORT+EXTRACT path does
+#     not CRASH. `--prefetch` runs the exact path the engine warm-up runs (`import("fastembed")` →
+#     FlagEmbedding.init → tar-extract the model), so #1590 fails it at import BEFORE any socket. The
+#     classifier separates that crash (import-fail ⇒ FAIL) from a model-download-unavailable sandbox
+#     (network-skip ⇒ tolerated + LOGGED). The classifier defaults an UNRECOGNISED non-zero exit to
+#     import-fail, so a network-absent CI can never silently pass a real import crash.
+# shellcheck source=deploy/smoke_embeddings.sh
+. "${ROOT}/deploy/smoke_embeddings.sh"
+EMB_CACHE="$(mktemp -d /tmp/orwell-smoke-emb-XXXXXX)"
+node dist/embedWorker.js --prefetch --cache-dir "$EMB_CACHE" >/tmp/orwell-smoke-emb-prefetch.log 2>&1
+emb_rc=$?
+emb_class="$(classify_prefetch_outcome "$emb_rc" "$(cat /tmp/orwell-smoke-emb-prefetch.log)")"
+case "$emb_class" in
+  ok)
+    pass "ORWELL_EMBEDDINGS=fastembed warm-up import/extract path works (prefetch exit 0 — #1590 guard)"
+    # The model is proven present (offline thereafter), so booting the engine against it can't flake
+    # on network — assert the strongest end-to-end proof: the provider RESOLVES to fastembed and is
+    # NOT degraded. This is the exact positive of the #1590 silent-degrade.
+    fb_port=$((PORT + 1)); fb_base="http://127.0.0.1:${fb_port}"
+    env ORWELL_ENGINE_PORT="$fb_port" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" ORWELL_EMBEDDINGS=fastembed \
+        ORWELL_EMBED_CACHE="$EMB_CACHE" ORWELL_EMBED_WARMUP_MS=60000 "${SHIPPED_FLAGS[@]}" \
+        node dist/main.js >/tmp/orwell-smoke-emb-engine.log 2>&1 &
+    fb_pid=$!
+    fb_up=0
+    for _ in $(seq 1 60); do
+      curl -fsS "${fb_base}/health" >/dev/null 2>&1 && { fb_up=1; break; }
+      kill -0 "$fb_pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if [ "$fb_up" = 1 ]; then
+      # Warm-up runs AFTER the listen (prod incident 2026-06-19), so poll /health until it upgrades.
+      fb_health=""
+      for _ in $(seq 1 40); do
+        fb_health="$(curl -fsS "${fb_base}/health" 2>/dev/null)"
+        have "$fb_health" '"provider":"fastembed"' && break
+        sleep 0.5
+      done
+      if have "$fb_health" '"provider":"fastembed"' && ! printf '%s' "$fb_health" | grep -Eq '"degraded":[[:space:]]*true'; then
+        pass "fastembed engine warms up healthy: /health provider=fastembed, degraded=false (NOT the #1590 silent degrade)"
+      else
+        fail "fastembed requested + model cached, but /health never upgraded to a healthy fastembed: ${fb_health}"
+        echo "    engine log:"; sed 's/^/      /' /tmp/orwell-smoke-emb-engine.log | tail -n 15
+      fi
+    else
+      fail "fastembed engine did not become healthy on :${fb_port} (see /tmp/orwell-smoke-emb-engine.log)"
+    fi
+    kill "$fb_pid" 2>/dev/null; wait "$fb_pid" 2>/dev/null
+    ;;
+  network-skip)
+    echo "  WARN — fastembed model is UNREACHABLE in this sandbox (a benign, offline-CI condition, NOT the"
+    echo "         #1590 import crash — the import succeeded, only the model download failed). Skipping the"
+    echo "         live fastembed-boot assertion. Prefetch output:"
+    sed 's/^/           /' /tmp/orwell-smoke-emb-prefetch.log
+    pass "fastembed import path did not CRASH (model download unavailable — tolerated, logged loudly)"
+    ;;
+  *)
+    fail "ORWELL_EMBEDDINGS=fastembed warm-up CRASHED on import/exception (the #1590 class — semantic recall"
+    echo "         would run permanently DEGRADED on every boot). This is a build/dependency defect, NOT a"
+    echo "         network problem. Prefetch output:"
+    sed 's/^/           /' /tmp/orwell-smoke-emb-prefetch.log
+    ;;
+esac
+rm -rf "$EMB_CACHE"
+
 # ── [4/4] the SYSTEM works (B71/ops A7): engine auth ON + the real front-end + a real turn ──────
 # A green engine alone is compatible with a broken FE; this stage boots the actual app against a
 # token-enforcing engine (proving B67 end-to-end) and drives create → advance → decision.
