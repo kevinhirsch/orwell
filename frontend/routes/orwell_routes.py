@@ -13,11 +13,14 @@ no bespoke game chat route here. These endpoints are the onboarding + state seam
   * GET  /api/orwell/moment  -> the managed game-master prompt for the moment;
   * GET  /api/orwell/health  -> engine reachability.
 """
+import asyncio
 import json
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Request, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
@@ -39,6 +42,18 @@ import time as _time
 
 _WARN_EVERY = 30.0
 _LAST_WARN: dict[str, float] = {}
+
+# #1614: bound the (normally sub-millisecond) local portrait-file resolve. Serving a stored portrait
+# is pure per-user disk I/O, but a busy portrait generation/backfill lane can saturate the disk and
+# starve this read for many seconds. Because the browser holds a per-host connection slot on every
+# pending <img>, ONE stuck portrait response starves EVERY portrait surface at once. Bounding the
+# resolve (off the event loop, with this timeout) guarantees the route resolves-or-fails-fast: on
+# timeout it returns the same "no portrait" 404 the not-found path already serves, the browser
+# releases the slot, and the FE (monogram-first; PR #1613) degrades to the monogram.
+try:
+    _PORTRAIT_RESOLVE_TIMEOUT_S = float(os.environ.get("ORWELL_PORTRAIT_TIMEOUT_S", "3.0") or "3.0")
+except (TypeError, ValueError):
+    _PORTRAIT_RESOLVE_TIMEOUT_S = 3.0
 
 
 def _warn_throttled(key: str, msg: str) -> None:
@@ -1390,11 +1405,45 @@ def setup_orwell_routes() -> APIRouter:
     async def orwell_portrait(houseguest_id: str, request: Request):
         """Serve one houseguest's persisted portrait PNG (0051) from this user's portrait dir.
         Per-user scoped (cross-user isolation): a user only ever reads their OWN sandbox's
-        portraits. 404 when none is stored (the roster falls back to a placeholder)."""
+        portraits. 404 when none is stored (the roster falls back to a placeholder).
+
+        RESOLVE-OR-FAIL-FAST (#1614): the lookup is local disk I/O, but a portrait
+        generation/backfill lane can saturate the disk and starve it for many seconds. Because the
+        browser holds a per-host connection slot on each pending <img>, one hung portrait response
+        starves every portrait surface at once (cast window, room strip, rail, chat faces). So run
+        the blocking resolve OFF the event loop under a bounded timeout; on timeout or any error,
+        fall through to the same fast "no portrait" 404 the not-found path already returns — the
+        browser releases the slot and the FE (monogram-first, reveal-on-decode; PR #1613) degrades
+        to the monogram. A ready portrait still streams normally."""
         user = _current_user(request)
-        path = orwell_portraits.portrait_file(user, houseguest_id)
+
+        def _no_portrait() -> JSONResponse:
+            # A transient miss / fail-fast is never cached: the portrait may land moments later once
+            # generation finishes, so the next roster poll must re-request rather than serve a stale
+            # cached 404.
+            return JSONResponse(
+                status_code=404,
+                content={"error": "no portrait"},
+                headers={"Cache-Control": "no-store"},
+            )
+
+        try:
+            path = await asyncio.wait_for(
+                run_in_threadpool(orwell_portraits.portrait_file, user, houseguest_id),
+                timeout=_PORTRAIT_RESOLVE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[orwell] portrait resolve exceeded %.1fs for %r — failing fast to placeholder",
+                _PORTRAIT_RESOLVE_TIMEOUT_S, houseguest_id,
+            )
+            return _no_portrait()
+        except Exception as e:  # pragma: no cover - defensive: a disk/read blip must fail fast, not hang
+            logger.info("[orwell] portrait resolve error for %r: %r — failing fast", houseguest_id, e)
+            return _no_portrait()
+
         if path is None:
-            return JSONResponse(status_code=404, content={"error": "no portrait"})
+            return _no_portrait()
         return FileResponse(
             str(path),
             media_type="image/png",
