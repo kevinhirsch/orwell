@@ -7273,7 +7273,10 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     .theme-import-actions.hidden { display: none; }
     /* Font & Density */
     .theme-fd-row { display: flex; gap: 8px; margin-bottom: 8px; }
-    .theme-fd-group { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+    /* THM-02: min-width:0 lets a flex child shrink below its content's intrinsic width
+       (the <select>/<range> inside would otherwise force the row to overflow) — safe at
+       every width, load-bearing once the row wraps below. */
+    .theme-fd-group { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
     .theme-fd-label { font-size: 12px; font-weight: 500; color: var(--fg); opacity: 0.6; }
     .theme-fd-select {
       padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
@@ -7310,6 +7313,18 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       background: var(--red); border: none; cursor: pointer;
     }
     .theme-fd-range:focus { outline: none; }
+    /* THM-02: Customize never reflowed narrow — the Colors 2-col grid (.theme-custom)
+       and the 4-across Font & Layout row (.theme-fd-row, no flex-wrap) both overflowed
+       to a horizontal scrollbar at the kit window's 320px floor. #theme-popup already
+       establishes an inline-size CONTAINER (~5833), so this collapses against the
+       window's OWN measured width (not the viewport) — matching the settings-modal
+       container-query pattern, and correct even when a floating theme window is
+       resized narrow on a wide viewport. 620 is the shared container-tier token
+       (responsive-tokens.css / S5), same tier `@container settings-modal` uses. */
+    @container (max-width: 620px) {
+      .theme-custom { grid-template-columns: 1fr; }
+      .theme-fd-row { flex-wrap: wrap; }
+    }
     /* Color Harmony Generator */
     .theme-harmony-row { display: flex; gap: 8px; align-items: flex-end; }
     .harmony-generate-btn {
@@ -7393,30 +7408,16 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       .styled-confirm-box .close-btn {
         display: none !important;
       }
-      #theme-popup {
-        width: 100% !important;
-        height: 65vh !important;
-        max-height: 65vh !important;
-        top: auto !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
-        position: fixed !important;
-        border-radius: 14px 14px 0 0;
-        border: none;
-        border-top: 1px solid var(--border);
-        padding: 6px 12px 12px;
-        animation: sheet-enter 0.2s ease-out forwards;
-        overflow-y: hidden !important;
-      }
-      #theme-popup .theme-tab-panel {
-        touch-action: pan-y;
-        overscroll-behavior: contain;
-        -webkit-overflow-scrolling: touch;
-      }
-      #theme-popup.sheet-ready {
-        animation: none;
-      }
-      #theme-popup.modal-closing {
-        animation: sheet-exit 0.15s ease-in both !important;
-      }
+      /* THM-01: the pre-kit #theme-popup mobile block (position:fixed + height:65vh +
+         the sheet-enter/sheet-exit animation hooks) is REMOVED here. #theme-popup is
+         now composed as .ow-window .ow-body CONTENT (see ~7111) — the OrwellWindow kit's
+         OWN sheet mode (the .ow-sheet family, ~24028) already owns phone presentation
+         (position, height, detents, grab handle, open/close animation). The legacy fixed
+         positioning re-anchored the content to the viewport independent of the kit's
+         window geometry, floating it over its own titlebar with ~400px of dead space on
+         every phone open. Settings never had this collision (its analogous legacy rule
+         used height:auto), which is why only Theme broke. Do not reintroduce a
+         position/height override here — style the kit's .ow-sheet /.ow-body instead. */
       .modal-content,
       .memory-modal-content,
       .settings-modal-content,
@@ -15806,10 +15807,21 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   .settings-sidebar::-webkit-scrollbar {
     display: none;
   }
-  /* S3: 476px of tabs were hidden with zero affordance — fade the clipped edge. */
+  /* S3: 476px of tabs were hidden with zero affordance — fade the clipped edge.
+     SET-OV-3 (2026-07-14 audit): the mask was RIGHT-edge-only and static — a scroll
+     position that lands MID-tab-strip (the active tab is not always the first one)
+     fades only the trailing edge, so a tab clipped on the LEADING edge read as fully
+     gone, not merely scrollable. Made the fade bidirectional (both edges) so the
+     "there's more here" affordance holds regardless of which way the strip is
+     scrolled. */
   .settings-sidebar {
-    mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
-    -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 28px), transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 28px), transparent);
+    /* Snap scrolling so a flick/drag never rests with a pill clipped mid-label —
+       each tab settles fully into view (the literal SET-OV-3 symptom: the ACTIVE
+       pill stopping half-visible with no way to tell it was cut off). */
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 20px;
   }
   .settings-sidebar-divider,
   .settings-sidebar-label {
@@ -15819,6 +15831,7 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
     flex: 0 0 auto;
     padding: 6px 10px;
     font-size: var(--fs-xs);
+    scroll-snap-align: start;
   }
   .settings-panels {
     padding: 12px 14px;
@@ -21176,14 +21189,19 @@ body.theme-frosted .ow-btn-prominent {
     var(--ow-btn-tint-primary, rgba(255,255,255,0.26));
   color: #16191f;
   font-weight: var(--ow-fw-semibold, 600);
-  border-color: color-mix(in srgb, #16191f 6%, transparent);
+  /* KIT-F-02: was 6% — WEAKER than Secondary's 12% border (backwards hierarchy for the
+     primary action). 14% now reads stronger than Secondary. */
+  border-color: color-mix(in srgb, #16191f 14%, transparent);
   /* the shared float shadow + a brighter (but still crisp) specular rim — the primary
      action reads as the MOST lit glass (luminosity, not hue; owner ruling). #709: the lift
      comes from a sharper top-edge highlight + the inner perimeter line, NOT a fatter wash
      (a fat bright rim fought the refraction halo and pooled into a streak). Brightest white
-     0.6 (#770 ceiling). */
+     0.6 (#770 ceiling).
+     KIT-F-02: the perimeter inset was 0.34 alpha — WEAKER than Secondary's shared
+     --ow-btn-rim perimeter (0.5 alpha), so the primary action's rim read subordinate to
+     the secondary one. Raised to 0.62 so Prominent carries the STRONGEST rim in the set. */
   box-shadow:
-    inset 0 0 0 0.75px rgba(255,255,255,0.34),
+    inset 0 0 0 0.75px rgba(255,255,255,0.62),
     inset 0 1px 0.5px rgba(255,255,255,0.6),
     inset 0 -1px 1px rgba(0,0,0,0.05),
     var(--ow-btn-shadow);
@@ -21685,6 +21703,40 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
   box-shadow: none;
 }
 
+/* ── THM-OV-1: .admin-tab pill strip inside a frosted kit window ────────────────
+   .admin-tab/.admin-tabs (the Theme window's Themes/Customize strip, plus the
+   Agent Tools sub-tabs) is a pre-kit component tuned for the base dark theme: idle
+   color rides `--fg-muted` (unset here ⇒ inherits) and — because it's a plain
+   `<button>` inside `.ow-body` that isn't `.ow-btn` — it's also caught by the
+   generic vibrant-fill rule above (`color-mix(var(--fg) 12%, transparent)`), which
+   resolves to a dark tint under the frosted `--fg` redefinition. Ink inherits dark
+   too, so it rendered dark-on-dark. Same escape + mirror the .settings-nav-item
+   frosted treatment: transparent/light idle, a filled system-blue pill (white ink)
+   when active. */
+body.theme-frosted .ow-window .ow-body button.admin-tab {
+  background-color: transparent;
+  border: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  border-radius: var(--ow-radius-inner, 10px);
+  color: var(--ow-control-ink, #16191f);
+  transform: none;
+}
+body.theme-frosted .ow-window .ow-body button.admin-tab:hover:not(.active) {
+  background-color: color-mix(in srgb, #16191f 8%, transparent);
+  box-shadow: none;
+  transform: none;
+  filter: none;
+  color: var(--ow-control-ink, #16191f);
+}
+body.theme-frosted .ow-window .ow-body button.admin-tab.active {
+  background-color: var(--ow-ios-blue, #0a84ff);
+  color: #fff;
+  box-shadow: none;
+}
+body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff; }
+
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */
 /* ║  ── ELEMENT KIT ──  (issue #773)                                          ║ */
 /* ║  The OrwellElement kit: Apple-HIG atomic PRIMITIVES, ONE source of truth, ║ */
@@ -21764,8 +21816,14 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
      Matches adaptiveGlass.js HERO_INK_DARK / the .ow-btn ink #726 pinned. */
   --ow-control-ink: #16191f;
   /* System red for the Destructive role (HIG: "a destructive button uses the system
-     red color"). A semantic, not a theme hue — legible label rides on top of it. */
-  --ow-danger: var(--color-danger, #ff453a);
+     red color"). A semantic, not a theme hue — legible label rides on top of it.
+     KIT-F-06 (2026-07-14 audit): this used to fall through to `--color-danger`, which
+     resolves to the legacy `#c0392b` app-wide (style.css ~136) — NOT the Apple system
+     red ELEMENT_KIT.md promises, so the kit's own `#ff453a` fallback was dead code.
+     Pinned literally here so the KIT's destructive role is the real system red; the
+     app-wide `--color-danger` repoint (or a scoped split) is the open call tracked in
+     issue #1605 — do not fold that decision in here. */
+  --ow-danger: #ff453a;
   --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
 
   /* ── TINT PROMINENCE (WWDC25 310 "Build an AppKit app with the new design") ──────
@@ -21787,7 +21845,7 @@ body.theme-frosted .ow-window .ow-body button.settings-nav-item.active {
      The default tint stays NEUTRAL-luminous (owner ruling: glass is colorless — emphasis
      by luminosity + weight). Override `--ow-btn-tint-primary` to an accent wash to take
      310's accent-tinted primary look without touching any label. */
-  --ow-btn-tint-primary: rgba(255,255,255,0.34);   /* primary prominence — the MOST luminous neutral glass (brighter than secondary so the prime action reads first; #709). Still translucent (tint-not-fill); a top-down luminosity gradient on .ow-btn-prominent lets the refracted wallpaper read through while keeping the dark label legible over a dark backdrop (override → accent wash) */
+  --ow-btn-tint-primary: rgba(255,255,255,0.48);   /* primary prominence — the MOST luminous neutral glass (brighter than secondary so the prime action reads first; #709. KIT-F-02: raised .34→.48 — the old value rendered within ~1% luminance of secondary, failing the "primary reads first" hierarchy). Still translucent (tint-not-fill); a top-down luminosity gradient on .ow-btn-prominent lets the refracted wallpaper read through while keeping the dark label legible over a dark backdrop (override → accent wash) */
   --ow-btn-tint-secondary: rgba(255,255,255,0.30);  /* secondary — subdued LIGHT luminous veil; #709 flipped from a dark wash so the dark ink stays legible over any backdrop (Apple secondary lowers WEIGHT, not the material's lightness) */
   --ow-btn-tint-danger: color-mix(in srgb, var(--ow-danger, #ff453a) 62%, transparent); /* secondary-prominence RED tint over glass (translucent, NOT a solid plate; deep enough the white on-danger label clears AA) */
 }
@@ -21839,10 +21897,12 @@ body.theme-frosted .ow-btn:hover {
   /* lift the float: a deeper, softer cast shadow while keeping the specular rim. */
   box-shadow: var(--ow-btn-rim), var(--ow-btn-shadow-hover);
 }
-/* prominent keeps its brighter rim on the elevated hover shadow. */
+/* prominent keeps its brighter rim on the elevated hover shadow. KIT-F-02: perimeter
+   alpha raised .34→.62 to match the resting-state rim strength (kept the STRONGEST rim
+   through the hover transition, not just at rest). */
 body.theme-frosted .ow-btn-prominent:hover {
   box-shadow:
-    inset 0 0 0 1px rgba(255,255,255,0.34),
+    inset 0 0 0 1px rgba(255,255,255,0.62),
     inset 0 1px 1px rgba(255,255,255,0.7),
     inset 0 -1px 1px rgba(0,0,0,0.05),
     var(--ow-btn-shadow-hover);
@@ -21863,10 +21923,22 @@ body.theme-frosted .ow-btn:focus-visible {
   outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
   outline-offset: 2px;
 }
+/* KIT-OV-2 (2026-07-14 audit): unified onto the VM-17 OPAQUE disabled treatment
+   (style.css ~21495, `.send-btn`/`.odec-*`/`.ow-window .ow-body button:disabled`) —
+   the plain-opacity dim here composited pale-on-pale over a tinted fill (the same
+   measured ~1.74:1 failure) whenever a disabled .ow-btn sat OUTSIDE a
+   `.ow-window .ow-body` container (the only place that already carried the opaque
+   override, at higher specificity). One philosophy everywhere now: an opaque muted
+   fill + opaque darker ink (both fixed, not composited over glass), never opacity
+   alone — `[aria-disabled="true"]` included per F-STATE-1. */
 body.theme-frosted .ow-btn:disabled,
 body.theme-frosted .ow-btn[disabled],
+body.theme-frosted .ow-btn[aria-disabled="true"],
 body.theme-frosted .ow-btn.is-disabled {
-  opacity: 0.42;
+  opacity: 1;
+  background: #d6d6d9;
+  color: #57575c;
+  border-color: transparent;
   cursor: not-allowed;
   filter: none;
   transform: none;
@@ -22039,8 +22111,10 @@ body.theme-frosted .ow-field {
 }
 body.theme-frosted textarea.ow-field { min-height: calc(var(--ow-tap-min, 44px) * 1.6); resize: vertical; line-height: 1.45; }
 body.theme-frosted .ow-field::placeholder {
-  /* legible placeholder — a muted neutral, never invisible (WCAG legibility floor). */
-  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 56%, transparent);
+  /* legible placeholder — a muted neutral, never invisible (WCAG legibility floor).
+     KIT-F-08 (2026-07-14 audit): 56% sampled ~3.3:1 live (98,99,97 on 198,191,177) —
+     under the small-text 4.5:1 floor. 68% clears it while staying visibly "muted". */
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 68%, transparent);
   opacity: 1;
 }
 body.theme-frosted .ow-field:hover { background-color: var(--ow-control-fill-hover); }
@@ -22176,6 +22250,13 @@ body.theme-frosted select.ow-select option {
 body.theme-frosted select.ow-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── SLIDER: .ow-slider — kit-styled range (system-green track, glass thumb) ──── */
+/* KIT-N-07 (2026-07-14 audit) minimal fix: every `.ow-slider` rule below is
+   `body.theme-frosted`-scoped, so on the Normal (flat) tier `.ow-slider` falls back
+   to `accent-color: auto` and renders Chromium's default BLUE — the one sanctioned
+   accent color this control ever shows is the system GREEN (owner ruling). This one
+   declaration is deliberately UNSCOPED so it applies on every tier; the full flat
+   track/thumb authoring is the bigger KIT-N lane (§3), not needed to fix the color. */
+.ow-slider { accent-color: var(--ow-ios-green, #30d158); }
 body.theme-frosted input[type="range"].ow-slider {
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 28px; background: transparent; cursor: pointer;
@@ -22443,7 +22524,8 @@ body.theme-frosted .admin-card input[type="text"]:not(.ow-field)::placeholder,
 body.theme-frosted .admin-card input[type="password"]:not(.ow-field)::placeholder,
 body.theme-frosted .admin-card input[type="search"]:not(.ow-field)::placeholder,
 body.theme-frosted .admin-add-form input:not(.ow-field)::placeholder {
-  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 56%, transparent);
+  /* KIT-F-08 mirror: same low-contrast placeholder mix as .ow-field, same fix. */
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 68%, transparent);
   opacity: 1;
 }
 body.theme-frosted .admin-card input[type="text"]:not(.ow-field):focus,

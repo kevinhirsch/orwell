@@ -76,10 +76,24 @@ html {
     min-height: var(--tap-min);
     min-width: var(--tap-min);
   }
+  /* KIT-F-03 (2026-07-14 theme audit): every OTHER coarse-pointer control above gets
+     the full 44px --tap-min floor by growing its VISIBLE box — fine for a button, but
+     inflating a checkbox/radio's visible glyph to 44px would read as a broken,
+     oversized control rather than "a bigger tap target" (the kit's own .ow-check/
+     .ow-radio are deliberately 20px). So this is the one control that needs an
+     INVISIBLE expanded hit region instead: a fixed 20px content box (matching the kit
+     visual) + 12px of padding on every side = a 44px total footprint (WCAG 2.5.5 / the
+     Apple 44×44pt floor this file's --tap-min already encodes for every sibling).
+     `background-clip: content-box` keeps any control background (kit-styled OR bare
+     native) confined to the visible 20px, so the padding never paints as a filled
+     ring — only the hit area grows. */
   input[type="checkbox"]:not(.tap-exempt),
   input[type="radio"]:not(.tap-exempt) {
-    min-height: 1.5rem;
-    min-width: 1.5rem;
+    width: 20px;
+    height: 20px;
+    padding: 12px;
+    box-sizing: content-box;
+    background-clip: content-box;
   }
   /* The generic width floor above is now the full --tap-min (RSP-8/#894), so
      icon-only buttons already clear the 44px WCAG 2.5.5 target the responsive
