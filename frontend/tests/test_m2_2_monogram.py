@@ -173,3 +173,20 @@ def test_mock_stays_in_the_pr_record():
     """The DoR's owner-approval artifact — the static template sheet — ships in-repo so
     the approved design is inspectable (and re-renderable) later."""
     assert os.path.exists(os.path.join(FE, "..", "docs", "mocks", "m2-2-monogram-template.html"))
+
+
+def test_portrait_ref_heals_to_the_monogram_on_error():
+    """#11: a still-generating / 404 portrait ref must heal to the designed monogram —
+    never the browser broken-image glyph — on this ONE shared face (ceremony slates,
+    decision cards, premiere strip, docked rail all route through face())."""
+    js = _read(KIT)
+    m = re.search(r"function face\(card, opts\)\s*\{(.+?)\n  \}", js, re.S)
+    assert m, "face() must exist"
+    body = m.group(1)
+    assert "img.onerror" in body, "the portrait <img> must carry an onerror heal"
+    # the heal rebuilds the monogram inner AND re-composites the role badge
+    heal = re.search(r"img\.onerror\s*=\s*function\s*\(\)\s*\{(.+?)\};", body, re.S)
+    assert heal, "onerror must be a handler that rebuilds the face"
+    hbody = heal.group(1)
+    assert "svg(card, opts)" in hbody, "heal must render the monogram svg"
+    assert "badgeSvg(opts.role)" in hbody, "heal must re-composite the role badge"

@@ -187,6 +187,15 @@
       const img = document.createElement("img");
       img.loading = "lazy";
       img.alt = opts.alt || (card.name || "");
+      // #11: a still-generating / 404 portrait ref must heal to the designed monogram, not
+      // show the browser's broken-image glyph (this is the shared face used by ceremony slates,
+      // decision cards, the premiere strip and the docked rail). Rebuild the monogram inner +
+      // re-composite the role badge, exactly as the else-branch below would have.
+      img.onerror = function () {
+        img.onerror = null;
+        el.innerHTML = svg(card, opts);
+        if (opts.role && BADGES[opts.role]) el.insertAdjacentHTML("beforeend", badgeSvg(opts.role));
+      };
       img.src = card.portrait;
       el.appendChild(img);
     } else {
