@@ -99,7 +99,10 @@ describe("the producer is voiced in the casting interview, consistently", () => 
     expect(prompt).toMatch(/INTRODUCE YOURSELF FIRST/);
     expect(prompt).toMatch(/naming who you are/);
     // The headshot is no longer the OPENING — it's the first QUESTION after the introduction.
-    expect(prompt).toMatch(/THIS IS YOUR FIRST QUESTION/);
+    expect(prompt).toMatch(/YOUR FIRST QUESTION/);
+    // ORDER matters: the self-introduction must come BEFORE the first question, or the interview
+    // opens on the headshot again (the phrase-presence checks alone can't catch a reordering).
+    expect(prompt.indexOf("INTRODUCE YOURSELF FIRST")).toBeLessThan(prompt.indexOf("YOUR FIRST QUESTION"));
   });
 });
 
@@ -121,6 +124,11 @@ describe("the producer's public name is exposed for the chat byline (Vault-free)
     const inHouse = s.getMomentPrompt({ moment: "social" }).producerName;
     expect(inHouse).toBe(preGame);
     expect(inHouse.length).toBeGreaterThan(0);
+    // Non-degradation (0007): the byline projection survives a save/restore — a resumed session
+    // drives the SAME producer name off the restored seed, so the FE byline can never diverge.
+    const resumed = new GameSessionAdapter();
+    resumed.restore(JSON.parse(JSON.stringify(s.snapshot())));
+    expect(resumed.getMomentPrompt({ moment: "social" }).producerName).toBe(preGame);
   });
 
   it("producerName carries no Vault vocabulary (it is public voice flavor only)", () => {
