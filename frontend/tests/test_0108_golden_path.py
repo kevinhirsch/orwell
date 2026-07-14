@@ -304,6 +304,25 @@ def test_leak_scan_passes_a_clean_fixture(golden, tmp_path):
     assert golden.fixture_leak_scan(str(clean)) == []
 
 
+def test_leak_scan_allows_narration_words_but_flags_the_engine_key(golden, tmp_path):
+    """The Vault field names are all common English words the narrator legitimately voices. A bare
+    narration VALUE that equals such a word — e.g. "untrustworthy" streamed as tokens ["un","trust",
+    "worthy"] serializes a delta chunk `{"delta": "trust"}` — is NOT a Vault leak and must NOT trip
+    the gate (matching a KEY requires the trailing colon). The engine FIELD echo (`{"trust": 0.7}`,
+    where the secret number rides) still fails. Guards the key-position anchor from silently
+    regressing back to a bare-word substring match (which false-fails almost every re-record)."""
+    prose = tmp_path / "prose.jsonl"
+    _write_fixture(prose, [{"key": "k", "kind": "stream", "seq": 0, "chunks": [
+        'data: {"delta": "him un"}\n\n', 'data: {"delta": "trust"}\n\n',
+        'data: {"delta": "worthy — a real threat"}\n\n', 'data: {"delta": " to my soul."}\n\n']}])
+    assert golden.fixture_leak_scan(str(prose)) == [], "narration words must not trip the Vault gate"
+    leak = tmp_path / "leak.jsonl"
+    _write_fixture(leak, [{"key": "k", "kind": "call", "seq": 0,
+                           "response": '{"trust": 0.7, "threat": 0.3}'}])
+    assert any("vault-key" in v for v in golden.fixture_leak_scan(str(leak))), (
+        "an engine Vault field echo (key + numeric value) must still be caught")
+
+
 def test_record_scrubs_secret_shapes_before_write(golden, tmp_path, monkeypatch):
     monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
     gp = importlib.reload(sys.modules["src.golden_path"])
