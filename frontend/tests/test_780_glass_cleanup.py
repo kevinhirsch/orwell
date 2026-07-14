@@ -244,15 +244,32 @@ def test_first_paint_head_script_resolves_saved_tier_before_glass_default():
 # ── #5 — the element-kit demo wallpaper covers the full scroll height (no dark slab) ──
 def test_element_kit_demo_wallpaper_covers_full_scroll_height():
     """The demo overrides the fixed-height app shell to a normal scrollable block whose
-    wallpaper covers the WHOLE scroll height, so no dark `--bg` slab shows past the fold."""
+    wallpaper covers the WHOLE scroll height, so no dark `--bg` slab shows past the fold.
+
+    The wallpaper rides a dedicated FIXED, pointer-events:none #__wp layer — NOT
+    `background-attachment: fixed` on the tall scrolling body. In real Chrome a fixed
+    background on a scroll container is promoted to a compositing layer that eats the
+    wheel + clicks in the bottom region (the switchers went dead) — headless software-GL
+    never promotes it, so the automated gates couldn't see it. See #1624. The `#__wp`
+    element is the compositor-friendly way to pin a full-bleed backdrop."""
     html = _read("static", "element_kit_demo.html")
     # the app shell (height:100dvh; display:flex; overflow) is overridden to a scrollable block
     assert "height: auto !important" in html
     assert "display: block !important" in html
-    # and the wallpaper is a FIXED full-bleed background (covers the viewport at every scroll pos)
-    assert "fixed !important" in html
+    # the wallpaper is a FIXED full-bleed #__wp layer, pointer-transparent so it never
+    # intercepts the wheel or a click (covers the viewport at every scroll position).
     assert re.search(r"#__wp\s*\{[^}]*position:\s*fixed[^}]*inset:\s*0", html, re.S), (
         "the demo must carry a fixed full-bleed #__wp wallpaper layer"
+    )
+    assert re.search(r"#__wp\s*\{[^}]*pointer-events:\s*none", html, re.S), (
+        "the #__wp wallpaper layer must be pointer-events:none so it never eats input"
+    )
+    # and the ANTI-PATTERN must NOT come back: no fixed-attachment background anywhere
+    # (the real-Chrome input-eating compositing bug this page hit). Whitespace- and
+    # case-tolerant so `attachment:fixed` / uppercase can't slip a regression past the gate.
+    assert re.search(r"background-attachment\s*:\s*fixed\b", html, re.I) is None, (
+        "no fixed-attachment background on the scrolling body (breaks wheel + fixed-control "
+        "clicks in real Chrome — #1624)"
     )
 
 
