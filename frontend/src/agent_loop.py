@@ -2407,8 +2407,15 @@ def _resolve_belt_endpoint(owner, fallback_url, fallback_model, fallback_headers
         url, model, headers = resolve_endpoint("utility", owner=owner)
         if url and model:
             return url, model, headers
-    except Exception:
-        pass
+        # Fall-through is a real miss (utility tier unresolved) — make it VISIBLE, not silent
+        # (ruling #1599): the belts route back to the COSTLIER narration model here.
+        logger.warning(
+            "[orwell] utility belt endpoint unresolved (incomplete url/model) — belts fall back "
+            "to the narration model (costlier extraction); check utility_model/utility_endpoint_id")
+    except Exception as _belt_resolve_err:
+        logger.warning(
+            "[orwell] utility belt endpoint resolution errored (%s) — belts fall back to the "
+            "narration model (costlier extraction)", type(_belt_resolve_err).__name__)
     return fallback_url, fallback_model, fallback_headers
 
 
@@ -4549,8 +4556,10 @@ async def _stream_agent_loop_impl(
                 disabled_tools.update(GAME_NARRATOR_TOOL_DROP)
         except Exception:
             pass
-        _belt_endpoint, _belt_model, _belt_headers = _resolve_belt_endpoint(
-            owner, endpoint_url, model, headers)
+        # Offload the synchronous resolve (settings load + DB queries in endpoint_resolver) to a
+        # thread so a slow settings store can't block the event loop / other concurrent streams.
+        _belt_endpoint, _belt_model, _belt_headers = await asyncio.to_thread(
+            _resolve_belt_endpoint, owner, endpoint_url, model, headers)
         # Ground the game-master narration temperature (Bug 2). The player-facing narration/casting
         # turn otherwise rides the app-wide DEFAULT_TEMPERATURE (1.0), which the owner reported reads
         # as canonically incoherent ("as if temp were 1.3"). Override the incoming temperature with
