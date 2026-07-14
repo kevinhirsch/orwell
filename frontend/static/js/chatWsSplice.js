@@ -157,6 +157,30 @@ export function _onWsChatFrame(frame) {
     // Stamp the server db id so the settle reconcile adopts THIS bubble with zero
     // churn (mirrors resumeStream's savedDbId — no db-id-less duplicate).
     if (_wsRound && _wsRound.holder && d.id != null) _wsRound.holder.dataset.dbId = String(d.id);
+    // M2-6: the beat's IN-WORLD moment rides the same event (chat_routes) — show it on the
+    // LIVE mirror bubble too, so window B reads "Week 1 · Eviction night" during the stream
+    // exactly like the sender + the reload render (chatRenderer.roleTimestamp), instead of the
+    // wall clock until the settle reconcile. Wall clock demoted to hover/dataset (parity, ADR
+    // 0012). Absent moment ⇒ untouched (neutral wall-clock stamp). Timestamps are excluded from
+    // the mirror-parity transcript diff, so this is presentation-only.
+    if (_wsRound && _wsRound.holder && typeof d.moment === 'string' && d.moment.trim()) {
+      var _ts = _wsRound.holder.querySelector('.role-timestamp');
+      if (_ts) {
+        // Demote the wall clock to hover/dataset BEFORE swapping the visible text to the moment,
+        // the SAME way chat.js _applyServerTimestamp / chatRenderer.js roleTimestamp do: prefer the
+        // SERVER-minted `d.ts` (the message_saved frame carries it) so the hover reads identically
+        // across windows; fall back to the bubble's existing wall-clock text if `ts` is absent/bad.
+        var _wd = d.ts ? new Date(d.ts) : null;
+        if (_wd && !isNaN(_wd.getTime())) {
+          _ts.title = _wd.toLocaleString();
+          _ts.dataset.wallClock = _wd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+          _ts.dataset.wallClock = _ts.textContent;
+        }
+        _ts.textContent = d.moment.trim();
+        _ts.classList.add('role-timestamp-moment');
+      }
+    }
     return;
   }
   if (d.done) {
