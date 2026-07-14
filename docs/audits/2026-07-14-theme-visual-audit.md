@@ -51,9 +51,53 @@ theme-correct flat scaffolding.)*
 
 ## 2. Element kit — Frosted (default tier) findings
 
-*(lane landing)*
+**Lane report landed (apple-genius auditor, measured via Playwright DOM geometry + pixel
+sampling; full detail in the PR discussion + lane file). Ranked:**
 
-Self-verified so far (overseer measurements):
+- **KIT-F-01 · P0 · nested kit buttons lose their variant tint (LIVE bug, not demo-only).**
+  `style.css:20871-20882` — `body.theme-frosted .ow-window .ow-body button, .on-card button,
+  .og-card button, .og-card .og-act { background-color: color-mix(in srgb, var(--fg) 12%, …) }`
+  has specificity (0,3,2) and beats EVERY kit variant (`.ow-btn-destructive` 21722,
+  `.ow-btn-prominent` 21079, `.ow-btn-secondary` 21056 — all (0,2,1)). Measured: an
+  `.ow-btn-destructive` "Evict" inside a kit window renders fill rgb(222,214,215) with a
+  near-white label — **1.43:1** contrast. Live consumers already degraded:
+  `orwellNewSeason.js:117,216` + `orwellRetrospective.js:104,270` prominent CTAs render the
+  generic 12% fill instead of the prominent tint. Fix: scope the generic container rule with
+  `:not([class*="ow-btn-"])` or `:where()`, + a regression test pinning nested variant computed
+  backgrounds.
+- **KIT-F-02 · P1 · Prominent ≈ Secondary (hierarchy failure).** Rendered fills differ by ~1%
+  luminance (237 vs 235); Prominent's rim (.34 alpha) is WEAKER than Secondary's shared rim
+  (.5 alpha) and its border weaker (6% vs 12% ink); on real hover Secondary changes more than
+  Prominent. WWDC25 310 tintProminence requires the primary to read first. Fix: widen the
+  luminosity gap (primary tint ≈ .46-.50 alpha) + make Prominent's rim the strongest.
+- **KIT-F-03 · P1 · checkbox/radio coarse-pointer floor is 24px, not 44px (explicit in source).**
+  `css/responsive-tokens.css:74-77` gives `input[type=checkbox/radio]` a 1.5rem floor while
+  siblings get `--tap-min` 44px (lines 66-72) — WCAG 2.5.5 shortfall wherever the kit is reused
+  on touch. Fix: 44px hit region via invisible `::after` (pattern at style.css:21267), visible
+  box stays 20px.
+- **KIT-F-04 · P1 (demo-only) · House Status gadget garbled** ("HOHYou", "NomsTwo houseguests"):
+  `orwellStatusPanel.js:193-195` scopes its injected row CSS to the literal `#orwell-status`,
+  but the demo mounts `id="ek-g-status"` (`orwellElements.js:157-167`) — same root-cause class
+  as the Decision mis-composition. Fix: mount the demo gadget as `orwell-status` or rescope the
+  injected CSS to a class/data-attribute.
+- **KIT-F-05 · P2 (demo) · demo never loads `css/responsive-tokens.css`** (index.html loads it
+  before style.css; the demo links style.css only) — the reference page cannot verify ANY
+  touch-floor behavior; masks KIT-F-03. Fix: add the link in load order.
+- **KIT-F-06 · P2 · Destructive red is legacy `#c0392b`, not Apple system red.** ELEMENT_KIT.md
+  promises system red; `--ow-danger → var(--color-danger)` resolves to `#c0392b`
+  (style.css:136) app-wide, so the kit's `#ff453a` fallback is dead code. Decision needed:
+  repoint `--color-danger` app-wide vs scope an ELEMENT-KIT-block override.
+- **KIT-F-07 · P2 (demo) · traffic-light swatch fidelity:** the "hover/focus" swatch forces
+  button opacity but the glyph reveal rides an ANCESTOR `.ow-titlebar:hover` rule
+  (style.css:21224-27) so glyphs never show; 2 of 3 demo windows are permanently unfocused
+  (grey lights). Real hover/focus verified working — demo simulation wrong.
+- **KIT-F-08 · P3 · field placeholder ≈ 3.3:1** (sampled 98,99,97 on 198,191,177) vs the CSS
+  comment's claimed legibility floor. Fix: mix `::placeholder` toward ~65-70% control ink.
+- **KIT-F-09 · P3/low-confidence (demo) · top banner permanently overlays scrolled demo
+  content** — the demo page's scroll-layout override; confirm the real shell reserves space
+  (it does via `--on-banner-inset`, but see APP-OV-1: the sidebar does NOT consume it).
+
+Overseer-verified (pre-lane measurements):
 
 - **KIT-OV-1 · P1 · top system banner · both viewports.** The dismiss `×` (`.on-dismiss`, a
   44px-tall button) sits at `cyOff +5.4px` below the 38px band's centerline (measured
