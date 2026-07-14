@@ -20746,9 +20746,9 @@ body.theme-frosted .ow-window > .ow-body .on-card {
    chat surface radius rather than carrying a bespoke fixed radius. ONE rule for both the
    kit's root CLASS (`.odec` — orwellDecision.js scopes its injected structural CSS there;
    the element-kit demo's reference cards compose the class alone) and the live card's id.
-   The ID selector stays LAST in the list so test_ow_design_system.py's pinned form
-   (`body.theme-frosted #orwell-decision-card {`) keeps matching — one source of truth for
-   the concentric math instead of a hand-synced twin. */
+   The ID selector stays LAST in the list so test_ow_design_system.py's pinned regex — the
+   frosted decision-card selector immediately followed by the rule's opening brace — keeps
+   matching; one source of truth for the concentric math instead of a hand-synced twin. */
 body.theme-frosted .odec,
 body.theme-frosted #orwell-decision-card {
   --ow-parent-radius: var(--ow-glass-radius);
