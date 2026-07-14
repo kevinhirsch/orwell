@@ -118,7 +118,73 @@ Overseer-verified (pre-lane measurements):
 
 ## 3. Element kit — Glass tier / Flat tier findings
 
-*(lane landing)*
+**Lane report landed (measured: computed-style cascade walks, liquidGlass cap instrumentation,
+same-run A/B pixel diffs, pixel-sampled contrast). Ranked:**
+
+### Flat (Normal) tier — the kit does not exist here
+
+- **KIT-N-01 · P0 · all five `.ow-btn` variants collapse to ONE generic grey box.** Every kit
+  rule is `body.theme-frosted`-scoped (style.css:21028, 21594-22168 — zero unscoped kit rules);
+  on Normal only the app-wide reset (`button{height:32px}` + `background:var(--bg)`) matches.
+  Prominent/Secondary/Plain/Destructive/Icon render pixel-identical (bg rgb(40,44,52), 4px
+  radius). The HIG **role** system (destructive = system red) is absent, not just plainer.
+  Fix: author a Normal expression per primitive — solid token fills (`--panel`/`--fg`/
+  `--border`/`--red`), same geometry/size-ladder/focus/tap rules, no blur.
+- **KIT-N-02 · P0 · `.ow-switch` structurally collapses on Normal** — a bare 13×13px native
+  checkbox beside an invisible zero-width track span (style.css:22012-22045 all
+  frosted-scoped). Not a plainer switch; no toggle affordance at all.
+- **KIT-N-03 · P1 · measured contrast on Normal: 1.26-1.27:1** on every `.ow-btn*`/`.ow-field`/
+  `.odec-*`; `.on-card` title **1.07:1** (dark ink on dark bg). Exposed today by the demo
+  scaffold bug, but the root gap (no Normal kit CSS) is structural.
+- **KIT-N-04/05 · P2 · `.ow-select` on Normal is a bare native select again** (the exact
+  dark-on-dark admin bug the class exists to fix), legible only by a UA quirk that colors
+  selects but not buttons from the same reset — an accident, not a guarantee.
+- **KIT-N-06 · P2 · check/radio fall to 13×13px native widgets** on Normal (kit spec: 20×20,
+  neutral rim, blue only when checked).
+- **KIT-N-07 · P2 · slider is Chromium default BLUE on Normal** (`accent-color:auto`) vs the
+  kit's system green — all three green rules frosted-scoped (style.css:21467,22087,22372).
+  Minimum fix: unscoped `accent-color: var(--ow-ios-green)`.
+- **KIT-N-08 · P2 · traffic lights fall back to 24×32px rectangles with literal "–"/"×" glyphs**
+  on Normal (style.css:21114-21243 frosted-scoped) — no window-control identity. (Visual
+  identity angle; the touch-target half is already F-TOUCH-1 in the 2026-07-09 audit.)
+- **KIT-N-09 · P2 · `.ow-btn-group` loses the grouping semantic on Normal** — no capsule, each
+  member keeps its own 4px radius; N unrelated buttons.
+- **KIT-G-06 · P3 · surface radii split on Normal:** windows/gadgets/notices share 26px on
+  glass/frosted but fall back to 10/10/12px legacy radii on Normal — one family becomes three.
+- **The template that already works:** the OLDER `.og-card` gadget family
+  (style.css:2082-2091) ships coherently cross-tier (solid `color-mix(--panel)` fill, no
+  frosted gate, no blur). The Normal pass for the atomic kit is a fill/color/blur gap, not a
+  re-architecture — mirror `.og-card`'s pattern.
+
+### Glass (Full) tier
+
+- **KIT-G-01 · P1 · the refraction cap starves buttons on desktop.** `liquidGlass.js`
+  `MAX_LIVE_SURFACES=20` (line 179; SELECTORS priority 214-248): on the demo, windows+cards
+  consume 14 slots; measured 6/8 prominent, **0/13 secondary, 0/2 icon, 0/2 groups** refracted —
+  two siblings in ONE row render different materials purely from cap order.
+- **KIT-G-02 · P1 · on phone (`MAX_LIVE_SURFACES_MOBILE=8`) ZERO buttons and zero notice cards
+  refract** — the tier's defining optic is absent below the window/gadget layer on mobile.
+  Consider raising caps where headroom allows or reordering priorities.
+- **KIT-G-03 · P1/M · glass vs frosted is visually indistinguishable on the demo wallpaper**
+  (A/B pixel diffs: max Δ≤14/255 everywhere except the modal's faint correct tint) — the
+  backdrop is too smooth to bend. The demo needs a busier/realistic backdrop before any
+  "looks the same" conclusion is trusted (also the corpus's own guidance: judge over a
+  realistic backdrop).
+- **KIT-G-04 · P2 (demo) · the demo's `.ek-card` wrapper is glass-on-glass by construction**
+  (own `backdrop-filter` around independently-sampling kit controls) — models the exact
+  anti-pattern the corpus forbids (§1 "never glass on glass") in the page meant to teach it.
+  Fix: solid demo section cards.
+- **KIT-G-05 · P2/M · production-shaped glass-on-glass latent:** style.css:20709-20729
+  pre-computes concentric radii for `.og-card`/`.on-card` nested inside `.ow-window > .ow-body`
+  — two independent samples by construction if that composition goes live; the demo never
+  exercises it. Add a demo example + decide the sanctioned pattern.
+- **Measured contrast candidates (glass/frosted):** `.ow-btn-destructive` white-on-red-tint
+  **3.28:1**, `.odec-confirm` white-on-`#0a84ff` **3.65:1** (both match Apple's own pairs —
+  candidates, not certain fails), placeholder 3.49:1, disabled field 2.87:1 (AA-exempt by
+  convention).
+- **KIT-REF-01 · P3 (demo) · same responsive-tokens.css gap as KIT-F-05** — confirmed the
+  coarse-pointer floor never applies on the demo, so Normal buttons measure 32px under touch
+  emulation there.
 
 ## 4. Settings window — every panel
 
