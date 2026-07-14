@@ -298,18 +298,6 @@
         // buffer replays/tails). Record it so a later ring-replayed `run-started` for the SAME run
         // is recognized as stale and ignored.
         if (frame.d && frame.d.runId != null) _lastRunId = frame.d.runId;
-        // #1087 orphaned-invitation drain (the WS mirror-parity F5 flake): a subscribe that resolved
-        // to a FINISHED/empty run (`hasRun:false`) clears the tail via this `done`-less ack — but a
-        // genuinely-NEW run whose `run-started` edge QUEUED behind this in-flight subscribe (stashed in
-        // `_pendingRunId` because `_chatTailActive` was optimistically true) would otherwise NEVER drain
-        // (a run that isn't live never sends a chat `done` frame — the only OTHER drain site, above at
-        // the `_chatDone` branch). Orphaned, the peer window (window B) receives zero delta frames,
-        // never mounts `_wsEnsureRound`/`_renderLiveStream`, and converges only via a full-repaint
-        // history reconcile — exactly the `B incrementalStream=false` two-window divergence. Drain now
-        // that the tail is provably free (this is the symmetric second drain site to the `done` one).
-        // Safe/idempotent: `_lastRunId` is set FIRST above, so a redundant same-id pending is a no-op
-        // via `_onRunStarted`'s `=== _lastRunId` skip; a genuinely-new run (distinct id) attaches live.
-        if (frame.d && frame.d.hasRun === false) _drainPendingRun();
       }
       try { q.resolve(frame); } catch (_) {}
       return;
@@ -463,17 +451,25 @@
   //     boolean-only behavior.
   function _onRunStarted(runId) {
     if (_mode !== "ws") return;
+    // Reconcile-by-id (#1087): a STALE ring-replayed edge for the run we already rendered / are tailing
+    // carries the SAME id — ignore it (the duplicate-bubble churn guard). Checked FIRST so it holds
+    // whether or not we're currently tailing.
+    if (runId != null && runId === _lastRunId) return;
     if (_chatTailActive) {
-      // Already tailing a live run — do NOT tear it down (§4.1). But a GENUINELY-NEW run queued
-      // behind it (a distinct id from the one we're tailing) published its ONLY `run-started` edge
-      // NOW and will never send another (#1087 queued-run drop). Remember it so this run's `done`
-      // can attach it. A same-id replay of the run we're already tailing (`id === _lastRunId`) is NOT
-      // a queued run — skip it (an id-less edge stays inert here too: `runId != null` fails).
-      if (runId != null && runId !== _lastRunId) _pendingRunId = runId;
-      return;
+      // An ID-LESS edge while tailing can't be told apart from a stale replay — keep the conservative
+      // #1087 behaviour (don't tear a live tail down on an ambiguous edge; the active run's `done` frees it).
+      if (runId == null) return;
+      // A genuinely-NEW run (distinct id) started while we were still tailing the PREVIOUS one. Do NOT
+      // wait for the old run's `done` to attach it: deferring mounted the new run's live round only AFTER
+      // the old run's possibly-late `done`, too late for the realtime mirror — the F5 WS-leg flake (the
+      // OBSERVER renders the new run via a full-repaint reconcile → incrementalStream=false). The server
+      // started a fresh per-run buffer for the new run and CANCELS the old chat channel on our new
+      // subscribe (_spawn_channel — no double-tail), the old run's tail is moot (a new run began ⇒ its
+      // engine work is done) and its final content reconciles from history. Re-attach the new run NOW —
+      // the WS analog of the SSE observer's resumeStream(id)-per-run (sessionSync.js). Fall through.
     }
-    if (runId != null && runId === _lastRunId) return; // stale replayed edge — already rendered (#1087)
     if (runId != null) _lastRunId = runId; // provisional; the subscribe ack confirms/overwrites it
+    _pendingRunId = null;          // attaching the newest run now — nothing is left queued behind us
     _highestChatSeq = -1;          // a NEW run's buffer restarts at seq 0 — replay it from the top
     _chatSubscribed = false;
     _subscribeChat(0).catch(function () { _chatTailActive = false; });

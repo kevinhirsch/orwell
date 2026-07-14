@@ -195,40 +195,34 @@ async function handshake(hasRunFirst, runId) {
       "an id-less run-started must fall back to the boolean guard (re-attach when not tailing)");
   }
 
-  // ── scenario 7 (the WS mirror-parity F5 flake — orphaned-invitation drain): a stale replayed
-  // run-started issues an IN-FLIGHT subscribe (optimistically setting _chatTailActive=true); a
-  // GENUINELY-NEW run-started that arrives before that subscribe's ack queues in _pendingRunId; the
-  // in-flight subscribe then resolves `hasRun:false` (the stale run was already finished). Pre-fix,
-  // _onAck cleared the tail but NEVER drained the pending — so the new (live) run was orphaned, the
-  // peer window received zero delta frames and fell back to a full-repaint reconcile
-  // (B incrementalStream=false). The fix drains the pending on the hasRun:false ack.
+  // ── scenario 7 (the WS mirror-parity F5 fix — attach a genuinely-new run IMMEDIATELY, not deferred):
+  // while we are TAILING run "W", a GENUINELY-NEW run "M" (distinct id) starts. The observer must
+  // re-subscribe to M RIGHT NOW — the WS analog of the SSE observer's resumeStream(id)-per-run — NOT
+  // wait for W's `done`. Deferring (the pre-fix #1087 behaviour) mounted M's live round only AFTER W's
+  // possibly-late `done`, too late for the realtime mirror, so the peer window fell back to a
+  // full-repaint reconcile (B incrementalStream=false). The server cancels W's chat channel on the new
+  // subscribe (no double-tail); W's tail is moot (a new run began) and reconciles from history.
   {
     const WS = boot();
     await tick();
-    await handshake(false);           // not tailing; _lastRunId UNSET (so a stale edge isn't id-skipped)
-    const base = chatSubs().length;   // 1 (the initial subscribe)
-
-    // A STALE replayed run-started for a now-finished run "W" arrives while the tail is free → it
-    // issues an in-flight subscribe and optimistically marks the tail active.
-    down({ t: "state", ch: "state", d: { beatSeq: 3, reason: "run-started", runId: "W" } });
+    await handshake(true, "W");        // tailing a live run W (the ack names it)
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "streaming W..." } });
     await tick();
-    assert(chatSubs().length === base + 1, "stale edge W issues an in-flight subscribe; got " + chatSubs().length);
-    const subW = chatSubs()[base];
+    const base = chatSubs().length;    // 1 (the initial subscribe to W)
 
-    // Before W's ack lands, a GENUINELY-NEW run "M" starts → it must QUEUE behind the busy tail.
+    // A genuinely-NEW run M starts WHILE we're still tailing W (W has sent no `done`). Immediate re-attach.
     down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "M" } });
     await tick();
-    assert(chatSubs().length === base + 1, "M queues behind the in-flight W subscribe (no new subscribe yet)");
+    assert(chatSubs().length === base + 1,
+      "a genuinely-new run while tailing must RE-SUBSCRIBE immediately (not defer to the old run's done); got " + chatSubs().length);
+    assert(chatSubs()[base].d.fromSeq === 0, "the new run M attaches from seq 0");
 
-    // W's subscribe resolves hasRun:false (W was already finished) → clears the tail. The orphan-drain
-    // must now attach the queued live run M (pre-fix: M is orphaned and NEVER subscribed → the flake).
-    // Contract-valid: a `hasRun:false` ack carries NO runId (W's provisional id was already recorded by
-    // `_onRunStarted("W")`), so the pending-run drain is still exercised without an off-contract field.
-    down({ t: "ack", ch: "chat", cid: subW.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
+    // Reconcile-by-id still holds: once attached to M, a STALE replay of M's edge (same id) is ignored.
+    down({ t: "ack", ch: "chat", cid: chatSubs()[base].cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "M" } });
+    down({ t: "state", ch: "state", d: { beatSeq: 4, reason: "run-started", runId: "M" } });
     await tick();
-    assert(chatSubs().length === base + 2,
-      "the orphaned pending run M must attach after the hasRun:false ack drains it; got " + chatSubs().length);
-    assert(chatSubs()[base + 1].d.fromSeq === 0, "the drained run M attaches from seq 0");
+    assert(chatSubs().length === base + 1,
+      "a stale replay of the run we just attached (same id) must be ignored (reconcile-by-id); got " + chatSubs().length);
   }
 
   console.log("OK");
@@ -283,15 +277,16 @@ def test_reattach_reconciles_by_run_id():
         "the chat subscribe ack's runId must be recorded for the reconcile-by-id guard"
 
 
-def test_on_ack_drains_orphaned_pending_run():
-    # The WS mirror-parity F5 flake: a `hasRun:false` chat subscribe ack clears the tail but must ALSO
-    # drain a run-started that QUEUED behind the in-flight subscribe (in _pendingRunId) — otherwise the
-    # newly-live run is orphaned (it never sends a chat `done`, the only OTHER drain site), the peer
-    # window receives zero delta frames and converges via a full-repaint reconcile instead of mounting
-    # the incremental renderer (the mirror-parity WS leg's `B incrementalStream=false`). Symmetric with
-    # the chat-`done` drain.
-    on_ack = WS.split("function _onAck")[1].split("\n  function ")[0]
-    # Pin the drain to the hasRun:false BRANCH specifically (a same-line guarded call), not merely the
-    # co-occurrence of the two substrings anywhere in _onAck — so moving the drain out of this branch fails.
-    assert "hasRun === false) _drainPendingRun()" in on_ack, \
-        "a hasRun:false chat subscribe ack must drain an orphaned pending run IN THAT BRANCH (the WS mirror-parity orphan-drain)"
+def test_new_run_reattaches_immediately_even_while_tailing():
+    # The WS mirror-parity F5 fix: a genuinely-new run-started (distinct id) must re-subscribe the chat
+    # channel IMMEDIATELY — even while still tailing the previous run — so the OBSERVER mirrors the new
+    # run live from its start (the WS analog of the SSE observer's resumeStream-per-run). Deferring to
+    # the old run's `done` mounted the new round too late → `B incrementalStream=false`. Pin the two
+    # invariants that make it safe: only an ID-LESS edge short-circuits while tailing, and a same-id
+    # replay is still skipped (reconcile-by-id) — so a distinct-id new run falls through to re-subscribe.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "runId === _lastRunId) return" in body, \
+        "reconcile-by-id must still skip a stale same-id replay"
+    assert "runId == null) return" in body, \
+        "only an ID-LESS edge may be ignored while tailing; a distinct-id new run must fall through to re-subscribe"
+    assert "_subscribeChat(0)" in body, "a genuinely-new run must re-subscribe from seq 0"

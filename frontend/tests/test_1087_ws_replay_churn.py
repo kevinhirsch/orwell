@@ -330,24 +330,19 @@ async function handshake(runId) {
   const before = chatSubs().length;
   assert(before === 1, "one initial chat subscribe before the queued run; got " + before);
 
-  // A SECOND turn queues behind rA — its run-started edge (the QUEUED run's id) arrives WHILE we tail rA.
+  // A SECOND run starts behind rA — its run-started edge (the new run's id) arrives WHILE we tail rA.
+  // The observer must attach it IMMEDIATELY (the WS analog of the SSE observer's resumeStream-per-run)
+  // so it mirrors the new run LIVE from its start — NOT defer to rA's `done`, which mounted the new
+  // round too late for the F5 realtime mirror (B incrementalStream=false). The server cancels rA's chat
+  // channel on the new subscribe (_spawn_channel — no double-tail); rA's final content reconciles.
   down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started", runId: "rB" } });
   await tick();
-  assert(chatSubs().length === before,
-    "a queued run's edge must NOT tear down the active tail (no immediate re-subscribe); got " + chatSubs().length);
-  assert(WS.pendingRunId() === "rB",
-    "the queued run's id must be REMEMBERED while the active run tails; got " + WS.pendingRunId());
-
-  // rA finishes — the remembered queued run attaches NOW (its single edge never repeats).
-  down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
-  await tick();
   assert(chatSubs().length === before + 1,
-    "the queued run must attach after the active run's done; got " + chatSubs().length);
-  assert(chatSubs()[before].d.fromSeq === 0, "the queued run attaches from seq 0 (fresh per-run buffer)");
-  assert(WS.pendingRunId() === null, "the pending slot is cleared once drained; got " + WS.pendingRunId());
+    "a genuinely-new run while tailing must re-subscribe IMMEDIATELY (SSE-parity), not defer to done; got " + chatSubs().length);
+  assert(chatSubs()[before].d.fromSeq === 0, "the new run attaches from seq 0 (fresh per-run buffer)");
   assert(WS.lastRunId() === "rB", "the newly-attached run becomes the reconcile-by-id anchor; got " + WS.lastRunId());
 
-  // …and once the queued run renders to its `done`, its OWN stale replay is inert (no re-churn).
+  // rB's ack + stream + done; then rB's OWN stale replay is inert (reconcile-by-id — no re-churn, #1087).
   const sub2 = chatSubs()[before];
   down({ t: "ack", ch: "chat", cid: sub2.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "rB" } });
   down({ t: "event", ch: "chat", seq: 0, d: { delta: "queued..." } });
@@ -356,7 +351,7 @@ async function handshake(runId) {
   down({ t: "state", ch: "state", d: { beatSeq: 3, reason: "run-started", runId: "rB" } });
   await tick();
   assert(chatSubs().length === before + 1,
-    "after rendering the queued run, its replayed edge must be ignored (no churn); got " + chatSubs().length);
+    "after rendering the new run, its replayed edge must be ignored (reconcile-by-id, no churn); got " + chatSubs().length);
 
   console.log("OK");
   process.exit(0);
@@ -364,12 +359,15 @@ async function handshake(runId) {
 """
 
 
-def test_client_remembers_and_attaches_a_queued_run_after_done():
-    """#1087 CLIENT half: a `run-started` edge for a run QUEUED behind the active one arrives while the
-    window is still tailing (ws_routes publishes it up-front, stamped with the queued run's id). The
-    client must REMEMBER it (not tear down the active tail, not drop it) and attach when the active
-    run's `done` frees the tail — otherwise every peer window silently misses the queued turn. Driven
-    against the REAL orwellWs.js in Node with a stubbed WebSocket (fail-before / pass-after)."""
+def test_client_attaches_a_new_run_immediately_even_while_tailing():
+    """#1087 CLIENT half (revised for the F5 WS mirror fix): a `run-started` edge for a genuinely-new run
+    (distinct id) arrives while the window is still tailing the previous one. The client must attach it
+    IMMEDIATELY — the WS analog of the SSE observer's resumeStream(id)-per-run — so the peer window
+    mirrors the new run LIVE from its start. The earlier design deferred to the active run's `done`,
+    which mounted the new round too late for the realtime mirror (the F5 WS-leg flake, B
+    incrementalStream=false). Reconcile-by-id still guards a STALE same-id replay (the original #1087
+    churn), and an ID-LESS edge while tailing is still ignored. Driven against the REAL orwellWs.js in
+    Node with a stubbed WebSocket."""
     node = shutil.which("node")
     if not node:
         pytest.skip("node not available for the behavioral queued-run attach check")
