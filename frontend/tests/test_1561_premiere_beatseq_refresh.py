@@ -71,12 +71,51 @@ def test_do_create_character_does_not_refresh_on_a_refused_create(monkeypatch):
     assert ch.last_beat_seq(owner) == 20, "a refused create advances nothing — it must not refresh last-seen"
 
 
+# ── BEHAVIORAL — the #1599 disposition log ACTUALLY fires on a real refresh failure ─────────────────
+
+def test_refresh_failure_logs_the_1599_warning(monkeypatch, caplog):
+    """#1599 — the #1599 WARNING is a phantom guard unless a genuine refresh failure can REACH it. The
+    call site must bypass the fail-open `_refresh_after_model_progression` wrapper (which swallows) and
+    call the RAISING `_refresh_beat_seq` directly, so a real failure propagates into the `except` and the
+    warning actually emits. Drive that path: make the refresh raise and assert the WARNING logged."""
+    owner = "role-player-3"
+    oe = importlib.import_module("src.orwell_engine")
+
+    async def _create(*a, **k):
+        return {"started": True, "beatSeq": 71, "house": [], "portraitPrompts": []}
+
+    monkeypatch.setattr(oe, "create_character", _create)
+    monkeypatch.setattr(oe, "remember_pending", lambda *a, **k: None)
+
+    # The underlying beatSeq refresh FAILS (e.g. a corrupt store, an import error). The call site must
+    # NOT swallow it — it must log the #1599 disposition.
+    def _boom(*a, **k):
+        raise RuntimeError("beat store unavailable")
+
+    monkeypatch.setattr(ch, "_refresh_beat_seq", _boom)
+
+    import asyncio
+    with caplog.at_level("WARNING"):
+        res = asyncio.get_event_loop().run_until_complete(
+            ti.do_create_character('{"playerName": "role-player-3"}', owner=owner))
+    # The turn still stands — a degraded refresh is corrected by the stale-beat belt, not fatal
+    # (the tool returns its usual envelope, it does not crash out).
+    assert isinstance(res, dict) and "started" in (res.get("output") or "")
+    # The disposition WARNING must have fired (this is the whole point — no silent soft-failure).
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("#1561" in m and "beatSeq refresh failed" in m for m in warnings), (
+        "a failed post-createCharacter beatSeq refresh must emit the #1599 disposition WARNING, not be "
+        f"swallowed silently; saw warnings: {warnings}")
+
+
 # ── STRUCTURAL — pin the seam + the #1599 disposition log ──────────────────────────────────────────
 
 def test_refresh_is_wired_into_do_create_character():
     src = inspect.getsource(ti.do_create_character)
-    assert "_refresh_after_model_progression" in src, (
-        "do_create_character must refresh the FE last-seen beatSeq (mirror the other progression tools)")
+    # The RAISING refresh (not the fail-open wrapper) must be the call site, so a failure can be logged.
+    assert "_refresh_beat_seq" in src, (
+        "do_create_character must refresh the FE last-seen beatSeq via the raising _refresh_beat_seq "
+        "(NOT the fail-open _refresh_after_model_progression wrapper, which would swallow failures)")
     # #1599 — if the guard cannot run, it must log with disposition, never swallow silently.
     assert "#1599" in src and "logger.warning" in src, (
         "a failed beatSeq refresh (the turn-1 desync guard) must log at WARNING per #1599")

@@ -4770,7 +4770,13 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # Mirrors _refresh_after_model_progression for the other progression tools.
         if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
             try:
-                await _refresh_after_model_progression(owner, res)
+                # Call the RAISING refresh directly — NOT _refresh_after_model_progression, which is
+                # fail-open (`except Exception: pass`) and would swallow a genuine failure so the #1599
+                # WARNING below could never fire (a phantom guard). Bypassing the swallowing wrapper lets
+                # a real failure propagate into this `except` and actually log. Mirrors _refresh_beat_seq
+                # for the other progression tools.
+                from routes import chat_helpers as _ch
+                _ch._refresh_beat_seq(owner, res)
             except Exception as _beat_exc:
                 # #1599 — the beatSeq refresh is the guard that PREVENTS a turn-1 desync; if it cannot
                 # run, log at WARNING with disposition (the stale-beat auto-retry belt still recovers,

@@ -734,6 +734,10 @@
                 (wasReconnect ? "reconnect" : "connect") + " — chat falls back to SSE for this session:",
                 (e && e.message) || e);
             } catch (_) {}
+            // Actually PERFORM the handoff the warning promises: without this the window stays in WS
+            // mode with chat inactive (silently dead) — a soft failure. `_goFallback` tears down the
+            // socket and emits `orwell:ws-inactive` so the SSE resume path picks chat back up.
+            _goFallback("chat-subscribe-refused");
           });
         // Arm the state/hud push edge too (§4). This runs on EVERY successful
         // handshake — a fresh connect AND a reconnect (both re-enter this onopen) —
