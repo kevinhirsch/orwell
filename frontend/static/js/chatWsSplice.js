@@ -206,13 +206,20 @@ export function _onWsResync(ev) {
 export function _onWsRunBoundary() {
   try { if (chatState._streamSessionId) return; } catch (_) { /* observer path only */ }
   const prior = _wsRound;
+  const priorRich = _wsRichRun;   // capture BEFORE _wsResetRound() clears it
   if (prior && prior.holder) {
     // Settle the PRIOR observer round like a synthetic `done`: release the #1570 live-render lock (so a
-    // reconcile of the prior run isn't deferred) and reset. Leave the prior holder in the DOM — its own
-    // settle/history reconcile adopts it by {id, seq}; we only stop rendering NEW deltas into it.
+    // reconcile of the prior run isn't deferred) and reset.
     const priorSid = prior.sessionId ||
                      (window.OrwellWs && window.OrwellWs.canonicalId && window.OrwellWs.canonicalId()) || null;
     if (prior._spinner) { try { prior._spinner.destroy(); } catch (_) { /* best-effort */ } }
+    // A RICH (multi-round tool) run's live holder holds rounds 1..N MERGED — never adoptable (history
+    // reconstructs the run as N bubbles). Discard it, mirroring the `done` branch: otherwise
+    // softReloadHistory's orphan detection sees the merged holder mismatch the N-bubble reconstruction
+    // and forces a full DESTRUCTIVE rebuild instead of the cheap adopt path (avoidable churn — exactly
+    // the case this PR's interrupt-mid-tail scenario can hit). A plain (single-round) run's holder is
+    // adoptable by {id, seq}, so it stays in the DOM and its own settle/history reconcile adopts it.
+    if (priorRich) { try { prior.holder.remove(); } catch (_) { /* best-effort DOM cleanup */ } }
     _wsResetRound();
     if (priorSid) { try { chatState._resumingStreams.delete(priorSid); } catch (_) { /* Set may be absent in a bare import */ } }
   }
