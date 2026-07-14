@@ -24,9 +24,22 @@ def _read(rel: str) -> str:
 def test_notice_kit_honors_no_reflow_banners():
     js = _read("static/js/orwellNotice.js")
     assert re.search(r'if \(this\.o\.reflow === false\) el\.setAttribute\("data-on-noreflow", ""\)', js)
+    # MOB-01/APP-OV-1 refinement of the original M1-7 pin: a host holding only no-reflow cards
+    # releases the BODY PADDING (the app-wide reflow stays opt-in — the degraded slab must not
+    # push the whole app down), while the --on-banner-inset fixed-chrome dodge var STAYS LIVE
+    # (the hamburger / floating sidebar / kit windows must still slide below the banner, or a
+    # 2-line banner covers the phone hamburger and Settings/Theme become unreachable).
     assert re.search(
-        r'!host\.querySelector\("\.on-card:not\(\[data-on-noreflow\]\)"\)[^}]*clearBannerInset\(\)',
-        js, re.S), "a host holding only no-reflow cards must release the body inset"
+        r'!host\.querySelector\("\.on-card:not\(\[data-on-noreflow\]\)"\)[^{}]*\)\s*\{\s*'
+        r'document\.body\.style\.paddingTop = "";',
+        js, re.S), "a host holding only no-reflow cards must release the body padding (M1-7)"
+    # the dodge var is set BEFORE (outside) the reflow gate, so it tracks for no-reflow banners too
+    set_i = js.index("function setBannerInset")
+    gate_i = js.index('.on-card:not([data-on-noreflow])')
+    assert '.style.setProperty("--on-banner-inset"' in js[set_i:gate_i], (
+        "--on-banner-inset must be set unconditionally (before the reflow gate) so fixed chrome "
+        "dodges a no-reflow banner (MOB-01/APP-OV-1)"
+    )
 
 
 def test_engine_status_banner_overlays_without_reflow():

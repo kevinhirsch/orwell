@@ -20496,6 +20496,31 @@ body.theme-frosted .on-card {
   box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 6px 20px rgba(0,0,0,0.22) !important;
 }
+/* APP-OV-2 (2026-07-14 theme audit): the TOP SYSTEM BANNER spans the viewport edge-to-edge and
+   overlays OTHER light-glass chrome — the chat top bar's rounded strip, the floating sidebar's
+   top corner — and at the shared 0.60 translucency every surface beneath composited THROUGH the
+   band as a brighter inner capsule: measured live, the "double layer" was the .chat-top-bar's
+   own rgba 255,255,255,.6 glass reading through the banner's identical fill — never a fill on
+   .on-head or .on-title, which carry none. A global outage banner is a system alert: give the
+   banner-placed card a near-opaque FIXED light fill — the VM-17 pattern, a fixed color that
+   reads identically over any backdrop or chrome — so the band renders as ONE coherent layer.
+   The fill must be fully OPAQUE, not merely near-opaque: on the Full tier liquidGlass.js
+   pins its SVG-refraction backdrop-filter INLINE with importance, warping the under-chrome
+   edges into hard-edged bright smears that stay visible through even a 96 percent white
+   fill (measured at .92 and .96) — alpha 1 is the only tier-independent guarantee of one
+   uniform band. A solid near-white in the band's own perceived tone keeps it reading as a
+   member of the light-glass family rather than a stark paper-white slab.
+   Severity meaning stays in the border + icon; the stacked above-composer notices and toasts
+   keep the ONE translucent light glass (they never overlay other chrome edge-to-edge). The
+   banner-host id outranks both the shared light-glass group and the kit's injected severity-
+   skin neutralization. Wrapped in reduced-transparency:no-preference so the a11y SOLID
+   fallback keeps winning under reduce. */
+@media (prefers-reduced-transparency: no-preference) {
+  body.theme-frosted #orwell-notice-banner .on-card {
+    background-color: #f6f8f9 !important;
+    background-image: none !important;
+  }
+}
 
 /* ── iOS Control-Center dock ─────────────────────────────────────────────────*/
 /* The minimized-window dock (#minimized-dock) is re-styled to read like the iOS  */
@@ -23343,33 +23368,27 @@ body.theme-frosted .icon-rail button {
    Scoped to prefers-reduced-transparency:no-preference — under `reduce` the glass chrome falls
    back to the SOLID dark --panel with its own ink handling, so we leave that a11y mode untouched. */
 @media (prefers-reduced-transparency: no-preference) {
-  body.theme-frosted #sidebar #user-bar-name,
   body.theme-frosted #sidebar .sidebar-brand-title,
   body.theme-frosted #sidebar #sidebar-new-chat-btn .grow {
     color: var(--fg, #eef1f4) !important;
     text-shadow: 0 1px 2px color-mix(in srgb, var(--bg, #15171c) 62%, transparent),
                  0 0 2px color-mix(in srgb, var(--bg, #15171c) 50%, transparent) !important;
   }
-  /* The account icons beside the name (reload / theme / gear) sat on the sidebar's own DARK ink
-     (#16191f from `#sidebar *`) — so on the dark var(--bg) footer band below they rendered
-     DARK-ON-DARK (owner: "a dark block with dark-on-dark icons"), while the username right next to
-     them was correctly the theme's light --fg. Bring the icon buttons onto the SAME var(--fg)
-     polarity as the name so the whole footer cluster reads as one: light ink on the dark dock band
-     (glass/dark themes), dark ink on the light band (light palettes). (The avatar is NOT here — it
-     carries its OWN light var(--fg)-12% chip, so its glyph must stay the sidebar's dark ink to
-     contrast that light chip.) */
-  body.theme-frosted #sidebar .user-bar-btn,
-  body.theme-frosted #sidebar .user-bar-btn svg {
-    color: var(--fg, #eef1f4) !important;
-  }
-  /* The user-bar footer sits at the sidebar's BOTTOM, where the backdrop behind the glass is the
-     most variable (it can render light OR dark depending on the game content below), so theme ink
-     alone is not reliably AA there. Give the footer a bounded glass backing IN THE THEME'S OWN
-     POLARITY (a container fill that SURVIVES the compositor, unlike a per-glyph scrim) so the
-     var(--fg) label clears AA regardless of what's behind — a subtle account-footer band: dark on
-     dark themes (the Control-Center dock feel), light on light palettes. */
+  /* APP-OV-3 (2026-07-14 theme audit — the §0 polarity class): the user-bar footer used to be a
+     var(--bg)-derived band + var(--fg) ink — which on the default DARK theme rendered a DARK
+     capsule with LIGHT ink on the LIGHT frosted sidebar (the frosted material is a light surface
+     regardless of theme tokens, so any token-driven fill inverts polarity there). Give the footer
+     the SAME light-glass treatment the kit surfaces use — the ONE light glass fill
+     (--ow-glass-light-color, a material-fixed white translucent chip that reads identically over
+     any theme/backdrop) — and let the name + account icons fall back to the sidebar's blanket
+     DARK chrome ink (#16191f + light halo, the `#sidebar *` rule): dark ink on light glass, the
+     kit convention. The chip still guarantees the AA backing the old band existed for — a white
+     .60 fill stacked on the sidebar's own .60 glass composites ≥ ~0.84 white even over the
+     darkest backdrop, so the dark ink clears 4.5:1 everywhere. (The brand title + New Chat label
+     above keep their theme-fg treatment — they float on unbounded glass with no backing chip.) */
   body.theme-frosted #sidebar .sidebar-user-bar {
-    background-color: color-mix(in srgb, var(--bg, #15171c) 55%, transparent) !important;
+    background-color: var(--ow-glass-light-color, rgba(255,255,255,0.6)) !important;
+    border: 1px solid var(--ow-glass-rim-border, rgba(255,255,255,0.12));
     border-radius: 10px;
   }
   /* #1375-b: the status-gadget disclosure chevron '▾' is dark ink on the gadget card's light
@@ -24244,4 +24263,20 @@ body.signin-entrance .chat-history {
 }
 @media (prefers-reduced-transparency: reduce) {
   body.theme-frosted { --fg-muted: #2f323a; }
+}
+
+/* ── APP-OV-4 (2026-07-14 theme audit; extends the F-CONTRAST-1 floor family) ────────
+   The holding/welcome helper line — "Production needs a feed source…" — is the player's
+   ONLY guidance out of a model-less house, yet it rendered at opacity .2: measured live,
+   var --fg rgb 238,241,244 at .2 over the frosted theme's dark teal mesh composites to
+   roughly 1.7:1, far below the 4.5:1 floor (this is instructional text, not decoration).
+   Same class as F-CONTRAST-1: muted/secondary ink over the frosted backdrop dropping
+   below the legibility floor. Floor it under the frosted material only: keep the
+   theme-polarity ink (var --fg — light over the default dark wallpaper, dark over a
+   light palette) and raise the resolved alpha so the line clears AA over the darkest
+   mesh region (measured ~6:1 at .85) while staying visibly quieter than the welcome-sub.
+   The short-viewport collapse still hides it via max-height 0 + overflow hidden.
+   Flat tier untouched (rule is body.theme-frosted-scoped). */
+body.theme-frosted #welcome-screen .welcome-tip {
+  opacity: 0.85;
 }
