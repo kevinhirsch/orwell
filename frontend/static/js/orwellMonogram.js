@@ -187,6 +187,23 @@
       const img = document.createElement("img");
       img.loading = "lazy";
       img.alt = opts.alt || (card.name || "");
+      // #11: a still-generating / 404 portrait ref must heal to the designed monogram, not
+      // show the browser's broken-image glyph (this is the shared face used by ceremony slates,
+      // decision cards, the premiere strip and the docked rail). Rebuild the monogram inner +
+      // re-composite the role badge, exactly as the else-branch below would have.
+      img.onerror = function () {
+        img.onerror = null;
+        // The monogram svg is aria-hidden, so the swap would drop the only accessible name the
+        // <img> alt carried. Move that label onto the .ow-mono-face wrapper so the face keeps its
+        // name on the broken-portrait path.
+        // role="group" (NOT "img"): role="img" makes descendants presentational, which would drop
+        // the composited role-badge chip out of the accessibility tree; group keeps the badge in the
+        // tree while still carrying the portrait's accessible name via aria-label.
+        const _label = img.alt || (card && card.name) || "";
+        if (_label) { el.setAttribute("role", "group"); el.setAttribute("aria-label", _label); }
+        el.innerHTML = svg(card, opts);
+        if (opts.role && BADGES[opts.role]) el.insertAdjacentHTML("beforeend", badgeSvg(opts.role));
+      };
       img.src = card.portrait;
       el.appendChild(img);
     } else {

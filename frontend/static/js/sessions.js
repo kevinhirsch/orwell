@@ -18,6 +18,16 @@ let currentSessionId = null;
 let _sessionNavToken = 0;
 let _skipAutoSelect = false;
 
+// #11 snappy UX: toggle the thin indeterminate top progress bar on the chat pane
+// while selectSession() awaits /api/history, plus aria-busy for assistive tech.
+// Purely presentational — never touches #chat-history's message DOM.
+function _setChatSwitchingBar(on) {
+  const c = document.getElementById('chat-container');
+  if (!c) return;
+  c.classList.toggle('chat-switching', !!on);
+  c.setAttribute('aria-busy', on ? 'true' : 'false');
+}
+
 const SIDEBAR_MAX_VISIBLE = 10;
 const FOLDER_MAX_VISIBLE = 5;
 let _showAllSessions = false;
@@ -1555,8 +1565,12 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     window.compareModule.deactivate(true);
     return; // deactivate does a page reload
   }
+  // #11: declared OUTSIDE the try so the `finally` cleanup (which clears the session-switch
+  // loading bar guarded on this token) can read it — a `const` inside the try is block-scoped
+  // and would ReferenceError in finally on every switch.
+  let navToken;
   try {
-    const navToken = ++_sessionNavToken;
+    navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
     // Re-archive peeked session when navigating away
     _checkPeekCleanup(id);
@@ -1651,6 +1665,12 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     const isOC = meta && (meta.is_openclaw || id === 'openclaw');
     let msgHistory = [], modelName = null;
     if (!isOC) {
+      // #11 snappy UX: while we await /api/history the pane still shows the
+      // PREVIOUS chat's content at full opacity. On a slow load that reads as
+      // frozen. Show a thin indeterminate top bar (a real "we're not hanging"
+      // cue) only when actually switching AWAY from another chat. Non-
+      // destructive — it never touches #chat-history; cleared in `finally`.
+      if (prevSessionId !== id) _setChatSwitchingBar(true);
       const res = await fetch(`${API_BASE}/api/history/${id}`);
       const data = await res.json();
       if (navToken !== _sessionNavToken || currentSessionId !== id) return;
@@ -1833,6 +1853,11 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     console.error('Error in selectSession:', error);
     uiModule.showError('Failed to load session: ' + error.message);
   } finally {
+    // #11 snappy UX: clear the session-switch loading bar. Guard on navToken so a
+    // STALE selectSession (superseded mid-flight by a newer switch) doesn't tear
+    // down the newer call's bar — the current call always reaches here and clears
+    // its own. Removing an absent class is a no-op, so this is safe on every path.
+    if (navToken === _sessionNavToken) _setChatSwitchingBar(false);
     // #891 P1 fix (cross-session bleed): a queued/restored send-outbox item is BOUND to its own
     // session and HELD while any other session is current (chat.js _flushSendOutbox eligibility).
     // Nudge the drain now that the selection changed, so an item bound to THIS session dispatches
