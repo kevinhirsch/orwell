@@ -85,14 +85,41 @@ def test_contain_intrinsic_size_width_covers_settings_content_range():
     )
 
 
-def test_settings_window_does_not_opt_out_of_kit_resize():
-    """settings.js must keep `resizable: true` (an explicit opt-out would also kill resize)."""
-    src = _read(SETTINGS_JS)
-    assert "resizable: false" not in src and "resizable:false" not in src, (
-        "settings.js opts the window out of kit resize (`resizable: false`) — it must stay "
-        "resizeable on both axes."
+def _settings_modal_create_call(src):
+    """The `OrwellWindowKit.create({ ... })` object literal that configures the settings-modal
+    window — located by the `id: 'settings-modal'` it contains, so the assertion can't be
+    satisfied by an unrelated `resizable: true` elsewhere in settings.js."""
+    # Scan every `OrwellWindowKit.create({ ... })` block; return the one whose body names the
+    # settings-modal id. Brace-count from the opening `{` so a nested object doesn't truncate it.
+    for m in re.finditer(r"OrwellWindowKit\.create\(\s*\{", src):
+        start = m.end() - 1  # index of the opening `{`
+        depth, i = 0, start
+        while i < len(src):
+            if src[i] == "{":
+                depth += 1
+            elif src[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        body = src[start : i + 1]
+        if re.search(r"id:\s*['\"]settings-modal['\"]", body):
+            return body
+    raise AssertionError(
+        "no OrwellWindowKit.create({...}) call containing `id: 'settings-modal'` found in settings.js"
     )
-    assert re.search(r"resizable:\s*true", src), (
-        "settings.js no longer passes `resizable: true` to OrwellWindowKit.create — the "
-        "Settings window would fall to a non-resizeable default."
+
+
+def test_settings_window_does_not_opt_out_of_kit_resize():
+    """The settings-modal kit config must keep `resizable: true` (an explicit opt-out would also
+    kill resize). Scoped to the create-call that carries `id: 'settings-modal'` so an unrelated
+    `resizable: true` elsewhere in the file cannot mask a regression in THIS window's config."""
+    create = _settings_modal_create_call(_read(SETTINGS_JS))
+    assert "resizable: false" not in create and "resizable:false" not in create, (
+        "the settings-modal kit config opts the window out of kit resize (`resizable: false`) — "
+        "it must stay resizeable on both axes."
+    )
+    assert re.search(r"resizable:\s*true", create), (
+        "the settings-modal OrwellWindowKit.create({...}) config no longer passes "
+        "`resizable: true` — the Settings window would fall to a non-resizeable default."
     )
