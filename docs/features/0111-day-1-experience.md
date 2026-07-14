@@ -4,14 +4,20 @@
 > `0102-weekly-recap-cliffhanger`; this is the newer, still-unbuilt spec, so it moved to the next
 > free slot. No content change.
 >
-> **Status:** ✅ **BUILT (2026-07-10).** All five pillars shipped: casting probes the self / no kill-list
-> (#905), one Vault-free curiosity needle (#909, `src/engine/curiosityNeedle.ts`), the asymmetric premiere
-> gate (#906, `PremiereIntrosView.powerReachable`/`hotReads` — first power fast, no one invisible, the HOH
-> stays a real seeded competition), the consequential Day-1 beat via the existing `recordInteraction`/0023
-> fold + the 0055 `_auto_record_scene` belt (#908), and the Diary Room enterable Day-1 & OOC (#907). BDD
-> `0111-day-1-experience.feature` (wired in `cucumber.cjs`; `day1_experience.steps.ts`); the reframes are
-> calibration-neutral (byte-identical `advanceToFinale` season). FE premiere tutorial touch in
-> `orwellPremiereTutorial.js`. See § "PO review" + `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
+> **Status:** ✅ **BUILT (2026-07-10; Pillar 3 reframed 2026-07-14 — THE CHAMPAGNE CIRCLE).** All five
+> pillars shipped: casting probes the self / no kill-list (#905), one Vault-free curiosity needle (#909,
+> `src/engine/curiosityNeedle.ts`), fast house entry (#906) — **redesigned (owner ruling 2026-07-14): the
+> premiere opens on the producers convening the WHOLE house for champagne-circle introductions, so every
+> houseguest is met at the toast, at once, deterministically and engine-recorded** (`GameSessionAdapter.
+> meetWholeHouseAtChampagneCircle`, at premiere entry — Vault-free, seed-neutral); the player no longer
+> mills about to meet strangers and the premiere gadget no longer shows a "X of 15 met / still to meet"
+> checklist. `PremiereIntrosView.powerReachable` is reachable the moment the toast is done (the whole house
+> is met), and the first HOH stays a real, un-rigged seeded competition. The consequential Day-1 beat via
+> the existing `recordInteraction`/0023 fold + the 0055 `_auto_record_scene` belt (#908), and the Diary
+> Room enterable Day-1 & OOC (#907). BDD `0111-day-1-experience.feature` (wired in `cucumber.cjs`;
+> `day1_experience.steps.ts`); the reframes are calibration-neutral (byte-identical `advanceToFinale`
+> season). FE premiere tutorial touch in `orwellPremiereTutorial.js`. See § "PO review" +
+> `docs/decisions/PO-DECISIONS-LOG.md` (2026-06-27) + #875.
 > Tracks the first-run → end-of-day-1 audit (`docs/audits` / `scratchpad/audit_day1/AUDIT_REPORT.md`) and
 > its umbrella **#875**. This is the **coherent design** over five already-filed sub-issues — it does not
 > introduce a parallel system; it sequences and constrains them as **one first-session experience** rather
@@ -71,12 +77,18 @@ needle** — grounded only in facts the engine can stand behind (the seeded dive
 of hidden elements), never a specific secret — e.g. "this cast was assembled for friction." What crosses is
 the **promise of depth**, never a fact. The Wall stays absolute (see § Vault Wall).
 
-### Pillar 3 — "Strategy/agency arrive fast — I'm playing, not auditioning." → fast, asymmetric entry (#906)
-The premiere currently forbids the first HOH "while [the to-meet] list still has names on it" — a
-completionist 15-introduction roll-call before any stakes. Reframe the premiere gate in `liveSeason.ts` so
-the rule is **no one is invisible, not everyone is equal**: let **2–3 first reads run hot**, meet the
-stragglers *in motion* (e.g. the HOH-comp mingle), and let the **first power arrive fast** (cf. v1's "won
-HOH Day 1"). The HOH remains a real, un-rigged, seeded `runCompetition` — never gifted (mandate #3).
+### Pillar 3 — "Strategy/agency arrive fast — I'm playing, not auditioning." → the champagne circle (#906)
+The premiere used to forbid the first HOH "while [the to-meet] list still has names on it" — a
+completionist 15-introduction roll-call before any stakes. **Redesigned (owner ruling 2026-07-14 — THE
+CHAMPAGNE CIRCLE):** the premiere opens on the producers convening the **whole house for champagne-circle
+introductions**, and every houseguest is met **right there, at once** — the FIRST thing that happens. The
+player never mills about to stumble on strangers. This is **deterministic and engine-recorded**
+(`GameSessionAdapter.meetWholeHouseAtChampagneCircle`, at premiere entry — it marks every active NPC met +
+name-locked, Vault-free and seed-neutral), NOT the model's progressive `markHouseguestMet` calls (the model
+still *narrates* the toast; the engine only records — ADR 0003). The premiere gadget drops the "X of 15 met
+/ still to meet" checklist accordingly (it keeps the cast-roster strip as color). `powerReachable` is
+therefore true the moment the toast is done, and the **first power arrives fast** (cf. v1's "won HOH Day
+1"). The HOH remains a real, un-rigged, seeded `runCompetition` — never gifted (mandate #3).
 
 ### Pillar 4 — "What I do sticks." → one demonstrably consequential early beat (#908)
 Day 1's only stakes today are the high-variance first HOH. Add **one Day-1 social beat** (a bedroom-pick
@@ -98,7 +110,8 @@ knowledge with **no in-game pathway to any NPC** (the visibility model + Bible �
    #874 / #859 are the *gate*; this spec is the *content* behind the gate).
 2. **Producers reach out first, in-chat** the instant the player lands (the casting interview is the first
    scene, ADR 0050). Probe self-belief + tells (Pillar 1); drop one truthful curiosity needle (Pillar 2).
-3. **Fast, asymmetric house entry** — meet the room, 2–3 first reads run hot, stragglers in motion (Pillar 3).
+3. **The champagne circle** — the producers convene the whole house for a champagne toast; every houseguest
+   is met at once, then the first power is a breath away (Pillar 3).
 4. **One early consequential social beat** the player can later see bite (Pillar 4).
 5. **The Diary Room opened as a room** before it's needed (Pillar 5).
 6. **First power fast, stakes intact** — the un-rigged HOH, as built (Pillar 3).
@@ -117,10 +130,12 @@ path or a new outcome authority.
   Pillar-1 casting reframe and the Pillar-2 needle into the live framing; the Pillar-4 beat rides the
   existing `_auto_record_scene` (0055) error-correction so the early beat **always folds** even if the model
   under-calls `recordInteraction`. **FE error-corrects the omission; never engine-authors content.**
-- **`src/engine/liveSeason.ts`** — the **premiere gate reframe** (Pillar 3): replace "meet ALL before any
-  power" with a "no one invisible, 2–3 hot reads, first power fast" rule. The first HOH stays a real seeded
-  `runCompetition`. The **Day-1 consequential beat** (Pillar 4) is recorded through the existing
-  `recordInteraction` + the 0023 live fold — no new fold authority.
+- **`src/adapters/engine/GameSessionAdapter.ts`** — the **champagne circle** (Pillar 3, owner ruling
+  2026-07-14): `meetWholeHouseAtChampagneCircle()` marks the whole house met at premiere entry (deterministic,
+  Vault-free, seed-neutral), so `powerReachable` is true the moment the toast is done — no manual roll-call.
+  The premiere-scoped trackers are cleared inside the commit that leaves the premiere (`syncProjection`). The
+  first HOH stays a real seeded `runCompetition` in `liveSeason.ts`. The **Day-1 consequential beat** (Pillar
+  4) is recorded through the existing `recordInteraction` + the 0023 live fold — no new fold authority.
 - **The Diary Room (Pillar 5)** — surface the existing 0013 DR as a **present, enterable room on Day 1**
   (presence/lingering 0049 + the FE room affordance); no new DR mechanics, only its Day-1 availability +
   one introducing touch.
@@ -162,9 +177,10 @@ distributions are **byte-identical** (the `expressiveNonCollapse` + `juryReach`/
 - [ ] **One Vault-free curiosity needle lands by end of casting (#909).** The producer plants exactly one
       truthful "there's a hidden game" beat sourced only from public/seeded framing — carrying **no**
       specific secret/relationship/scheme.
-- [ ] **Fast, asymmetric house entry (#906).** The first HOH is reachable without meeting all 15 first; no
-      houseguest is invisible (everyone is at least met in motion); the HOH is a real un-rigged seeded
-      competition.
+- [ ] **The champagne circle meets the whole house at the toast (#906).** The premiere opens on
+      champagne-circle introductions that meet every houseguest at once (deterministic, engine-recorded, no
+      manual roll-call); no houseguest is invisible; the first HOH is reachable the moment the toast is done;
+      the HOH is a real un-rigged seeded competition.
 - [ ] **One demonstrably consequential Day-1 beat (#908).** A Day-1 social choice folds a real first read
       via `recordInteraction`/`_auto_record_scene` (guaranteed even if the model under-calls); the change is
       recalled later as behavior, never shown as a number.
@@ -201,8 +217,9 @@ The audit flagged two of these as explicit design calls; this spec adds the sequ
   Room exposes no NPC pathway; a sentinel sweep finds no sealed magnitude introduced by the Day-1 path.
 - **Casting discovers, not declares:** finalizing casting requires no declared target list; the intake
   records self/tells.
-- **Asymmetric entry:** the first HOH is reachable with the to-meet list non-empty *only* in the
-  "in-motion" sense (no one invisible), asserted structurally on the premiere gate; the HOH is a seeded
+- **Champagne circle (#906):** the premiere meets the whole house at the toast (deterministic, engine-
+  recorded — `meetWholeHouseAtChampagneCircle`), so `complete`/`powerReachable` are true from premiere entry
+  and no houseguest is invisible, asserted structurally on the premiere gate; the HOH is a seeded
   competition (un-rigged).
 - **Consequential beat folds:** a Day-1 social beat folds a relationship read (0023) — guaranteed via the
   `_auto_record_scene` belt when the model under-calls — recalled later as behavior; byte-identical folds

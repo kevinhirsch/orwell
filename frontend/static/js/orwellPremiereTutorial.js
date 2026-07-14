@@ -164,13 +164,13 @@
     card.classList.add("orwell-premiere-tutorial");   // keep the legacy hook class for inner CSS
     // J2-12: announce on insert without stealing focus (the kit already sets aria-live=polite for
     // the guide kind — non-intrusive note per ADR 0003).
-    // 0111 (Pillar 3, #906): house entry is FAST + asymmetric — get a couple of real reads going; you
-    // meet all fifteen houseguests, but the first power does NOT wait on a full roll-call. And (Pillar 5,
-    // #907) the Diary Room is introduced as an enterable room from day one — the private backstage.
+    // 0111 (Pillar 3, owner ruling 2026-07-14 — THE CHAMPAGNE CIRCLE): the producers gather the whole
+    // house for a champagne toast, so you meet all fifteen houseguests at once — then the first HOH is a
+    // breath away. And (Pillar 5, #907) the Diary Room is introduced as an enterable room from day one.
     body.innerHTML =
-      '<div>Talk to anyone, wander any room — the house keeps playing around you. Get a couple of real ' +
-      'reads going: you\'ll meet all fifteen houseguests, but the first HOH won\'t wait on you shaking ' +
-      'every hand.</div>' +
+      '<div>The producers gather the whole house for a champagne toast — you\'ll meet all fifteen ' +
+      'houseguests right there. Then talk to anyone and wander any room; the house keeps playing around ' +
+      'you, and the first HOH is a breath away.</div>' +
       '<div>The <strong>Diary Room</strong> is open from day one — step in whenever you want to vent. ' +
       'Nobody in the house hears it.</div>' +
       '<div class="opt-rhythm">' +
@@ -181,7 +181,7 @@
       '</div>' +
       // J2-13: an affordance to DO the first move (close the gulf-of-execution).
       '<div class="opt-actions">' +
-        '<button type="button" class="ow-btn ow-btn-secondary opt-go" aria-label="Start meeting the house — fills the message box with an opener">Meet the house \u{2192}</button>' +
+        '<button type="button" class="ow-btn ow-btn-secondary opt-go" aria-label="Join the champagne toast — fills the message box with an opener">Join the toast \u{2192}</button>' +
       '</div>';
     _mounted = true;
     var go = body.querySelector(".opt-go");
@@ -196,7 +196,7 @@
     if (!input) return;
     // Only seed an EMPTY composer — never clobber a draft the player has already started.
     if (!input.value || !input.value.trim()) {
-      input.value = "I head out to find the other houseguests and start introducing myself.";
+      input.value = "I step into the champagne circle and start taking in the whole house.";
       // Let the composer's own autosize / draft-save seams react to the change.
       try { input.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
     }

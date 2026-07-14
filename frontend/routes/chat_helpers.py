@@ -610,11 +610,11 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
     """J3-13 (wayfinding) — surface the engine's meet-everyone progress as a CONSISTENT framing fact
     during the premiere, so a redirect toward power names the actual gap and a concrete next step.
 
-    #1387 / feature 0111 (finding 3, 2026-07-11 prompt audit): the first HOH is REACHABLE before every
-    formal introduction — a couple of GENUINE hot reads + nobody left invisible — so this NO LONGER
-    stonewalls a ready player behind an all-15 roll-call. It returns None the moment power is reachable
-    (or the meet-list is fully complete), and while power is NOT yet reachable it frames the gap
-    ASYMMETRICALLY: keep the player forming real reads, never grind through every introduction.
+    CHAMPAGNE CIRCLE (feature 0111, owner ruling 2026-07-14): the premiere now meets the WHOLE house at
+    the champagne toast, at once — so during a live premiere `complete`/`powerReachable` are ALWAYS true
+    and this directive is effectively DORMANT (it returns None immediately). It is kept as a defensive,
+    fail-open no-op: on the current flow there is no gap to name and no stonewall to lift, so the turn is
+    framed exactly as before. (Left as a pure function so its unit tests still pin the fail-open shape.)
 
     The counts never rely on the model REMEMBERING — `getGameState` already carries the engine-tracked
     `premiere` progress (PremiereIntrosView: metCount/total/hotReads/powerReachable). Vault-free by
@@ -624,9 +624,9 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
     exactly as before."""
     if not isinstance(premiere, dict):
         return None
-    # 0111 asymmetric gate: once the first HOH is REACHABLE (a couple of hot reads + nobody invisible),
-    # or the whole meet-list is complete, STOP redirecting — the model is free to start the game the
-    # instant the player is ready. This is the fix for the stonewalled-ready-player half of #1387.
+    # CHAMPAGNE CIRCLE (0111): the whole house is met at the toast, so `complete`/`powerReachable` are
+    # true throughout a live premiere ⇒ STOP redirecting (the model is free to start the game the instant
+    # the player is ready). This is now the normal path — the branch below is a defensive fail-open remnant.
     if premiere.get("complete") or premiere.get("powerReachable"):
         return None
     try:
