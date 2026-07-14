@@ -213,6 +213,34 @@ export function _setReconcileDeps(deps) {
   }
 
   /**
+   * CASTING-RESUME-HANG Fix 3 (the likely ACTUAL hang): a framed CASTING turn can settle to
+   * reasoning-only — a long thinking trace with an EMPTY VISIBLE reply and no tool call. `accumulated`
+   * (merged reply + reasoning) is NON-blank there, so `_isEmptyTurnNoSave` above is false and no Retry
+   * arms; the reasoning renders into the "Thinking" accordion and the interview just HANGS. None of the
+   * auto-continue paths catch it — they fire on truncation / interruption / step-limit (a cut-off), not
+   * on a clean empty completion. This pure predicate decides whether to fire exactly ONE bounded
+   * re-prompt: true iff we're in the CASTING register (game build, season NOT started), the stream ended
+   * cleanly (a `[DONE]`, not thrown/cancelled), the turn used NO tools and produced NO visible artifact,
+   * the VISIBLE reply is empty, THE TURN HAD REASONING (`hadReasoning` — a non-blank `accumulated`), and
+   * the one-shot re-prompt has not already fired. SCOPED to casting — in-game empty turns keep their
+   * existing behavior. Pure so it is gated without a live stream.
+   *
+   * The `hadReasoning` gate is load-bearing (review #1595): it makes this predicate MUTUALLY EXCLUSIVE
+   * with `_isEmptyTurnNoSave` above (which fires only when `accumulated` is BLANK). A fully-silent
+   * completion (no reasoning, no reply) is the no-content case → it takes ONLY the clean-empty Retry
+   * path; a reasoning-only completion (non-blank `accumulated`, empty visible reply) is THIS case → it
+   * takes ONLY the bounded re-prompt. Without it, a silent turn would trip BOTH — a Retry banner AND an
+   * auto re-prompt in the same turn.
+   */
+  export function _isCastingEmptyReplyReprompt({
+    gameBuild, seasonStarted, sawDone, cancelled, usedTools, producedVisible, visibleReply, hadReasoning, alreadyReprompted,
+  } = {}) {
+    return !!gameBuild && !seasonStarted && !!sawDone && !cancelled &&
+      !usedTools && !producedVisible && !!hadReasoning && !alreadyReprompted &&
+      (visibleReply == null || String(visibleReply).trim() === '');
+  }
+
+  /**
    * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
    * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
    * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so

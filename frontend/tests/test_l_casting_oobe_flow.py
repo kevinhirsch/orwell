@@ -201,10 +201,21 @@ def _node_drive_resume(script_body):
         "let _composerValue = '';\n"
         "const box = { get value(){return _composerValue;}, set value(v){_composerValue=v;}, "
         "  focus(){}, dispatchEvent(){} };\n"
-        "let _streamBusy = false; let _cues = [];\n"
-        "globalThis.chatModule = { hasActiveStream: () => _streamBusy, "
+        "let _cues = [];\n"
+        # CASTING-RESUME-HANG Fix 2 — the stub now models the REAL chat.js contract: hasActiveStream
+        # HONORS its sessionId argument (compares against the live _streamSessionId, null when idle), and
+        # there is a sessionModule.getCurrentSessionId() the onboarding streamBusy() guard must consult. A
+        # BARE hasActiveStream() (the dead-guard regression) reads undefined !== the current session and is
+        # permanently false — so this stub can't silently mask that rot anymore.
+        "const _CURRENT_SESSION = 'casting-session';\n"
+        "let _streamSessionId = null;\n"
+        "globalThis.chatModule = { "
+        "  hasActiveStream: (sessionId) => _streamSessionId != null && _streamSessionId === sessionId, "
         "  sendHiddenCue: (line) => { _cues.push(line); } };\n"
-        "globalThis.setStreamBusy = (b) => { _streamBusy = !!b; };\n"
+        "globalThis.sessionModule = { getCurrentSessionId: () => _CURRENT_SESSION };\n"
+        "globalThis.window.sessionModule = globalThis.sessionModule;\n"
+        # setStreamBusy(true) marks the CURRENT session's stream in flight; false clears it (idle → null).
+        "globalThis.setStreamBusy = (b) => { _streamSessionId = b ? _CURRENT_SESSION : null; };\n"
         "globalThis.setComposer = (v) => { _composerValue = v; };\n"
         "globalThis.getCues = () => _cues.slice();\n"
         "const byId = { message: box };\n"
@@ -522,3 +533,159 @@ def test_968_seeding_indicator_silent_when_no_model_wired():
     # no indicator should appear.
     out = _node_drive_seeding({"warmed": False, "count": 0})
     assert out["toastMounts"] == 0, "no model wired (warmed:false) must show NO indicator"
+
+
+# ── CASTING-RESUME-HANG Fix 1: a SOFT season restart (no page reload) must re-arm the cue latches ──
+# `_openSent` (producers' opener) and `_resumeSent` (post-photo resume) are MODULE-LEVEL once-guards.
+# "Reset this season" / next-season is a soft SPA restart with NO reload, so left set they stay `true`
+# forever → season 2+ the opener AND the resume cue never fire and the casting interview HANGS.
+
+def test_soft_restart_rearms_the_post_photo_resume_cue():
+    # Fails-before: without the _resumeSent reset in _orwellMarkRestart, afterS2 stays 1 (the season-2
+    # resume never re-fires). Passes-after: the soft restart re-arms the latch and the cue fires again.
+    out = _node_drive_resume(
+        # Season 1: the resume cue fires once and latches _resumeSent = true.
+        "globalThis.window._orwellResumeAfterPhoto();\n"
+        "globalThis.tick(250);\n"
+        "const afterS1 = globalThis.getCues().length;\n"
+        # A duplicate resume in the SAME (season-1) session must be a NO-OP (the once-guard holds).
+        "globalThis.window._orwellResumeAfterPhoto();\n"
+        "globalThis.tick(2000);\n"
+        "const afterS1Dup = globalThis.getCues().length;\n"
+        # A soft restart (season 2) — NO page reload — must re-arm the latch so the resume fires again.
+        "globalThis.window._orwellMarkRestart();\n"
+        "globalThis.window._orwellResumeAfterPhoto();\n"
+        "globalThis.tick(250);\n"
+        "const afterS2 = globalThis.getCues().length;\n"
+        "process.stdout.write(JSON.stringify({ afterS1, afterS1Dup, afterS2 }));\n"
+    )
+    assert out["afterS1"] == 1, "the season-1 resume must fire once"
+    assert out["afterS1Dup"] == 1, "a duplicate resume in the same season must NOT re-fire (latch holds)"
+    assert out["afterS2"] == 2, "after a soft restart the resume cue must fire AGAIN (latch re-armed)"
+
+
+def test_mark_restart_rearms_both_soft_restart_latches():
+    # Source-pin: _orwellMarkRestart must clear BOTH module-level cue latches (opener + resume) — the
+    # opener re-arm has no clean synchronous harness drive, so pin it here alongside the resume.
+    js = _read("static", "js", "orwellOnboarding.js")
+    seg = js[js.index("window._orwellMarkRestart"):]
+    seg = seg[: seg.index("\n  };")]
+    assert "_openSent = false" in seg, "the producers' opener latch must re-arm on a soft restart"
+    assert "_resumeSent = false" in seg, "the post-photo resume latch must re-arm on a soft restart"
+
+
+# ── CASTING-RESUME-HANG Fix 2: the stream-busy guard must consult the LIVE session id (not a bare call) ──
+
+def test_stream_busy_guard_passes_the_live_session_id_not_a_bare_call():
+    # chat.js hasActiveStream(sessionId) compares _streamSessionId === sessionId (null when idle), so a
+    # BARE hasActiveStream() compared against `undefined` and was PERMANENTLY false — a dead guard. The
+    # fix must pass the live current-session id so the "defer the cue while a stream is in flight" branch
+    # actually works. (The behavioral proof rides the arg-honoring stub above: the #969 stream-busy tests
+    # only pass because streamBusy now hands hasActiveStream the real session id.)
+    js = _read("static", "js", "orwellOnboarding.js")
+    seg = js[js.index("const streamBusy = ()"):]
+    seg = seg[: seg.index("\n    };")]
+    assert "getCurrentSessionId" in seg, "the guard must read the live current-session id"
+    assert "hasActiveStream(sid)" in seg, "the guard must pass the session id into hasActiveStream"
+    assert "hasActiveStream()" not in seg, "the bare no-arg call was the dead guard — never reintroduce it"
+
+
+# ── CASTING-RESUME-HANG Fix 3: a reasoning-only casting turn (empty visible reply) fires ONE re-prompt ──
+# NEEDS LIVE-MODEL VERIFY on prod (the stubbed gates never produce a real reasoning-only completion).
+# The deterministic coverage below exercises the pure predicate's truth table + pins the finalize wiring.
+
+def _eval_casting_reprompt_predicate(cases):
+    """Slice the PURE _isCastingEmptyReplyReprompt predicate out of chatReconcile.js (which otherwise
+    imports browser-only modules) and run it under bare Node against `cases` — no browser, no live
+    stream. Returns the boolean the predicate yields for each case."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available for the casting re-prompt predicate check")
+    src = _read("static", "js", "chatReconcile.js")
+    i = src.index("export function _isCastingEmptyReplyReprompt(")
+    # anchor on the END of the single-return body (…=== '');\n  }) — NOT the first "\n  }", which is the
+    # `} = {}` destructuring default in the signature.
+    j = src.index("');\n  }", i) + len("');\n  }")
+    fn = src[i:j].replace("export function", "function", 1)
+    harness = (
+        fn + "\n"
+        f"const cases = {json.dumps(cases)};\n"
+        "process.stdout.write(JSON.stringify(cases.map((c) => _isCastingEmptyReplyReprompt(c))));\n"
+    )
+    proc = subprocess.run(
+        [node, "--input-type=module", "-e", harness],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert proc.returncode == 0, f"node failed: {proc.stderr}"
+    return json.loads(proc.stdout)
+
+
+def test_casting_empty_reply_reprompt_predicate_truth_table():
+    base = dict(gameBuild=True, seasonStarted=False, sawDone=True, cancelled=False,
+                usedTools=False, producedVisible=False, visibleReply="", hadReasoning=True,
+                alreadyReprompted=False)
+
+    def m(**over):
+        d = dict(base)
+        d.update(over)
+        return d
+
+    cases = [
+        m(),                                     # 0: THE hang — casting, clean [DONE], reasoning, empty reply, no tools → fire
+        m(visibleReply="Welcome to the house"),  # 1: a real producer line landed → don't fire
+        m(seasonStarted=True),                   # 2: in-game (season started) — scoped OUT of casting
+        m(gameBuild=False),                      # 3: non-game build → never
+        m(usedTools=True),                       # 4: a tool turn legitimately has no prose → don't fire
+        m(producedVisible=True),                 # 5: image/ask_user/budget/error artifact → don't fire
+        m(sawDone=False),                        # 6: thrown/interrupted (not a clean [DONE]) → handled elsewhere
+        m(cancelled=True),                       # 7: user-cancelled → don't fire
+        m(alreadyReprompted=True),               # 8: the one-shot latch is already spent → hard loop-guard
+        m(visibleReply="   "),                   # 9: whitespace-only reply is still empty → fire
+        m(hadReasoning=False),                   # 10: fully-silent turn (no reasoning) → clean-empty Retry path ONLY, don't fire
+    ]
+    out = _eval_casting_reprompt_predicate(cases)
+    assert out == [True, False, False, False, False, False, False, False, False, True, False], out
+
+
+def test_casting_empty_reply_reprompt_is_wired_and_bounded():
+    recon = _read("static", "js", "chatReconcile.js")
+    assert "export function _isCastingEmptyReplyReprompt(" in recon, "the casting re-prompt predicate must exist"
+    js = _read("static", "js", "chat.js")
+    assert "_isCastingEmptyReplyReprompt({" in js, "the finalize must consult the casting re-prompt predicate"
+    seg = js[js.index("_isCastingEmptyReplyReprompt({"):]
+    seg = seg[: seg.index("}, 50);")]
+    # scoped to the casting register (game build + season NOT started), single-round (no tool node),
+    # and keyed on the empty VISIBLE reply — not `accumulated` (which carries reasoning).
+    assert "gameBuild: isGameBuild()" in seg
+    assert "seasonStarted: isSeasonStarted()" in seg
+    # `usedTools` reads the TURN-SCOPED flag, not `holder.querySelector('.agent-thread-node')`: the
+    # tool rail is appended to `#chat-history` as a SIBLING of `holder`, so the DOM query always read
+    # false and a tool-only casting turn could wrongly trip the re-prompt (P1 review, #1595). The flag
+    # is declared with `_producedVisibleOutput` and set true in the tool_start branch.
+    assert "usedTools: _usedToolsThisTurn" in seg
+    assert "holder.querySelector('.agent-thread-node')" not in seg, \
+        "the dead DOM query must not gate usedTools — the tool rail is a sibling of holder"
+    assert "let _usedToolsThisTurn = false;" in js, "the turn-scoped tool flag must be declared"
+    # the flag must actually flip on a tool call, or it would be a constant-false (same bug, hidden)
+    _ts = js[js.index("else if (json.type === 'tool_start')"):]
+    _ts = _ts[: _ts.index("_cancelThinkingTimer();")]
+    assert "_usedToolsThisTurn = true" in _ts, "tool_start must set the turn-scoped tool flag"
+    assert "visibleReply: _castingVisibleReply" in seg
+    # reasoning-present gate — makes the casting re-prompt mutually exclusive with _isEmptyTurnNoSave
+    # (which requires BLANK accumulated), so a fully-silent turn never trips both recoveries (#1595).
+    # It MUST derive from the dedicated reasoning channel `roundReasoningText`, NOT the merged
+    # `accumulated` (which carries reply text + synthetic <think> delimiters — an empty <think></think>
+    # would falsely read as reasoning; the channel split is a hard coding guideline).
+    assert "hadReasoning: !!(roundReasoningText" in seg
+    assert "hadReasoning: !!(accumulated" not in seg, \
+        "hadReasoning must not be inferred from the merged accumulated buffer"
+    assert "hadReasoning" in recon, "the predicate must accept a hadReasoning gate"
+    assert "alreadyReprompted: _castingEmptyRepromptSent" in seg
+    # a HARD one-shot: the latch is set BEFORE the deferred send, and the re-prompt only RE-ASKS the
+    # model (a hidden cue) — it never engine-authors content.
+    assert "_castingEmptyRepromptSent = true" in seg
+    assert "handleChatSubmit(null, _CASTING_EMPTY_REPROMPT, { hideUserBubble: true })" in seg
+    # the latch is cleared once a casting turn lands a visible reply (re-arm for a future genuine hang)
+    assert "_castingEmptyRepromptSent = false" in js
+    # the re-prompt line must NOT script content — it only nudges the model to continue in-character
+    assert "_CASTING_EMPTY_REPROMPT" in js

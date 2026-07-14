@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, isSeasonStarted, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -98,7 +98,7 @@ import {
 // reach the cluster through the chatModule re-export, unchanged.
 import {
   softReloadHistory, flushPendingReconcile, deferPeerResume, flushPendingPeerResume,
-  _isSkippableUserPrompt, _isEmptyTurnNoSave, _msgSeq, _insertBySeq, _reorderBySeq,
+  _isSkippableUserPrompt, _isEmptyTurnNoSave, _isCastingEmptyReplyReprompt, _msgSeq, _insertBySeq, _reorderBySeq,
   _visibleMsgCount, _expectedVisibleBubbleCount, _setReconcileDeps,
 } from './chatReconcile.js';
 // #1414 (R3 PR8): the SEVERABLE stream-presentation helpers (PARTIAL by design — the ~1,660-line
@@ -165,6 +165,16 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   // chatState._autoNudges (handshakes fired for the CURRENT user turn) + chatState._autoContinuePending
   // (next submit is an auto-continue — don't reset the counter). Moved to chatState.js, #1414 R3 PR0.
   const _AUTO_NUDGE_CAP = 3;
+
+  // CASTING-RESUME-HANG Fix 3 — a bounded, casting-only re-prompt for a reasoning-only turn (a long
+  // thinking trace with an EMPTY visible reply and no tool call) that would otherwise HANG the casting
+  // interview after the post-photo resume cue. The re-prompt only RE-ASKS the model (never engine-authors
+  // content); the latch is a HARD loop-guard so it can fire AT MOST ONCE per stuck streak, and is cleared
+  // the moment any casting turn lands a visible reply (so a later genuine hang can still be recovered).
+  const _CASTING_EMPTY_REPROMPT =
+    "(Production cue — your last turn produced no visible reply. Continue the casting interview now: " +
+    "respond to me directly, in character as the producers.)";
+  let _castingEmptyRepromptSent = false;
 
   // ── #985 P2-A / #891 / #830: the SEND OUTBOX subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
   // Its state — the three queues (chatState._sendOutbox / ._outboxAwaitingConfirm / ._outboxFailed)
@@ -1827,6 +1837,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       // yet are a real, completed turn — NOT the empty-turn-with-no-recourse case. Set true on those so
       // the empty-turn Retry never spuriously fires after one.
       let _producedVisibleOutput = false;
+      // CASTING-RESUME-HANG Fix 3 (P1 review): a turn-scoped "did this turn call any tool?" flag.
+      // The tool RAIL (`.agent-thread` → `.agent-thread-node`) is appended to `#chat-history` as a
+      // SIBLING of the assistant `holder` (see the tool_start branch: `chatBox.appendChild`), so
+      // `holder.querySelector('.agent-thread-node')` never sees it and always read false — a
+      // tool-only casting turn could then wrongly trip the empty-reply re-prompt. Set true in the
+      // tool_start branch below and read by `_isCastingEmptyReplyReprompt`'s `usedTools` gate.
+      let _usedToolsThisTurn = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2668,6 +2685,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
 
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
+                _usedToolsThisTurn = true;   // this turn called a tool → not a no-tool empty completion
                 _cancelThinkingTimer();
                 _removeThinkingSpinner();
                 // Force-close thinking if still open — tools are real content, not thinking
@@ -3776,6 +3794,51 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           _renderStreamDropRetry(holder, streamSessionId, {
             label: "The narrator didn't respond. Your message was received — retry to continue.",
           });
+        }
+
+        // CASTING-RESUME-HANG Fix 3 — the reasoning-only casting hang (distinct from _isEmptyTurnNoSave
+        // above: THERE `accumulated` is blank; HERE the model streamed a long thinking trace so
+        // `accumulated` is NON-blank but the VISIBLE reply is empty). No truncation/interruption/step-limit
+        // auto-continue catches a clean empty completion, so the post-photo resume interview just HANGS.
+        // Fire exactly ONE bounded re-prompt (a hidden cue that only RE-ASKS the model — never engine-
+        // authors content), scoped to the casting register, single-round-only (no tool node), and latched
+        // so it can never loop. `roundReplyText` is the last round's reply-only buffer; gating on the
+        // no-tool case makes it single-round, so it IS the whole turn's visible reply. NEEDS LIVE-MODEL
+        // VERIFY (the stubbed gates never exercise a real reasoning-only completion).
+        const _castingVisibleReply = stripToolBlocks(roundReplyText).trim();
+        if (isGameBuild() && !isSeasonStarted() && _castingVisibleReply) {
+          _castingEmptyRepromptSent = false;   // a real producer line landed — re-arm for a future hang
+        }
+        if (holder && holder.parentNode &&
+            _isCastingEmptyReplyReprompt({
+              gameBuild: isGameBuild(),
+              seasonStarted: isSeasonStarted(),
+              sawDone: _streamSawDone,
+              cancelled: _turnWasCancelled,
+              usedTools: _usedToolsThisTurn,   // turn-scoped flag — the tool rail is a SIBLING of holder, not inside it
+              producedVisible: _producedVisibleOutput,
+              visibleReply: _castingVisibleReply,
+              // reasoning-present — derived from the DEDICATED reasoning channel `roundReasoningText`
+              // (deltas with json.thinking truthy), NOT the merged `accumulated` (which carries reply
+              // text + synthetic <think> delimiters, so `<think></think>` would falsely read as
+              // reasoning). Keeps the reply/reasoning channel split intact (hard coding guideline —
+              // never infer reasoning from the merged buffer) and gates the re-prompt on a REAL
+              // thinking trace, so the reasoning-only hang self-recovers while a genuinely silent turn
+              // stays on the clean-empty Retry path (review #1595).
+              hadReasoning: !!(roundReasoningText && roundReasoningText.trim()),
+              alreadyReprompted: _castingEmptyRepromptSent,
+            })) {
+          _castingEmptyRepromptSent = true;    // hard loop-guard: at most ONE auto re-prompt per streak
+          const _repromptSid = streamSessionId;
+          // Defer so this turn's `finally` (isStreaming / _sendInFlight / holder cleanup) settles first —
+          // exactly as _tryAutoRecover defers its headless send. Drop it if the player has since switched
+          // chats. Headless + hideUserBubble so the cue is never a visible player line.
+          setTimeout(() => {
+            try {
+              if (_repromptSid && sessionModule.getCurrentSessionId() !== _repromptSid) return;
+              handleChatSubmit(null, _CASTING_EMPTY_REPROMPT, { hideUserBubble: true });
+            } catch (_) {}
+          }, 50);
         }
       } // end if (!_isBgFinal)
 
@@ -5456,6 +5519,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     _insertBySeq,       // BUG 1: insert-by-seq choke point
     _reorderBySeq,      // BUG 1: non-destructive seq reorder (the reconcile corrector)
     _isEmptyTurnNoSave, // BUG 2 (#985 P2-B): clean-empty-turn predicate (browser gate)
+    _isCastingEmptyReplyReprompt, // CASTING-RESUME-HANG Fix 3: reasoning-only casting re-prompt predicate (gate)
     _renderStreamDropRetry, // BUG 2: the user-controlled Retry control (browser gate)
     _enqueueSend,       // #985 P2-A: enqueue a send-while-streaming into the outbox (browser gate)
     _flushSendOutbox,   // #985 P2-A: drain the outbox FIFO at turn settle (browser gate)
