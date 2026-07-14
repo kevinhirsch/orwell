@@ -72,9 +72,12 @@ sampling; full detail in the PR discussion + lane file). Ranked:**
   luminosity gap (primary tint ≈ .46-.50 alpha) + make Prominent's rim the strongest.
 - **KIT-F-03 · P1 · checkbox/radio coarse-pointer floor is 24px, not 44px (explicit in source).**
   `css/responsive-tokens.css:74-77` gives `input[type=checkbox/radio]` a 1.5rem floor while
-  siblings get `--tap-min` 44px (lines 66-72) — WCAG 2.5.5 shortfall wherever the kit is reused
-  on touch. Fix: 44px hit region via invisible `::after` (pattern at style.css:21267), visible
-  box stays 20px.
+  siblings get `--tap-min` 44px (lines 66-72). Precision: 24px meets the WCAG 2.2 **AA** floor
+  (2.5.8 Target Size Minimum); the 44px bar is WCAG 2.5.5 Target Size **Enhanced (AAA)** and
+  the Apple HIG's own 44×44pt guidance — which is the standard this codebase's `--tap-min`
+  convention already applies to every sibling control, so check/radio are the one inconsistent
+  exception rather than a baseline-AA failure. Fix: 44px hit region via invisible `::after`
+  (pattern at style.css:21267), visible box stays 20px.
 - **KIT-F-04 · P1 (demo-only) · House Status gadget garbled** ("HOHYou", "NomsTwo houseguests"):
   `orwellStatusPanel.js:193-195` scopes its injected row CSS to the literal `#orwell-status`,
   but the demo mounts `id="ek-g-status"` (`orwellElements.js:157-167`) — same root-cause class
