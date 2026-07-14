@@ -81,8 +81,8 @@ jobs:
         # OpenRouter stands in here — request keys exclude the endpoint URL by design).
         run: |
           python3 scripts/golden_path_record.py \
-            --model z-ai/glm-5.2 --utility-model qwen/qwen3.6-flash \
-            --fixture /tmp/golden-nightly/golden_path_glm-5.2.jsonl \
+            --model z-ai/glm-4.7 --utility-model qwen/qwen3.6-flash \
+            --fixture /tmp/golden-nightly/golden_path_glm-4.7.jsonl \
             --report /tmp/golden-nightly/record-report.json
       - name: replay the COMMITTED fixture for the drift diff
         if: steps.key.outputs.present == 'true'
@@ -127,8 +127,8 @@ jobs:
           OPENROUTER_API_KEY: ""
         run: |
           set -e
-          FRESH=/tmp/golden-nightly/golden_path_glm-5.2.jsonl
-          COMMITTED=frontend/tests/golden/golden_path_glm-5.2.jsonl
+          FRESH=/tmp/golden-nightly/golden_path_glm-4.7.jsonl
+          COMMITTED=frontend/tests/golden/golden_path_glm-4.7.jsonl
           if [ ! -s "$FRESH" ]; then
             echo "::warning title=golden-nightly::no fresh fixture produced — nothing to commit"; exit 0
           fi
@@ -142,7 +142,7 @@ jobs:
             git config user.email "golden-nightly@users.noreply.github.com"
             git add "$COMMITTED"
             git commit -m "chore(golden): commit the replay-verified refreshed fixture (golden-nightly)" \
-              -m "Recorded live against z-ai/glm-5.2 + qwen/qwen3.6-flash; key-free replay --runs 2 PASSED before this commit. Relights golden-path/visual-regression/theme-consistency."
+              -m "Recorded live against z-ai/glm-4.7 + qwen/qwen3.6-flash; key-free replay --runs 2 PASSED before this commit. Relights golden-path/visual-regression/theme-consistency."
             git pull --rebase origin "${GITHUB_REF_NAME}" || true
             git push origin "HEAD:${GITHUB_REF_NAME}"
             echo "::notice title=golden-nightly::refreshed fixture committed — the golden/vr/theme gates relight on the next runs."

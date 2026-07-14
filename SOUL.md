@@ -438,7 +438,7 @@ converted to a STRUCTURAL fix — fixture integrity/writer forensics, `scrub_sta
 settings TTL race, phase-stall escalation, M0-7 pending-surface gap, serialized authoring,
 M0-8 logical clock `ORWELL_LOGICAL_CLOCK`, background-LLM quiesce, dwell-label key
 neutralization, 409-token strip, the awaited post-turn record belt; final fixture
-`golden_path_glm-5.2.jsonl`, digest `78b5e660e6cc6734`, replayed byte-identical twice; the
+`golden_path_glm-4.7.jsonl`, digest `78b5e660e6cc6734`, replayed byte-identical twice; the
 `golden-path` PR gate is ARMED), **M0-3 both halves** (the deterministic mid-gen-join pin +
 the LIVE two-window run — 14/14 parity through premiere→HOH→noms, evidence in the ship-gate
 doc), **all of Wave M1** (10 items: decision-card layout, first-run card, season-titled chats,

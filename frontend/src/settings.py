@@ -309,10 +309,10 @@ DEFAULT_SETTINGS = {
     # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
     # read this resolved default) — OWNER RULING 2026-07-13 (live prod debug-bundle audit): back to
     # the ADR 0016 narrator/utility default GLM-4.7 (the 2026-07-07 glm-5.2 two-tier retarget is
-    # reverted for the SHIPPED default; persisted stores keep whatever they carry — the owner flips
-    # his box in the UI). NOTE the committed golden fixture stays recorded on glm-5.2 EXPLICITLY
-    # (`scripts/golden_path_record.py --model`, its own flag) — the golden gate is model-pinned by
-    # fixture, not by this seed, so this default does NOT stale it. `default_endpoint_id` stays
+    # reverted; persisted stores keep whatever they carry — the owner flips his box in the UI). The
+    # committed golden fixture is ALSO recorded on glm-4.7 (owner ruling 2026-07-14: the golden gate
+    # must test what prod runs — the earlier glm-5.2 decoupling was papered-over debt, now removed).
+    # `default_endpoint_id` stays
     # empty so resolution binds it to the first enabled endpoint (the OpenRouter one the setup
     # wizard creates); the setup wizard also writes the endpoint id explicitly once it exists.
     "default_model": "z-ai/glm-4.7",

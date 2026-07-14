@@ -4,8 +4,8 @@ This directory holds the committed **real-model transcript fixture(s)** for the 
 replay gate — one JSONL file per recorded run, keying every FE→model request (stable hash of
 messages + tool schemas + shape-affecting params) to the recorded response bytes.
 
-- `golden_path_glm-5.2.jsonl` — THE canonical fixture (owner's two-tier topology, 2026-07-07:
-  narration `z-ai/glm-5.2`, utility `qwen/qwen3.6-flash`): one real run across casting →
+- `golden_path_glm-4.7.jsonl` — THE canonical fixture (owner's two-tier topology, 2026-07-07:
+  narration `z-ai/glm-4.7`, utility `qwen/qwen3.6-flash`): one real run across casting →
   premiere → Week 1 HOH → nominations → veto → eviction → week roll. **Until it is recorded and
   committed, the `golden-path` CI job is dormant** (it says so with an explicit notice — never a
   silent pass). The gate is model-agnostic — the replay driver picks up whatever single

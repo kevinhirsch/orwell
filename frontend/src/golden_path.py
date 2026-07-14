@@ -48,11 +48,11 @@ META_UTILITY_ENV = "ORWELL_GOLDEN_UTILITY_MODEL"
 META_SEED_ENV = "ORWELL_GOLDEN_SEED"
 
 #: The one canonical committed fixture — the owner's two-tier topology (2026-07-07):
-#: narration z-ai/glm-5.2, utility qwen/qwen3.6-flash. The gate stays model-agnostic:
+#: narration z-ai/glm-4.7, utility qwen/qwen3.6-flash. The gate stays model-agnostic:
 #: the replay driver globs for whatever single golden_path_*.jsonl is committed.
 DEFAULT_FIXTURE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "golden", "golden_path_glm-5.2.jsonl")
+    "tests", "golden", "golden_path_glm-4.7.jsonl")
 
 #: The sentinel the replay-miss error carries — the CI driver greps for it, and the
 #: failure message tells a human exactly how to regenerate (spec: "a regenerate-the-
