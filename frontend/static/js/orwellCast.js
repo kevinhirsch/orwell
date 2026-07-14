@@ -180,7 +180,17 @@
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
           display: flex; align-items: center; justify-content: center;
         }
-        #orwell-cast .oc-portrait img { width: 100%; height: 100%; object-fit: cover; }
+        /* OWN-9: the photo LAYERS OVER the monogram base (setPortrait mounts both while a
+           real portrait is in flight) — absolute so the monogram beneath keeps the square
+           box; border-radius rides the holder's overflow:hidden clip. */
+        #orwell-cast .oc-portrait img {
+          width: 100%; height: 100%; object-fit: cover;
+          position: absolute; inset: 0;
+        }
+        /* …and stays INVISIBLE until decoded (the reveal seam drops the class), so a slow,
+           hung, or failing portrait request shows the designed monogram — never a bare grey
+           holder, alt text, or the broken-image glyph. */
+        #orwell-cast .oc-portrait img.oc-img-pending { opacity: 0; }
         /* G22: a just-landed face fades in gently… */
         @keyframes ocFadeIn { from { opacity: 0; } to { opacity: 1; } }
         #orwell-cast .oc-portrait img.oc-justin { animation: ocFadeIn .35s ease; }
@@ -189,6 +199,16 @@
           #orwell-cast .oc-portrait img.oc-justin { animation: none; }
         }
         #orwell-cast .oc-ph { font-size: 1.6rem; opacity: .45; }
+        /* OWN-9: the no-kit legacy initial consumes the --oc-mono-hue tint again (the M2-2
+           refactor had orphaned the var — no rule read it, so the kit-less fallback rendered
+           a grey letter-tile). Deterministic name→hue; theme-independent (frosted AND flat). */
+        #orwell-cast .oc-ph.oc-mono-fallback {
+          display: flex; align-items: center; justify-content: center;
+          background: linear-gradient(135deg,
+            hsl(var(--oc-mono-hue, 200) 55% 34%), hsl(var(--oc-mono-hue, 200) 60% 17%));
+          color: hsl(var(--oc-mono-hue, 200) 30% 94%);
+          font-weight: 800;
+        }
         /* J2-15 → M2-2: the per-houseguest placeholder is now the DESIGNED monogram from the
            shared OrwellMonogram kit (id-seeded gradient + pattern + initials — audit B3 killed
            the flat letter-rectangles). This block keeps only holder sizing; the template lives
@@ -435,45 +455,86 @@
     // the same src is never re-assigned, so a loaded face never reloads.
     entry.portrait = url || null;
     entry.holder.textContent = "";
+    // J2-15: until a portrait (0051) backfills, a single shared 👤 silhouette made the
+    // "meet 15 distinct people" payoff read as interchangeable placeholders. Render a
+    // per-houseguest monogram instead — the name's initial over a deterministic tint
+    // derived from the name (NOT any hidden/Vault attribute) — so every card is visibly
+    // its own person from the first frame. Pure presentation; zero new data.
+    //
+    // OWN-9: the designed monogram is now ALSO the base layer while a real portrait is
+    // still IN FLIGHT. The old shape mounted the <img> alone, so a slow / hung / failing
+    // portrait route (mid-generation churn, an epoch-rotated ?v= ref still regenerating,
+    // a wedged engine) left every tile a bare grey .oc-portrait holder — the whole window
+    // read as a grid of grey squares (the owner-reported "cast window renders grey").
+    // Now the monogram is the tile's face in EVERY non-photo state, and the photo reveals
+    // over it only once genuinely decoded (the reveal seam below), which then drops the
+    // monogram layer so a loaded card's holder keeps exactly one face (+ badge).
+    const ph = document.createElement("span");
+    ph.className = "oc-ph oc-monogram";
+    // M2-2: the designed template (id-seeded gradient + pattern + initials) from the shared
+    // kit; the legacy flat initial stays only as the no-kit fallback so the card never blanks
+    // (oc-mono-fallback carries the --oc-mono-hue tint — the M2-2 refactor had orphaned the
+    // hue var with no consuming rule, leaving that path a grey letter-tile).
+    if (window.OrwellMonogram) {
+      ph.innerHTML = window.OrwellMonogram.svg({ id: entry.id, name: entry.name });
+    } else {
+      const nm = (entry.name || "").trim();
+      ph.classList.add("oc-mono-fallback");
+      ph.textContent = nm ? nm[0].toUpperCase() : "?";
+      ph.style.setProperty("--oc-mono-hue", String(nameHue(nm)));
+    }
+    entry.holder.appendChild(ph);
     if (!url) {
       // RESP-20 (#894): flag the holder as portrait-LESS so the narrow tier can cap it
       // to a compact thumbnail (a docked ≤240px rail otherwise gives a 1-column, ~240px
       // viewport-filling gradient block). A real face (the img branch below) drops the
       // flag, so a card that streams in its portrait snaps back to the full tile.
       entry.holder.classList.add("oc-portrait-ph");
-      // J2-15: until a portrait (0051) backfills, a single shared 👤 silhouette made the
-      // "meet 15 distinct people" payoff read as interchangeable placeholders. Render a
-      // per-houseguest monogram instead — the name's initial over a deterministic tint
-      // derived from the name (NOT any hidden/Vault attribute) — so every card is visibly
-      // its own person from the first frame. Pure presentation; zero new data.
-      const ph = document.createElement("span");
-      ph.className = "oc-ph oc-monogram";
-      // M2-2: the designed template (id-seeded gradient + pattern + initials) from the shared
-      // kit; the legacy flat initial stays only as the no-kit fallback so the card never blanks.
-      if (window.OrwellMonogram) {
-        ph.innerHTML = window.OrwellMonogram.svg({ id: entry.id, name: entry.name });
-      } else {
-        const nm = (entry.name || "").trim();
-        ph.textContent = nm ? nm[0].toUpperCase() : "?";
-        ph.style.setProperty("--oc-mono-hue", String(nameHue(nm)));
-      }
-      entry.holder.appendChild(ph);
       syncBadge(entry);
       return;
     }
     const img = document.createElement("img");
     img.loading = "lazy";
+    img.decoding = "async";
     img.alt = entry.name;
-    if (justLanded) {
-      // The G22 arrival fade (reduced-motion guarded in the CSS above); drop the
-      // class once played so a later grid re-order can't replay it.
-      img.className = "oc-justin";
-      img.addEventListener("animationend", () => img.classList.remove("oc-justin"), { once: true });
-    }
+    // The OWN-9 reveal seam: the img mounts INVISIBLE (oc-img-pending — the monogram base
+    // shows through) and turns visible only once its bytes decoded, so neither the empty
+    // pending box, the alt text, nor the broken-image glyph ever paints as the tile.
+    img.className = "oc-img-pending";
+    // Photo decoded ⇒ the monogram loading-base retires (one face per card — the
+    // browser-smoke "no placeholder glyph on provider-on cards" gate). Idempotent:
+    // a url re-transition may have already wiped the holder before a timer fires.
+    const retire = () => { if (ph.isConnected) ph.remove(); };
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return; // load can follow a synchronous cache-hot reveal — run once
+      revealed = true;
+      img.classList.remove("oc-img-pending");
+      if (justLanded) {
+        // The G22 arrival fade (reduced-motion guarded in the CSS above); drop the
+        // class once played so a later grid re-order can't replay it.
+        img.classList.add("oc-justin");
+        img.addEventListener("animationend", () => img.classList.remove("oc-justin"), { once: true });
+        // Crossfade: the monogram stays BENEATH the .35s arrival fade (fading in over
+        // the bare grey holder is the OWN-9 look again), then retires on animationend.
+        // The timer is a generous BACKSTOP only — reduced-motion's animation:none never
+        // emits animationend (the photo is fully visible instantly, so the leftover base
+        // is invisible and the timer is pure DOM cleanup), and a frame-throttled tab can
+        // freeze the fade at its first (transparent) frame, where an eager timer would
+        // retire the base and re-open the grey window this fix closes.
+        img.addEventListener("animationend", retire, { once: true });
+        setTimeout(retire, 2000);
+      } else {
+        retire(); // first paint / cache-hot: no fade, the photo simply replaces the base
+      }
+    };
+    img.onload = reveal;
     // The placeholder fallback, as ever — and the entry forgets the url, so a
     // transient miss (the file landing a beat after the manifest) heals next poll.
     img.onerror = () => setPortrait(entry, null, false);
     img.src = url;
+    // A cache-hot image can already be decoded synchronously after the src write.
+    if (img.complete && img.naturalWidth > 0) reveal();
     // RESP-20 (#894): a real face keeps the FULL tile — drop the portrait-less cap flag.
     entry.holder.classList.remove("oc-portrait-ph");
     entry.holder.appendChild(img);
