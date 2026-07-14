@@ -164,9 +164,16 @@ export function _onWsResync(ev) {
   if (round && round._spinner) { try { round._spinner.destroy(); } catch (_) { /* best-effort DOM cleanup */ } }
   if (round && round.holder) { try { round.holder.remove(); } catch (_) { /* best-effort DOM cleanup */ } }
   _wsResetRound();
-  if (sid) {
-    try { chatState._resumingStreams.delete(sid); } catch (_) { /* Set may be absent in a bare test import */ }
-    if (chatState._streamSessionId === sid) chatState._streamSessionId = null;
+  // Release the active-stream lock whether it was pinned to the canonical id OR the tab's OWN
+  // round.sessionId (Greptile #1609): after canonical adoption those DIFFER, and the sender lock in
+  // `chatState._streamSessionId` holds `round.sessionId` (from `_wsPinRound`). Clearing only on `sid`
+  // would leave `hasActiveStream(round.sessionId)` true, so the history reconcile keeps deferring and
+  // the wedge remains. Release both, and drop both from the resuming-streams set.
+  const pinnedSid = round && round.sessionId;
+  if (sid) { try { chatState._resumingStreams.delete(sid); } catch (_) { /* Set may be absent in a bare test import */ } }
+  if (pinnedSid && pinnedSid !== sid) { try { chatState._resumingStreams.delete(pinnedSid); } catch (_) { /* best-effort */ } }
+  if (chatState._streamSessionId && (chatState._streamSessionId === sid || chatState._streamSessionId === pinnedSid)) {
+    chatState._streamSessionId = null;
   }
   if (sid) {
     // A reconcile that THROWS is a real render failure — surface it (never swallow), then let the next
