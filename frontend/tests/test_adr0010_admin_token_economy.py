@@ -104,6 +104,21 @@ def test_seeded_entry_numbers_and_cost_total(monkeypatch, tmp_ledger):
     assert summ["cacheHitRate"] == pytest.approx(0.25)
 
 
+def test_cache_hit_rate_is_none_with_zero_input(monkeypatch, tmp_ledger):
+    """The divide-by-zero guard: no input tokens ⇒ cacheHitRate is None (not a fake 0.0)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    tmp_ledger.record_turn(
+        "player", session="game-1", turn_id="t0", call_class="narration",
+        input_tokens=0, cached_tokens=0, output_tokens=0, cost=0.0,
+    )
+    client = TestClient(_app(), raise_server_exceptions=False)
+    r = client.get("/api/admin/token-economy", params={"user": "player"})
+    assert r.status_code == 200
+    summ = r.json()["summary"]
+    assert summ["inputTokens"] == 0
+    assert summ["cacheHitRate"] is None
+
+
 # ── (3) the soft alert flips true below the accumulated cost ─────────────────────────────────
 
 def test_soft_alert_flips_when_threshold_below_accumulated_cost(monkeypatch, tmp_ledger):
