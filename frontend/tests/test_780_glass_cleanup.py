@@ -264,9 +264,10 @@ def test_element_kit_demo_wallpaper_covers_full_scroll_height():
     assert re.search(r"#__wp\s*\{[^}]*pointer-events:\s*none", html, re.S), (
         "the #__wp wallpaper layer must be pointer-events:none so it never eats input"
     )
-    # and the ANTI-PATTERN must NOT come back: no `background-attachment: fixed` on the
-    # scrolling body (the real-Chrome input-eating compositing bug this page hit).
-    assert "background-attachment: fixed" not in html, (
+    # and the ANTI-PATTERN must NOT come back: no fixed-attachment background anywhere
+    # (the real-Chrome input-eating compositing bug this page hit). Whitespace- and
+    # case-tolerant so `attachment:fixed` / uppercase can't slip a regression past the gate.
+    assert re.search(r"background-attachment\s*:\s*fixed\b", html, re.I) is None, (
         "no fixed-attachment background on the scrolling body (breaks wheel + fixed-control "
         "clicks in real Chrome — #1624)"
     )
