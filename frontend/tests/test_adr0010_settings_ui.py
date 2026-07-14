@@ -62,9 +62,16 @@ def test_keys_present_in_default_settings():
         # active reasoning:{enabled:false} that STOPS the burst. Supersedes the ADR-0016 "low" seed.
         "narration": "off", "utility-extraction": "off",
         # #1007: background-authoring is "off" — structured JSON extraction, not a reasoning task.
-        "casting": "medium", "background-authoring": "off",
+        # casting "off" (2026-07-14): on GLM-4.7 the reasoning-effort knob is inert, so the old
+        # "medium" only front-loaded the burst that HANGS casting (prod + golden-record). off is
+        # tool-safe (createCharacter is force-called).
+        "casting": "off", "background-authoring": "off",
     }
-    assert DEFAULT_SETTINGS["openrouter_provider"] == {}
+    # Hard pin to Novita, no fallback (owner ruling 2026-07-14): all four call classes run reasoning
+    # "off", and a direct probe proved StreamLake ignores reasoning-off and bursts — hanging live
+    # turns. Novita honored reasoning-off 0/5, fp8, so it is the pinned provider. allow_fallbacks:false
+    # so OpenRouter can never route a game turn to a burst-prone sub-provider.
+    assert DEFAULT_SETTINGS["openrouter_provider"] == {"only": ["novita"], "allow_fallbacks": False}
     assert DEFAULT_SETTINGS["token_spend_alert_usd"] == 0.0
     assert DEFAULT_SETTINGS["token_pin_threshold_tokens"] == 0
     assert DEFAULT_SETTINGS["context_tiering_enabled"] is False

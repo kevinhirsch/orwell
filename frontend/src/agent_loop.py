@@ -5002,8 +5002,21 @@ async def _stream_agent_loop_impl(
         except (TypeError, ValueError):
             _pin_threshold = 0
         # ADR 0010 slice C: the admin OpenRouter `provider` routing object (base routing config).
+        # SCOPED TO THE NARRATION MODEL (review 2026-07-14): the shipped default is a HARD pin to a
+        # single provider chosen because it honors reasoning-off for the NARRATOR model
+        # (openrouter_provider={"only":["novita"],"allow_fallbacks":false}). It must never be attached
+        # to a call on a DIFFERENT model — the utility tier (qwen/qwen3.6-flash) is not served by that
+        # provider, so a hard `only` pin with no fallback would 404 it. Utility-extraction calls run a
+        # separate path and never reach here today, but gating on model == default_model makes that
+        # structural: only the narrator's own turns (glm-4.7) carry the narrator's provider pin, and a
+        # fallback candidate on a different model can't inherit it. Byte-identical for the live game
+        # (this site only ever runs the narration/casting model, which IS default_model), so the golden
+        # fixture is unchanged. NOTE: if you retarget default_model to a model the pinned provider does
+        # not serve, update openrouter_provider in the same change (the hard pin will otherwise 404 —
+        # loudly, per ruling #1599, not silently).
         _po = get_setting("openrouter_provider", {})
-        _provider_opts = _po if (isinstance(_po, dict) and _po) else None
+        _narr_model = get_setting("default_model", "") or ""
+        _provider_opts = _po if (isinstance(_po, dict) and _po and model == _narr_model) else None
     # The operator-aside scrub is gated WIDER than the live-game error-correction: in the game build
     # the model is never a workspace assistant, so machinery/operator-asides are ALWAYS a leak — even
     # on a turn whose framing momentarily flickered to non-game (a cold engine-fetch race right after

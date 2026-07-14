@@ -150,13 +150,18 @@ DEFAULT_SETTINGS = {
     "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
-    # reasoning budget. Maps a call class to a reasoning effort. Defaults to the
-    # owner-ratified OPTIMIZED efforts (ADR 0010 Owner rulings #1), AMENDED by ADR 0016: casting =
-    # medium (quality-sensitive, player-facing), narration = **low** (the GLM narrator — see the
-    # inline note below), background-authoring = low (background flavor), and **utility-extraction =
-    # off** — pure JSON
-    # extraction/classification whose prompts forbid thinking; the 2026-06-21 I/O
-    # trace showed its reasoning tokens wasted.
+    # reasoning budget. Maps a call class to a reasoning effort. As shipped, ALL FOUR classes
+    # default to **"off"** (owner rulings, perf audit F-PY-1 2026-07-13 + casting 2026-07-14):
+    # on the GLM-4.7 narrator (via OpenRouter) the "low"/"medium" effort levels are INERT —
+    # llm_core._apply_reasoning_budget DROPS `effort` (OpenRouter 400s if both `effort` and
+    # `reasoning.max_tokens` are sent), so the model still bursts its default pre-token reasoning
+    # ("it HANGS then streams"). Only "off" resolves to an active reasoning:{"enabled":false} that
+    # STOPS the burst. narration + casting are player-facing but force-tool_choice-guarded, so off
+    # is tool-safe (see the inline notes below); utility-extraction + background-authoring are pure
+    # JSON extraction whose prompts forbid thinking. This SUPERSEDES the earlier ADR-0016 "low"
+    # (narration) / ADR-0010 "medium" (casting) seeds — both are stale. (The model-agnostic
+    # token_policy._DEFAULT_EFFORT code fallback still carries medium/low for a hypothetical
+    # NON-bursting reasoning model; these DEFAULT_SETTINGS values override it at runtime.)
     # Valid classes are exactly token_policy.CALL_CLASSES; valid efforts are
     # token_policy.valid_efforts() ("off", "low", "medium", "high"). NOTE: "off" is
     # now a GENUINE disable, not an omission — token_policy resolves it and
@@ -187,7 +192,18 @@ DEFAULT_SETTINGS = {
         # golden trio is non-blocking; the re-record is a separate owed task; golden files untouched).
         "narration": "off",
         "utility-extraction": "off",
-        "casting": "medium",
+        # casting: OFF (2026-07-14). The "medium" ruling (2026-06-21, ADR-0010) predated the
+        # GLM-4.7 narrator revert and assumed reasoning-EFFORT ("low"/"medium") actually shaped
+        # output. On GLM-4.7 via OpenRouter it does NOT: the effort knob is inert — the model
+        # either front-loads a long reasoning BURST (regardless of the effort value) or, with
+        # reasoning:{enabled:false} ("off"), skips it. So "medium" bought casting zero shaped
+        # output and instead front-loaded the burst that HANGS the casting turn — LIVE-CONFIRMED
+        # as both a prod casting hang and the golden-record hang (the record's per-turn stream
+        # never settled). "off" is tool-SAFE here: createCharacter is force-called via
+        # _forced_tool_choice_for_casting, so stripping reasoning can't regress the tool call
+        # (same rationale that justified narration="off", F-PY-1 2026-07-13). Casting quality is
+        # unaffected — the burst produced nothing the player sees, only latency.
+        "casting": "off",
         # #1007: OFF, not "low". Cast authoring is structured JSON extraction, not a reasoning
         # task — the strict-JSON prompt forbids thinking. On a reasoning model (deepseek-v4-pro)
         # an enabled reasoning channel burned ~1300 tokens BEFORE any visible JSON, blowing the
@@ -292,11 +308,26 @@ DEFAULT_SETTINGS = {
     # calls (https://openrouter.ai/docs/guides/routing/provider-selection). A free-form dict of the
     # documented fields — e.g. {"sort": "throughput"}, {"order": ["deepinfra/turbo"],
     # "allow_fallbacks": false}, {"only": ["deepinfra"]}, {"max_price": {"prompt": 1, "completion": 2}},
-    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Default {} = OpenRouter's
-    # normal price-based load balancing. Edit at runtime via POST /api/settings (admin). It is the BASE
-    # routing config; the high-token pin (token_pin_threshold_tokens) overlays allow_fallbacks=false on
-    # large prompts. Only applied for OpenRouter-routed game turns; a non-dict value is ignored.
-    "openrouter_provider": {},
+    # {"zdr": true}, {"data_collection": "deny"}, {"quantizations": ["fp8"]}. Edit at runtime via POST
+    # /api/settings (admin). It is the BASE routing config; the high-token pin
+    # (token_pin_threshold_tokens) overlays allow_fallbacks=false on large prompts. Only applied for
+    # OpenRouter-routed game turns; a non-dict value is ignored.
+    #
+    # HARD PIN to Novita (owner ruling 2026-07-14, "pin hard, no fallback"). This is a LOAD-BEARING
+    # safety pin, not a preference: our anti-hang strategy depends on the provider honoring
+    # reasoning:{"enabled":false} (all four call classes run reasoning "off"). ADR 0016 §A warned
+    # reasoning control is flaky across OpenRouter sub-providers, and a direct probe (2026-07-14) of
+    # all 9 glm-4.7 sub-providers CONFIRMED it: StreamLake IGNORES reasoning-off and bursts ~560
+    # reasoning tokens before the first visible byte — which is exactly what hung a live narration
+    # turn and the golden record (a per-turn stream read that never settled). Novita honored
+    # reasoning-off 0/5 bursts across repeated probes, at fp8 quant (best prose fidelity, mandate #1),
+    # 204K context (longest), tight 4.6-7.0s latency with no spikes, on a large reliable provider
+    # (availability matters most under no-fallback). allow_fallbacks:false so OpenRouter can NEVER
+    # silently route a game turn to a burst-prone sub-provider (e.g. StreamLake) and reintroduce the
+    # hang — a fail-loud posture (ruling #1599) over a fail-soft one. The committed golden fixture is
+    # recorded WITH this pin so the gate tests what prod runs. Re-run the probe (/tmp probe scripts,
+    # or the OpenRouter /endpoints API) before changing the pinned provider.
+    "openrouter_provider": {"only": ["novita"], "allow_fallbacks": False},
     # Extra directory roots that read_file / write_file may access, in
     # addition to the built-in project data/ and system temp dirs. Each
     # entry is an absolute path. Sensitive subpaths (.ssh, .gnupg, shell
@@ -308,11 +339,12 @@ DEFAULT_SETTINGS = {
     # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
     # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
     # read this resolved default) — OWNER RULING 2026-07-13 (live prod debug-bundle audit): back to
-    # the ADR 0016 narrator/utility default GLM-4.7 (the 2026-07-07 glm-5.2 two-tier retarget is
-    # reverted for the SHIPPED default; persisted stores keep whatever they carry — the owner flips
-    # his box in the UI). NOTE the committed golden fixture stays recorded on glm-5.2 EXPLICITLY
-    # (`scripts/golden_path_record.py --model`, its own flag) — the golden gate is model-pinned by
-    # fixture, not by this seed, so this default does NOT stale it. `default_endpoint_id` stays
+    # the ADR 0016 NARRATOR default z-ai/glm-4.7 (utility is qwen/qwen3.6-flash — see utility_model
+    # below); the 2026-07-07 glm-5.2 two-tier retarget is
+    # reverted; persisted stores keep whatever they carry — the owner flips his box in the UI). The
+    # committed golden fixture is ALSO recorded on glm-4.7 (owner ruling 2026-07-14: the golden gate
+    # must test what prod runs — the earlier glm-5.2 decoupling was papered-over debt, now removed).
+    # `default_endpoint_id` stays
     # empty so resolution binds it to the first enabled endpoint (the OpenRouter one the setup
     # wizard creates); the setup wizard also writes the endpoint id explicitly once it exists.
     "default_model": "z-ai/glm-4.7",

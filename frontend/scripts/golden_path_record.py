@@ -10,7 +10,7 @@ prompt/tool-schema change legitimately invalidates the committed fixture:
         python3 scripts/golden_path_record.py
 
 Then eyeball the printed invariant table, pass the integrity + leak scans (automatic
-below), and commit ``tests/golden/golden_path_glm-5.2.jsonl``. The nightly workflow runs
+below), and commit ``tests/golden/golden_path_glm-4.7.jsonl``. The nightly workflow runs
 this same script and uploads the refreshed fixture as an artifact (a ready-to-commit
 regenerate). Defaults follow the owner's two-tier topology (2026-07-07): narration
 GLM 5.2, utility Qwen 3.6 Flash.
@@ -30,7 +30,7 @@ from src import golden_path as gp  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--fixture", default=gp.DEFAULT_FIXTURE)
-    ap.add_argument("--model", default="z-ai/glm-5.2",
+    ap.add_argument("--model", default="z-ai/glm-4.7",
                     help="the NARRATION model (default_model)")
     ap.add_argument("--utility-model", default="qwen/qwen3.6-flash",
                     help="the cheap tier for utility/background call classes "
@@ -43,6 +43,13 @@ def main() -> int:
     # first GLM 5.2 run reached veto at 60 turns without hitting eviction. 120 covers the
     # golden week with headroom; replay walks the same trajectory, budget-capped identically.
     ap.add_argument("--turn-budget", type=int, default=120)
+    # Per-turn stream-silence timeout. The casting-finalize turn kicks background cast-genesis,
+    # which on glm-4.7 emits the whole 15-NPC skeleton JSON as one ~4400-token completion (~6 min
+    # of stream silence) — under the driver's 420s default only when it does NOT re-roll. We raise
+    # the ceiling to 900s (record-only; prod is untouched) so a single genesis pass plus a possible
+    # re-roll can complete without a false genuine-hang timeout. The re-roll itself is separately
+    # reduced by the strengthened hidden-element minimum in orwell_cast_genesis.build_genesis_messages.
+    ap.add_argument("--turn-timeout", type=int, default=900)
     ap.add_argument("--report", default="")
     args = ap.parse_args()
 
@@ -64,7 +71,7 @@ def main() -> int:
     d = run_once(mode="record", fixture=args.fixture, model=args.model,
                  utility_model=utility_model,
                  provider_url=args.base_url, provider_key=args.api_key,
-                 turn_budget=args.turn_budget)
+                 turn_budget=args.turn_budget, turn_timeout=args.turn_timeout)
     rep = d.report(args.report or None)
 
     print(f"\nfixture: {args.fixture} "

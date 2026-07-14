@@ -1,13 +1,19 @@
-# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), GLM-4.7-Flash utility, Seedream portraits
+# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 Flash utility, Seedream portraits
 
 > **Status:** **Accepted** (PO direction, 2026-06-29 — the model-selection research thread).
-> **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget):** the owner retargeted the pair to
+> **Re-amended (2026-07-13 / 2026-07-14 — reverted the narrator to `z-ai/glm-4.7`):** the owner
+> reverted the SHIPPED narrator default back to **`z-ai/glm-4.7`** (2026-07-13, live prod
+> debug-bundle audit) and the **golden fixture** back to **`z-ai/glm-4.7`** too (2026-07-14 — the
+> gate must test what prod runs; the interim glm-5.2 golden decoupling was papered-over debt, now
+> removed). **Utility stays `qwen/qwen3.6-flash`.** The historical retarget note below is preserved
+> for context but is superseded on the narrator model by this revert.
+> **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget, SUPERSEDED on narrator by the revert above):** the owner retargeted the pair to
 > **narration = `z-ai/glm-5.2`** and **utility = `qwen/qwen3.6-flash`** (Qwen 3.6 Flash on OpenRouter;
 > locally served in prod, `deepseek/deepseek-v4-flash` as the cloud alternate) — the M0-1 golden-path
 > fixture and the `golden-nightly` re-record job run on exactly this pair. On **2026-07-09 the owner
 > confirmed the OOB defaults should BE the pair** (not merely this deployment's settings), so
 > `DEFAULT_SETTINGS.default_model`/`utility_model` and the OOBE-reset defaults now carry it (M0-6).
-> Everything else in this ADR stands: the narrator reasoning posture stays **`low`** (GLM-5.2 is the
+> Everything else in this ADR stands: the narrator reasoning posture stays **`low`** (GLM-4.7 is the
 > same interleaved-thinking family), the portrait default is **unchanged**
 > (`google/gemini-3.1-flash-image` OOB; the Seedream follow-up remains a separate build), and the
 > per-class reasoning budgets are the cost lever for Qwen 3.6 Flash's reason-by-default behavior

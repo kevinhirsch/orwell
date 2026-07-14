@@ -49,9 +49,8 @@ def _read(rel):
 
 def test_oob_default_chat_model_is_glm_4_7():
     # OWNER RULING 2026-07-13 (live prod debug-bundle audit): the OOB narrator/chat model is the
-    # ADR 0016 GLM-4.7 tier (the 2026-07-07/09 glm-5.2 retarget is reverted for the SHIPPED
-    # default). NOTE the committed golden fixture stays recorded on glm-5.2 explicitly (its own
-    # `--model` flag) — the golden gate is fixture-pinned, not seed-pinned, so it does not move.
+    # ADR 0016 GLM-4.7 tier (the 2026-07-07/09 glm-5.2 retarget is reverted). The golden fixture is
+    # ALSO recorded on glm-4.7 now (owner ruling 2026-07-14 — the gate tests what prod runs).
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["default_model"] == "z-ai/glm-4.7", (
         "the assumed default chat model must be glm-4.7 (OpenRouter)"

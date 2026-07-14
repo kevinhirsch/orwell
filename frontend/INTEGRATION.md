@@ -132,8 +132,8 @@ real engine + real FE on every PR — no API key (`.github/workflows/ci.yml` job
 - **Regenerate the fixture** (required whenever a prompt/tool-schema change makes the replay
   miss — that miss is the gate working):
   `cd frontend && OPENROUTER_API_KEY=sk-… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py`
-  then commit `tests/golden/golden_path_glm-5.2.jsonl` (defaults record the owner's two-tier
-  pair: GLM 5.2 narration + Qwen 3.6 Flash utility). The nightly's uploaded artifact is the
+  then commit `tests/golden/golden_path_glm-4.7.jsonl` (defaults record the owner's two-tier
+  pair: GLM 4.7 narration + Qwen 3.6 Flash utility). The nightly's uploaded artifact is the
   same thing pre-baked: download, eyeball the invariant diff, commit. **One driver run at a
   time** — `frontend/data` is shared state; the driver pre-flight scrubs stale cross-run
   state (canonical binding, old golden sessions/endpoints) before boot.

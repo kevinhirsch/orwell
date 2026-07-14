@@ -172,7 +172,11 @@ def test_settings_keys_present_with_correct_defaults():
         "narration": "off", "utility-extraction": "off",
         # #1007: background-authoring is "off" too — structured JSON extraction, not a reasoning task.
         # An enabled reasoning channel burned the cap before any visible JSON on deepseek-v4-pro (0/15).
-        "casting": "medium", "background-authoring": "off",
+        # casting "off" (2026-07-14): the 2026-06-21 "medium" ruling assumed reasoning-effort shaped
+        # output, but on GLM-4.7 the effort knob is inert — "medium" only front-loaded the burst that
+        # HANGS the casting turn (prod + golden-record). createCharacter is force-called, so off is
+        # tool-safe. Same "it hangs then streams" root cause as narration.
+        "casting": "off", "background-authoring": "off",
     }
     assert "token_spend_alert_usd" in defaults
     assert isinstance(defaults["token_spend_alert_usd"], float)

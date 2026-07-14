@@ -2,7 +2,7 @@
 """M0-3 — the owed ADR-0008/0012 LIVE two-window verification (F5 parity, real model).
 
 Boots a production-shaped stack (real engine, real FE, NO golden seams), wires a REAL
-narrator endpoint (OpenRouter; narration z-ai/glm-5.2, utility qwen/qwen3.6-flash —
+narrator endpoint (OpenRouter; narration z-ai/glm-4.7, utility qwen/qwen3.6-flash —
 the owner's two-tier topology), then drives one live game through a full ceremony
 sequence (premiere → HOH competition → nominations) with TWO Playwright windows open
 the whole way. After every settled turn both windows' transcripts must be identical
@@ -39,7 +39,7 @@ REPO = os.path.dirname(FRONTEND)
 OUT = os.path.join(FRONTEND, "data", "_m03_live")
 os.makedirs(OUT, exist_ok=True)
 
-NARRATION = os.environ.get("M03_NARRATION_MODEL", "z-ai/glm-5.2")
+NARRATION = os.environ.get("M03_NARRATION_MODEL", "z-ai/glm-4.7")
 UTILITY = os.environ.get("M03_UTILITY_MODEL", "qwen/qwen3.6-flash")
 BASE_URL = os.environ.get("M03_BASE_URL", "https://openrouter.ai/api/v1")
 SEED = int(os.environ.get("M03_SEED", "31103"))
