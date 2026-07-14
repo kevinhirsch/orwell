@@ -131,3 +131,14 @@ def test_live_and_mirror_paths_carry_the_moment():
     assert "span.textContent = moment.trim();" in js
     # The mirror finalize-in-place carries the moment onto the canonical bubble metadata.
     assert "meta_.game_moment = serverMoment;" in js
+
+
+def test_ws_splice_live_bubble_shows_the_moment():
+    # WS transport (ADR 0017): the live mirror bubble (window B) applies the moment from the
+    # message_saved frame during the stream, so it reads the in-world stamp like the sender — not
+    # the wall clock until the settle reconcile. Wall clock demoted to dataset (hover parity).
+    js = _read("static/js/chatWsSplice.js")
+    assert "d.type === 'message_saved'" in js
+    assert "typeof d.moment === 'string' && d.moment.trim()" in js
+    assert "_ts.textContent = d.moment.trim();" in js
+    assert "_ts.dataset.wallClock = _ts.textContent;" in js
