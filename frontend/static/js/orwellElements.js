@@ -255,8 +255,8 @@
   // unstyled rather than breaking the rest of the reference page.
   function buildDecision() {
     try {
-      if (window.OrwellDecisionKit && window.OrwellDecisionKit.ensureStyles) {
-        window.OrwellDecisionKit.ensureStyles();
+      if (window.OrwellDecisionStyles && window.OrwellDecisionStyles.ensureStyles) {
+        window.OrwellDecisionStyles.ensureStyles();
       }
     } catch (e) { console.warn("[kit-demo] decision styles failed", e); }
   }

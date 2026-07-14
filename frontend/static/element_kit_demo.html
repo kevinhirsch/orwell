@@ -16,6 +16,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OrwellElement kit — demo</title>
+  <!-- KIT-F-05 (2026-07-14 audit): load responsive-tokens.css BEFORE style.css exactly like
+       index.html does — it owns --tap-min and the whole coarse-pointer touch-floor system, so
+       without it this reference page cannot verify any real mobile tap-target behavior. -->
+  <link rel="stylesheet" href="/static/css/responsive-tokens.css">
   <link rel="stylesheet" href="/static/style.css">
   <style>
     /* This is a tall DOC/demo page, not the app shell. The app's style.css clamps
@@ -105,6 +109,9 @@
     #ek-tier button:hover { background: rgba(255,255,255,.12); }
     #ek-tier button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
     #ek-tier button.ek-tier-on { background: #0a84ff; color: #fff; }
+    /* The fixed switcher must never occlude the last section's controls on a phone —
+       reserve scroll room past the content for it (it is ~44px tall + 14px inset). */
+    @media (max-width: 768px) { .ek-page { padding-bottom: 140px; } }
 
     /* ── FLAT tier scaffolding (html/body get .ek-flat) ──────────────────────────
        On flat the app's surfaces are dark --panel with light --fg — the light demo
@@ -326,7 +333,7 @@
     <!-- DECISION (OrwellDecision kit) -->
     <section class="ek-card">
       <h2>Decision — OrwellDecision (.odec-*)</h2>
-      <p class="ek-note">The decision card the kit renders above the composer: prompt + selectable option buttons + a confirm action + an instruction note. Static composition of the kit's <code>.odec</code> root class + <code>.odec-*</code> internals with the REAL button classes the live card composes (<code>ow-btn ow-btn-prominent</code>); the structural CSS is injected by <code>orwellDecision.js</code> via <code>window.OrwellDecisionKit.ensureStyles()</code>. Low-stakes example: a comp-intent (the live eviction vote is a HIGH-STAKES kind and wears the risk skin — see the second card).</p>
+      <p class="ek-note">The decision card the kit renders above the composer: prompt + selectable option buttons + a confirm action + an instruction note. Static composition of the kit's <code>.odec</code> root class + <code>.odec-*</code> internals with the REAL button classes the live card composes (<code>ow-btn ow-btn-prominent</code>); the structural CSS is injected by <code>orwellDecision.js</code> via <code>window.OrwellDecisionStyles.ensureStyles()</code>. Low-stakes example: a comp-intent (the live eviction vote is a HIGH-STAKES kind and wears the risk skin — see the second card).</p>
       <div id="orwell-decision-card" class="odec" role="form" aria-label="Competition — set your approach">
         <div class="odec-head"><span class="odec-title">Competition — set your approach</span></div>
         <p class="odec-prompt">How will you play this competition? Declare your intent before it starts — you can’t change it once the comp is underway.</p>
@@ -381,7 +388,7 @@
   <script src="/static/js/orwellNotice.js"></script>
   <!-- The decision kit: its ensureStyles() injects ALL the .odec-* structural CSS (scoped to
        the .odec root class) that the static Decision cards above compose; the demo driver
-       (orwellElements.js) calls window.OrwellDecisionKit.ensureStyles(). Fail-open: its live
+       (orwellElements.js) calls window.OrwellDecisionStyles.ensureStyles(). Fail-open: its live
        pending/poll seams are inert here (the static card occupies the CARD_ID slot). -->
   <script src="/static/js/orwellDecision.js"></script>
   <!-- The real SVG-refraction layer: it generates the #owlg-thumb concave lip-bezel

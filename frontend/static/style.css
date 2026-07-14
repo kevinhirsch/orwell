@@ -20880,9 +20880,16 @@ body.theme-frosted .og-card [style*="font-weight:300"] {
    keep a translucent fill + 1px rim + the lighten/lift/press morph; the blur is
    removed. (Transient interactive controls — the composer SEND, decision CONFIRM —
    are handled separately as prominent actions.) */
-body.theme-frosted .ow-window .ow-body button,
-body.theme-frosted .on-card button,
-body.theme-frosted .og-card button,
+/* KIT-F-01 (2026-07-14 audit): a kit-classed button (.ow-btn + variant) must KEEP its variant
+   chrome inside these containers — this generic vibrant-fill rule's higher specificity
+   ((0,3,2)/(0,2,2) vs the variants' (0,2,1)) was silently flattening every nested
+   .ow-btn-prominent/-secondary/-destructive to the same neutral fill (a nested Destructive
+   measured 1.43:1 label contrast). The :not([class*="ow-btn"]) guard scopes this rule to
+   PLAIN buttons only; kit buttons ride their own kit rules. (No app class contains the
+   substring "ow-btn" other than the kit family — verified at fix time.) */
+body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]),
+body.theme-frosted .on-card button:not([class*="ow-btn"]),
+body.theme-frosted .og-card button:not([class*="ow-btn"]),
 body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   background-color: color-mix(in srgb, var(--fg, #fff) 12%, transparent);
@@ -20900,12 +20907,12 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
    is untouched, and the Normal (non-frosted) tier keeps its own borders. The gadget-card
    controls also get the light inset top highlight; the DOCK chip keeps only the border
    change (its own Control-Center box-shadow / tile depth below stays intact). */
-body.theme-frosted .og-card button,
+body.theme-frosted .og-card button:not([class*="ow-btn"]),
 body.theme-frosted .og-card .og-act,
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-color: rgba(255,255,255,0.14);
 }
-body.theme-frosted .og-card button,
+body.theme-frosted .og-card button:not([class*="ow-btn"]),
 body.theme-frosted .og-card .og-act {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
 }
@@ -20919,14 +20926,14 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 2px 8px rgba(0,0,0,0.18);
 }
-body.theme-frosted .ow-window .ow-body button:hover,
-body.theme-frosted .on-card button:hover,
-body.theme-frosted .og-card button:hover,
+body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):hover,
+body.theme-frosted .on-card button:not([class*="ow-btn"]):hover,
+body.theme-frosted .og-card button:not([class*="ow-btn"]):hover,
 body.theme-frosted .og-card .og-act:hover,
 body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
-body.theme-frosted .ow-window .ow-body button:focus-visible,
-body.theme-frosted .on-card button:focus-visible,
-body.theme-frosted .og-card button:focus-visible,
+body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):focus-visible,
+body.theme-frosted .on-card button:not([class*="ow-btn"]):focus-visible,
+body.theme-frosted .og-card button:not([class*="ow-btn"]):focus-visible,
 body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   /* lighten + glass-bloom + a touch of lift (the control "comes to life") */
   background-color: color-mix(in srgb, var(--fg, #fff) 22%, transparent);
@@ -20939,9 +20946,9 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   transform: translateY(-1px) scale(1.015);
   filter: brightness(1.08);
 }
-body.theme-frosted .ow-window .ow-body button:active,
-body.theme-frosted .on-card button:active,
-body.theme-frosted .og-card button:active,
+body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):active,
+body.theme-frosted .on-card button:not([class*="ow-btn"]):active,
+body.theme-frosted .og-card button:not([class*="ow-btn"]):active,
 body.theme-frosted .og-card .og-act:active,
 body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   transform: translateY(0) scale(0.97);   /* depress on press */
@@ -20949,16 +20956,16 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   transition-duration: .08s;
 }
 @media (prefers-reduced-motion: reduce) {
-  body.theme-frosted .ow-window .ow-body button,
-  body.theme-frosted .on-card button,
-  body.theme-frosted .og-card button,
+  body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]),
+  body.theme-frosted .on-card button:not([class*="ow-btn"]),
+  body.theme-frosted .og-card button:not([class*="ow-btn"]),
   body.theme-frosted .og-card .og-act,
   body.theme-frosted #minimized-dock .minimized-dock-chip {
     transition: none;
   }
-  body.theme-frosted .ow-window .ow-body button:hover,
-  body.theme-frosted .on-card button:hover,
-  body.theme-frosted .og-card button:hover,
+  body.theme-frosted .ow-window .ow-body button:not([class*="ow-btn"]):hover,
+  body.theme-frosted .on-card button:not([class*="ow-btn"]):hover,
+  body.theme-frosted .og-card button:not([class*="ow-btn"]):hover,
   body.theme-frosted #minimized-dock .minimized-dock-chip:hover {
     transform: none;   /* no motion under reduced-motion; color/bloom still change */
   }

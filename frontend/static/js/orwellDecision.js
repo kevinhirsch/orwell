@@ -136,7 +136,7 @@
   // the element id) — NOT to `#orwell-decision-card` — so any card composing the kit's classes
   // (the live card, the element-kit demo's reference cards) is styled identically. The element
   // ID stays `orwell-decision-card` (many tests/registries + the FAB/scroll suppressions pin it);
-  // only the CSS scope is class-based. Exposed as window.OrwellDecisionKit.ensureStyles for the
+  // only the CSS scope is class-based. Exposed as window.OrwellDecisionStyles.ensureStyles for the
   // kit demo page (element_kit_demo.html), which composes the classes statically.
   function ensureStyles() {
     if (document.getElementById("orwell-decision-css")) return;
@@ -1111,5 +1111,5 @@
   // The tiny public seam (mirrors window.OrwellNoticeKit et al): the element-kit demo page
   // composes the .odec-* classes statically and calls ensureStyles() to get the kit's
   // injected structural CSS without a live pending. Additive — the live card path is untouched.
-  window.OrwellDecisionKit = { ensureStyles };
+  window.OrwellDecisionStyles = { ensureStyles };
 })();

@@ -43,11 +43,36 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
   token-driven solid expression (same geometry/typography/focus, `--panel`/`--fg`/`--border`
   fills, no blur) — inventoried in §3.
 
-## 1. Fixes in flight on this branch (IN PROGRESS — not yet verified-shipped)
+## 1. Fixed on this branch (landed, measured before/after)
 
-*(populated with before/after evidence as the fix lane lands — demo decision-section fidelity,
-`.odec` style scoping + selected-pill fix, banner dismiss-× centering, demo tier switcher with
-theme-correct flat scaffolding.)*
+1. **Decision-card CSS rescoped `#orwell-decision-card` → `.odec` root class**
+   (`orwellDecision.js`; element keeps its id; `window.OrwellDecisionKit.ensureStyles` exposed
+   for the demo; the newer #651/#1375-a/WCAG-2.1.1 rules preserved through the rescope) — the
+   demo now composes the REAL card (both variants) through the real styles.
+2. **Frosted selected-pill dark-on-dark fixed** — before: `color-mix(var(--fg) 96%)` computed
+   `rgba(22,25,31,.96)` plate with `rgb(40,44,52)` ink (measured). After: fixed
+   `rgba(255,255,255,.96)` plate + `#16191f` ink + the blue ring (backdrop-independent, same
+   pattern as the VM-17 disabled fix). Flat tier untouched (s6_4 accent contract).
+3. **Banner dismiss × centered** — before cyOff **+5.39px** below the 38px band's midline;
+   after **−0.5px** at 1440+390 on all three tiers; 44px hit box preserved; stacked notice
+   cards unchanged (banner-scoped rule in `orwellNotice.js`).
+4. **Demo tier switcher** (Frosted default / Glass / Flat, `#tier=` deep links) with
+   theme-correct FLAT scaffolding (dark preset tokens + dark backdrop) — flat now renders as
+   it truly does in-app; switcher lives in `orwellElements.js` (the demo is served under CSP
+   `script-src 'self'` — inline scripts are dead).
+5. **Demo decision kind mislabel fixed** — the non-risk example is now a comp-intent; the
+   eviction vote (a high-stakes kind) is the `.odec-risk` example, as live.
+6. **KIT-F-01 container-cascade fix** — `:not([class*="ow-btn"])` guards on the generic
+   `.ow-window .ow-body button` / `.on-card button` / `.og-card button` vibrant-fill + state
+   rules (style.css ~20883-20965), so nested kit variants keep their variant chrome (the
+   1.43:1 nested-Destructive and the flattened live prominent CTAs in
+   `orwellNewSeason.js`/`orwellRetrospective.js` are restored). Verified no app class
+   false-matches the substring guard.
+7. **KIT-F-05 demo stylesheet parity** — the demo now loads `css/responsive-tokens.css` before
+   `style.css` (as `index.html` does), so touch floors are verifiable on the reference page.
+
+Before/after renders: PR #1589 (48 PNGs across frosted/glass/flat × 1440/390, plus the fix
+lane's measured computed-style evidence).
 
 ## 2. Element kit — Frosted (default tier) findings
 
@@ -152,7 +177,8 @@ same-run A/B pixel diffs, pixel-sampled contrast). Ranked:**
   identity angle; the touch-target half is already F-TOUCH-1 in the 2026-07-09 audit.)
 - **KIT-N-09 · P2 · `.ow-btn-group` loses the grouping semantic on Normal** — no capsule, each
   member keeps its own 4px radius; N unrelated buttons.
-- **KIT-G-06 · P3 · surface radii split on Normal:** windows/gadgets/notices share 26px on
+- **KIT-N-10 · P3 · surface radii split on Normal** *(lane-reported as KIT-G-06; renumbered —
+  it is a Normal-tier finding)*: windows/gadgets/notices share 26px on
   glass/frosted but fall back to 10/10/12px legacy radii on Normal — one family becomes three.
 - **The template that already works:** the OLDER `.og-card` gadget family
   (style.css:2082-2091) ships coherently cross-tier (solid `color-mix(--panel)` fill, no
@@ -254,6 +280,16 @@ Self-verified so far:
 ## 7. Walked-game-state findings (decision card, slates, rail, cast/dossier/memory)
 
 *(tier crawl + 0114 gate landing)*
+
+**Harness note (pre-existing, reproduced on clean main twice):** `scripts/browser_smoke.py`
+fails one check locally — `F3: the finale sheet stays full-width ({'f': {'top':0,'bottom':0,
+'w':0}})`: `#orwell-finale` measures 0×0 after `_orwellFinaleEnsure()` on the mobile-viewport
+leg. Not caused by this branch (byte-identical result on unmodified files); likely a
+mount/timing window in the smoke. Filed here so it isn't mistaken for a regression of this
+campaign; CI is the authority.
+
+**Demo nit (this branch, follow-up):** the fixed tier-switcher pill overlaps the decision
+card's Confirm row at 390×844 — move it or give the page bottom padding at phone widths.
 
 ## 8. Kit-coverage table (per settings/theme panel)
 
