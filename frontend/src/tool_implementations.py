@@ -4760,6 +4760,25 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # phantom card (e.g. last season's juror-vote, even under the old player's name) armed on
         # GET /api/orwell/status until the first advanceGame of season 2 overwrites it.
         orwell_engine.remember_pending(res, user=owner)
+        # #1561 — createCharacter FINALIZE advances the engine beatSeq (season start + the premiere
+        # fan-out), exactly like advanceGame/submitDecision/turnIn — but, unlike those, it never flowed
+        # its committed result through `_refresh_beat_seq`. So the FE's last-seen token stayed at the
+        # PRE-create value while the engine head moved (e.g. 58 -> 64), and the very first narration turn
+        # attached a stale `expectedBeatSeq` → a stale-beat 409 + desync on turn 1 (the belts recovered it
+        # after the fact; this removes it at the seam). Refresh last-seen from the committed result NOW —
+        # between this settle and the first narration turn — so that first turn attaches the CURRENT beat.
+        # Mirrors _refresh_after_model_progression for the other progression tools.
+        if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+            try:
+                await _refresh_after_model_progression(owner, res)
+            except Exception as _beat_exc:
+                # #1599 — the beatSeq refresh is the guard that PREVENTS a turn-1 desync; if it cannot
+                # run, log at WARNING with disposition (the stale-beat auto-retry belt still recovers,
+                # so it is corrected, not fatal) rather than swallowing it silently. TODO(#1599): raise a
+                # RED health event on /admin/status once the health ring covers this seam.
+                logger.warning(
+                    "[#1561] post-createCharacter beatSeq refresh failed for %s (turn-1 desync guard "
+                    "degraded; the stale-beat retry belt still recovers): %s", owner, _beat_exc)
         # 0057 parity: a chat "run it back" cleared the level exactly like the menu's New-season
         # button, so advance the per-user season counter too (the engine reset does NOT track it —
         # it lives in the FE store and survives the sandbox rotation). Mid-season resets never reach
