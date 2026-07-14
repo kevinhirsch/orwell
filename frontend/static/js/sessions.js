@@ -1565,8 +1565,12 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
     window.compareModule.deactivate(true);
     return; // deactivate does a page reload
   }
+  // #11: declared OUTSIDE the try so the `finally` cleanup (which clears the session-switch
+  // loading bar guarded on this token) can read it — a `const` inside the try is block-scoped
+  // and would ReferenceError in finally on every switch.
+  let navToken;
   try {
-    const navToken = ++_sessionNavToken;
+    navToken = ++_sessionNavToken;
     const prevSessionId = currentSessionId;
     // Re-archive peeked session when navigating away
     _checkPeekCleanup(id);

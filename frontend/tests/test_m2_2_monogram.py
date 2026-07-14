@@ -190,3 +190,6 @@ def test_portrait_ref_heals_to_the_monogram_on_error():
     hbody = heal.group(1)
     assert "svg(card, opts)" in hbody, "heal must render the monogram svg"
     assert "badgeSvg(opts.role)" in hbody, "heal must re-composite the role badge"
+    # the aria-hidden svg would drop the img's accessible name — the heal must move the label
+    # onto the .ow-mono-face wrapper so the face keeps its name on the broken-portrait path.
+    assert 'setAttribute("aria-label"' in hbody, "heal must preserve the accessible label on the wrapper"

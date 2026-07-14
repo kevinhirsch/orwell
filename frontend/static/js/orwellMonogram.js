@@ -193,6 +193,11 @@
       // re-composite the role badge, exactly as the else-branch below would have.
       img.onerror = function () {
         img.onerror = null;
+        // The monogram svg is aria-hidden, so the swap would drop the only accessible name the
+        // <img> alt carried. Move that label onto the .ow-mono-face wrapper so the face keeps its
+        // name on the broken-portrait path.
+        const _label = img.alt || (card && card.name) || "";
+        if (_label) { el.setAttribute("role", "img"); el.setAttribute("aria-label", _label); }
         el.innerHTML = svg(card, opts);
         if (opts.role && BADGES[opts.role]) el.insertAdjacentHTML("beforeend", badgeSvg(opts.role));
       };

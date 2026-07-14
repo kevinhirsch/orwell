@@ -53,6 +53,17 @@ def test_bar_is_cleared_in_finally_guarded_by_navtoken():
     assert idx_clear > idx_finally, "the clear must run in the finally, guaranteeing every exit path"
 
 
+def test_navtoken_is_declared_outside_the_try_so_finally_can_read_it():
+    """Regression: navToken guards the finally cleanup, so it MUST be hoisted out of the try —
+    a `const navToken` inside the try is block-scoped and ReferenceErrors in finally on every
+    switch (which broke session switching entirely until caught in review)."""
+    # the hoisted declaration
+    assert re.search(r"\n  let navToken;\n\s*try \{", SESSIONS), "navToken must be declared before the try"
+    # assignment (not re-declaration) inside the try
+    assert "navToken = ++_sessionNavToken;" in SESSIONS
+    assert "const navToken = ++_sessionNavToken;" not in SESSIONS, "must not re-declare (would shadow)"
+
+
 def test_bar_never_touches_the_message_dom():
     """Non-destructive: the helper must not clear/rewrite #chat-history (the rescue depends on it)."""
     m = re.search(r"function _setChatSwitchingBar\(on\)\s*\{(.*?)\n\}", SESSIONS, re.S)

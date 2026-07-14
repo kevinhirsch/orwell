@@ -33,6 +33,17 @@ function esc(s) { return uiModule.esc(s); }
 function _savingHint(msg) {
   if (msg) { msg.textContent = 'Saving…'; msg.style.color = 'var(--fg-muted)'; }
 }
+// #11 / ruling #1599 (nothing fails softly): POST settings and THROW on a non-2xx response so the
+// caller's catch shows 'Failed to save' — a resolved-but-4xx/5xx fetch must never read as 'Saved'.
+async function _postSettings(body) {
+  const r = await fetch('/api/auth/settings', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r || !r.ok) throw new Error('settings save failed: HTTP ' + (r && r.status));
+  return r;
+}
 function safeRasterDataUrl(raw) {
   const value = String(raw || '').trim();
   return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value) ? value : '';
@@ -741,13 +752,10 @@ async function initDefaultChat() {
     try {
       _savingHint(msg);
       var clean = _fallbacks.filter(function(f) { return f.endpoint_id && f.model; });
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          default_endpoint_id: epSel.value,
-          default_model: modelSel.value,
-          default_model_fallbacks: clean
-        })
+      await _postSettings({
+        default_endpoint_id: epSel.value,
+        default_model: modelSel.value,
+        default_model_fallbacks: clean
       });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
       setTimeout(function() { msg.textContent = ''; }, 2000);
@@ -812,12 +820,9 @@ async function initUtilityModel() {
   async function saveUtility() {
     try {
       _savingHint(msg);
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          utility_endpoint_id: epSel.value || '',
-          utility_model: modelSel.value || ''
-        })
+      await _postSettings({
+        utility_endpoint_id: epSel.value || '',
+        utility_model: modelSel.value || ''
       });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
       setTimeout(function() { msg.textContent = ''; }, 1500);
@@ -878,12 +883,9 @@ async function initFaithfulnessModel() {
   async function saveFaith() {
     try {
       _savingHint(msg);
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          faithfulness_endpoint_id: epSel.value || '',
-          faithfulness_model: modelSel.value || ''
-        })
+      await _postSettings({
+        faithfulness_endpoint_id: epSel.value || '',
+        faithfulness_model: modelSel.value || ''
       });
       if (msg) { msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
         setTimeout(function() { msg.textContent = ''; }, 1500); }
@@ -1011,8 +1013,7 @@ async function initImageSettings() {
   async function saveSettings() {
     try {
       _savingHint(msg);
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_gen_enabled: enabledToggle ? enabledToggle.checked : true, image_model: modelSel.value, image_quality: qualSel.value }) });
+      await _postSettings({ image_gen_enabled: enabledToggle ? enabledToggle.checked : true, image_model: modelSel.value, image_quality: qualSel.value });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
@@ -1236,8 +1237,7 @@ async function initVisionSettings() {
   async function saveSettings() {
     try {
       _savingHint(msg);
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vision_enabled: enabledToggle ? enabledToggle.checked : true, vision_model: vlSel.value }) });
+      await _postSettings({ vision_enabled: enabledToggle ? enabledToggle.checked : true, vision_model: vlSel.value });
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
   }
@@ -1962,10 +1962,7 @@ async function initResearchSettings() {
     }
     try {
       _savingHint(msg);
-      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      await _postSettings(payload);
       msg.textContent = 'Saved'; msg.style.color = 'var(--fg)';
       setTimeout(showStatus, 2000);
     } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
