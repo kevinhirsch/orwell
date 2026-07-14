@@ -222,7 +222,6 @@
     ".chat-top-bar",
     ".model-picker-menu",
     ".toast",
-    ".og-card",                    // the control-room gadget cards
     // Transient menus & popovers: small + short-lived, so they refract when open and
     // share size buckets (one map per size). watchMounts() schedules a pass when they mount.
     ".dropdown",
@@ -232,25 +231,35 @@
     // look). The high-emphasis glass variants get the SAME feImage→feDisplacementMap
     // refraction + specular rim as the chrome, applied via backdrop-filter (refracts the
     // backdrop BEHIND the button, NEVER the label/glyph — see applyTo). They rank AFTER
-    // every window/gadget/chrome surface above (those always win the cap first) but —
-    // #1603(b), 2026-07-14 audit — ABOVE `.on-card` notices below: on the demo + real
-    // desktop the button/group count reliably starved to 0/13 secondary, 0/2 icon, 0/2
-    // group under the shared MAX_LIVE_SURFACES cap (KIT-G-01), so buttons need to outrank
-    // the lower-frequency notice cards to refract at all before the cap runs out. They
+    // every window/chrome/nav surface above (windows, dock, sidebar, composer, modal,
+    // top-bar, model-picker, toast, menus/popovers — the HIG functional layer always wins
+    // the cap first) but — #1603 / KIT-G-01/02, 2026-07-14 audit — ABOVE the CARDS below
+    // (`.og-card` gadget cards + `.on-card` notices). On desktop the button/group count
+    // reliably starved to 0/13 secondary, 0/2 icon, 0/2 group (KIT-G-01), and on phone
+    // (MAX_LIVE_SURFACES_MOBILE=8) the cards consumed the whole budget so ZERO buttons
+    // refracted (KIT-G-02) — the tier's defining optic absent from every button. Owner
+    // ruling: BUTTONS get refraction priority OVER CARDS within the cap, so the card
+    // selectors are moved BELOW the buttons (dropped first when the cap bites). Buttons
     // SHARE the per-size filter cache (identical buttons → ONE filter, so a row of
     // same-size buttons is cheap). The .ow-btn-group is the ONE glass-sampling surface for
     // its members (NSGlassEffectContainerView analogue, style.css) — its members carry no
     // backdrop of their own and are EXCLUDED below. EXCLUSIONS (isRefractableButton):
     // .ow-btn-plain (borderless, no glass material), the opaque .ow-btn-destructive-solid
     // plate, and grouped members (they ride the group's single sample) never refract.
-    // (The cap-RAISE half of #1603 — KIT-G-01/02, whether MAX_LIVE_SURFACES itself should
-    // grow — is a separate, not-yet-decided change; this reorder only reprioritizes who
-    // wins the EXISTING cap.)
+    // (The cap-RAISE half of KIT-G-01/02 — whether MAX_LIVE_SURFACES itself should grow —
+    // is a separate, not-yet-decided change; this reorder only reprioritizes who wins the
+    // EXISTING cap.)
     ".ow-btn-prominent",
     ".ow-btn-secondary",
     ".ow-btn-icon",
     ".ow-btn-group",               // the segmented group = ONE shared backdrop sample
     ".ow-btn",                     // any remaining glass .ow-btn (plain/solid/grouped excluded)
+    // ── CARDS (content-layer affordances) — LOWEST priority, below the buttons (#1603 /
+    // KIT-G-01/02): the gadget cards + notice kit. A rail of identical cards shares one
+    // size bucket (cheap), so they refract when headroom remains but yield the cap to the
+    // buttons above them first. They are also de-glassed when NESTED in another glass
+    // surface (isNestedGlassCard — #1604 / KIT-G-05, no glass-on-glass).
+    ".og-card",                    // the control-room gadget cards
     ".on-card",                    // the notice kit (functional affordance)
   ];
   // Glass-button variants that must NEVER refract: borderless plain (no glass material),
@@ -263,6 +272,26 @@
       return !el.matches(BTN_NO_REFRACT);
     } catch (_) {
       return true;
+    }
+  }
+  // #1604 / KIT-G-05 — NO GLASS-ON-GLASS. A glass CARD (.og-card / .on-card) nested inside
+  // an already-glass surface must NOT get its OWN SVG refraction: two independent samples
+  // stacked read muddy/illegible (HIG §1 "always avoid glass on glass … use fills,
+  // transparency, and vibrancy for the top elements … part of the material"). Such a nested
+  // card is dropped from the refraction set here AND de-glassed to a subtle non-glass tint
+  // in CSS (body.theme-frosted glass-ancestor > card). A top-level card (rides the wallpaper
+  // directly) still refracts normally.
+  var GLASS_CARD_SEL = ".og-card, .on-card";
+  // Mirrors the CSS de-glass ancestor set (style.css, body.theme-frosted …) exactly, incl.
+  // `.ow-body` — a window body can render outside its `.ow-window` wrapper (sheet mode), so the
+  // JS refraction gate and the CSS blur-glass fallback must de-glass the SAME nested cards.
+  var GLASS_ANCESTOR_SEL = ".ow-window, .ow-body, .admin-card, .modal-content, .og-card, .on-card";
+  function isNestedGlassCard(el) {
+    try {
+      if (!el.matches || !el.matches(GLASS_CARD_SEL)) return false;         // not a glass card → no extra gate
+      return !!(el.parentElement && el.parentElement.closest(GLASS_ANCESTOR_SEL)); // has a glass ancestor
+    } catch (_) {
+      return false;
     }
   }
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
@@ -800,6 +829,7 @@
       if (!el || !el.isConnected) return;
       if (el.id && EXCLUDE_IDS[el.id]) return;
       if (!isRefractableButton(el)) { clearFrom(el); return; } // never refract plain/solid/grouped-member buttons
+      if (isNestedGlassCard(el)) { clearFrom(el); return; }    // #1604 — no glass-on-glass (nested card de-glasses)
       var r = el.getBoundingClientRect();
       if (r.width < 24 || r.height < 24) return; // too small to bother
       var id = filterFor(r.width, r.height, activeScale());
@@ -870,6 +900,7 @@
         if (seen.has(el)) continue;
         if (el.id && EXCLUDE_IDS[el.id]) continue;
         if (!isRefractableButton(el)) continue; // plain/solid/grouped-member buttons never refract
+        if (isNestedGlassCard(el)) continue;    // #1604 — no glass-on-glass (nested card de-glasses)
         if (el.offsetParent === null && getComputedStyle(el).position !== "fixed") continue; // hidden
         seen.add(el);
         out.push(el);
