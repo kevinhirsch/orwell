@@ -20738,6 +20738,18 @@ body.theme-frosted #orwell-decision-card {
     0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
   border-radius: var(--ow-radius-concentric) !important;
 }
+/* Duplicate of the rule above for the kit's root CLASS: orwellDecision.js scopes its injected
+   structural CSS to `.odec` (the live card carries id + class; the element-kit demo's reference
+   cards compose the class alone), so any .odec surface gets the same concentric corner. The
+   ID-keyed rule above is deliberately left byte-identical — test_ow_design_system.py pins its
+   exact form — this is the class-scoped twin, not a replacement. */
+body.theme-frosted .odec {
+  --ow-parent-radius: var(--ow-glass-radius);
+  --ow-parent-inset: 8px;    /* the card's gutter inside the chat column */
+  --ow-radius-concentric: max(
+    0px, calc(var(--ow-parent-radius) - var(--ow-parent-inset)));
+  border-radius: var(--ow-radius-concentric) !important;
+}
 
 body.theme-frosted #minimized-dock .minimized-dock-chip {
   border-radius: var(--ow-glass-radius-inner) !important;
@@ -21355,11 +21367,17 @@ body.theme-frosted .odec-opt:hover {
    TRANSLUCENT luminous glass; the selected pill is a near-SOLID bright plate with dark ink + an
    accent ring (the selected-ref: "lit up, filled in"). The `background` shorthand clears the kit's
    prominent radial-gradient so the selected fill is clean and reads opaque. It is deliberately NOT
-   the system-blue of the Confirm CTA (so "a selected option" never reads as "the Confirm button").*/
+   the system-blue of the Confirm CTA (so "a selected option" never reads as "the Confirm button").
+   FIXED colors, not token-compositing (same pattern as the disabled-state fix below): the old
+   `color-mix(var(--fg) 96%, …)` plate + `color: var(--bg)` ink composed off whatever --fg/--bg
+   resolve to locally — and every frosted CHROME host (.on-card, .ow-window .ow-body, the kit
+   demo's dark-ink scope) REDEFINES --fg to the dark chrome ink #16191f, so the "bright" plate
+   computed NEAR-BLACK under dark ink: dark-on-dark. Pin the plate light and the ink dark so the
+   selected state is backdrop-independent, per this rule's own intent. */
 body.theme-frosted .odec-opt[aria-pressed="true"],
 body.theme-frosted .odec-opt.selected {
-  background: color-mix(in srgb, var(--fg, #fff) 96%, transparent) !important;
-  color: var(--bg, #15181f) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  color: #16191f !important;
   border-color: var(--ow-ios-blue, #0a84ff) !important;
   box-shadow: 0 0 0 1px var(--ow-ios-blue, #0a84ff),
               inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 8px rgba(0,0,0,0.2) !important;

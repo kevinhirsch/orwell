@@ -132,12 +132,18 @@
   _refreshRosterCache(true);
   window.addEventListener("orwell:gamechanged", () => _refreshRosterCache(true));
 
+  // The injected structural CSS is scoped to the root CLASS `.odec` (render() adds it beside
+  // the element id) — NOT to `#orwell-decision-card` — so any card composing the kit's classes
+  // (the live card, the element-kit demo's reference cards) is styled identically. The element
+  // ID stays `orwell-decision-card` (many tests/registries + the FAB/scroll suppressions pin it);
+  // only the CSS scope is class-based. Exposed as window.OrwellDecisionKit.ensureStyles for the
+  // kit demo page (element_kit_demo.html), which composes the classes statically.
   function ensureStyles() {
     if (document.getElementById("orwell-decision-css")) return;
     const st = document.createElement("style");
     st.id = "orwell-decision-css";
     st.textContent = `
-      #${CARD_ID} {
+      .odec {
         position: relative; /* J5-21: anchors the absolutely-positioned dismiss × in the corner */
         margin: .6rem auto; max-width: 640px; border-radius: 12px; padding: .8rem .9rem;
         background: var(--panel, #111); color: var(--fg, #9cdef2);
@@ -154,11 +160,11 @@
         transition: opacity .2s ease, border-color .2s ease;
       }
       @keyframes odec-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-      @media (prefers-reduced-motion: reduce) { #${CARD_ID} { animation: none; transition: none; } }
+      @media (prefers-reduced-motion: reduce) { .odec { animation: none; transition: none; } }
       /* #642: hosted in the OrwellNotice kit card (.on-card.on-decision owns the lift/border/
          radius/anchor), the decision card goes FLAT — drop its own margin/max-width/shadow/
          border/animation so it fills the kit body (no double chrome, no squeezed note column). */
-      .on-card.on-decision #${CARD_ID} {
+      .on-card.on-decision .odec {
         margin: 0; max-width: none; box-shadow: none; border: none; padding: 0;
         background: transparent; animation: none;
       }
@@ -166,33 +172,33 @@
          grabber/accent-rim/glass/anchor), the decision card goes FLAT exactly as in the notice
          host — drop its own margin/max-width/shadow/border/animation/bg so the sheet provides the
          one chrome (no double frame, no squeezed note column). */
-      .ow-sheet.ow-sheet-anchored #${CARD_ID} {
+      .ow-sheet.ow-sheet-anchored .odec {
         margin: 0; max-width: none; box-shadow: none; border: none; padding: 0;
         background: transparent; animation: none;
       }
       /* Under the glass theme the inner card must stay transparent (the sheet IS the glass) so it
          never double-glasses — mirrors the .on-card.on-decision frosted rule below. (The .odec-risk
          selector is listed FIRST so the j5_20 token-tint regex never matches this transparent rule.) */
-      body.theme-frosted .ow-sheet.ow-sheet-anchored #${CARD_ID}.odec-risk,
-      body.theme-frosted .ow-sheet.ow-sheet-anchored #${CARD_ID} {
+      body.theme-frosted .ow-sheet.ow-sheet-anchored .odec.odec-risk,
+      body.theme-frosted .ow-sheet.ow-sheet-anchored .odec {
         background-color: transparent; background-image: none;
         -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
       }
-      #${CARD_ID} .odec-head { display: flex; align-items: baseline; gap: .5rem; }
-      #${CARD_ID} .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
+      .odec .odec-head { display: flex; align-items: baseline; gap: .5rem; }
+      .odec .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
       /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
          END of the card's DOM so it is the LAST thing a keyboard user Tabs to — the decision options
          and Confirm come first (WCAG 2.4.3 focus order: a binding-decision surface must not put
          "skip this" ahead of the actual choice). Visual position is unchanged; only tab order moves.
          The 44×44 tap target + descriptive aria-label are preserved below. */
-      #${CARD_ID} .odec-x { position: absolute; top: .35rem; right: .35rem; cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
-      #${CARD_ID} .odec-x:hover { opacity: .9; }
+      .odec .odec-x { position: absolute; top: .35rem; right: .35rem; cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+      .odec .odec-x:hover { opacity: .9; }
       /* J5-20: a high-stakes, irreversible decision (eviction/noms/jury vote) wears a risk skin —
          an eviction-red border + a faint red wash so it never reads as a low-stakes comp chip. The
          tint is token-driven (--color-error / --red across the house themes). Color is NEVER the
          only signal: the .odec-risk-badge below carries the same "binding / irreversible" meaning in
          text + an icon for colorblind + SR users (the badge is what AT announces). */
-      #${CARD_ID}.odec-risk {
+      .odec.odec-risk {
         border-color: var(--color-error, var(--red, #e06c75));
         background:
           linear-gradient(0deg, color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent), color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 9%, transparent)),
@@ -201,9 +207,9 @@
       /* #775: a SELECTED option on a risk (irreversible) card keeps the eviction-RED fill — the
          stakes signal. !important so it wins over the style.css frosted selected-pill override
          (the kit-migration's neutral selected state) on the glass tiers too. */
-      #${CARD_ID}.odec-risk .odec-opt[aria-pressed="true"] { border-color: var(--color-error, var(--red, #e06c75)) !important; background: var(--color-error, var(--red, #e06c75)) !important; color: var(--on-accent, #fff) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25) !important; }
-      #${CARD_ID}.odec-risk .odec-confirm { background: var(--color-error, var(--red, #e06c75)); }
-      #${CARD_ID} .odec-risk-badge {
+      .odec.odec-risk .odec-opt[aria-pressed="true"] { border-color: var(--color-error, var(--red, #e06c75)) !important; background: var(--color-error, var(--red, #e06c75)) !important; color: var(--on-accent, #fff) !important; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25) !important; }
+      .odec.odec-risk .odec-confirm { background: var(--color-error, var(--red, #e06c75)); }
+      .odec .odec-risk-badge {
         display: inline-flex; align-items: center; gap: .3rem; margin-left: .4rem;
         /* #651: .68rem sat BELOW the --fs-2xs text floor once the fluid root shrinks at the
            phone tiers (10.3px at tiny-320) — caught by the widened crowding sweep. The --fs-xs
@@ -214,24 +220,24 @@
         border: 1px solid color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 60%, transparent);
         background: color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 12%, transparent);
       }
-      #${CARD_ID} .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
+      .odec .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */
-      #${CARD_ID} .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
-      #${CARD_ID} .odec-stillin strong { letter-spacing: .02em; }
+      .odec .odec-stillin { margin: 0 0 .55rem; font-size: .82em; opacity: .92; line-height: 1.45; }
+      .odec .odec-stillin strong { letter-spacing: .02em; }
       /* WCAG 2.1.1 (Keyboard): the prompt + still-in roster are focusable regions (tabindex=0,
          set in _build) so a keyboard/SR user can read the FULL prompt/roster — which caps to a
          20vh scroll region on short viewports (the media block below) — before confirming a
          binding move. Neutral iOS-blue ring, consistent with the window/gadget kits. */
-      #${CARD_ID} .odec-prompt:focus-visible, #${CARD_ID} .odec-stillin:focus-visible {
+      .odec .odec-prompt:focus-visible, .odec .odec-stillin:focus-visible {
         outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; border-radius: 4px;
       }
-      #${CARD_ID} .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
+      .odec .odec-opts { display: flex; flex-wrap: wrap; gap: .4rem; }
       /* #775 element-kit migration (owner request): the decision OPTION chips compose the kit's
          .ow-btn .ow-btn-prominent (a liquid-glass PROMINENT CTA). On the GLASS tiers the kit owns
          the chip chrome (background/border/ink) — so the bespoke chip fill is scoped to the NORMAL
          (non-glass) tier here, and a frosted-tier SELECTED override lives in style.css. The
          layout-only bits (capsule radius, padding, tap floor) stay on both tiers. */
-      #${CARD_ID} .odec-opt {
+      .odec .odec-opt {
         cursor: pointer; border-radius: 999px; padding: .5rem .8rem; min-height: 44px;
         font: inherit;
         display: inline-flex; align-items: center; gap: .45em; /* M2-2: face + label */
@@ -240,23 +246,23 @@
          (OrwellMonogram kit) — a person you pick, not an abstract label. A real persisted
          portrait renders when the roster cache has one; the monogram is the fallback. Small,
          round-cornered, never the tap target on its own (the whole chip is the button). */
-      #${CARD_ID} .odec-face {
+      .odec .odec-face {
         width: 22px; height: 22px; border-radius: 6px; overflow: hidden; flex: none;
         display: inline-block; pointer-events: none;
       }
-      #${CARD_ID} .odec-face .ow-mono-svg, #${CARD_ID} .odec-face img { display: block; width: 100%; height: 100%; }
+      .odec .odec-face .ow-mono-svg, .odec .odec-face img { display: block; width: 100%; height: 100%; }
       /* INT-26/VM-22: a non-binding comp-round's two NON-selected chips — dimmed + inert so
          they read as color-only, never as a live "you could change this" affordance. */
-      #${CARD_ID} .odec-opt.odec-opt-inert { cursor: default; opacity: .4; }
+      .odec .odec-opt.odec-opt-inert { cursor: default; opacity: .4; }
       /* Normal-tier (non-glass) chip chrome — the glass tiers take the kit prominent instead. */
-      body:not(.theme-frosted) #${CARD_ID} .odec-opt {
+      body:not(.theme-frosted) .odec .odec-opt {
         /* J5-04: the plain --border (#355a66) on the chip's translucent fill is ~2.25:1 on the
            dark panel — below WCAG 1.4.11's 3:1 for a UI-component boundary. Mix toward --fg so
            the chip edge is visible (the chip is the ONLY way to make the pick). */
         border: 1px solid color-mix(in srgb, var(--border, #355a66) 55%, var(--fg, #9cdef2)); background: rgba(255,255,255,.05); color: inherit;
       }
-      body:not(.theme-frosted) #${CARD_ID} .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
-      #${CARD_ID} textarea {
+      body:not(.theme-frosted) .odec .odec-opt[aria-pressed="true"] { border-color: var(--accent, #e06c75); background: var(--accent, #e06c75); color: var(--on-accent, #fff); }
+      .odec textarea {
         width: 100%; min-height: 72px; box-sizing: border-box; margin-top: .2rem;
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
         border-radius: 8px; padding: .5rem; font: inherit;
@@ -264,40 +270,40 @@
       /* flex-wrap so the full-width .odec-hint (flex-basis:100%; order:99) drops to
          its OWN line instead of competing for width and crushing .odec-note (the
          description) into a one-word-per-line column. */
-      #${CARD_ID} .odec-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .65rem; }
-      #${CARD_ID} .odec-confirm {
+      .odec .odec-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .65rem; }
+      .odec .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
         min-height: 44px;
         background: var(--accent, #e06c75); color: var(--on-accent, #fff); font: inherit;
       }
-      #${CARD_ID} .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
-      #${CARD_ID} .odec-note { opacity: .80; font-size: var(--ow-fs-body, .875rem); flex: 1; }
+      .odec .odec-confirm:disabled { opacity: .4; cursor: not-allowed; }
+      .odec .odec-note { opacity: .80; font-size: var(--ow-fs-body, .875rem); flex: 1; }
       /* J4-20: the disabled-Confirm hint — quiet, italicized, sits beside the button; its hidden
          attribute is toggled in sync() so it shows only while Confirm can't be pressed. */
       /* M1-4 (audit A4): no negative top margin — it pulled the hint's descenders into the card's
          bottom edge, half-clipping "Make your selection above to enable Confirm." at 1440×900. */
-      #${CARD_ID} .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: 0; line-height: 1.35; }
-      #${CARD_ID} .odec-hint[hidden] { display: none; }
-      #${CARD_ID} .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
-      #${CARD_ID}.odec-done { border-color: var(--border, #355a66); opacity: .8; }
+      .odec .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: 0; line-height: 1.35; }
+      .odec .odec-hint[hidden] { display: none; }
+      .odec .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
+      .odec.odec-done { border-color: var(--border, #355a66); opacity: .8; }
       /* Narrow: the note must not squeeze into a thin column beside the button —
          stack it full-width above a full-width Confirm. */
       @media (max-width: 480px) {
-        #${CARD_ID} .odec-row { flex-direction: column; align-items: stretch; gap: .5rem; }
-        #${CARD_ID} .odec-note { flex: none; order: -1; }
-        #${CARD_ID} .odec-confirm { width: 100%; padding: .6rem .95rem; }
+        .odec .odec-row { flex-direction: column; align-items: stretch; gap: .5rem; }
+        .odec .odec-note { flex: none; order: -1; }
+        .odec .odec-confirm { width: 100%; padding: .6rem .95rem; }
       }
       /* M1-4 (audit A4): on a small viewport the PROSE scrolls internally so the option chips +
          the Confirm row always stay reachable — a long ceremony prompt must never push the
          binding control below the fold (the m-1 audit shot: Confirm off-screen on 390×844). */
       @media (max-width: 480px), (max-height: 720px) {
-        #${CARD_ID} .odec-prompt, #${CARD_ID} .odec-stillin {
+        .odec .odec-prompt, .odec .odec-stillin {
           max-height: 20vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
         }
       }
       /* ── LIQUID GLASS (body.theme-frosted) ──────────────────────────────────────
          The decision card surface must read as the SAME ONE LIGHT GLASS as the rest of the
-         family. The common path hosts #${CARD_ID} INSIDE the OrwellNotice kit card
+         family. The common path hosts .odec INSIDE the OrwellNotice kit card
          (.on-card.on-decision), where it goes FLAT (transparent/no chrome) so the glass comes
          from the kit (.on-card, painted the kube LIGHT glass by style.css). In the FALLBACK
          path (no kit → mounted bare into #chat-history) the card carries its OWN solid
@@ -313,8 +319,8 @@
          card honors the a11y opaque preference under reduce. */
       @media (prefers-reduced-transparency: no-preference) {
       /* The ONE LIGHT GLASS for BOTH tiers (Full adds SVG refraction on top). */
-      body.theme-frosted #${CARD_ID},
-      body.theme-frosted #${CARD_ID}.odec-risk {
+      body.theme-frosted .odec,
+      body.theme-frosted .odec.odec-risk {
         background-color: var(--ow-glass-light-color);
         background-image: var(--ow-glass-light-fill);
         -webkit-backdrop-filter: blur(3px) saturate(180%);
@@ -335,15 +341,15 @@
          a LIGHT ink + a DARK legibility halo so it clears WCAG AA over the dark backdrop (the halo
          also outlines it over any lighter glass frame). Scoped inside the no-preference block so
          the reduced-transparency opaque fallback keeps the dark ink. */
-      body.theme-frosted #${CARD_ID} .odec-hint {
+      body.theme-frosted .odec .odec-hint {
         color: #fff;
         opacity: 1;
         text-shadow: 0 1px 2px rgba(0,0,0,0.62), 0 0 2px rgba(0,0,0,0.5);
       }
       /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
          glass) — keep it transparent under theme-frosted so it never double-glasses. */
-      body.theme-frosted .on-card.on-decision #${CARD_ID},
-      body.theme-frosted .on-card.on-decision #${CARD_ID}.odec-risk {
+      body.theme-frosted .on-card.on-decision .odec,
+      body.theme-frosted .on-card.on-decision .odec.odec-risk {
         background-color: transparent;
         background-image: none;
         -webkit-backdrop-filter: none;
@@ -474,6 +480,9 @@
 
     const card = document.createElement("div");
     card.id = CARD_ID;
+    // The kit's structural CSS is scoped to this root class (see ensureStyles) — the id stays
+    // for the DOM registries/suppressions that pin it, but styling rides the class.
+    card.classList.add("odec");
     // J4-02: role="form" makes this a named form landmark (AT users can reach it
     // via landmark navigation and know a binding decision is required).
     card.setAttribute("role", "form");
@@ -1098,4 +1107,9 @@
       render(e.detail && e.detail.pending);
     } catch (_) { /* fail open — the conversation path always remains */ }
   });
+
+  // The tiny public seam (mirrors window.OrwellNoticeKit et al): the element-kit demo page
+  // composes the .odec-* classes statically and calls ensureStyles() to get the kit's
+  // injected structural CSS without a live pending. Additive — the live card path is untouched.
+  window.OrwellDecisionKit = { ensureStyles };
 })();
