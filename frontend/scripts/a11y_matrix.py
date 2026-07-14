@@ -178,6 +178,9 @@ def classify_and_report():
         if matched and matched in XFAIL_CONTEXT:
             token = XFAIL_CONTEXT[matched]
             if not all(token in ctx for ctx in slot["hits"]):
+                # The needle DID fire — record it so the xpass report never suggests removing
+                # an entry whose element is actively failing (just outside the exempt context).
+                xfail_hits.add(matched)
                 matched = None
         if matched:
             xfail_hits.add(matched)

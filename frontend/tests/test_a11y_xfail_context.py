@@ -57,7 +57,11 @@ def test_unscrimmed_context_is_a_real_fail(a11y, capsys):
     """The same element failing OUTSIDE the scrim (a real chip/ink regression) must gate."""
     a11y.record(_USER_BAR_LINE, "desktop-1366")
     assert a11y.classify_and_report() == 1
-    assert "FAIL" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "FAIL" in out
+    # The needle fired (context-rejected) — the xpass report must NOT suggest removing #1375-i
+    # while its element is actively failing.
+    assert "#1375-i" in a11y.xfail_hits
 
 
 def test_mixed_contexts_do_not_hide_the_unscrimmed_hit(a11y, capsys):
