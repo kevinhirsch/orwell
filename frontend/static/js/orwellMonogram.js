@@ -196,8 +196,11 @@
         // The monogram svg is aria-hidden, so the swap would drop the only accessible name the
         // <img> alt carried. Move that label onto the .ow-mono-face wrapper so the face keeps its
         // name on the broken-portrait path.
+        // role="group" (NOT "img"): role="img" makes descendants presentational, which would drop
+        // the composited role-badge chip out of the accessibility tree; group keeps the badge in the
+        // tree while still carrying the portrait's accessible name via aria-label.
         const _label = img.alt || (card && card.name) || "";
-        if (_label) { el.setAttribute("role", "img"); el.setAttribute("aria-label", _label); }
+        if (_label) { el.setAttribute("role", "group"); el.setAttribute("aria-label", _label); }
         el.innerHTML = svg(card, opts);
         if (opts.role && BADGES[opts.role]) el.insertAdjacentHTML("beforeend", badgeSvg(opts.role));
       };

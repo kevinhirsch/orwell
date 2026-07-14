@@ -193,3 +193,7 @@ def test_portrait_ref_heals_to_the_monogram_on_error():
     # the aria-hidden svg would drop the img's accessible name — the heal must move the label
     # onto the .ow-mono-face wrapper so the face keeps its name on the broken-portrait path.
     assert 'setAttribute("aria-label"' in hbody, "heal must preserve the accessible label on the wrapper"
+    # role MUST be group, not img: role="img" flattens descendants, dropping the composited role
+    # badge out of the accessibility tree. group keeps both the name and the badge in the tree.
+    assert 'setAttribute("role", "group")' in hbody, "wrapper must use role=group (img flattens the badge)"
+    assert 'setAttribute("role", "img")' not in hbody, "role=img would flatten the badge chip"

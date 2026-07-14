@@ -17,52 +17,46 @@ from pathlib import Path
 FE = Path(__file__).resolve().parents[1]
 SETTINGS = (FE / "static" / "js" / "settings.js").read_text(encoding="utf-8")
 
-# Every model-config save wired for the Saving… hint, with a stable anchor into its body.
-SAVE_FUNCS = [
-    ("saveDefault", r"async function saveDefault\(\)\s*\{(.*?)\n  \}"),
-    ("utility", r"utility_endpoint_id:.*?\n\s*\}\);"),   # sampled via its body below
+# The six model-config saves, each keyed by a marker that is UNIQUE to that save's
+# _postSettings(...) call — so the per-save assertions can't be satisfied by a sibling.
+SAVES = [
+    ("default chat", "default_endpoint_id: epSel.value"),
+    ("utility", "utility_endpoint_id: epSel.value"),
+    ("faithfulness", "faithfulness_endpoint_id: epSel.value"),
+    ("image", "image_gen_enabled:"),
+    ("vision", "vision_enabled:"),
+    ("research", "_postSettings(payload)"),
 ]
 
 
-def _fn_body(name):
-    m = re.search(rf"async function {name}\(\)\s*\{{(.*?)\n  \}}", SETTINGS, re.S)
-    return m.group(1) if m else None
-
-
-def test_helper_sets_saving_with_the_muted_color():
+def test_helper_sets_the_exact_saving_text_with_the_muted_color():
     m = re.search(r"function _savingHint\(msg\)\s*\{(.*?)\n\}", SETTINGS, re.S)
     assert m, "_savingHint helper must exist"
     body = m.group(1)
-    assert "Saving" in body and "textContent" in body
+    # exact copy, not a loose substring (guards against 'Saving now' / 'Not Saving' drift)
+    assert "msg.textContent = 'Saving…'" in body, "helper must set exactly 'Saving…'"
     assert "var(--fg-muted)" in body, "the hint must use the muted color token"
 
 
-def test_every_touched_save_hints_before_posting():
-    """Each of the 6 model-config saves calls _savingHint(msg) before its settings POST."""
-    # 6 call sites + 1 helper definition.
-    assert SETTINGS.count("_savingHint(msg)") >= 7
-    # Verify ordering in each identifiable save body: the hint precedes the POST helper.
-    # The 6 bodies each contain a _postSettings(...) call; assert the hint comes first.
-    for marker in (
-        "default_endpoint_id: epSel.value",
-        "utility_endpoint_id: epSel.value",
-        "faithfulness_endpoint_id: epSel.value",
-        "image_gen_enabled:",
-        "vision_enabled:",
-        "_postSettings(payload)",
-    ):
-        i_marker = SETTINGS.find(marker)
-        assert i_marker != -1, f"expected a wired save containing {marker!r}"
-        # the nearest preceding _savingHint(msg) must be within the same try block (<~600 chars)
-        window = SETTINGS[max(0, i_marker - 600):i_marker]
-        assert "_savingHint(msg)" in window, f"{marker!r} save must hint before posting"
+def test_each_save_hints_before_posting_scoped_to_its_own_body():
+    """For EACH of the six saves, within its own try block, _savingHint(msg) must precede
+    the _postSettings(...) call. Scoped per-save so one save can't satisfy another."""
+    for name, marker in SAVES:
+        idx = SETTINGS.find(marker)
+        assert idx != -1, f"{name}: marker {marker!r} not found"
+        try_idx = SETTINGS.rfind("try {", 0, idx)
+        assert try_idx != -1, f"{name}: save must run inside a try block"
+        body = SETTINGS[try_idx: idx + len(marker) + 40]
+        hint = body.find("_savingHint(msg)")
+        post = body.find("_postSettings(")
+        assert hint != -1, f"{name}: must set the Saving… hint"
+        assert post != -1, f"{name}: must POST through _postSettings"
+        assert hint < post, f"{name}: the Saving… hint must be set BEFORE the POST"
 
 
-def test_saves_route_through_postSettings_which_throws_on_non_ok():
+def test_postSettings_throws_on_a_non_ok_response():
     """A non-2xx settings response must raise so the catch shows 'Failed to save', not 'Saved'."""
     m = re.search(r"async function _postSettings\(body\)\s*\{(.*?)\n\}", SETTINGS, re.S)
     assert m, "_postSettings helper must exist"
     body = m.group(1)
     assert "!r.ok" in body and "throw" in body, "must throw on a non-ok response"
-    # all six model-config saves must use it (helper def + 6 calls = 7 occurrences)
-    assert SETTINGS.count("_postSettings(") >= 7
