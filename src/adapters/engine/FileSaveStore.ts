@@ -108,9 +108,13 @@ export class FileSaveStore implements UserSaveStore {
     // "unlimited users concurrently"). Since the content fsync + atomic rename above already guarantee
     // a truncated file can NEVER win, we AMORTIZE the directory fsync to the periodic checkpoint cadence
     // (the same CHECKPOINT_EVERY boundary `prune` keeps in the long-tail archive): the long-lived
-    // checkpoint renames get a hard power-loss guarantee, and a power cut can lose at most the recent
-    // un-hardened tail (already bounded by RETAIN_RECENT above the newest durable checkpoint) — never a
-    // corrupt "latest". Owner-sanctioned in #1562 ("drop/amortize the second (directory) fsync").
+    // checkpoint renames get a hard power-loss guarantee. The un-hardened window is the directory entries
+    // for the renames SINCE the last checkpoint — up to CHECKPOINT_EVERY-1 of them — whose durability the
+    // amortized fsync no longer forces synchronously; in practice the OS's own dirty-page writeback makes
+    // those entries durable within a few seconds regardless, so a power cut in that narrow window loses at
+    // most that un-hardened tail, never the newest durable checkpoint and never a corrupt "latest".
+    // (RETAIN_RECENT governs RETENTION — how many recent versions we keep on disk — not durability; the two
+    // are independent.) Owner-sanctioned in #1562 ("drop/amortize the second (directory) fsync").
     if (version % FileSaveStore.CHECKPOINT_EVERY === 0) {
       try {
         const dirFd = openSync(dir, "r");
