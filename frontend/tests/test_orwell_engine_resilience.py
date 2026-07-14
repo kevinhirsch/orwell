@@ -57,8 +57,20 @@ def _patch_seq(monkeypatch, script):
 
 
 def _run(coro):
+    # Run on a DEDICATED, freshly-minted event loop — never the process-shared
+    # ``get_event_loop()`` one. Under ``pytest-xdist -n``, sibling tests in the same worker can
+    # leave a pending fire-and-forget coroutine on the shared default loop (the front-end schedules
+    # many best-effort background engine calls). Resumed inside this test's ``run_until_complete``,
+    # such a foreign coroutine reaches the process-global ``orwell_engine._shared_client`` — which is
+    # THIS test's ``_SeqClient`` stub — and steals a scripted response, so ``client.calls`` came out
+    # nondeterministically 3 instead of 2 (the ``assert 3 == 2`` CI flake). A private loop is never
+    # iterated by any foreign task, so the stubbed call sequence stays hermetic.
     import asyncio
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 @pytest.fixture(autouse=True)
@@ -69,9 +81,16 @@ def _fast_and_clean(monkeypatch):
     monkeypatch.setattr(orwell_engine.asyncio, "sleep", _no_sleep)
     orwell_engine._clear_error()
     orwell_engine._clear_reconnecting()
+    # Tear down the process-global shared client both before and after: a lingering ``_SeqClient``
+    # stub must never persist as ``orwell_engine._client`` for a later test to grab (and a stale real
+    # client from a prior test must be rebuilt against THIS test's monkeypatched ``AsyncClient``).
+    orwell_engine._client = None
+    orwell_engine._client_factory = None
     yield
     orwell_engine._clear_error()
     orwell_engine._clear_reconnecting()
+    orwell_engine._client = None
+    orwell_engine._client_factory = None
 
 
 # --- a transient gateway 502 is retried and recovers ------------------------------------------
