@@ -185,8 +185,13 @@ def test_non_accent_white_ctas_are_left_alone():
     (semantic danger / recording / dark image overlays) must stay white."""
     css = _read("static/style.css")
     # danger/error/recording buttons keep white on their own semantic bg.
-    assert "background:var(--color-danger); color:#fff" in css, (
-        ".confirm-btn-danger (semantic danger bg) must NOT be rewritten to --on-accent."
+    # #1605: --color-danger is now the system red #ff453a (white ~3.4:1, fails AA on a
+    # solid fill), so the solid danger BUTTON uses the AA-safe darker pair
+    # --color-danger-strong — still WHITE text (not rewritten to dark --on-accent ink),
+    # which is what this guard protects.
+    assert "background:var(--color-danger-strong); color:#fff" in css, (
+        ".confirm-btn-danger (semantic danger bg) must keep white text (via the AA-safe "
+        "--color-danger-strong), NOT be rewritten to --on-accent."
     )
     assert re.search(r"background:\s*var\(--color-error\);[^}]*\n?\s*color:\s*#fff", css) or \
         "background: var(--color-error)" in css and "color: #fff" in css, (

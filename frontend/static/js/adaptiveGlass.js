@@ -36,11 +36,15 @@
   ].join(", ");
   var EXCLUDE_IDS = { "orwell-headshot": 1 };
 
-  // The ONLY surfaces that adapt under the glass theme: the RECEIVED chat bubbles. Apple's
-  // Messages received bubble flips polarity with the wallpaper — a LIGHT frost + DARK ink
-  // over a bright wall, a DARK frost + LIGHT ink over a dark one. Chrome does NOT adapt (it
-  // is a FIXED light glass; the old per-surface dark veil is retired and must not return),
-  // and the SENT (blue) bubble never adapts (always blue + white). So this is just .msg-ai.
+  // The ONLY surface that adapts under the glass theme: the RECEIVED chat bubble. #1601 /
+  // OWN-2 — the chat column is ONE LIGHT-GLASS FAMILY, so the received bubble is now a FIXED
+  // light glass (a LIGHT frost + DARK ink) matching the composer/chrome; it no longer FLIPS to
+  // a dark frost + light ink over a dark wall (that dark-bubble-vs-light-composer split was the
+  // OWN-2 bug). What still adapts is the scrim OPACITY: resolveBubbleScrim escalates
+  // --ai-scrim-alpha per-bubble so the dark ink clears APCA over ANY backdrop (the light frost
+  // climbs toward opaque near-white over a dark/busy wall — the fixed-light-glass move). Chrome
+  // does NOT adapt (also fixed light glass), and the SENT (blue) bubble never adapts (blue +
+  // white). So this is just .msg-ai.
   var BUBBLE_ADAPTIVE = ".msg-ai";
   // ── #763 — the WELCOME HERO over the bare wallpaper ───────────────────────────
   // The hero (the big "Orwell" wordmark, the subtitle, the inline "type /setup" link)
@@ -564,9 +568,16 @@
   }
 
   function resolveBubbleScrim(L, bgRgb) {
-    // PREFERRED polarity from the linear-Y flip (Apple Messages received-bubble behaviour):
-    // a BRIGHT backdrop → DARK ink + light frost; a DARK backdrop → WHITE ink + dark frost.
-    var darkPref = L >= INK_THRESHOLD;
+    // #1601 / OWN-2 — ONE LIGHT-GLASS FAMILY: the received bubble is a FIXED light glass, so we
+    // ALWAYS prefer the light-frost/DARK-ink polarity (never the old dark-frost/white-ink flip
+    // that read as a dark slab beside the light composer). The scrim escalation below floors
+    // legibility over any backdrop — a light frost climbs toward opaque near-white over a
+    // dark/busy wall, where dark ink clears APCA by a wide margin — so this preferred polarity
+    // essentially always wins. The alt-polarity branch is retained ONLY as the non-negotiable
+    // legibility terminator (it never fires for a light frost, which always clears via opacity).
+    // `L` is intentionally no longer consulted for polarity (kept in the signature for the
+    // caller/tests); the fixed light glass is polarity-independent.
+    var darkPref = true;
     var darkInk = parseColor(INK_DARK).slice(0, 3), lightInk = [255, 255, 255];
     var prefInk = darkPref ? darkInk : lightInk;
     var prefFrost = darkPref ? BUBBLE_LIGHT_RGB : BUBBLE_DARK_RGB;

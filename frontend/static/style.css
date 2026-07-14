@@ -133,7 +133,19 @@
   --color-error-light: #ff6666;
   --color-success: #4caf50;
   --color-warning: #f0ad4e;
-  --color-danger: #c0392b;
+  /* KIT-F-06 / #1605 (2026-07-14 audit): repointed from the legacy flat-UI brick
+     `#c0392b` to Apple's system red `#ff453a` (the iOS-dark systemRed the kit already
+     pins in `--ow-danger`). Used app-wide for danger borders, focus rings, tints and
+     badges. NOTE the contrast split below: white body-text on a SOLID `#ff453a` fill
+     measures only ~3.4:1 (fails WCAG AA 4.5:1 for normal text — clears the 3:1 large/
+     bold floor only), so the ONE solid-danger-fill-behind-white-body-text site
+     (`.confirm-btn-danger`) uses the paired `--color-danger-strong` instead. */
+  --color-danger: #ff453a;
+  /* A darker shade of the SAME system red (derived, so it tracks any future repoint of
+     `--color-danger`) for solid danger fills that carry white BODY text: white on this
+     clears AA (~5.3:1). Use it wherever `#fff` sits on a full danger plate; the plain
+     `--color-danger` stays the hue for borders/tints/large-bold labels. */
+  --color-danger-strong: color-mix(in srgb, var(--color-danger) 76%, #000);
   --color-recording: #ff3b30;
   --color-recording-hover: #d63031;
   /* AXE-7 (WCAG 1.4.3, AA text contrast): #888 measured 3.96:1 against the dark
@@ -6066,8 +6078,12 @@ body.bg-pattern-perlin-flow {
     .confirm-btn-secondary:hover { background:var(--border); }
     .confirm-btn-primary { background:var(--accent-primary, var(--red, #4a9eff)); color:var(--on-accent, #fff); border-color:transparent; }
     .confirm-btn-primary:hover { filter:brightness(1.15); }
-    .confirm-btn-danger { background:var(--color-danger); color:#fff; border-color:transparent; }
-    .confirm-btn-danger:hover { background:var(--color-error); }
+    /* #1605 contrast sweep: white BODY text (0.85rem, regular) on a solid danger plate.
+       `--color-danger` is now the system red #ff453a (white ~3.4:1, fails AA), so this
+       one solid-fill site uses the AA-safe `--color-danger-strong` (white ~5.3:1); hover
+       darkens further, keeping the danger semantics without dropping below AA. */
+    .confirm-btn-danger { background:var(--color-danger-strong); color:#fff; border-color:transparent; }
+    .confirm-btn-danger:hover { background:color-mix(in srgb, var(--color-danger-strong) 88%, #000); }
     /* Styled prompt — text-input dialog (used in place of window.prompt) */
     #styled-prompt-overlay {
       background:rgba(0,0,0,0.5);
@@ -19582,6 +19598,36 @@ body.theme-frosted .og-card {
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 18%, transparent),
               0 4px 14px rgba(0,0,0,0.18) !important;
 }
+/* ── #1604 / KIT-G-05 — FORBID GLASS-ON-GLASS (nested cards de-glass) ─────────────────
+   A glass CARD (.og-card / .on-card) that sits INSIDE an already-glass surface (a kit
+   window/body, a settings panel, a modal, or another card) must NOT carry its own glass
+   material — two independently-sampling glass planes stacked read muddy/illegible. HIG §1:
+   "always avoid glass on glass … use fills, transparency, and vibrancy for the top
+   elements to make them feel like a thin overlay that is part of the material." So a
+   nested card falls back to a NON-glass subtle-tint fill (part of the parent material):
+   its backdrop-filter is dropped and it paints a faint neutral wash instead. liquidGlass.js
+   mirrors this structurally (isNestedGlassCard drops the SVG refraction for the same nodes),
+   so neither the CSS blur-glass NOR the Full-Glass refraction ever double-stacks. A TOP-LEVEL
+   card (riding the wallpaper directly — the iOS Control-Center pattern) keeps its glass. */
+body.theme-frosted .ow-window .og-card,
+body.theme-frosted .ow-window .on-card,
+body.theme-frosted .ow-body .og-card,
+body.theme-frosted .ow-body .on-card,
+body.theme-frosted .admin-card .og-card,
+body.theme-frosted .admin-card .on-card,
+body.theme-frosted .modal-content .og-card,
+body.theme-frosted .modal-content .on-card,
+body.theme-frosted .og-card .og-card,
+body.theme-frosted .og-card .on-card,
+body.theme-frosted .on-card .og-card,
+body.theme-frosted .on-card .on-card {
+  /* NON-glass fallback: a thin neutral tint that reads as part of the parent glass, not a
+     second sheet. No backdrop sampling, so it can never muddy the surface it sits on. */
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background-color: color-mix(in srgb, var(--fg) 6%, transparent) !important;
+  background-image: none !important;
+}
 /* Liquid glass on the composer (the chatbox) so the primary input surface matches
    the window/gadget kits instead of reading as a solid dark bar. Translucent tint +
    blur + a bright top rim; the inner textarea stays transparent so it rides the bar
@@ -21819,12 +21865,11 @@ body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff
   --ow-control-ink: #16191f;
   /* System red for the Destructive role (HIG: "a destructive button uses the system
      red color"). A semantic, not a theme hue — legible label rides on top of it.
-     KIT-F-06 (2026-07-14 audit): this used to fall through to `--color-danger`, which
-     resolves to the legacy `#c0392b` app-wide (style.css ~136) — NOT the Apple system
-     red ELEMENT_KIT.md promises, so the kit's own `#ff453a` fallback was dead code.
-     Pinned literally here so the KIT's destructive role is the real system red; the
-     app-wide `--color-danger` repoint (or a scoped split) is the open call tracked in
-     issue #1605 — do not fold that decision in here. */
+     KIT-F-06 (2026-07-14 audit): kept pinned literally so the KIT's destructive role is
+     the real system red independent of the app token layer. As of #1605 the app-wide
+     `--color-danger` was ALSO repointed to `#ff453a` (style.css ~136) — they now agree,
+     but this literal stays so the kit never silently inherits a future `--color-danger`
+     drift. (Solid-fill-behind-white-body-text uses `--color-danger-strong`; see ~136.) */
   --ow-danger: #ff453a;
   --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
 
@@ -23136,12 +23181,15 @@ body.theme-frosted .msg-ai {
      (luminance ~unchanged) so it never perturbs the APCA legibility floor. */
   -webkit-backdrop-filter: blur(18px) saturate(120%) !important;
   backdrop-filter: blur(18px) saturate(120%) !important;
-  /* neutral translucent frost — a gentle saturate lets a HINT of the wallpaper COLOR bloom
-     through (Apple's bubbles pick up the wall) without amplifying a busy multicolor backdrop
-     into a patchy plate, while the floored dark scrim keeps white text legible across any
-     backdrop (over a DARK wall the wall does the work; over a BRIGHT or BUSY MID-TONE wall
-     this opaque-enough scrim is the legibility backstop). */
-  background-color: rgba(56,60,68,var(--ai-scrim-alpha,0.46)) !important;
+  /* #1601 / OWN-2 — ONE LIGHT-GLASS FAMILY for the chat column. The received bubble now
+     shares the composer's FIXED light-glass material (a near-white translucent frost read
+     with DARK ink) instead of the old dark scrim, so the AI bubble and the composer read as
+     ONE coherent material rather than dark-bubble-vs-light-composer. A gentle saturate lets a
+     HINT of the wallpaper COLOR bloom through (Apple's received bubble picks up the wall);
+     the floored LIGHT scrim keeps DARK ink legible across any backdrop — adaptiveGlass.js
+     escalates --ai-scrim-alpha toward opaque near-white over a dark/busy wall, exactly the
+     way the fixed-light-glass chrome stays legible over any wallpaper. */
+  background-color: rgba(245,246,248,var(--ai-scrim-alpha,0.46)) !important;
   background-image: none !important;
   border: none !important;
   box-shadow: none !important;
@@ -23200,14 +23248,15 @@ body.theme-frosted .msg-user .msg-footer .timestamp {
 body.theme-frosted .msg-user .role::before {
   background: rgba(255,255,255,0.55) !important;
 }
-/* RECEIVED bubbles DEFAULT to white over the dark frost (over a dark wallpaper / the dark
-   animation). adaptiveGlass.js FLIPS them to dark ink + a light frost over a BRIGHT
-   wallpaper (Apple Messages received-bubble polarity) by setting an inline color on .msg-ai;
-   the .body uses `inherit` so it FOLLOWS that adaptive colour (otherwise its own colour rule
-   would block the flip). Non-important defaults so the inline adaptive colour wins. */
+/* #1601 / OWN-2 — RECEIVED bubbles are now FIXED LIGHT GLASS ⇒ DARK ink by default (the
+   composer/chrome polarity), no longer white-over-dark-frost. adaptiveGlass.js still sets the
+   inline ink per-bubble (and escalates the light scrim's opacity so dark ink clears APCA over
+   any wallpaper); this is the first-paint / non-JS default + a LIGHT legibility halo (a dark
+   halo would smudge under dark ink). The .body uses `inherit` so it follows the adaptive ink.
+   Non-important defaults so the inline adaptive colour wins. */
 body.theme-frosted .msg-ai {
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 2px rgba(0,0,0,0.40);
+  color: #16191f;
+  text-shadow: 0 1px 1px rgba(255,255,255,0.5);
 }
 body.theme-frosted .msg-ai .body {
   color: inherit !important;
