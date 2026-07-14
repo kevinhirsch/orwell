@@ -101,6 +101,36 @@ The recurring root cause behind most "mixed polarity" sightings is structural, n
 Before/after renders: PR #1589 (48 PNGs across frosted/glass/flat × 1440/390, plus the fix
 lane's measured computed-style evidence).
 
+### Wave 2 (2026-07-14 overnight implementation campaign — all measured, per-delegate evidence
+in the wave PR): SET-03/04/05/06 (22 tools mapped, Other bucket gone, drift gate added) ·
+OWN-1 (welcome-hero hide via one transcript-content observer; 7 pins + browser test) ·
+OWN-3/4/5/6 (headshot dialog: light-glass polarity, square tiles — root cause was the global
+`button{height:32px}` reset defeating aspect-ratio —, blue selection outline, opaque disabled,
+copy dedup) · OWN-8 (chat faces: portraits-first via the shared cache, the dangling
+`orwellResolveHouseguestId` seam defined, detached discs anchored to their speech, tight
+face-weighted small-avatar crop, live-path survival via observer; new orwellChatFaces.js) ·
+OWN-9 (cast window: monogram-first base layer + reveal-on-decode — pending/failed portrait
+requests can never render a grey grid again; *caveat: the live trigger was a server-side
+portrait-route stall — hung `/api/orwell/portrait/{id}` responses — which now degrades
+gracefully but may deserve an engine-side look*) · MOB-01 + APP-OV-1 (the banner-inset var was
+EMPTY under the reflow gate + `:root`-computed vars can't see body-only declarations — fixed;
+hamburger click-through proven under a live banner) · APP-OV-2 (double layer = chat-top-bar
+glass compositing through the banner + un-neutralizable inline-!important refraction — solid
+band now, byte-uniform) · APP-OV-3 (user bar → material-fixed light chip, 3.75:1→8.62:1) ·
+APP-OV-4 (welcome tip 1.73:1→7.09:1) · THM-01 (legacy `#theme-popup` mobile block deleted —
+phone sheet clean on all tiers) · THM-02 (Customize reflows at the 620 token; no h-scroll at
+320) · THM-OV-1 (admin-tab pills → frosted reskin, blue active pill) · THM-OV-3 (Glass/
+Frosted/Flat everywhere; wire values untouched) · SET-OV-3 (nav strip edge-fade + snap;
+suite-green, not independently live-repro'd — verify on next live pass) · KIT-F-02 (prominent
+gap 9.1/255, strongest rim) · KIT-F-03 (46px check/radio hit boxes, visuals unchanged) ·
+KIT-F-06 kit-scoped `#ff453a` (#1605 tracks app-wide) · KIT-F-08 (placeholder 68% mix) ·
+KIT-OV-2 (opaque kit disabled) · KIT-N-01..10 + SET-07/08 (the full flat-tier kit expression:
+five distinct variants, structural switch fixed, 26px family radius, accent leaks to system
+blue; all contrasts ≥4.5:1 except destructive-white-on-red 3.41:1 = Apple's own pairing) ·
+KIT-G-03/04 + KIT-F-04/07 (busy demo backdrop w/ 7.7× measured glass-vs-frosted visibility,
+solid section wrappers, status-gadget garble fixed, colored traffic lights) · #1603(b)
+(buttons re-ranked above notices in the refraction priority; cap-raise half stays open).
+
 ## 2. Element kit — Frosted (default tier) findings
 
 **Lane report landed (apple-genius auditor, measured via Playwright DOM geometry + pixel
