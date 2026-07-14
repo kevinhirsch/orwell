@@ -30,8 +30,8 @@
        it here so the demo is a normal scrollable block whose wallpaper covers the FULL
        scrollable height — no dark slab past the fold. */
     /* SINGLE scroll container = <html>; <body> is normal-flow content, NOT a second
-       scroll container, and carries NO fixed background. The old build put a
-       `background-attachment: fixed` wallpaper on the tall (4.5–6.7k px) body AND
+       scroll container, and carries NO fixed background. The old build pinned a
+       fixed-attachment wallpaper to the tall (4.5–6.7k px) body AND
        `overflow-y: auto` on BOTH html and body. In real Chrome (GPU compositing) that
        fixed-attachment background on a scroll container is promoted to a composited layer
        that hit-tests ABOVE the page's own `position: fixed` children — so the bottom-right
@@ -59,7 +59,7 @@
       background: transparent !important;
     }
     /* The full-bleed wallpaper as a dedicated FIXED element behind everything — the
-       compositor-friendly way to pin a backdrop (vs. background-attachment:fixed on the
+       compositor-friendly way to pin a backdrop (vs. a fixed-attachment background on the
        scrolling body). Smooth wash is the JS-off / #bg=smooth default; the busy backdrop
        (below) overrides this element's background-image. pointer-events:none so it never
        intercepts a click or the wheel. */
@@ -87,7 +87,7 @@
        (the :not(.ek-flat) guard — the flat rules below stay in charge). */
     /* The busy backdrop rides the fixed #__wp element ONLY — never `body` (a fixed or even
        painted background on the tall scrolling body is what broke click/scroll on the fixed
-       switchers above). #__wp is already position:fixed, so no background-attachment needed. */
+       switchers above). #__wp is already position:fixed, so no fixed attachment needed. */
     body.ek-bg-busy:not(.ek-flat) #__wp {
       background-image:
         var(--ek-noise-tile, none),
