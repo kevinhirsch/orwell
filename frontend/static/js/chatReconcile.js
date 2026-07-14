@@ -213,6 +213,26 @@ export function _setReconcileDeps(deps) {
   }
 
   /**
+   * CASTING-RESUME-HANG Fix 3 (the likely ACTUAL hang): a framed CASTING turn can settle to
+   * reasoning-only — a long thinking trace with an EMPTY VISIBLE reply and no tool call. `accumulated`
+   * (merged reply + reasoning) is NON-blank there, so `_isEmptyTurnNoSave` above is false and no Retry
+   * arms; the reasoning renders into the "Thinking" accordion and the interview just HANGS. None of the
+   * auto-continue paths catch it — they fire on truncation / interruption / step-limit (a cut-off), not
+   * on a clean empty completion. This pure predicate decides whether to fire exactly ONE bounded
+   * re-prompt: true iff we're in the CASTING register (game build, season NOT started), the stream ended
+   * cleanly (a `[DONE]`, not thrown/cancelled), the turn used NO tools and produced NO visible artifact,
+   * the VISIBLE reply is empty, and the one-shot re-prompt has not already fired. SCOPED to casting —
+   * in-game empty turns keep their existing behavior. Pure so it is gated without a live stream.
+   */
+  export function _isCastingEmptyReplyReprompt({
+    gameBuild, seasonStarted, sawDone, cancelled, usedTools, producedVisible, visibleReply, alreadyReprompted,
+  } = {}) {
+    return !!gameBuild && !seasonStarted && !!sawDone && !cancelled &&
+      !usedTools && !producedVisible && !alreadyReprompted &&
+      (visibleReply == null || String(visibleReply).trim() === '');
+  }
+
+  /**
    * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
    * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
    * (chat.js ~2780) and a skippable production-cue user bubble. Those have no server counterpart, so

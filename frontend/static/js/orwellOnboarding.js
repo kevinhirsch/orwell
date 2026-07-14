@@ -605,7 +605,16 @@
     };
     const streamBusy = () => {
       try {
-        return !!(window.chatModule && window.chatModule.hasActiveStream && window.chatModule.hasActiveStream());
+        // CASTING-RESUME-HANG Fix 2 — the real chat.js `hasActiveStream(sessionId)` compares
+        // `_streamSessionId === sessionId` (null when idle), so a BARE no-arg call compared against
+        // `undefined` and was PERMANENTLY false — the "defer the cue until the in-flight stream settles"
+        // guard was DEAD in prod (masked in tests by a stub that ignored the arg). Pass the LIVE session
+        // id so it actually reflects the current session's stream. No current session ⇒ nothing can be
+        // streaming to defer for ⇒ treat as not busy.
+        const sm = window.sessionModule;
+        const sid = sm && sm.getCurrentSessionId && sm.getCurrentSessionId();
+        return !!(sid && window.chatModule && window.chatModule.hasActiveStream
+          && window.chatModule.hasActiveStream(sid));
       } catch (_) { return false; }
     };
     // The send seam (chat.js) is READY when chatModule exposes a programmatic send. On a fresh cold-start
@@ -733,6 +742,13 @@
     try { window._orwellRestartArmed = true; } catch (_) {}
     // #1035 (F-10): a new season has a fresh cast — re-arm the author-warm so route() warms it once.
     try { _resetAuthorWarmGuard(); } catch (_) {}
+    // CASTING-RESUME-HANG Fix 1 — re-arm the SOFT-restart cue latches. `_openSent` (the producers'
+    // opener) and `_resumeSent` (the post-photo resume cue) are MODULE-LEVEL once-guards that survive
+    // a season reset, because "Reset this season" / next-season is a SOFT SPA restart with NO page
+    // reload. Left set, season 2+ never fires the opener OR the resume cue and the casting interview
+    // HANGS. Clear both here (mirrors the _resetAuthorWarmGuard re-arm above) so the fresh season's
+    // cues fire again.
+    try { _openSent = false; _resumeSent = false; } catch (_) {}
     // #874: a restart/new-season/reset begins a FRESH casting flow — clear any stale no-feed notice
     // so a subsequent route() re-evaluates cleanly for the new season (there is no "welcome seen"
     // marker anymore since the healthy case shows no gate/modal at all).
