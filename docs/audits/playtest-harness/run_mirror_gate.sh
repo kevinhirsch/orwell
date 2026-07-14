@@ -119,11 +119,20 @@ wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; 
 # 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass
 if [ -z "$LIVE" ]; then
   # FAKE_TOKEN_DELAY_MS spaces the streamed tokens so A's stream has a DETERMINISTIC wall-clock WIDTH
-  # (default 300ms/token → a ~7-9s narration stream). A zero-width burst stream is impossible for a
+  # (default 600ms/token → a ~15-18s narration stream). A zero-width burst stream is impossible for a
   # second window to mirror LIVE on a contended host — the F5 flake root cause — so the live-parity
   # gate widens it; it changes PACING only, never the bytes (two windows still receive identical
   # deltas). Override with MIRROR_TOKEN_DELAY_MS. The toolturn/HUD gates don't need it (0 there).
-  FAKE_TOKEN_DELAY_MS_DEFAULT=300
+  #
+  # WHY 600 (raised from 300, 2026-07-14): the observer window B must ATTACH to A's live incremental
+  # stream (mount createStreamRenderer) *before* A's stream ends — else B falls back to a full
+  # history-reconcile and the gate reads `bUsesIncrementalRenderer=false`. On a contended gh-hosted
+  # runner B's subscribe+first-render can lag several seconds; a ~8s window let that miss land as a
+  # flaky red on unrelated FE PRs (mirror-parity flipped pass/fail across runs on identical code).
+  # Doubling the window makes the mid-stream attach robust to runner load without changing what the
+  # gate proves (still a pure pacing knob). Cheap: the extra seconds only cost on the happy path,
+  # which retries far less, and the 40-min job cap has ample headroom.
+  FAKE_TOKEN_DELAY_MS_DEFAULT=600
   [ -n "$TOOLTURN" ] && FAKE_TOKEN_DELAY_MS_DEFAULT=0
   TOKEN_DELAY="${MIRROR_TOKEN_DELAY_MS:-$FAKE_TOKEN_DELAY_MS_DEFAULT}"
   say "2) fake model :$FAKE_PORT${TOOLTURN:+ (FAKE_SCRIPT=toolturn)} (token-delay ${TOKEN_DELAY}ms)"
