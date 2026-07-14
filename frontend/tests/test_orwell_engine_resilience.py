@@ -70,7 +70,17 @@ def _run(coro):
     try:
         return loop.run_until_complete(coro)
     finally:
-        loop.close()
+        # Drain before close: cancel + await any tasks the coro left pending so a fire-and-forget
+        # child isn't destroyed mid-flight (no "Task was destroyed but it is pending" warnings /
+        # skipped cleanup). run_until_complete only awaits the root coroutine. (CodeRabbit #1621.)
+        try:
+            _pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for _t in _pending:
+                _t.cancel()
+            if _pending:
+                loop.run_until_complete(asyncio.gather(*_pending, return_exceptions=True))
+        finally:
+            loop.close()
 
 
 @pytest.fixture(autouse=True)
