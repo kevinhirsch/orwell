@@ -12,46 +12,113 @@
 (function () {
   "use strict";
 
-  // ── TIER SWITCHER (demo chrome) ────────────────────────────────────────────
-  // Drives the fixed Frosted / Glass / Flat toolbar (#ek-tier in element_kit_demo.html).
+  // ── TIER + BACKDROP SWITCHERS (demo chrome) ─────────────────────────────────
+  // Drives the fixed Frosted / Glass / Flat toolbar (#ek-tier) AND the Busy / Smooth
+  // backdrop toggle (#ek-bg — KIT-G-03, 2026-07-14 audit) in element_kit_demo.html.
   // Lives HERE, not inline in the demo page: the app serves /static under a CSP that
   // refuses inline scripts (script-src 'self'). Deep-linkable via location.hash
-  // (#tier=frosted|glass|flat); FROSTED is the default (the app default). Self-contained —
-  // deliberately does NOT load theme.js; flat's dark tokens are demo scaffolding CSS
-  // (.ek-flat) — a DELIBERATE COPY of the `dark` preset in js/theme.js THEMES (keep in
-  // sync; see the tripwire comment in element_kit_demo.html). The tier→body-class map
-  // below likewise mirrors theme.js applyGlassTier's contract, minus the glassTierCeiling
-  // clamp — this page must show all three tiers on demand.
+  // (#tier=frosted|glass|flat&bg=busy|smooth); FROSTED is the default tier (the app
+  // default) and BUSY the default backdrop (glass must be judged over a realistic
+  // backdrop — the smooth pastel wash measured A/B glass-vs-frosted diffs ≤14/255).
+  // Self-contained — deliberately does NOT load theme.js; flat's dark tokens are demo
+  // scaffolding CSS (.ek-flat) — a DELIBERATE COPY of the `dark` preset in js/theme.js
+  // THEMES (keep in sync; see the tripwire comment in element_kit_demo.html). The
+  // tier→body-class map below likewise mirrors theme.js applyGlassTier's contract, minus
+  // the glassTierCeiling clamp — this page must show all three tiers on demand.
   function initTierSwitcher() {
-    var VALID = { frosted: 1, glass: 1, flat: 1 };
+    var VALID_TIER = { frosted: 1, glass: 1, flat: 1 };
+    var VALID_BG = { busy: 1, smooth: 1 };
     function tierFromHash() {
       var m = /tier=(\w+)/.exec(location.hash || "");
-      return (m && VALID[m[1]]) ? m[1] : "frosted";   // FROSTED is the app default
+      return (m && VALID_TIER[m[1]]) ? m[1] : "frosted";   // FROSTED is the app default
     }
-    function apply(tier) {
+    function bgFromHash() {
+      var m = /bg=(\w+)/.exec(location.hash || "");
+      return (m && VALID_BG[m[1]]) ? m[1] : "busy";        // KIT-G-03: BUSY is the default
+    }
+    function apply() {
+      var tier = tierFromHash(), bg = bgFromHash();
       var b = document.body, h = document.documentElement;
       b.classList.remove("theme-frosted", "glass-full", "ek-flat");
       h.classList.remove("ek-flat");
       if (tier === "glass") { b.classList.add("theme-frosted", "glass-full"); }
       else if (tier === "frosted") { b.classList.add("theme-frosted"); }
       else { b.classList.add("ek-flat"); h.classList.add("ek-flat"); }
+      // KIT-G-03: the busy backdrop rides one body class; flat's dark backdrop rules
+      // still win there (the CSS carries the :not(.ek-flat) guard).
+      b.classList.toggle("ek-bg-busy", bg === "busy");
       document.querySelectorAll("#ek-tier button").forEach(function (btn) {
         var on = btn.dataset.tier === tier;
         btn.classList.toggle("ek-tier-on", on);
         btn.setAttribute("aria-pressed", on ? "true" : "false");
       });
-      // re-target the Chromium SVG refraction layer for the new tier (no-op elsewhere)
+      document.querySelectorAll("#ek-bg button").forEach(function (btn) {
+        var on = btn.dataset.bg === bg;
+        btn.classList.toggle("ek-tier-on", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      // re-target the Chromium SVG refraction layer for the new tier/backdrop (no-op elsewhere)
       try { window.OrwellLiquidGlass && window.OrwellLiquidGlass.refresh && window.OrwellLiquidGlass.refresh(); } catch (_) {}
     }
+    function setHash(tier, bg) {
+      var next = "tier=" + tier + "&bg=" + bg;
+      var already = (location.hash || "").replace(/^#/, "") === next;
+      location.hash = next;                        // deep-linkable; hashchange applies
+      if (already) apply();                        // same-hash re-click fires no hashchange
+    }
     document.querySelectorAll("#ek-tier button").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var already = tierFromHash() === btn.dataset.tier;
-        location.hash = "tier=" + btn.dataset.tier;   // deep-linkable; hashchange applies
-        if (already) apply(btn.dataset.tier);          // same-hash re-click fires no hashchange
-      });
+      btn.addEventListener("click", function () { setHash(btn.dataset.tier, bgFromHash()); });
     });
-    window.addEventListener("hashchange", function () { apply(tierFromHash()); });
-    apply(tierFromHash());
+    document.querySelectorAll("#ek-bg button").forEach(function (btn) {
+      btn.addEventListener("click", function () { setHash(tierFromHash(), btn.dataset.bg); });
+    });
+    window.addEventListener("hashchange", apply);
+    ensureBusyNoise();
+    apply();
+  }
+
+  // ── KIT-G-03: the seeded canvas noise/blotch tile for the BUSY backdrop ──────
+  // The CSS gradient layers give the backdrop hue/luma STRUCTURE at control scale;
+  // this tile adds the photo-like texture on top — soft random color blotches + a
+  // per-pixel grain pass — injected as the CSS custom property --ek-noise-tile
+  // (consumed by the body.ek-bg-busy #__wp rule). Seeded (mulberry32-style) so every
+  // load/screenshot sees the SAME texture; fail-open — no canvas ⇒ the gradient
+  // layers alone still carry the busy look.
+  function ensureBusyNoise() {
+    try {
+      var SIZE = 288;
+      var c = document.createElement("canvas");
+      c.width = c.height = SIZE;
+      var ctx = c.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      var s = 0x9e3779b9 >>> 0;                    // fixed seed — deterministic texture
+      function rnd() {
+        s = (s + 0x6d2b79f5) >>> 0;
+        var t = Math.imul(s ^ (s >>> 15), 1 | s);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      }
+      // soft color blotches — cloud/foliage-scale hue detail
+      for (var i = 0; i < 90; i++) {
+        var r = 8 + rnd() * 46;
+        ctx.fillStyle = "hsla(" + Math.floor(rnd() * 360) + "," +
+          Math.floor(35 + rnd() * 45) + "%," + Math.floor(35 + rnd() * 45) + "%," +
+          (0.10 + rnd() * 0.22).toFixed(2) + ")";
+        ctx.beginPath();
+        ctx.arc(rnd() * SIZE, rnd() * SIZE, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // per-pixel grain — the photo-noise floor
+      var img = ctx.getImageData(0, 0, SIZE, SIZE), d = img.data;
+      for (var p = 0; p < d.length; p += 4) {
+        var n = (rnd() - 0.5) * 56;
+        d[p] += n; d[p + 1] += n; d[p + 2] += n;
+        d[p + 3] = Math.max(d[p + 3], 46);         // a faint grain film everywhere
+      }
+      ctx.putImageData(img, 0, 0);
+      document.documentElement.style.setProperty(
+        "--ek-noise-tile", 'url("' + c.toDataURL("image/png") + '")');
+    } catch (_) { /* fail-open: gradients alone still read busy */ }
   }
   if (document.getElementById("ek-tier")) initTierSwitcher();
 
@@ -121,6 +188,15 @@
     relocate(docked.el, "ek-windows");
 
     dropScrims();
+
+    // KIT-F-07 (2026-07-14 audit): FORCE all three windows focused for the reference
+    // still. In the app the kit's focus stack keeps exactly ONE window .ow-focused
+    // (colored traffic lights) and the rest render the neutral grey lights BY DESIGN —
+    // which left 2 of 3 demo windows permanently grey. The reference shows the colored
+    // cluster on every example; the grey unfocused state has its own labeled swatch.
+    [std, modal, docked].forEach(function (w) {
+      try { w.el.classList.add("ow-focused"); } catch (_) {}
+    });
   }
 
   function buildNotices() {
@@ -189,6 +265,38 @@
     return g;
   }
 
+  // KIT-F-04 (2026-07-14 audit): the House Status swatch's row CSS. The real panel
+  // (orwellStatusPanel.js ensurePanel) injects its layout CSS scoped to the literal
+  // `#orwell-status` — the old demo mount (`ek-g-status`) never matched it, so the rows
+  // rendered run-together ("HOHYou", "NomsTwo houseguests"). The swatch now mounts under
+  // the REAL id (nothing else on this page uses it), and because the demo deliberately
+  // does NOT load orwellStatusPanel.js (it boots a live /api poller that would hide or
+  // overwrite the static swatch), the subset of rules this swatch composes is injected
+  // here as a DELIBERATE COPY — under the SAME style-element id the real panel guards
+  // on, declarations byte-matched to the panel source (keep in sync;
+  // test_0773_element_kit.py pins every copied rule against orwellStatusPanel.js).
+  function ensureStatusPanelCssCopy() {
+    if (document.getElementById("orwell-status-css")) return;
+    var st = document.createElement("style");
+    st.id = "orwell-status-css";
+    st.textContent = `
+        #orwell-status .os-ttl { display: flex; align-items: baseline; gap: .4rem; flex: 1; min-width: 0; flex-wrap: wrap; }
+        #orwell-status .os-phase { opacity: .65; font-weight: 400; text-transform: capitalize; }
+        #orwell-status .os-row { display: flex; gap: .4rem; }
+        #orwell-status .os-row .os-k { color: color-mix(in srgb, var(--fg, #9cdef2) 78%, var(--panel, #111)); min-width: 4.2em; }
+        #orwell-status .os-row .os-v { flex: 1; }
+        #orwell-status .os-noms { color: var(--red, #e06c75); }
+        body.theme-frosted #orwell-status .os-noms { color: #16191f; }
+        #orwell-status .os-you { margin: .35rem 0 .1rem; font-weight: 600; }
+        #orwell-status .os-you .os-badge {
+          display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
+          font-size: .72em; font-weight: 700; letter-spacing: .02em;
+          background: var(--accent, var(--red, #e06c75)); color: var(--on-accent, #fff);
+        }
+        #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }`;
+    document.head.appendChild(st);
+  }
+
   function buildGadgets() {
     // ALL the real player-tier gadget KINDS (owner: "all of them there"). Each is the
     // same OrwellGadget .og-card kit, instantiated with the real gadget's title/icon +
@@ -197,8 +305,13 @@
 
     // 1) HOUSE STATUS — the rich status HUD ("The House"); orwellStatusPanel.js. The
     //    real one carries week/phase in the title slot + the ceremony rows + the roster.
+    //    KIT-F-04: mounted under the REAL panel id so the panel-scoped row CSS applies;
+    //    persistCollapsed:false so the demo swatch NEVER reads or writes the app's own
+    //    per-user collapse key for this id (same localStorage origin).
+    ensureStatusPanelCssCopy();
     var status = makeGadget(
-      { id: "ek-g-status", title: "House Status", ariaLabel: "Game status", collapsible: true },
+      { id: "orwell-status", title: "House Status", ariaLabel: "Game status",
+        collapsible: true, persistCollapsed: false },
       '<div class="os-ceremony">' +
       '  <div class="os-you">You <span class="os-badge">HOH</span></div>' +
       '  <div class="os-row"><span class="os-k">HOH</span><span class="os-v">You</span></div>' +
@@ -211,7 +324,10 @@
     // the real status panel writes week/phase into the .og-title slot — mirror that.
     try {
       var ts = status.el && status.el.querySelector(".og-title");
-      if (ts) ts.innerHTML = '<span>Week 4</span> <span class="os-phase" style="opacity:.7">· Veto Ceremony</span>';
+      if (ts) {
+        ts.classList.add("os-ttl");  // the real panel adds the title-slot layout class
+        ts.innerHTML = '<span>Week 4</span> <span class="os-phase">· Veto Ceremony</span>';
+      }
     } catch (_) {}
 
     // 2) YOUR DEALS — orwellDeals.js (🤝)

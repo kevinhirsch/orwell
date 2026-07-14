@@ -8,8 +8,10 @@
     • Flat: no tier class — the app's default DARK theme tokens + dark backdrop, so the
       kit-less flat rendering is shown as it truly is in-app (the kit CSS is
       theme-frosted-scoped by design; flat has no kit chrome).
-  Deep-linkable: #tier=frosted | #tier=glass | #tier=flat. NOT in app nav.
-  Open at /static/element_kit_demo.html.
+  Deep-linkable: #tier=frosted | #tier=glass | #tier=flat, combinable with the backdrop
+  switch #bg=busy | #bg=smooth (KIT-G-03: BUSY — a realistic, photo-like wallpaper — is the
+  DEFAULT, so glass refraction is actually visible; smooth is the old pastel wash).
+  NOT in app nav. Open at /static/element_kit_demo.html.
 -->
 <html lang="en">
 <head>
@@ -49,6 +51,43 @@
         radial-gradient(60% 60% at 70% 90%, #ffd6e7 0%, transparent 60%),
         linear-gradient(135deg, #f3f6ff 0%, #eef7ee 100%);
     }
+    /* ── KIT-G-03 (2026-07-14 audit): the BUSY (default) demo backdrop ────────────
+       The pastel wash above is too smooth to bend — same-run A/B pixel diffs between
+       Glass and Frosted measured ≤14/255 everywhere, so this reference page could not
+       show the Glass tier's defining optic (refraction). This backdrop is deliberately
+       PHOTO-LIKE at control scale — varied hue + luma structure every ~10–90px from the
+       repeating-gradient layers, plus a seeded canvas noise/blotch tile the demo driver
+       (orwellElements.js) injects as --ek-noise-tile — per the corpus's own guidance:
+       judge glass over a realistic backdrop. The layers ride BODY itself (longhand
+       !important to out-cascade the smooth base's shorthand !important above): in the
+       CSS paint order the in-flow body background paints ABOVE the negative-z #__wp
+       layer, so restyling #__wp alone stays invisible — #__wp is kept in sync below
+       purely as the mirror of the app hook. Deep-linkable (#bg=busy is the default |
+       #bg=smooth); JS-off fails open to the smooth wash. Flat keeps its dark backdrop
+       (the :not(.ek-flat) guard — the flat rules below stay in charge). */
+    body.ek-bg-busy:not(.ek-flat),
+    body.ek-bg-busy:not(.ek-flat) #__wp {
+      background-image:
+        var(--ek-noise-tile, none),
+        repeating-linear-gradient(98deg,
+          rgba(31, 58, 108, .50) 0 18px,
+          rgba(236, 244, 252, .42) 18px 30px,
+          rgba(196, 92, 48, .46) 30px 47px,
+          rgba(247, 214, 142, .40) 47px 60px,
+          rgba(38, 110, 82, .44) 60px 79px,
+          rgba(250, 246, 238, .38) 79px 92px),
+        repeating-linear-gradient(14deg,
+          rgba(120, 32, 68, .30) 0 11px,
+          rgba(120, 32, 68, 0) 11px 27px,
+          rgba(24, 96, 132, .28) 27px 38px,
+          rgba(255, 232, 160, .26) 38px 55px),
+        radial-gradient(42% 34% at 22% 18%, rgba(255, 214, 120, .85), rgba(255, 214, 120, 0) 70%),
+        radial-gradient(50% 42% at 78% 74%, rgba(28, 44, 96, .55), rgba(28, 44, 96, 0) 72%),
+        linear-gradient(158deg, #a8c2e6 0%, #d9b98e 46%, #7d9a82 100%) !important;
+      background-repeat: repeat, repeat, repeat, no-repeat, no-repeat, no-repeat !important;
+      background-size: 288px 288px, auto, auto, auto, auto, auto !important;
+      background-attachment: fixed !important;
+    }
     /* Simulate an in-app glass surface: real glass surfaces (.ow-window .ow-body,
        .on-card, .modal-content) REDEFINE --fg to the canonical chrome dark ink so
        every nested kit control inherits dark-on-glass legibility. The kit composes
@@ -57,12 +96,17 @@
     .ek-h1 { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
     .ek-sub { opacity: .8; font-size: 13px; margin: 0 0 24px; }
     .ek-card {
-      background-color: color-mix(in srgb, var(--fg) 8%, transparent);
-      -webkit-backdrop-filter: var(--ow-glass-backdrop, blur(22px));
-      backdrop-filter: var(--ow-glass-backdrop, blur(22px));
-      border: 1px solid var(--ow-glass-rim-border, rgba(255,255,255,.12));
+      /* KIT-G-04 (2026-07-14 audit): the section wrappers are SOLID. The old wrapper
+         carried its OWN backdrop-filter around independently-sampling kit controls —
+         the exact "never glass on glass" anti-pattern the corpus forbids (§1), modeled
+         on the page meant to teach it. An opaque light plate approximates the old
+         frosted look; the kit controls inside now sample THIS one solid plane, and the
+         LIVE window/modal glass floats OUTSIDE the cards, directly over the wallpaper
+         (see .ek-onwall below). Do not reintroduce a backdrop-filter here. */
+      background: #eef1f6;
+      border: 1px solid color-mix(in srgb, #16191f 12%, transparent);
       border-radius: var(--ow-radius, 26px);
-      box-shadow: var(--ow-glass-float, 0 18px 50px rgba(0,0,0,.3));
+      box-shadow: 0 10px 30px rgba(0,0,0,.16);
       padding: 18px 20px; margin: 0 0 20px;
     }
     .ek-card h2 { font-size: 15px; font-weight: 600; margin: 0 0 14px; }
@@ -73,15 +117,46 @@
     .ek-section-h { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; opacity: .55;
       margin: 30px 0 12px; padding-bottom: 6px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 18%, transparent); }
     .ek-note { font-size: 12px; opacity: .78; margin: 0 0 12px; line-height: 1.5; }
+    /* the page headings sit directly on the (busy) wallpaper — a small SOLID chip keeps
+       them legible over photo-scale detail (solid, per the same KIT-G-04 rule; the later
+       border/padding shorthands deliberately override .ek-section-h's underline look). */
+    .ek-h1, .ek-sub, .ek-section-h {
+      background: #eef1f6; width: fit-content;
+      padding: .12em .55em; border-radius: .55em;
+      border: 1px solid color-mix(in srgb, #16191f 10%, transparent);
+    }
     .ek-note code, .ek-page code { font-family: var(--ow-mono-font); font-size: .92em; background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 1px 4px; border-radius: 4px; }
     .ek-tag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; opacity: .55; }
     .ek-traffic-wrap { display: grid; gap: 4px; justify-items: start; }
-    /* show the traffic-light cluster on a small frosted titlebar swatch */
-    .ek-traffic-wrap .ow-controls { background: color-mix(in srgb, var(--fg) 10%, transparent);
-      border-radius: 999px; padding: 5px 8px; }
+    /* KIT-F-07 (2026-07-14 audit): each swatch cluster rides a REAL .ow-titlebar context,
+       so the glyph reveal is the app's OWN ancestor rule (style.css
+       `.ow-titlebar:hover .ow-controls .ow-*::before`) firing on real hover — the old
+       swatch forced button opacity, which never revealed the ::before glyphs. The wrapper
+       deliberately does NOT wear .ow-window (liquidGlass.js refracts every `.ow-window`,
+       so the swatch would consume refraction cap slots meant for the real windows) — the
+       two window-ancestry COLOR states are mirrored below as a DELIBERATE COPY of
+       style.css's "FOCUSED window → colored lights" / "UNFOCUSED window → neutral grey
+       lights" rules (keep in sync; test_0773_element_kit.py pins the hexes). */
+    .ek-traffic-wrap .ow-titlebar {
+      display: inline-flex; cursor: default;
+      background: color-mix(in srgb, var(--fg) 10%, transparent);
+      border-radius: 999px; padding: 5px 10px;
+    }
+    body.theme-frosted .ek-traffic-focused .ow-controls .ow-close { background: #ff5f57; }
+    body.theme-frosted .ek-traffic-focused .ow-controls .ow-min   { background: #febc2e; }
+    body.theme-frosted .ek-traffic-focused .ow-controls .ow-dock  { background: #28c840; }
+    body.theme-frosted .ek-traffic-unfocused .ow-controls .ow-close,
+    body.theme-frosted .ek-traffic-unfocused .ow-controls .ow-min,
+    body.theme-frosted .ek-traffic-unfocused .ow-controls .ow-dock {
+      background: color-mix(in srgb, var(--fg, #fff) 26%, transparent);
+    }
     /* relocated kit windows/gadgets sit STATIC inline in the demo (override the kit's
        fixed/absolute slot positioning so they render in the section flow for the still). */
     .ek-wins { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+    /* KIT-G-04/G-03: the LIVE windows host floats directly over the wallpaper (like the
+       app) — never inside a section card — so the window/modal glass samples the REAL
+       backdrop instead of a plate (glass over a solid card shows no refraction at all). */
+    .ek-onwall { margin: 4px 2px 24px; }
     .ek-wins .ow-window { position: static !important; inset: auto !important; transform: none !important;
       margin: 0 !important; width: 300px !important; max-width: 100%; }
     /* .og-card is display:none by default (the rail flips it to block via show());
@@ -90,28 +165,31 @@
     #ek-notices .on-card, #ek-chathint .on-card, #ek-chathint .orwell-chat-hint {
       position: static !important; inset: auto !important; transform: none !important; margin: 0 !important; max-width: 100%; }
 
-    /* ── TIER SWITCHER (demo chrome, not app chrome) ─────────────────────────────
-       Fixed neutral colors so the toolbar itself stays legible on all three tiers
-       (light wallpaper AND the flat dark backdrop). Deep-linkable via #tier=…. */
-    #ek-tier {
-      position: fixed; right: 14px; bottom: 14px; z-index: 12000;
+    /* ── TIER + BACKDROP SWITCHERS (demo chrome, not app chrome) ─────────────────
+       Fixed neutral colors so the toolbars themselves stay legible on all three tiers
+       (light wallpaper AND the flat dark backdrop). Deep-linkable via
+       #tier=…&bg=… (KIT-G-03: #ek-bg toggles busy | smooth; busy is the default). */
+    #ek-tier, #ek-bg {
+      position: fixed; right: 14px; z-index: 12000;
       display: inline-flex; gap: 4px; padding: 5px;
       background: rgba(24, 27, 33, 0.92); border: 1px solid rgba(255,255,255,.18);
       border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,.35);
       font-family: var(--ow-ui-font);
     }
-    #ek-tier button {
+    #ek-tier { bottom: 14px; }
+    #ek-bg { bottom: 62px; }
+    #ek-tier button, #ek-bg button {
       appearance: none; border: none; cursor: pointer;
       padding: 7px 14px; border-radius: 999px;
       background: transparent; color: #e8ecf2;
       font: inherit; font-size: 12px; font-weight: 600; letter-spacing: .01em;
     }
-    #ek-tier button:hover { background: rgba(255,255,255,.12); }
-    #ek-tier button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
-    #ek-tier button.ek-tier-on { background: #0a84ff; color: #fff; }
-    /* The fixed switcher must never occlude the last section's controls on a phone —
-       reserve scroll room past the content for it (it is ~44px tall + 14px inset). */
-    @media (max-width: 768px) { .ek-page { padding-bottom: 140px; } }
+    #ek-tier button:hover, #ek-bg button:hover { background: rgba(255,255,255,.12); }
+    #ek-tier button:focus-visible, #ek-bg button:focus-visible { outline: 2px solid #0a84ff; outline-offset: 1px; }
+    #ek-tier button.ek-tier-on, #ek-bg button.ek-tier-on { background: #0a84ff; color: #fff; }
+    /* The fixed switchers must never occlude the last section's controls on a phone —
+       reserve scroll room past the content for the two stacked pills (~92px + insets). */
+    @media (max-width: 768px) { .ek-page { padding-bottom: 180px; } }
 
     /* ── FLAT tier scaffolding (html/body get .ek-flat) ──────────────────────────
        On flat the app's surfaces are dark --panel with light --fg — the light demo
@@ -136,17 +214,26 @@
     }
     /* flat: undo the glass-surface dark-ink simulation — the app's flat ink is light --fg */
     body.ek-flat .ek-page { --fg: #9cdef2; }
-    /* flat: the demo section cards read as the app's flat panels, not glass slabs */
+    /* flat: the demo section cards read as the app's flat panels (already solid —
+       KIT-G-04 removed the wrapper's backdrop-filter for every tier) */
     body.ek-flat .ek-card {
       background: var(--panel, #111);
-      -webkit-backdrop-filter: none; backdrop-filter: none;
       border: 1px solid var(--border, #355a66);
       box-shadow: none;
+    }
+    /* flat: the heading chips read as flat panels too, not light plates */
+    body.ek-flat .ek-h1, body.ek-flat .ek-sub, body.ek-flat .ek-section-h {
+      background: var(--panel, #111);
+      border: 1px solid var(--border, #355a66);
     }
   </style>
 </head>
 <body class="theme-frosted">
   <div id="__wp"></div>
+  <div id="ek-bg" role="group" aria-label="Backdrop">
+    <button type="button" data-bg="busy" aria-pressed="false">Busy</button>
+    <button type="button" data-bg="smooth" aria-pressed="false">Smooth</button>
+  </div>
   <div id="ek-tier" role="group" aria-label="Glass tier">
     <button type="button" data-tier="frosted" aria-pressed="false">Frosted</button>
     <button type="button" data-tier="glass" aria-pressed="false">Glass</button>
@@ -305,20 +392,24 @@
     <section class="ek-card">
       <h2>Windows — OrwellWindowKit.create(…)</h2>
       <p class="ek-note">Live instances via <code>OrwellWindowKit.create({id, title, content, modal?, dockable?})</code>, relocated inline for the still. One base class + <code>.ow-titlebar / .ow-controls / .ow-body</code>. Types/states: standard (HUD), <code>modal:true</code> (centered, scrim'd dialog), <code>dockable</code> (docked into the control room); minimizable / closable / resizable / draggable; persisted layout + cross-device sync.</p>
-      <div class="ek-label">macOS traffic-light controls — .ow-controls (rest · hover/focus shows glyphs)</div>
+      <div class="ek-label">macOS traffic-light controls — .ow-controls (colored = focused window · glyphs reveal on hover/focus · grey = unfocused, BY DESIGN)</div>
       <div class="ek-row" id="ek-traffic-demo">
         <div class="ek-traffic-wrap">
-          <span class="ek-tag">rest</span>
-          <div class="ow-controls ek-traffic-rest"><button class="ow-min" type="button" aria-label="Minimize">–</button><button class="ow-close" type="button" aria-label="Close">×</button></div>
+          <span class="ek-tag">rest (focused)</span>
+          <div class="ek-traffic-focused"><div class="ow-titlebar"><div class="ow-controls ek-traffic-rest"><button class="ow-dock tap-exempt" type="button" aria-label="Dock to the control room">⇲</button><button class="ow-min tap-exempt" type="button" aria-label="Minimize">–</button><button class="ow-close tap-exempt" type="button" aria-label="Close">×</button></div></div></div>
         </div>
         <div class="ek-traffic-wrap">
-          <span class="ek-tag">hover / focus</span>
-          <div class="ow-controls ek-traffic-hot"><button class="ow-min" type="button" aria-label="Minimize">–</button><button class="ow-close" type="button" aria-label="Close">×</button></div>
+          <span class="ek-tag">hover / focus (glyphs)</span>
+          <div class="ek-traffic-focused"><div class="ow-titlebar ek-traffic-hot"><div class="ow-controls"><button class="ow-dock tap-exempt" type="button" aria-label="Dock to the control room">⇲</button><button class="ow-min tap-exempt" type="button" aria-label="Minimize">–</button><button class="ow-close tap-exempt" type="button" aria-label="Close">×</button></div></div></div>
+        </div>
+        <div class="ek-traffic-wrap">
+          <span class="ek-tag">unfocused (grey — by design)</span>
+          <div class="ek-traffic-unfocused"><div class="ow-titlebar"><div class="ow-controls"><button class="ow-dock tap-exempt" type="button" aria-label="Dock to the control room">⇲</button><button class="ow-min tap-exempt" type="button" aria-label="Minimize">–</button><button class="ow-close tap-exempt" type="button" aria-label="Close">×</button></div></div></div>
         </div>
       </div>
-      <div class="ek-label">Standard · modal · docked windows (live)</div>
-      <div class="ek-wins" id="ek-windows"></div>
+      <div class="ek-label">Standard · modal · docked windows (live) — floated on the wallpaper just below this card (window glass samples the WALLPAPER, never a card — no glass-on-glass). All three are FORCED focused for the reference still; in the app exactly ONE window is focused and the rest show grey lights.</div>
     </section>
+    <div class="ek-wins ek-onwall" id="ek-windows"></div>
 
     <!-- NOTIFICATIONS (OrwellNotice kit) -->
     <section class="ek-card">
@@ -379,9 +470,16 @@
     input.ow-field.ek-force-focus { border-color: var(--ow-focus-ring,#0a84ff);
       box-shadow: inset 0 1px 2px rgba(0,0,0,.18), 0 0 0 var(--ow-focus-ring-w,3px) color-mix(in srgb, var(--ow-focus-ring,#0a84ff) 45%, transparent); outline: none; }
     .ow-switch input.ek-force-focus + .ow-switch-track { outline: var(--ow-focus-ring-w,3px) solid var(--ow-focus-ring,#0a84ff); outline-offset: 2px; }
-    /* show the traffic-light glyphs on the "hot" swatch even without a real hover (the
-       app reveals the −/× glyphs on hover/focus of the cluster). */
-    .ek-traffic-hot .ow-min, .ek-traffic-hot .ow-close { opacity: 1 !important; }
+    /* KIT-F-07: force the app's OWN hover reveal for the still. The glyphs are ::before
+       pseudo-elements whose color style.css flips from transparent on
+       `.ow-titlebar:hover` — the old force (`opacity:1` on the buttons) never revealed
+       them. This mirrors the app's reveal rule exactly (DELIBERATE COPY — keep in sync
+       with style.css `.ow-titlebar:hover .ow-controls .ow-*::before`); a REAL hover on
+       the swatch titlebar fires the real rule too, since the swatch now rides a real
+       .ow-titlebar context. */
+    body.theme-frosted .ek-traffic-hot .ow-controls .ow-close::before,
+    body.theme-frosted .ek-traffic-hot .ow-controls .ow-min::before,
+    body.theme-frosted .ek-traffic-hot .ow-controls .ow-dock::before { color: rgba(0,0,0,0.6); }
   </style>
 
   <!-- The tier switcher logic lives in the demo driver (orwellElements.js) — the app serves

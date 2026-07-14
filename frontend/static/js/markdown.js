@@ -841,9 +841,14 @@ function ensureSpeakerCss() {
   } catch (_) { /* CSS is a nicety; never let it break the render */ }
 }
 
-// The chip HTML for one speaker. Uses the designed OrwellMonogram tile when the kit is present
-// (the real app); falls back to a monochrome initials tile headless / when the kit is absent so
-// the chip never blanks. Vault-free: keyed by public id/name only.
+// The chip HTML for one speaker. OWN-8: portraits are PRIMARY — the chip resolves the
+// houseguest's REAL persisted portrait from the kit's shared roster cache (#1324, keyed by the
+// seed: the sanctioned id form, or the name resolved to an id via orwellResolveHouseguestId)
+// and renders the designed OrwellMonogram tile only as the no-photo fallback; falls back to a
+// monochrome initials tile headless / when the kit is absent so the chip never blanks.
+// Vault-free: keyed by public id/name only; the portrait is the same public roster ref every
+// cast surface renders. Evicted keeps the L16 grayscale rule; photos take the kit's tight
+// face-weighted small-avatar crop (ow-mono-crop).
 function _speakerChipHtml(id, name) {
   const nm = String(name || '').trim();
   const safe = escapeHtml(nm || '?');
@@ -855,7 +860,15 @@ function _speakerChipHtml(id, name) {
       // surface has loaded it yet, the SVG would render unsized. Ensure it here.
       if (typeof window.OrwellMonogram.ensureCss === 'function') window.OrwellMonogram.ensureCss();
       const seed = _resolveSpeakerSeed(id, nm);
-      face = `<span class="ow-mono-face">${window.OrwellMonogram.svg({ id: seed, name: nm })}</span>`;
+      const cached = (typeof window.OrwellMonogram.portraitFor === 'function')
+        ? window.OrwellMonogram.portraitFor(seed) : null;
+      if (cached && cached.portrait) {
+        const ev = cached.status === 'evicted' ? ' ow-mono-evicted' : '';
+        face = `<span class="ow-mono-face ow-mono-crop${ev}">`
+          + `<img src="${escapeHtml(String(cached.portrait))}" alt="" loading="lazy"></span>`;
+      } else {
+        face = `<span class="ow-mono-face">${window.OrwellMonogram.svg({ id: seed, name: nm })}</span>`;
+      }
     }
   } catch (_) { face = ''; }
   if (!face) face = `<span class="ow-speaker-chip-ini">${escapeHtml(_speakerInitials(nm))}</span>`;
@@ -881,6 +894,17 @@ export function extractSpeakerTags(text) {
   // A dangling partial tag at the very end of a streaming buffer renders as nothing until the
   // next delta closes it. (A complete tag was already replaced above, so this is only a partial.)
   out = out.replace(_SPEAKER_TRAILING_PARTIAL_RE, '');
+  // OWN-8b — anchor a DETACHED attribution to its speech. The narrator sometimes emits the tag
+  // ALONE on its own line (a blank line between the tag and the quote, or the tag trailing the
+  // quote); mdToHtml then wraps the lone placeholder as its own paragraph and the face chip
+  // rendered as a disc floating BETWEEN prose blocks instead of in the speech's gutter. Join a
+  // tag-only line FORWARD onto the next non-empty line (the speech it introduces); a tag-only
+  // line at the very END anchors BACKWARD, leading the paragraph it attributes. A tag with
+  // same-line dialogue (the sanctioned form — placeholder followed by text, not a newline) is
+  // untouched, so every existing render is byte-identical.
+  out = out.replace(/(___OWSPK_\d+___)[ \t]*\n\s*(?=\S)/g, '$1 ');
+  out = out.replace(/(^|\n)([^\n]*\S[^\n]*)\n\s*(___OWSPK_\d+___)[ \t]*$/g,
+    (_m, brk, prev, ph) => brk + ph + ' ' + prev);
   return { text: out, chips };
 }
 

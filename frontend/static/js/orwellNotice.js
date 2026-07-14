@@ -460,25 +460,46 @@
   // safe transition can hook it later). Mirrors the old orwellEngineStatus --oes-inset behaviour.
   // #758b: measure via getBoundingClientRect (sub-pixel, the SAME box the FE consumers read) and
   // round UP, so a fractional line-height can never leave a 1px sliver of banner over the content.
+  //
+  // MOB-01/APP-OV-1 (2026-07-14 theme audit): the compensation is TWO separate concerns —
+  //   1. the --on-banner-inset CSS var + the orwell:banner-inset signal: the FIXED-CHROME DODGE
+  //      (hamburger, floating sidebar/rail, kit windows, gadget opener). It ALWAYS tracks the live
+  //      banner height while any card is up — a fixed control sliding below the banner is overlap
+  //      avoidance, not layout thrash, and without it a 2-line banner fully covered the phone
+  //      hamburger (Settings/Theme unreachable) and the desktop sidebar wordmark.
+  //   2. body padding-top: the APP-WIDE REFLOW of in-flow content. This stays OPT-IN (M1-7,
+  //      audit t-3): a `reflow: false` banner (the degraded-engine slab) overlays the chat top
+  //      instead of pushing the whole app down on every show/hide.
+  // The var is published on BOTH roots: the documentElement so `:root`-computed custom properties
+  // (style.css's --ow-titlebar-top, which anchors the mobile hamburger + gadget opener) can see it
+  // — a custom property declared at :root resolves var() against the HTML element, where a
+  // body-only inline var is invisible — and the body for every existing computed-style reader.
   function setBannerInset(host) {
     try {
-      // M1-7 (audit t-3): a banner created with `reflow: false` OVERLAYS instead of
-      // reserving body padding — the degraded-engine slab used to reflow the whole app on
-      // every show/hide. The host only reserves height while at least one card that OPTED
-      // INTO reflow is up; a host holding only no-reflow cards releases the inset.
-      if (host && host.querySelector && !host.querySelector(".on-card:not([data-on-noreflow])")) {
+      if (!host || !host.children || !host.children.length) {
         clearBannerInset();
         return;
       }
-      var rect = host && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
-      var h = rect ? Math.ceil(rect.height) : ((host && host.offsetHeight) || 0);
+      var rect = host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+      var h = rect ? Math.ceil(rect.height) : (host.offsetHeight || 0);
+      document.documentElement.style.setProperty("--on-banner-inset", h + "px");
       document.body.style.setProperty("--on-banner-inset", h + "px");
-      document.body.style.paddingTop = h + "px";
+      // M1-7 (audit t-3): a banner created with `reflow: false` OVERLAYS instead of
+      // reserving body padding — the degraded-engine slab used to reflow the whole app on
+      // every show/hide. The body only reserves height while at least one card that OPTED
+      // INTO reflow is up; a host holding only no-reflow cards releases the body padding
+      // (the fixed-chrome dodge var above stays live either way).
+      if (host.querySelector && !host.querySelector(".on-card:not([data-on-noreflow])")) {
+        document.body.style.paddingTop = "";
+      } else {
+        document.body.style.paddingTop = h + "px";
+      }
       _emitBannerInset(h);
     } catch (_) {}
   }
   function clearBannerInset() {
     try {
+      document.documentElement.style.removeProperty("--on-banner-inset");
       document.body.style.removeProperty("--on-banner-inset");
       document.body.style.paddingTop = "";
       _emitBannerInset(0);

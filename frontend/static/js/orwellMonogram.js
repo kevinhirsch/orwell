@@ -152,6 +152,13 @@
       // eviction = the L16 monochrome rule, owned here so every consumer agrees
       ".ow-mono-face.ow-mono-evicted img, .ow-mono-face.ow-mono-evicted .ow-mono-svg" +
       "  { filter: grayscale(1) brightness(.82); }" +
+      // OWN-8 — the TIGHT face-weighted crop for SMALL avatars (chat rows, speaker chips,
+      // decision chips: ≲32px). Portraits are head-and-shoulders framings; at chip size the
+      // face reads too small, so small consumers opt in via opts.crop / .ow-mono-crop and the
+      // kit zooms toward the upper-center face region. Photos only — the designed monogram
+      // (initials tile) is already composed for tiny sizes and never crops.
+      ".ow-mono-face.ow-mono-crop img { object-position: 50% 24%;" +
+      "  transform: scale(1.45); transform-origin: 50% 26%; }" +
       // the badge chip: bottom-right, ~34% of the face, white glyph on the role tint
       ".ow-mono-badge { position: absolute; right: 3%; bottom: 3%; width: 34%; height: 34%;" +
       "  min-width: 13px; min-height: 13px; max-width: 30px; max-height: 30px;" +
@@ -163,7 +170,9 @@
 
   // The one shared entry point: a face element for a roster card.
   //   card: {id, name, status, portrait} (the public roster card; portrait may be null)
-  //   opts: {role: 'hoh'|'nominee'|'veto'|'winner'|null, forceMono: bool, alt: string}
+  //   opts: {role: 'hoh'|'nominee'|'veto'|'winner'|null, forceMono: bool, alt: string,
+  //          crop: bool — OWN-8: the tight face-weighted crop for small (≲32px) consumers;
+  //          photos only, the monogram is untouched}
   // Returns a .ow-mono-face element — portrait <img> when a ref exists (unless forceMono),
   // else the designed monogram; badge composited on either; evicted ⇒ grayscale on either.
   function face(card, opts) {
@@ -173,6 +182,7 @@
     el.className = "ow-mono-face";
     const status = (card && card.status) || "active";
     if (status === "evicted") el.className += " ow-mono-evicted";
+    if (opts.crop) el.className += " ow-mono-crop";
     if (card && card.portrait && !opts.forceMono) {
       const img = document.createElement("img");
       img.loading = "lazy";
@@ -221,11 +231,32 @@
   // it never blocks or delays a render. `svg()`/`face()` stay pure and synchronous; only this
   // cache does I/O, and it does so out-of-band from any render call.
   const _portraitById = Object.create(null);
+  const _idByName = Object.create(null); // OWN-8: public name (lowercased) → roster id
   let _rosterFetchedAt = 0;
   let _rosterFetchSeq = 0; // out-of-order guard: only the LATEST in-flight refresh may apply
   function portraitFor(id) {
     if (id == null) return null;
     return _portraitById[String(id)] || null;
+  }
+  // OWN-8 — the full public roster card for an id OR a public display name (the roster names
+  // are the same public identity every cast surface renders; still Vault-free). Returns
+  // {id, name, status, portrait, isPlayer} or null while the cache is cold/missing.
+  function cardFor(ref) {
+    if (ref == null) return null;
+    const k = String(ref);
+    if (_portraitById[k]) return Object.assign({ id: k }, _portraitById[k]);
+    const byName = _idByName[k.trim().toLowerCase()];
+    if (byName && _portraitById[byName]) return Object.assign({ id: byName }, _portraitById[byName]);
+    return null;
+  }
+  // OWN-8 — the player's OWN roster card (isPlayer: true — /api/orwell/roster serves it first),
+  // so surfaces that draw the player (chat rows) find the casting headshot the same way NPC
+  // surfaces find portraits. Null pre-season / while the cache is cold.
+  function playerCard() {
+    for (const k of Object.keys(_portraitById)) {
+      if (_portraitById[k].isPlayer) return Object.assign({ id: k }, _portraitById[k]);
+    }
+    return null;
   }
   async function refreshPortraitCache(force) {
     if (typeof fetch !== "function") return; // non-browser eval (node-executed test harnesses)
@@ -242,15 +273,25 @@
         // A transient network REJECTION (catch below) deliberately keeps the cache — the true
         // reset path always reaches here or the successful repopulate.
         for (const k of Object.keys(_portraitById)) delete _portraitById[k];
+        for (const k of Object.keys(_idByName)) delete _idByName[k];
         return;
       }
       const data = await r.json();
       if (seq !== _rosterFetchSeq) return; // (json() awaited too — re-check before applying)
       const roster = Array.isArray(data && data.roster) ? data.roster : [];
       for (const k of Object.keys(_portraitById)) delete _portraitById[k];
+      for (const k of Object.keys(_idByName)) delete _idByName[k];
       for (const hg of roster) {
         if (hg && hg.id != null) {
-          _portraitById[String(hg.id)] = { portrait: hg.portrait || null, status: hg.status || "active" };
+          // OWN-8: keep the WHOLE public card (name/isPlayer joined the portrait/status pair)
+          // so cardFor()/playerCard() can serve every face consumer from the one cache.
+          _portraitById[String(hg.id)] = {
+            portrait: hg.portrait || null,
+            status: hg.status || "active",
+            name: hg.name || null,
+            isPlayer: !!hg.isPlayer,
+          };
+          if (hg.name) _idByName[String(hg.name).trim().toLowerCase()] = String(hg.id);
         }
       }
     } catch (_) { /* fail open — every consumer keeps rendering the monogram fallback */ }
@@ -258,10 +299,20 @@
   if (typeof window !== "undefined") {
     refreshPortraitCache(true);
     window.addEventListener("orwell:gamechanged", () => refreshPortraitCache(true));
+    // OWN-8 — close the M3-2 dangling seam: markdown.js's speaker chips already probe
+    // `window.orwellResolveHouseguestId(name)` to seed a chip by the REAL roster id (exact
+    // cross-surface hue + portrait-cache key match) but nothing ever defined it. The shared
+    // cache is the natural owner. Fail-soft: cold cache ⇒ null ⇒ the chip seeds by name.
+    if (typeof window.orwellResolveHouseguestId !== "function") {
+      window.orwellResolveHouseguestId = function (name) {
+        const c = cardFor(name);
+        return c ? c.id : null;
+      };
+    }
   }
 
   window.OrwellMonogram = {
     face, svg, badgeSvg, rolesFrom, hueFor, patternFor, initialsFor, ensureCss,
-    portraitFor, refreshPortraitCache,
+    portraitFor, refreshPortraitCache, cardFor, playerCard,
   };
 })();

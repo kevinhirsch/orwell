@@ -106,6 +106,14 @@ XFAIL = {
     "#1375-e": "contrast:sidebar:span.grow",
     # The sidebar "Orwell" brand title — 3.48:1 dark text on the translucent sidebar glass.
     "#1375-f": "contrast:sidebar:span.sidebar-brand-title",
+    # The user-bar username under the SETTINGS SCRIM (the only context that fires it): the APP-OV-3
+    # fix gives the footer a light chip + dark ink that measures ~13:1 un-scrimmed (pixel-verified),
+    # but the settings modal's dark overlay dims the chip to mid-gray (~108) and the sweep — which
+    # samples pixels scrim-and-all — reads the INERT, deliberately de-emphasized background chrome at
+    # ~3.4:1. Same class as #1375-e/-f above (both fire in this scrimmed state at ~4.2:1); no chip
+    # brightness can clear 4.5:1 under the scrim (needs pre-scrim luminance > 255). REMOVE if the
+    # sweep ever learns to skip modal-inerted chrome.
+    "#1375-i": "contrast:sidebar:span#user-bar-name.user-bar-name",
     # The post-season retro window (#orwell-retro) is a SYSTEMIC low-contrast surface: dark text +
     # dark window-kit controls (× – ⇲), the "The Season, Watched Back" title, the winner headline,
     # and the eviction list all render at ~3.6:1 on its light-ish glass. Its body is filled by a
@@ -127,6 +135,16 @@ XFAIL = {
     # season with enough content to overflow. Tracked as a kit a11y follow-up (add tabindex to the
     # scrollable kit body); REMOVE when the kit makes its scroll region focusable.
     "#1418-finale-scroll": "a11y:scrollable-region-focusable",
+}
+
+# Optional per-entry CONTEXT constraint: when an XFAIL id appears here, a finding is accepted
+# as that XFAIL only if EVERY context that hit it contains the token — a hit in any other
+# context is a real FAIL, never absorbed by the registry (needles are substring-matched, so a
+# selector-only needle would otherwise exempt the element everywhere).
+XFAIL_CONTEXT = {
+    # #1375-i is the settings-scrim reading ONLY — the un-scrimmed user-bar chip measures ~13:1
+    # and a regression there must gate.
+    "#1375-i": "+settings",
 }
 
 # Findings are collected into `found` keyed by their stable needle so a violation seen at N
@@ -156,6 +174,14 @@ def classify_and_report():
             if needle in line:
                 matched = fid
                 break
+        # A context-constrained entry only absorbs hits from its own context (see XFAIL_CONTEXT).
+        if matched and matched in XFAIL_CONTEXT:
+            token = XFAIL_CONTEXT[matched]
+            if not all(token in ctx for ctx in slot["hits"]):
+                # The needle DID fire — record it so the xpass report never suggests removing
+                # an entry whose element is actively failing (just outside the exempt context).
+                xfail_hits.add(matched)
+                matched = None
         if matched:
             xfail_hits.add(matched)
             xfails.append(f"XFAIL[{matched}] {line}  ::seen {len(slot['hits'])}x")

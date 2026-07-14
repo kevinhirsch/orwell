@@ -228,23 +228,30 @@
     ".dropdown",
     ".overflow-menu",
     ".cp-popover",
-    ".on-card",                    // the notice kit (functional affordance)
     // ── GLASS BUTTONS (kube.io demos the refraction on PILL BUTTONS — the authentic
     // look). The high-emphasis glass variants get the SAME feImage→feDisplacementMap
     // refraction + specular rim as the chrome, applied via backdrop-filter (refracts the
-    // backdrop BEHIND the button, NEVER the label/glyph — see applyTo). They are LAST in
-    // priority so the big chrome panels always win the cap, and they SHARE the per-size
-    // filter cache (identical buttons → ONE filter, so a row of same-size buttons is
-    // cheap). The .ow-btn-group is the ONE glass-sampling surface for its members
-    // (NSGlassEffectContainerView analogue, style.css) — its members carry no backdrop
-    // of their own and are EXCLUDED below. EXCLUSIONS (isRefractableButton): .ow-btn-plain
-    // (borderless, no glass material), the opaque .ow-btn-destructive-solid plate, and
-    // grouped members (they ride the group's single sample) never refract.
+    // backdrop BEHIND the button, NEVER the label/glyph — see applyTo). They rank AFTER
+    // every window/gadget/chrome surface above (those always win the cap first) but —
+    // #1603(b), 2026-07-14 audit — ABOVE `.on-card` notices below: on the demo + real
+    // desktop the button/group count reliably starved to 0/13 secondary, 0/2 icon, 0/2
+    // group under the shared MAX_LIVE_SURFACES cap (KIT-G-01), so buttons need to outrank
+    // the lower-frequency notice cards to refract at all before the cap runs out. They
+    // SHARE the per-size filter cache (identical buttons → ONE filter, so a row of
+    // same-size buttons is cheap). The .ow-btn-group is the ONE glass-sampling surface for
+    // its members (NSGlassEffectContainerView analogue, style.css) — its members carry no
+    // backdrop of their own and are EXCLUDED below. EXCLUSIONS (isRefractableButton):
+    // .ow-btn-plain (borderless, no glass material), the opaque .ow-btn-destructive-solid
+    // plate, and grouped members (they ride the group's single sample) never refract.
+    // (The cap-RAISE half of #1603 — KIT-G-01/02, whether MAX_LIVE_SURFACES itself should
+    // grow — is a separate, not-yet-decided change; this reorder only reprioritizes who
+    // wins the EXISTING cap.)
     ".ow-btn-prominent",
     ".ow-btn-secondary",
     ".ow-btn-icon",
     ".ow-btn-group",               // the segmented group = ONE shared backdrop sample
     ".ow-btn",                     // any remaining glass .ow-btn (plain/solid/grouped excluded)
+    ".on-card",                    // the notice kit (functional affordance)
   ];
   // Glass-button variants that must NEVER refract: borderless plain (no glass material),
   // the opaque solid-destructive plate, and grouped members (they ride the group's single

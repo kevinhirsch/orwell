@@ -124,13 +124,24 @@ def test_beat_chip_label_follows_theme_polarity_on_frosted():
 # ── the user-bar account icons follow the same polarity as the username ───────────────────────
 
 def test_user_bar_icons_follow_theme_polarity():
-    """The account icons (.user-bar-btn) must take the theme's var(--fg) ink like the username
-    beside them — they previously kept the sidebar dark ink and rendered dark-on-dark on the
-    dark footer band (owner: "dark-on-dark icons")."""
+    """APP-OV-3 (2026-07-14 theme audit — the §0 polarity class): the user-bar footer is now a
+    MATERIAL-FIXED light-glass chip (the frosted material is a light surface regardless of theme
+    tokens), so the account icons take the sidebar's blanket DARK chrome ink (#16191f). The old
+    frosted var(--fg) flip on .user-bar-btn — built for the retired dark var(--bg) footer band —
+    would render light-on-light on the chip; it must NOT come back."""
     hits = [
         (sel, body) for (sel, body) in _blocks_with(".user-bar-btn")
         if "theme-frosted" in sel and "var(--fg" in body
     ]
-    assert hits, (
-        "the frosted user-bar icon buttons must take var(--fg) ink so they read on the dark dock "
-        "band (light ink), matching the username")
+    assert not hits, (
+        "a frosted rule flips .user-bar-btn back to var(--fg) ink — on the light-glass footer "
+        "chip (APP-OV-3) the icons must keep the sidebar's dark chrome ink: %r" % hits)
+    # and the footer chip itself rides the kit's ONE light glass (fixed material, not a
+    # token-polarity band that inverts on the light frosted sidebar)
+    band = [
+        (sel, body) for (sel, body) in _blocks_with(".sidebar-user-bar")
+        if "theme-frosted" in sel and "var(--ow-glass-light-color" in body
+    ]
+    assert band, (
+        "the frosted .sidebar-user-bar footer must paint the kit light-glass chip "
+        "(var(--ow-glass-light-color)) — the APP-OV-3 polarity fix")

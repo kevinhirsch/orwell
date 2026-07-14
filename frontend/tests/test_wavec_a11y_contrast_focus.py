@@ -195,12 +195,19 @@ def test_headshot_disabled_buttons_have_a_hint_and_aria_describedby():
 
 
 def test_headshot_disabled_state_is_not_opacity_only():
+    """INT-6 (no opacity-only cue) + OWN-5 (2026-07-14 theme audit): the studio's disabled
+    buttons carry the app's established OPAQUE disabled treatment — the VM-17 pattern
+    (fixed #d6d6d9 fill + fixed #57575c ink + cursor:not-allowed at full opacity), never a
+    transparent/opacity composite whose contrast collapses over an arbitrary backdrop (the
+    old transparent-fill treatment read as ambiguous grey-on-grey on the flat tier)."""
     js = _read("static", "js", "orwellHeadshot.js")
-    m = re.search(r"\.ow-headshot-studio \.hs-btn\[disabled\]\s*\{([^}]*)\}", js)
+    m = re.search(r"\.ow-headshot-studio \.hs-btn\[disabled\][^{]*\{([^}]*)\}", js)
     assert m, "the disabled hs-btn rule has moved or been removed"
     body = m.group(1)
     assert "opacity: 1" in body, "disabled must not rely on a bare opacity dim (INT-6 — the old `opacity: .5` was the SOLE cue)"
-    assert "background: transparent" in body, "the disabled state must drop the fill entirely (a shape/fill cue, not just dimming)"
+    assert "background: #d6d6d9" in body, "disabled must paint the fixed opaque muted fill (the VM-17 pattern, OWN-5)"
+    assert "color: #57575c" in body, "disabled must paint the fixed opaque muted-dark ink (the VM-17 pattern, OWN-5)"
+    assert "cursor: not-allowed" in body, "disabled must keep the not-allowed cursor affordance"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
