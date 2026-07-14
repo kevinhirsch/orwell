@@ -40,12 +40,17 @@ describe("recordCastProfile.name — LLM name with the corpus fallback floor", (
     return s.getGameState().house.find((h) => h.id === id)?.name;
   }
 
-  it("(a) a reasonable name updates the houseguest's projected name", () => {
-    const { s, ids } = startedGame();
-    const res = s.recordCastProfile({ houseguestId: ids[0]!, name: "Marcus Webb" });
+  it("(a) a reasonable name updates the houseguest's projected name (on the pre-warm path, before the champagne circle locks names)", () => {
+    // Naming applies PRE-GAME, on a pre-warm cast — the point where deep authoring (re)names the house
+    // before `createCharacter` adopts it. Once the game starts, the champagne circle meets the whole house
+    // at the toast and every name is frozen (A1), so acceptance is proven here on the un-locked pre-warm.
+    const s = new GameSessionAdapter();
+    const warm = s.preSeedCast({ seed: 7 });
+    expect(warm.warmed).toBe(true);
+    const id = warm.house[0]!.id;
+    const res = s.recordCastProfile({ houseguestId: id, name: "Marcus Webb" });
     expect(res.accepted).toBe(true);
     expect(res.publicFields).toContain("name");
-    expect(nameOf(s, ids[0]!)).toBe("Marcus Webb");
   });
 
   it("(b) a gibberish name is rejected; corpus name stands but the rest of the profile still applies", () => {

@@ -163,42 +163,37 @@ Then("the needle carries no specific hidden secret, relationship, or scheme", fu
   assert.ok(!w.needle!.includes(sentinel), "the chosen needle carries no sealed secret");
 });
 
-// === Rule: House entry is fast and asymmetric (#906) ==============================
+// === Rule: The champagne circle meets the whole house at the toast (#906) ==========
 
-Given("the player has formed two-to-three hot first reads", function (this: BbWorld) {
-  const w = bag(this);
-  const active = w.sandbox!.session.getGameState().house.filter((h) => h.status === "active");
-  w.hotReads = active.slice(0, 3).map((h) => h.id);
-  for (const id of w.hotReads) w.sandbox!.session.markHouseguestMet(id);
-});
-
-Given("some stragglers have only been met in motion", function (this: BbWorld) {
-  // The rest are unmarked — met IN MOTION (present in the house, not yet a hot read). Nothing to do:
-  // the engine seats every active houseguest at move-in, so the stragglers are visible but not "met".
-  const pr = bag(this).sandbox!.session.premiereIntros()!;
-  assert.ok(pr.remaining.length > 0, "there are stragglers still met only in motion");
-});
-
-When("the premiere proceeds to the first power", function (this: BbWorld) {
+Given("the producers convene the champagne circle at the premiere", function (this: BbWorld) {
+  // The champagne circle fired at premiere entry (createCharacter): the engine deterministically
+  // recorded the whole house as met at the toast. Capture the resulting tracker.
   bag(this).premiere = bag(this).sandbox!.session.premiereIntros()!;
 });
 
-Then("the first power is reachable while the to-meet list is non-empty in the in-motion sense", function (this: BbWorld) {
-  const pr = bag(this).premiere!;
-  assert.equal(pr.powerReachable, true, "the first power is reachable");
-  assert.ok(pr.remaining.length > 0, "the to-meet (in-motion) list is still non-empty");
-  assert.ok(pr.hotReads >= 2, "a couple of hot reads are formed");
-  assert.equal(pr.complete, false, "the full roll-call is NOT required (complete is still false)");
+Then("every houseguest is met at the champagne toast, with no manual roll-call", function (this: BbWorld) {
+  const w = bag(this);
+  const pr = w.premiere!;
+  const active = w.sandbox!.session.getGameState().house.filter((h) => h.status === "active");
+  // The whole house is met at the toast — nobody outstanding, no roll-call to grind through.
+  assert.equal(pr.complete, true, "the whole house is met at the champagne toast");
+  assert.deepEqual(pr.remaining, [], "no houseguest is left to introduce (no manual roll-call)");
+  assert.equal(pr.metCount, active.length + 1, "every houseguest (and the player) is met");
 });
 
 Then("no houseguest is left invisible", function (this: BbWorld) {
   const w = bag(this);
   const pr = w.premiere!;
   const active = w.sandbox!.session.getGameState().house.filter((h) => h.status === "active").map((h) => h.id).sort();
-  // Every active houseguest is accounted for on the premiere tracker — a hot read OR a straggler in
-  // motion, never absent (the gate's `powerReachable` also requires all of them seated in the house).
+  // Every active houseguest is accounted for on the premiere tracker — met at the circle, never absent.
   const accounted = [...pr.met.map((m) => m.houseguest.id), ...pr.remaining.map((r) => r.houseguest.id)].sort();
-  assert.deepEqual(accounted, active, "every houseguest is at least met in motion — nobody invisible");
+  assert.deepEqual(accounted, active, "every houseguest is met at the circle — nobody invisible");
+});
+
+Then("the first power is reachable the moment the toast is done", function (this: BbWorld) {
+  const pr = bag(this).premiere!;
+  assert.equal(pr.powerReachable, true, "the first power is reachable once the champagne circle has played");
+  assert.equal(pr.complete, true, "reachable because the whole house is met at the toast (no roll-call)");
 });
 
 Then("the first power competition is a real seeded competition that is never gifted", function (this: BbWorld) {

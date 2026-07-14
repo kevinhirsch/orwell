@@ -206,20 +206,24 @@ def test_met_progress_gate_behaviour():
 
 # ── the strip retires with the premiere block (docks off after the first HOH) ── #
 
-def test_strip_hides_when_premiere_absent_or_complete():
+def test_strip_hides_when_premiere_absent():
+    # CHAMPAGNE CIRCLE (feature 0111, owner ruling 2026-07-14): the whole house is met at the toast, so the
+    # roster strip shows THROUGHOUT the premiere (no `complete` gate) and retires only when the engine drops
+    # the `premiere` field (the first HOH begins ⇒ the `!prem` guard fires).
     src = _read(PANEL)
     body = _fn_body(src, "renderPremiereStrip")
-    # absent OR complete OR no kit -> hide the strip and tear its tiles down via the shared helper.
+    # absent OR no kit -> hide the strip and tear its tiles down via the shared helper.
     assert "!prem" in body                     # absent-premiere guard
-    assert "prem.complete" in body             # complete guard
+    assert "prem.complete" not in body         # NO complete gate anymore (roster shows all premiere)
     assert "!window.OrwellMonogram" in body    # no-kit guard
     assert "clearPremiereStrip(el)" in body
     # the shared teardown both hides the strip AND removes every tile (button + its click listener).
     clear = _fn_body(src, "clearPremiereStrip")
     assert "strip.hidden = true" in clear
     assert "_stripTiles.delete(k)" in clear
-    # the parent #os-premiere block is itself hidden by renderPremiere on complete (the outer retire) …
+    # the parent #os-premiere block is itself hidden by renderPremiere when premiere is absent (outer retire) …
     prem = _fn_body(src, "renderPremiere")
+    assert "prem.complete" not in prem         # the outer block no longer gates on complete either
     assert "wrap.hidden = true" in prem
     # … and renderPremiere ALSO tears the strip down on its early hide paths (no stale tiles linger).
     assert "clearPremiereStrip(el)" in prem

@@ -863,8 +863,14 @@ export function updateSessionCostUI() {
 
 /** Create a timestamp span for role labels.
  * Pass an ISO string / Date / epoch-ms to render the message's own time
- * (used when replaying history). Falls back to "now" when no value is given. */
-export function roleTimestamp(when) {
+ * (used when replaying history). Falls back to "now" when no value is given.
+ *
+ * M2-6 — in a live game, pass the beat's IN-WORLD `moment` string
+ * ("Week 1 · Eviction night · Late night", from `metadata.game_moment`) as the second
+ * arg: it becomes the PRIMARY stamp and the real wall clock is demoted to the hover
+ * `title` (kept as metadata on `dataset.wallClock`). Absent/blank moment (pre-game /
+ * casting) ⇒ the neutral wall-clock stamp (prior behavior). */
+export function roleTimestamp(when, moment) {
   const ts = document.createElement('span');
   ts.className = 'role-timestamp';
   let d;
@@ -873,8 +879,17 @@ export function roleTimestamp(when) {
   else if (typeof when === 'string' && when) d = new Date(when);
   else d = new Date();
   if (isNaN(d.getTime())) d = new Date();
-  ts.textContent = d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-  ts.title = d.toLocaleString();
+  const wall = d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  if (typeof moment === 'string' && moment.trim()) {
+    // In-world moment leads; the wall clock is demoted to hover/metadata.
+    ts.textContent = moment.trim();
+    ts.classList.add('role-timestamp-moment');
+    ts.title = d.toLocaleString();
+    ts.dataset.wallClock = wall;
+  } else {
+    ts.textContent = wall;
+    ts.title = d.toLocaleString();
+  }
   return ts;
 }
 
@@ -2206,7 +2221,7 @@ export function addMessage(role, content, modelName, metadata) {
             roleEl.title = pair.requestedModel + ' -> ' + contModel;
           }
           applyModelColor(roleEl, contModel);
-          if (isFirstVisible) roleEl.appendChild(roleTimestamp(metadata?.timestamp));
+          if (isFirstVisible) roleEl.appendChild(roleTimestamp(metadata?.timestamp, metadata?.game_moment));
           wrap.appendChild(roleEl);
           const body = document.createElement('div');
           body.className = 'body';
@@ -2425,7 +2440,7 @@ export function addMessage(role, content, modelName, metadata) {
         r.title = replyModels.requestedModel + ' -> ' + resolvedModel;
       }
       if (!isSlash && !isCompacted) applyModelColor(r, resolvedModel);
-      r.appendChild(roleTimestamp(metadata?.timestamp));
+      r.appendChild(roleTimestamp(metadata?.timestamp, metadata?.game_moment));
     }
 
     const b = document.createElement('div');
@@ -2713,8 +2728,10 @@ export function addMessage(role, content, modelName, metadata) {
       wrap.appendChild(createMsgFooter(wrap));
       if (metadata) displayMetrics(wrap, metadata);
     } else {
-      // Add timestamp to user header (like AI messages)
-      r.appendChild(roleTimestamp(metadata?.timestamp));
+      // Add timestamp to user header (like AI messages). M2-6: user turns carry no
+      // server-stamped game_moment today, so this stays a neutral wall-clock stamp; the
+      // arg is passed for forward-compat and render-contract symmetry with the AI header.
+      r.appendChild(roleTimestamp(metadata?.timestamp, metadata?.game_moment));
 
       wrap.appendChild(createUserMsgFooter(wrap));
     }

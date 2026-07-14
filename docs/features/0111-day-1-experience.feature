@@ -30,14 +30,13 @@ Feature: 0111 — The Day-1 experience (the first session is the first move of t
       And the needle is sourced only from public or seeded framing
       And the needle carries no specific hidden secret, relationship, or scheme
 
-  Rule: House entry is fast and asymmetric; the first power arrives quickly (#906)
+  Rule: The champagne circle meets the whole house at the toast; the first power arrives quickly (#906)
 
-    Scenario: The first power is reachable without a full roster roll-call
-      Given the player has formed two-to-three hot first reads
-      And some stragglers have only been met in motion
-      When the premiere proceeds to the first power
-      Then the first power is reachable while the to-meet list is non-empty in the in-motion sense
+    Scenario: The whole house is met at the champagne toast, then the first power is ready
+      Given the producers convene the champagne circle at the premiere
+      Then every houseguest is met at the champagne toast, with no manual roll-call
       And no houseguest is left invisible
+      And the first power is reachable the moment the toast is done
       And the first power competition is a real seeded competition that is never gifted
 
   Rule: One early social beat demonstrably folds a real read (#908)

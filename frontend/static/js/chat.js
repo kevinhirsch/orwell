@@ -342,13 +342,26 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
    * speculative client `new Date()` the bubble was created with. Formats identically to
    * chatRenderer.roleTimestamp (the history-reload path) so the live bubble and the settled/reloaded
    * bubble read the same. Best-effort: a bad/absent value leaves the existing placeholder intact. */
-  function _applyServerTimestamp(holderEl, iso) {
+  function _applyServerTimestamp(holderEl, iso, moment) {
     try {
-      if (!holderEl || !iso) return;
+      if (!holderEl) return;
       var span = holderEl.querySelector('.role-timestamp');
       if (!span) return;
-      var d = new Date(iso);
-      if (isNaN(d.getTime())) return;
+      var d = iso ? new Date(iso) : null;
+      var haveWall = d && !isNaN(d.getTime());
+      // M2-6: the beat's IN-WORLD moment leads the live/mirror stamp too (matching
+      // chatRenderer.roleTimestamp on reload); the server-minted wall clock is demoted to
+      // the hover title + dataset. Absent moment ⇒ neutral wall-clock stamp (prior behavior).
+      if (typeof moment === 'string' && moment.trim()) {
+        span.textContent = moment.trim();
+        span.classList.add('role-timestamp-moment');
+        if (haveWall) {
+          span.title = d.toLocaleString();
+          span.dataset.wallClock = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+        return;
+      }
+      if (!haveWall) return;
       span.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       span.title = d.toLocaleString();
     } catch (_) {}
@@ -430,6 +443,28 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       if (isGameBuild()) {
         const _modeToggle = document.querySelector('.mode-toggle');
         if (_modeToggle) _modeToggle.style.display = 'none';
+      }
+    } catch (_) {}
+    // M2-7 — diegetic rename of the reasoning-surface Settings toggle in the GAME BUILD only.
+    // game-trim.css KEEPS the "Thinking Process" toggle (it changes the in-fiction chat), but its
+    // debug copy ("Show <think> collapsible bars") should read as the show's "Production Notes"
+    // family — matching the beat-chip register and the accordion label. The full inherited
+    // workspace (ORWELL_GAME_BUILD=0) keeps the technical operator wording untouched. Same
+    // belt-and-suspenders shape as the mode-toggle gate above; fail-safe if the node is absent.
+    try {
+      if (isGameBuild()) {
+        const _thinkRow = document.querySelector('.vis-row:has(input[data-ui-key="show-thinking"]) .vis-label');
+        if (_thinkRow) {
+          const _hint = _thinkRow.querySelector('.vis-hint');
+          if (_hint) _hint.textContent = 'Show the show’s production notes';
+          // Rewrite the leading label text node ("Thinking Process ") in place, keeping the hint span.
+          for (const node of _thinkRow.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+              node.textContent = 'Production Notes ';
+              break;
+            }
+          }
+        }
       }
     } catch (_) {}
     // Wire the slash-command autocomplete popup on the chat composer. The
@@ -1886,7 +1921,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   accumulated = accumulated.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                   roundText = roundText.replace(/<think>/i, '<think time="' + _elapsedDone + '">');
                 }
-                if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                 if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                 if (_liveThinkTimerEl && _elapsedDone) {
                   _liveThinkTimerEl.textContent = _elapsedDone + 's';
@@ -2209,7 +2244,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                     accumulated = accumulated.replace(/<think>/i, '<think time="' + elapsed + '">');
                     roundText = roundText.replace(/<think>/i, '<think time="' + elapsed + '">');
                   }
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Move timer to right side of header
                   if (_liveThinkTimerEl && elapsed) {
@@ -2632,7 +2667,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // observer, a late reload) renders the IDENTICAL time string instead of each window's
                 // own `new Date()` (which drifts). Overwrite the speculative role-timestamp the bubble
                 // was created with; the settled render (reload/addMessage) is already server-sourced.
-                if (json.ts && currentHolder) _applyServerTimestamp(currentHolder, json.ts);
+                // M2-6: `json.moment` (the beat's in-world stamp) rides the same event so the live
+                // bubble shows it immediately, identical to the reload render. Absent ⇒ wall clock.
+                if (currentHolder && (json.ts || json.moment)) _applyServerTimestamp(currentHolder, json.ts, json.moment);
 
               } else if (json.type === 'canonical_session') {
                 // ADR 0012 §2.4: the loser-of-the-bind window — it POSTed under its own per-tab id but
@@ -2656,7 +2693,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   isThinking = false;
                   cancelAnimationFrame(_thinkTimerRAF);
                   var _elapsed2 = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;
-                  if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
+                  if (_liveThinkHeader) _liveThinkHeader.textContent = isGameBuild() ? 'Production notes' : 'View thinking process';
                   if (_liveThinkTimerEl) _liveThinkTimerEl.textContent = _elapsed2 ? _elapsed2 + 's' : '';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
                   // Assign stable IDs
@@ -4456,9 +4493,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         const sec = document.createElement('div');
         sec.className = 'thinking-section';
         const domId = 'resume-think-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        // M2-7 — game build reads the reasoning accordion as diegetic "Production notes".
+        const _thinkLabel = isGameBuild() ? 'Production notes' : 'View thinking process';
         sec.innerHTML =
           '<div class="thinking-header" data-thinking-id="' + domId + '">' +
-            '<div class="thinking-header-left"><span class="live-think-header-text">View thinking process</span></div>' +
+            '<div class="thinking-header-left"><span class="live-think-header-text">' + _thinkLabel + '</span></div>' +
             '<span class="thinking-toggle live-think-toggle" id="' + domId + '-toggle"></span>' +
           '</div>' +
           '<div class="thinking-content" id="' + domId + '"><div class="thinking-content-inner live-think-inner"></div></div>';
@@ -4563,6 +4602,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // event so the finalize renders the identical time string the sender/history do (not a local
     // attach-time `new Date()`).
     let serverTs = null;
+    // M2-6: the beat's IN-WORLD moment string, captured off the replayed message_saved event so the
+    // mirror's finalize-in-place carries it onto the canonical bubble (matching the reload render).
+    let serverMoment = null;
     // F5 (dedup hardening): the SERVER-minted DB id, captured off the replayed message_saved event.
     // Stamped onto the finalized-in-place bubble below so the resumed reply carries its {db id} —
     // otherwise the finalize creates a db-id-LESS orphan that softReloadHistory's adopt pass cannot
@@ -4693,7 +4735,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
             // ADR 0012 §2.2: the run's persisted-message signal is in the replay buffer — capture its
             // server timestamp and re-stamp the live bubble so this observer reads the same time as
             // every other window. (json.id is the DB id; the finalize/reload carries it forward.)
-            if (json.ts) { serverTs = json.ts; _applyServerTimestamp(holder, serverTs); }
+            // M2-6: capture the in-world moment alongside the ts and re-stamp the mirror bubble.
+            if (typeof json.moment === 'string' && json.moment) serverMoment = json.moment;
+            if (json.ts || serverMoment) { if (json.ts) serverTs = json.ts; _applyServerTimestamp(holder, serverTs, serverMoment); }
             // F5 (dedup hardening): also capture the DB id so the finalize-in-place below stamps
             // data-db-id onto the canonical bubble (zero-churn adopt on a later reload, no duplicate).
             if (json.id) { savedDbId = json.id; holder.dataset.dbId = json.id; }
@@ -4731,6 +4775,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       // the identical time string as the sender's bubble and the history reload (chatRenderer.addMessage
       // → roleTimestamp(metadata.timestamp)). Absent ⇒ roleTimestamp falls back to "now" (prior behavior).
       if (serverTs) meta_.timestamp = serverTs;
+      // M2-6: carry the in-world moment so the finalized mirror bubble renders the same in-world stamp
+      // as the sender + history reload (chatRenderer.addMessage → roleTimestamp(ts, metadata.game_moment)).
+      if (serverMoment) meta_.game_moment = serverMoment;
       // F5 (dedup hardening): carry the DB id so the finalized bubble is data-db-id-stamped (addMessage
       // reads metadata._db_id). A later softReloadHistory then ADOPTS this bubble (id match) with ZERO
       // churn instead of leaving it an unmatchable orphan beside the canonical reload render (duplicate).

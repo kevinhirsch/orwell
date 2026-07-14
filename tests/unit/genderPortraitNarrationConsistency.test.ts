@@ -194,28 +194,29 @@ describe("#1326 — an unset genderPresentation is NEVER silently dropped", () =
     }
   });
 
-  it("the SAME fallback applies during the premiere's still-to-meet list", () => {
+  it("the SAME fallback applies during the premiere's champagne-circle roster", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const view = new GameSessionAdapter().createCharacter({ playerName: "The Player", seed: 23 });
-      // Force the premiere moment to be present with at least one still-to-meet houseguest whose
-      // facet we then strip, mirroring the roster-line doctoring above.
-      const remaining = view.premiere?.remaining ?? [];
-      // At creation the player has met nobody, so the still-to-meet list must be the full NPC cast —
-      // assert the precondition instead of silently skipping (review, PR #1346).
-      expect(remaining.length).toBeGreaterThan(0);
-      const target = remaining[0]!;
+      // CHAMPAGNE CIRCLE (0111): the whole house is met at the toast, so the roster the premiere context
+      // renders is the `met` list ("THE HOUSE AT THE CIRCLE"). Strip one houseguest's facet and assert the
+      // same unconfirmed-gender fallback clause appears — mirroring the roster-line doctoring above.
+      const met = view.premiere?.met ?? [];
+      // At creation the whole cast is met at the champagne circle — assert the precondition rather than
+      // silently skipping (review, PR #1346).
+      expect(met.length).toBeGreaterThan(0);
+      const target = met[0]!;
       const doctored: GameStateView = {
         ...view,
         premiere: {
           ...view.premiere!,
-          remaining: view.premiere!.remaining.map((fi) =>
+          met: view.premiere!.met.map((fi) =>
             fi.houseguest.id === target.houseguest.id ? { ...fi, genderPresentation: undefined } : fi,
           ),
         },
       };
       const ctx = renderGameContext(doctored);
-      const section = ctx.split("STILL TO MEET IN MOTION")[1] ?? "";
+      const section = ctx.split("THE HOUSE AT THE CIRCLE")[1] ?? "";
       expect(section).toContain(UNCONFIRMED_GENDER_CLAUSE);
     } finally {
       warn.mockRestore();

@@ -335,7 +335,7 @@ import { onNarrowChange } from './platform.js';
     body.innerHTML = `
         <div class="os-done" id="os-done" hidden><span id="os-done-label"></span><span id="os-done-winner"></span></div>
         <div class="os-premiere" id="os-premiere" hidden>
-          <div class="os-prem-obj">Meet the house<span class="os-prem-count" id="os-prem-count"></span></div>
+          <div class="os-prem-obj">Move-in night<span class="os-prem-count" id="os-prem-count"></span></div>
           <div class="os-prem-strip" id="os-prem-strip" role="group" aria-label="The premiere cast — tap a face to talk in chat" hidden></div>
           <div class="os-prem-left" id="os-prem-left" hidden></div>
         </div>
@@ -564,47 +564,37 @@ import { onNarrowChange } from './platform.js';
     el.style.display = "block";
   }
 
-  // J3-07/J3-08 (wayfinding): the PREMIERE objective + "X of 15 met" progress — the persistent,
-  // player-facing answer to "why hasn't HOH started, and how far am I?". Read from the engine's
-  // Vault-free `premiere` projection (PremiereIntrosView on getGameState). Shown ONLY during the
-  // premiere (it is the current objective) and hidden the moment it completes / the first HOH begins.
-  // metCount/total both include the player (they ARE met), so the player-mental-model figure is the
-  // NPC-only count (met-1 of total-1) to read as "X of 15". Public facets only — names + counts,
-  // never a number about a houseguest, a soul, or a standing.
+  // PREMIERE — THE CHAMPAGNE CIRCLE (owner ruling 2026-07-14): the premiere gadget is now a pure,
+  // Vault-free CAST ROSTER strip. The whole house is met at the champagne toast (feature 0111), so there
+  // is NO "X of 15 met" progress counter and NO "still to meet" checklist — the introductions auto-happen
+  // at the toast, in chat, not by milling about. Shown while the engine's `premiere` projection is present
+  // (the premiere moment) and hidden the instant the first HOH begins (the engine drops the `premiere`
+  // field). Public facets only — names + faces, never a number about a houseguest, a soul, or a standing.
   function renderPremiere(el, state) {
     const wrap = el.querySelector("#os-premiere");
     if (!wrap) return;
     const prem = state && state.premiere;
-    if (!prem || typeof prem !== "object" || prem.complete) { clearPremiereStrip(el); wrap.hidden = true; return; }
-    const total = Number(prem.total) - 1;     // NPCs only
-    const met = Number(prem.metCount) - 1;    // NPCs the player has met
-    if (!(total > 0) || !(met >= 0)) { clearPremiereStrip(el); wrap.hidden = true; return; }
+    // Present iff the engine is in the premiere moment — no `complete` gate (the roster shows throughout
+    // the premiere, even though the whole house is met at the toast).
+    if (!prem || typeof prem !== "object") { clearPremiereStrip(el); wrap.hidden = true; return; }
+    // No progress count and no still-to-meet list — everyone is met at the toast. Keep the elements in the
+    // DOM but empty/hidden; the roster strip is the only content now.
     const countEl = el.querySelector("#os-prem-count");
-    if (countEl) countEl.textContent = met + " of " + total + " met";
-    // The still-to-meet names (the same observable roster facets the engine exposes) — so the panel
-    // names the gap, not just a count. Bounded list; falls back to the count alone if absent.
+    if (countEl) countEl.textContent = "";
     const leftEl = el.querySelector("#os-prem-left");
-    if (leftEl) {
-      const names = Array.isArray(prem.remaining)
-        ? prem.remaining.map((fi) => fi && fi.houseguest && fi.houseguest.name).filter(Boolean)
-        : [];
-      if (names.length) {
-        leftEl.textContent = "Still to meet: " + names.join(", ");
-        leftEl.hidden = false;
-      } else {
-        leftEl.hidden = true;
-      }
-    }
-    renderPremiereStrip(el, state); // M2-3: the sixteen-tile cast strip below the objective
+    if (leftEl) { leftEl.textContent = ""; leftEl.hidden = true; }
+    renderPremiereStrip(el, state); // the sixteen-tile cast roster strip
     wrap.hidden = false;
   }
 
   // M2-3 (audit B2): the PREMIERE CAST STRIP — a Vault-free row of sixteen monogram tiles (the shared
-  // OrwellMonogram kit) that lights up as the player meets the house (0/15 → 15/15). Each tile carries
-  // ONLY the public roster card (id/name/status) + a met flag derived from the premiere projection's
-  // `remaining` set — no soul, number, or hidden field. Clicking a tile FOCUSES the chat (ADR 0003:
-  // augments, never replaces). It lives inside #os-premiere, so it appears only during the premiere and
-  // retires with the block the moment the first HOH begins. Keyed, idempotent upsert (no flicker).
+  // OrwellMonogram kit). Since the champagne circle meets the WHOLE house at the toast (feature 0111,
+  // owner ruling 2026-07-14), this is now a pure cast ROSTER (every tile lit) — NOT a still-to-meet
+  // tracker: the premiere projection's `remaining` set is empty, so the met-flag machinery below simply
+  // lights every face. Each tile carries ONLY the public roster card (id/name/status) — no soul, number,
+  // or hidden field. Clicking a tile FOCUSES the chat (ADR 0003: augments, never replaces). It lives
+  // inside #os-premiere, so it appears throughout the premiere and retires the moment the first HOH
+  // begins (the engine drops the `premiere` field). Keyed, idempotent upsert (no flicker).
   const _stripTiles = new Map(); // roster id -> tile button
   // Shared teardown: hide the strip and remove every tile (buttons + their click listeners). Called from
   // renderPremiereStrip AND from every renderPremiere hide/early-return path, so stale tiles never linger
@@ -618,7 +608,9 @@ import { onNarrowChange } from './platform.js';
     const strip = el.querySelector("#os-prem-strip");
     if (!strip) return;
     const prem = state && state.premiere;
-    if (!prem || typeof prem !== "object" || prem.complete || !window.OrwellMonogram) {
+    // Roster shows throughout the premiere (champagne circle — the whole house is met at the toast); no
+    // `complete` gate. Hidden only when premiere is absent (first HOH begun) or the monogram kit is missing.
+    if (!prem || typeof prem !== "object" || !window.OrwellMonogram) {
       clearPremiereStrip(el);
       return;
     }

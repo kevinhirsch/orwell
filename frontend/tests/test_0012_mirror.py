@@ -337,12 +337,13 @@ def test_chat_client_uses_server_timestamp_not_client_new_date():
     server timestamp — so every window renders the identical time string instead of each minting its
     own `new Date()` at a different instant."""
     chat = _read("static", "js", "chat.js")
-    # the shared server-timestamp helper exists and both paths use it.
-    assert "function _applyServerTimestamp(holderEl, iso)" in chat
-    # primary loop: message_saved carries `ts` and re-stamps the bubble.
-    assert "if (json.ts && currentHolder) _applyServerTimestamp(currentHolder, json.ts);" in chat
-    # resumeStream: captures the server ts off the replayed message_saved and carries it into finalize.
-    assert "if (json.ts) { serverTs = json.ts; _applyServerTimestamp(holder, serverTs); }" in chat
+    # the shared server-timestamp helper exists and both paths use it. (M2-6 extended its signature
+    # with the in-world `moment`; the server timestamp is still the demoted wall-clock source.)
+    assert "function _applyServerTimestamp(holderEl, iso, moment)" in chat
+    # primary loop: message_saved carries `ts` (+ the M2-6 `moment`) and re-stamps the bubble.
+    assert "if (currentHolder && (json.ts || json.moment)) _applyServerTimestamp(currentHolder, json.ts, json.moment);" in chat
+    # resumeStream: captures the server ts (+ M2-6 moment) off the replayed message_saved and carries it into finalize.
+    assert "if (json.ts || serverMoment) { if (json.ts) serverTs = json.ts; _applyServerTimestamp(holder, serverTs, serverMoment); }" in chat
     assert "if (serverTs) meta_.timestamp = serverTs;" in chat
 
 

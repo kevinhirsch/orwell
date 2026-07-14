@@ -554,11 +554,15 @@ export function extractThinkingBlocks(text) {
 function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) {
   const id = `thinking-${Date.now()}-${index}`;
   const timeHtml = thinkingTime ? `<span class="thinking-timer" style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;">${thinkingTime}s</span>` : '';
+  // M2-7 — diegetic rename in the game build: the reasoning accordion reads as the show's
+  // "Production notes" (matching the beat-chip register in orwellToolBeats.js), never the debug
+  // "View thinking process". Admin/operator (non-game) surfaces keep the technical wording.
+  const label = _inGameBuild() ? 'Production notes' : 'View thinking process';
   return `
     <div class="thinking-section">
       <div class="thinking-header" data-thinking-id="${id}">
         <div class="thinking-header-left">
-          <span>View thinking process</span>
+          <span>${label}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
           ${timeHtml}
