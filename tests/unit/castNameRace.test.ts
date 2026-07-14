@@ -9,10 +9,14 @@ import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter
 // concurrency bug, not a model hallucination.
 //
 // The fix is structural, at the `recordCastProfile` boundary: once a houseguest has been INTRODUCED to
-// the player (the engine's own `markHouseguestMet` structural tracker — the same signal the premiere
-// meet-everyone gate uses), their PUBLIC name is permanently frozen. A late-arriving authored name is
-// silently dropped (mirroring the existing cross-character per-field drop) — the rest of the authored
-// profile (biography/secrets/etc.) still applies.
+// the player, their PUBLIC name is permanently frozen. A late-arriving authored name is silently dropped
+// (mirroring the existing cross-character per-field drop) — the rest of the authored profile
+// (biography/secrets/etc.) still applies.
+//
+// CHAMPAGNE CIRCLE (owner ruling 2026-07-14): the premiere now introduces the WHOLE house at the toast,
+// at once, deterministically — so `createCharacter` locks EVERY name the instant the season starts (the
+// player has "met" everyone at the toast). Deep authoring may therefore only (re)name on the PRE-WARM
+// (pre-game) path, before the circle runs — which is where production authoring actually lands the cast.
 //
 // Roles only — no fixture names; every name read below comes from the engine's own seeded/authored output.
 
@@ -54,16 +58,16 @@ describe("A1 — recordCastProfile can never rename an already-introduced houseg
     expect(res.publicFields).toContain("biography");
   });
 
-  it("an NPC NOT yet introduced can still be renamed by authoring (the guard never over-rejects)", () => {
-    const s = freshGame(3);
-    const npc = s.getGameState().house.find((h) => h.status === "active")!;
-    // No markHouseguestMet call — this houseguest has not been introduced to the player yet.
-
-    const res = s.recordCastProfile({ houseguestId: npc.id, name: "Priya Anand" });
+  it("a PRE-WARM (pre-game) houseguest can still be renamed by authoring — the champagne circle hasn't run (the guard never over-rejects)", () => {
+    // Before the game starts there is no premiere and no champagne circle, so no name is locked yet: a
+    // pre-warm cast is exactly where deep authoring (re)names the house. The guard fires only for a
+    // houseguest the player has been introduced to, never on the un-locked pre-warm.
+    const s = new GameSessionAdapter();
+    const warm = s.preSeedCast({ seed: 3 });
+    expect(warm.warmed).toBe(true);
+    const res = s.recordCastProfile({ houseguestId: warm.house[0]!.id, name: "Priya Anand" });
     expect(res.accepted).toBe(true);
     expect(res.publicFields).toContain("name");
-    const after = s.getGameState().house.find((h) => h.id === npc.id)!;
-    expect(after.name).toBe("Priya Anand");
   });
 
   it("the name lock survives a snapshot/restore (the race can span an engine restart)", () => {
@@ -99,18 +103,21 @@ describe("A1 — recordCastProfile can never rename an already-introduced houseg
     expect(s.getGameState().house.find((h) => h.id === target.id)!.name).toBe(seededName);
   });
 
-  it("a fresh season (restart) starts with no locked names — the lock is season-scoped", () => {
+  it("a fresh season (restart) RE-RUNS the champagne circle — its cast is met at the toast and locked (season-scoped)", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Player", seed: 2 });
-    const first = s.getGameState().house.find((h) => h.status === "active")!;
-    s.markHouseguestMet(first.id);
 
-    // Confirmed restart onto a fresh season (same in-process adapter, standalone fallback path).
+    // Confirmed restart onto a fresh season (same in-process adapter, standalone fallback path). The
+    // prior season's lock is discarded (a fresh set), but the NEW season's champagne circle meets its
+    // whole house at the toast — so its cast is locked too (the player has met them all this season).
     s.createCharacter({ playerName: "The Player", seed: 44, confirmRestart: true });
     const npc = s.getGameState().house.find((h) => h.status === "active")!;
-    // A brand-new season's cast has not been introduced to anyone yet — authoring may still rename.
+    // Season-scoped: the lock holds EXACTLY this season's active cast, never an accumulation across seasons.
+    const locked = s.snapshot().introducedNames ?? [];
+    expect(locked.length).toBe(s.getGameState().house.filter((h) => h.status === "active").length);
+    // …and the new season's circle re-locked its own cast: a late authoring rename is refused.
     const res = s.recordCastProfile({ houseguestId: npc.id, name: "Elena Torres" });
-    expect(res.publicFields).toContain("name");
-    expect(s.getGameState().house.find((h) => h.id === npc.id)!.name).toBe("Elena Torres");
+    expect(res.publicFields).not.toContain("name");
+    expect(s.getGameState().house.find((h) => h.id === npc.id)!.name).not.toBe("Elena Torres");
   });
 });

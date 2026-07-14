@@ -1,6 +1,8 @@
 # 0044 — Strategic nomination & vote refinements
 
-> **Status:** Draft — an **enhancement**, not a new system. The NPC **nomination** and **vote** engines are
+> **Status:** **Built** (BDD-gated in `cucumber.cjs`; `nominationStrategy` in `season.ts`, `voteChoice` in
+> `liveSeason.ts`, tunables in `decisionConstants.ts`). PO-reviewed 2026-07-13 (the earlier "Draft" label was
+> stale doc-drift). An **enhancement**, not a new system. The NPC **nomination** and **vote** engines are
 > already **built, live, and relationship-driven** (`season.ts` `chooseNominations`, `liveSeason.ts`
 > `npcChoice`, `jury.ts` `castJuryVote`) — the engine decides, not the narrator. The audit found two real
 > **thinnesses**: nominations key on **`threat` only** (so an HOH always names the two biggest threats — no

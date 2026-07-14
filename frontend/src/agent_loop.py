@@ -2560,13 +2560,15 @@ async def _auto_move_npc(narration, last_user, house, endpoint_url, model, heade
 
 
 async def _auto_mark_premiere_intros(narration, owner) -> int:
-    """PREMIERE (#380) — GUARANTEE the meet-everyone gate progresses. The premiere prompt has the
-    producer introduce all 15 houseguests (calling markHouseguestMet each time) before the first
-    HOH unlocks, but the model reliably UNDER-CALLS markHouseguestMet: it narrates introductions
-    while the engine's meet-list never shrinks, so `complete` never flips and the player is trapped
-    in introductions (the live walkthrough sat in `premiere` across 6 turns). Error-correct the
-    omission the way _auto_record_scene / _auto_move_player do: for each STILL-TO-MEET houseguest
-    whose name the model just introduced in this turn's narration, mark them met ourselves.
+    """PREMIERE (#380) — GUARANTEE the meet-everyone gate progresses. Error-correct the model's
+    reliable UNDER-CALL of markHouseguestMet: for each STILL-TO-MEET houseguest whose name the model
+    just introduced in this turn's narration, mark them met ourselves.
+
+    CHAMPAGNE CIRCLE (feature 0111, owner ruling 2026-07-14): the engine now meets the WHOLE house at
+    the champagne toast, at once (`meetWholeHouseAtChampagneCircle`, at premiere entry), so the engine's
+    `remaining` list is EMPTY throughout a live premiere and this belt marks nobody (the loop below is a
+    no-op). It is kept — dormant and idempotent — as a defensive fail-open backstop; it never fights the
+    new flow (an already-met house yields an empty `remaining`).
 
     Deterministic (name-match against the engine's own `remaining` list — no LLM call), idempotent
     (the engine no-ops a re-mark), and fail-open. This KEEPS the designed meet-everyone feature

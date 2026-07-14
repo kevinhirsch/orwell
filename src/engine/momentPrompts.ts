@@ -687,22 +687,18 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "self to voice when they introduce themselves — never a thing the others already know). Do not write " +
     "any pre-existing familiarity, alliances, or closeness; bonds form from here, live, on screen. " +
     "WALK THE PLAYER THROUGH THESE PREMIERE BEATS, in order, lightly producer-guided: " +
-    "(1) INTRODUCTIONS — NO ONE IS INVISIBLE, BUT NOT EVERYONE IS EQUAL. This is a social game, not a " +
-    "roll-call: the player is playing, not auditioning. So let 2–3 first reads run HOT — a few houseguests " +
-    "the player actually clocks and connects with, up close — and meet the rest IN MOTION (a face across " +
-    "the champagne, a name caught in the crowd, someone drifting past): everyone gets seen, nobody is " +
-    "skipped, but you do NOT grind through all fifteen formal introductions before anything happens. " +
-    "Production gathers the whole house in the living room; each houseguest introduces their PUBLIC self — " +
-    "name, where they're from, what they do, one real thing — voiced from THAT person's card (their look, " +
-    "demeanor, background/biography in the GAME CONTEXT), in their OWN register, as a STRANGER meeting " +
-    "strangers. Go a few at a time so it breathes; let the player jump in and introduce THEMSELVES, and let " +
-    "them gravitate to whoever they want a real read on. " +
-    "DO NOT TRACK THE INTRODUCTIONS FROM MEMORY — the GAME CONTEXT below carries a 'PREMIERE — STILL TO " +
-    "MEET' list (the engine's truth of exactly who has NOT been formally introduced yet) and a met-count. " +
-    "The instant a houseguest has introduced their public self / the player has gotten a real read on them, " +
-    "call markHouseguestMet for them so the engine records the meeting and the list shrinks. Never " +
-    "re-introduce someone already met. Once a houseguest has introduced their public self, that intro is " +
-    "FIXED (it never drifts later). " +
+    "(1) INTRODUCTIONS — THE CHAMPAGNE CIRCLE. The FIRST thing that happens: production calls the WHOLE " +
+    "house into a champagne circle in the living room, and everyone is introduced right there, at once. " +
+    "This is the set-piece where the player meets the ENTIRE house — no wandering off to stumble on " +
+    "strangers, nobody skipped. Each houseguest introduces their PUBLIC self — name, where they're from, " +
+    "what they do, one real thing — voiced from THAT person's card (their look, demeanor, " +
+    "background/biography in the GAME CONTEXT), in their OWN register, as a STRANGER meeting strangers. Go " +
+    "around the circle so it breathes (a few at a time, some landing harder than others — this is a social " +
+    "game, not a flat roll-call), and let the player jump into the circle and introduce THEMSELVES. " +
+    "THE ENGINE HAS ALREADY RECORDED THE WHOLE HOUSE AS MET at the champagne circle — you do NOT track the " +
+    "introductions from memory and you do NOT call markHouseguestMet person by person; just voice the " +
+    "toast-circle introductions warmly and let the player gravitate to whoever they want a real read on. " +
+    "Once a houseguest has introduced their public self, that intro is FIXED (it never drifts later). " +
     "EARLY READS — the player gets to 'clock' people. As each houseguest is introduced, let the player " +
     "form a FIRST IMPRESSION from what is OBSERVABLE — their look, how they carry themselves, the way they " +
     "present, the energy they give off (the GAME CONTEXT's observable persona facets). This is the player " +
@@ -731,20 +727,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "(the first HOH, then nominations, then the veto, then eviction), briefly orient the player to what it " +
     "is and what's at stake the FIRST time, in your producer voice, without lecturing or showing any " +
     "numbers — they learn the weekly rhythm by living it. " +
-    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the introductions, the " +
-    "toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the first HOH " +
-    "competition; do not let the premiere drift indefinitely. " +
-    "THE FIRST POWER ARRIVES FAST — do not stall it behind a completionist roll-call, but it arrives AFTER " +
-    "the premiere's own beats, not before them: perform the TOAST and let the player PICK A BEDROOM first — " +
-    "those are the moments where the first real reads actually form. A 'hot read' is a GENUINE connection — " +
-    "a real one-on-one, a beat shared over the champagne — NOT merely having said someone's name in a crowd; " +
-    "so the way to reach first power is to let the player actually engage a couple of people, not to rattle " +
-    "off names. The GAME CONTEXT below tells you when the premiere is ready for power (the 'FIRST POWER' " +
-    "line: a couple of genuine hot reads formed and no houseguest left invisible). Once it reads reachable " +
-    "and the player signals they're ready for the game to start, THAT is your cue to advanceGame into the " +
-    "first HOH — you do NOT need every one of the fifteen formally introduced first; the stragglers get met " +
-    "in motion, during the mingle and the comp itself. Nobody should be invisible (everyone at least seen), " +
-    "but the first HOH should not wait on the last formal handshake — nor jump the toast and the bedroom.",
+    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the champagne-circle " +
+    "introductions, the toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the " +
+    "first HOH competition; do not let the premiere drift indefinitely. " +
+    "THE FIRST POWER IS READY ONCE THE CIRCLE HAS PLAYED: because the whole house is met at the champagne " +
+    "toast, there is NO roll-call to grind through and nobody to hunt down — the first HOH is reachable as " +
+    "soon as the champagne circle, the toast, and the bedroom pick have played out. Don't rush past those " +
+    "beats (they are where the player's first reads actually form), and don't stall past them either. Once " +
+    "the player has met the circle and signals they're ready for the game to start, THAT is your cue to " +
+    "call advanceGame into the first HOH.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -1263,21 +1254,20 @@ export function renderGameContext(view: GameStateView): string {
     return bits.length ? ` — ${bits.join(", ")}` : "";
   };
   const premiereLines: string[] = !pr ? [] : [
-    `- PREMIERE — READING THE HOUSE (engine truth): ${pr.metCount} of ${pr.total} of the cast met so far, ` +
-      `${pr.hotReads} hot first read${pr.hotReads === 1 ? "" : "s"} formed.`,
+    `- PREMIERE — THE CHAMPAGNE CIRCLE (engine truth): the producers convened the whole house for ` +
+      `champagne-circle introductions, so all ${pr.total - 1} houseguests are MET at the toast — there is ` +
+      `no roll-call to work through and nobody left to hunt down.`,
     `- PREMIERE — FIRST POWER: ` +
       (pr.powerReachable
-        ? "REACHABLE — a couple of GENUINE hot reads are formed and no houseguest is invisible; the first HOH may begin the moment the player is ready (the stragglers get met in motion, you do NOT need every formal introduction first)."
-        : `not yet — a couple of GENUINE hot reads still need to form, through real engagement (a one-on-one, a beat over the champagne toast), not by merely naming people. Run the toast and the bedroom pick — that is where the reads form. Everyone stays at least seen, nobody invisible; ${pr.remaining.length} still only met in motion.`),
-    ...(pr.remaining.length
+        ? "READY — the whole house is met at the champagne circle; the first HOH may begin as soon as the toast and the bedroom pick have played and the player is ready. Do not gift or rush past those beats."
+        : "not yet — let the champagne circle, the toast, and the bedroom pick play out first."),
+    ...(pr.met.length
       ? [
-          "- PREMIERE — STILL TO MEET IN MOTION (met around the house but not yet a hot read; markHouseguestMet",
-          "  the instant the player gets a real read on one — you never need to clear this whole list before the",
-          "  first HOH; describe each by what is OBSERVABLE only, never a strategy or danger label said aloud and",
-          "  never how the player feels — the player forms their OWN read):",
-          ...pr.remaining.map((fi) => `    · ${fi.houseguest.name}${observable(fi)}`),
+          "- PREMIERE — THE HOUSE AT THE CIRCLE (introduce each by what is OBSERVABLE only — never a strategy",
+          "  or danger label said aloud, and never how the player feels; the player forms their OWN read):",
+          ...pr.met.map((fi) => `    · ${fi.houseguest.name}${observable(fi)}`),
         ]
-      : ["- PREMIERE — STILL TO MEET IN MOTION: nobody — every houseguest has had a hot first read."]),
+      : []),
   ];
   // 0115 EXPOSURE-SHRINK (#1392) — the DR block below is the ONE prompt-guided (NOT structural) DR
   // surface, so we only inject a DR entry on a turn where its dramatic irony is NARRATABLE: no houseguest

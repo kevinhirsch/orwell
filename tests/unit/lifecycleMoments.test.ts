@@ -74,9 +74,9 @@ describe("L31 — the premiere is a producer-guided introductions round + a ligh
   it("the premiere moment drives a built-in round of introductions and a tutorial cadence", () => {
     const { sb } = liveGame("premiere-l31", 8);
     const { systemPrompt } = sb.session.getMomentPrompt({ moment: "premiere" });
-    // a BUILT-IN introductions beat — production gathers the house, person by person
+    // a BUILT-IN introductions beat — the champagne circle: production convenes the WHOLE house at once
     expect(systemPrompt).toMatch(/\(1\) INTRODUCTIONS/i);
-    expect(systemPrompt).toMatch(/production gathers the whole house/i);
+    expect(systemPrompt).toMatch(/calls the WHOLE house into a champagne circle/i);
     // each houseguest introduces their PUBLIC self (name / from / what they do / one real thing)
     expect(systemPrompt).toMatch(/name, where they're from/i);
     // once introduced, the public intro is fixed (ties to 0058 byte-stable public depth)

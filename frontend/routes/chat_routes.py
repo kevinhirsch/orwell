@@ -48,6 +48,7 @@ from routes.chat_helpers import (
     discard_last_user_message,
     unmark_session_framed,
     _last_message_ts,
+    current_game_moment,
 )
 from src.action_intents import classify_tool_intent as _classify_tool_intent
 from src.tool_policy import build_effective_tool_policy
@@ -1607,6 +1608,9 @@ def setup_chat_routes(
                                 }
                                 yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
                             if full_response:
+                                # M2-6: the beat's IN-WORLD moment (from this turn's framing state)
+                                # stamps the transcript timestamp; None pre-game (casting) ⇒ neutral.
+                                _game_moment = current_game_moment(ctx.user) if ctx.game_active else None
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
@@ -1620,13 +1624,16 @@ def setup_chat_routes(
                                     # Vault Wall (casting-leak fix): an OOC pre-game casting
                                     # reply is stamped so the in-game narrator never receives it.
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
+                                    game_moment=_game_moment,
                                 )
                                 if _saved_id:
                                     # ADR 0012 §2.2/§3.3: carry the SERVER-MINTED message timestamp so
                                     # every window renders the identical time string (the sender no
                                     # longer keeps its own `new Date()`). Read off the just-persisted
                                     # message's metadata; absent ⇒ the client falls back to "now".
-                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess)})}\n\n'
+                                    # M2-6: `moment` rides along so the LIVE bubble (and mirror windows)
+                                    # show the in-world stamp immediately, matching the reload render.
+                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess), "moment": _game_moment})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, full_response,
                                     last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
@@ -1655,6 +1662,12 @@ def setup_chat_routes(
                             },
                             reasoning=full_reasoning,
                         )
+                        # M2-6: a partial beat is still an in-game beat — stamp the in-world moment so a
+                        # disconnect/stopped save reloads with the game moment, not the wall clock (the
+                        # exact bug M2-6 removes). Same source + casting gate as the [DONE] save above.
+                        _stopped_moment = current_game_moment(ctx.user) if ctx.game_active else None
+                        if _stopped_moment:
+                            _stopped_md["game_moment"] = _stopped_moment
                         sess.add_message(ChatMessage("assistant", _stopped_content, metadata=_stopped_md))
                         if not incognito:
                             session_manager.save_sessions()
@@ -1822,6 +1835,9 @@ def setup_chat_routes(
                                     ))
                                     _rec_task.add_done_callback(_push_after_fallback)
                             if full_response:
+                                # M2-6: the beat's IN-WORLD moment (from this turn's framing state)
+                                # stamps the transcript timestamp; None pre-game (casting) ⇒ neutral.
+                                _game_moment = current_game_moment(ctx.user) if ctx.game_active else None
                                 _saved_id = save_assistant_response(
                                     sess, session_manager, session, full_response, last_metrics,
                                     character_name=ctx.preset.character_name,
@@ -1833,11 +1849,13 @@ def setup_chat_routes(
                                     # Vault Wall (casting-leak fix): an OOC pre-game casting
                                     # reply is stamped so the in-game narrator never receives it.
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
+                                    game_moment=_game_moment,
                                 )
                                 if _saved_id:
                                     # ADR 0012 §2.2/§3.3: server-minted timestamp (see the chat-mode
                                     # save above) so all windows render the identical time string.
-                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess)})}\n\n'
+                                    # M2-6: `moment` rides along for the live/mirror in-world stamp.
+                                    yield f'data: {json.dumps({"type": "message_saved", "id": _saved_id, "ts": _last_message_ts(sess), "moment": _game_moment})}\n\n'
                                 run_post_response_tasks(
                                     sess, session_manager, session, message, full_response,
                                     last_metrics, ctx.uprefs, memory_manager, memory_vector, webhook_manager,
@@ -1871,6 +1889,12 @@ def setup_chat_routes(
                                 },
                                 reasoning=full_reasoning,
                             )
+                            # M2-6: stamp the in-world moment on a partial/stopped beat too (same source +
+                            # casting gate as the [DONE] save), so a disconnect reloads with the game
+                            # moment instead of the wall clock.
+                            _stopped_moment2 = current_game_moment(ctx.user) if ctx.game_active else None
+                            if _stopped_moment2:
+                                _stopped_md2["game_moment"] = _stopped_moment2
                             sess.add_message(ChatMessage("assistant", _stopped_content2, metadata=_stopped_md2))
                             if not incognito:
                                 session_manager.save_sessions()
