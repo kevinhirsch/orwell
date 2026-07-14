@@ -137,6 +137,16 @@ XFAIL = {
     "#1418-finale-scroll": "a11y:scrollable-region-focusable",
 }
 
+# Optional per-entry CONTEXT constraint: when an XFAIL id appears here, a finding is accepted
+# as that XFAIL only if EVERY context that hit it contains the token — a hit in any other
+# context is a real FAIL, never absorbed by the registry (needles are substring-matched, so a
+# selector-only needle would otherwise exempt the element everywhere).
+XFAIL_CONTEXT = {
+    # #1375-i is the settings-scrim reading ONLY — the un-scrimmed user-bar chip measures ~13:1
+    # and a regression there must gate.
+    "#1375-i": "+settings",
+}
+
 # Findings are collected into `found` keyed by their stable needle so a violation seen at N
 # viewports/sub-passes is ONE entry. value = {"line": representative line, "hits": {contexts}}.
 found = {}
@@ -164,6 +174,11 @@ def classify_and_report():
             if needle in line:
                 matched = fid
                 break
+        # A context-constrained entry only absorbs hits from its own context (see XFAIL_CONTEXT).
+        if matched and matched in XFAIL_CONTEXT:
+            token = XFAIL_CONTEXT[matched]
+            if not all(token in ctx for ctx in slot["hits"]):
+                matched = None
         if matched:
             xfail_hits.add(matched)
             xfails.append(f"XFAIL[{matched}] {line}  ::seen {len(slot['hits'])}x")

@@ -2519,36 +2519,40 @@ def main() -> int:
               const ws = window.OrwellWs;
               if (ws && ws.isActive) { window._g15wsActive = ws.isActive; ws.isActive = () => false; }
             }""")
-            page.route("**/api/orwell/decision",
-                       lambda route: route.fulfill(status=200, content_type="application/json",
-                                                   body='{"ok": true}'))
-            page.evaluate("""window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
-                kind: 'eviction-vote', pick: 1, prompt: 'G15 smoke: cast your vote.',
-                options: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'} ] }}}));""")
-            page.wait_for_selector("#orwell-decision-card .odec-opt", timeout=3000)
-            g15_decision = page.evaluate("""() => new Promise(res => {
-              const ev0 = window._g15.events, f0 = window._g15.statusFetches;
-              const card = document.getElementById('orwell-decision-card');
-              card.querySelector('.odec-opt').click();
-              const confirm = card.querySelector('.odec-confirm');
-              const armed = !confirm.disabled;
-              confirm.click();
-              setTimeout(() => res({ armed,
-                                     locked: (card.textContent || '').indexOf('Locked in') !== -1,
-                                     events: window._g15.events - ev0,
-                                     statusFetches: window._g15.statusFetches - f0 }), 1200);
-            })""")
-            check(g15_decision.get("armed") is True and g15_decision.get("locked") is True,
-                  f"G15: the decision card's POST completed against the routed fake ({g15_decision})")
-            check(g15_decision.get("events") == 1 and g15_decision.get("statusFetches", 0) >= 2,
-                  f"G15: a bound decision refreshes the panels without waiting a poll period ({g15_decision})")
-            page.unroute("**/api/orwell/decision")
-            page.evaluate("""() => {
-              const ws = window.OrwellWs;
-              if (ws && window._g15wsActive) { ws.isActive = window._g15wsActive; delete window._g15wsActive; }
-              const c = document.getElementById('orwell-decision-card'); if (c) c.remove();
-              const b = document.getElementById('message'); if (b) b.value = '';
-            }""")
+            try:
+                page.route("**/api/orwell/decision",
+                           lambda route: route.fulfill(status=200, content_type="application/json",
+                                                       body='{"ok": true}'))
+                page.evaluate("""window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: {
+                    kind: 'eviction-vote', pick: 1, prompt: 'G15 smoke: cast your vote.',
+                    options: [ {id:'npc:1',name:'A'}, {id:'npc:2',name:'B'} ] }}}));""")
+                page.wait_for_selector("#orwell-decision-card .odec-opt", timeout=3000)
+                g15_decision = page.evaluate("""() => new Promise(res => {
+                  const ev0 = window._g15.events, f0 = window._g15.statusFetches;
+                  const card = document.getElementById('orwell-decision-card');
+                  card.querySelector('.odec-opt').click();
+                  const confirm = card.querySelector('.odec-confirm');
+                  const armed = !confirm.disabled;
+                  confirm.click();
+                  setTimeout(() => res({ armed,
+                                         locked: (card.textContent || '').indexOf('Locked in') !== -1,
+                                         events: window._g15.events - ev0,
+                                         statusFetches: window._g15.statusFetches - f0 }), 1200);
+                })""")
+                check(g15_decision.get("armed") is True and g15_decision.get("locked") is True,
+                      f"G15: the decision card's POST completed against the routed fake ({g15_decision})")
+                check(g15_decision.get("events") == 1 and g15_decision.get("statusFetches", 0) >= 2,
+                      f"G15: a bound decision refreshes the panels without waiting a poll period ({g15_decision})")
+            finally:
+                # Restore the transport pin + the routed fake even on a timeout/eval error —
+                # a page left forced onto HTTP would contaminate the later same-page checks.
+                page.unroute("**/api/orwell/decision")
+                page.evaluate("""() => {
+                  const ws = window.OrwellWs;
+                  if (ws && window._g15wsActive) { ws.isActive = window._g15wsActive; delete window._g15wsActive; }
+                  const c = document.getElementById('orwell-decision-card'); if (c) c.remove();
+                  const b = document.getElementById('message'); if (b) b.value = '';
+                }""")
 
             # G10 ratchet tightening: any close/minimize-shaped control inside a
             # fixed-position surface must belong to the kit or the legacy .modal family.

@@ -22696,14 +22696,21 @@ body:not(.theme-frosted) .ow-controls .ow-dock:focus-visible {
   outline: 2px solid var(--ow-ios-blue, #0a84ff);
   outline-offset: 2px;
 }
-/* the >=44px hit region (invisible) — WCAG 2.5.5 on the 12px discs, mirroring the frosted
-   cluster's rule; the glyph rides ::before, so ::after is free to carry the tap target.
-   Without this the flat discs are a 12px tap target (browser_smoke's >=24px cluster gate). */
+/* The enlarged hit region (invisible) — WCAG 2.5.8 on the 12px discs, mirroring the frosted
+   cluster's ::after pattern; the glyph rides ::before, so ::after is free to carry the tap
+   target. Without this the flat discs are a 12px tap target (browser_smoke's >=24px gate).
+   GEOMETRY IS LOAD-BEARING: a LATER sibling's ::after paints on top, so a region that
+   reaches past half the center-to-center distance swallows its neighbor's clicks (the
+   frosted 44px value on the old 2px gap put .ow-close's region over .ow-min's CENTER and
+   every min-click was "intercepted" — the af3fa4f CI red). 12px discs + the macOS-authentic
+   8px gap below = 20px centers; 32px regions reach 16px — sibling centers stay clear by 4px
+   while the target still beats the 24px floor. Change gap/disc/region together or not at all. */
+body:not(.theme-frosted) .ow-controls { gap: 8px; }
 body:not(.theme-frosted) .ow-controls .ow-close::after,
 body:not(.theme-frosted) .ow-controls .ow-min::after,
 body:not(.theme-frosted) .ow-controls .ow-dock::after {
   content: ""; position: absolute; top: 50%; left: 50%;
-  width: 44px; height: 44px; transform: translate(-50%, -50%);
+  width: 32px; height: 32px; transform: translate(-50%, -50%);
 }
 body:not(.theme-frosted) .ow-controls button:hover { transform: none; box-shadow: none; }
 
