@@ -773,8 +773,9 @@ def narration_temperature() -> float:
     if raw is not None and not isinstance(raw, bool):
         try:
             v = float(raw)
-        except (ValueError, TypeError):
-            # Expected "bad value -> default" case (a hand-edited non-numeric): quiet, not a failure.
+        except (ValueError, TypeError, OverflowError):
+            # Expected "bad value -> default" case (a hand-edited non-numeric, or an oversized
+            # numeric like 1e1000 that overflows float): quiet, not a failure.
             return _NARRATION_TEMPERATURE_DEFAULT
         if v == v:  # reject NaN
             return min(_NARRATION_TEMPERATURE_MAX, max(_NARRATION_TEMPERATURE_MIN, v))

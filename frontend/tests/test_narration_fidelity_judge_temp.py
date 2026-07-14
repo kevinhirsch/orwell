@@ -155,6 +155,23 @@ def test_assess_inside_a_running_loop_is_loud_not_silent(monkeypatch, run):
         "the sync-in-async guard-down must be surfaced RED, not swallowed"
 
 
+def test_assess_call_failure_is_loud_not_silent(monkeypatch):
+    """assess()'s OWN except-branch must record a RED-eligible faith:call-failed event when its
+    llm_fn raises — independently of agent_loop._faith_check's separate inline handler (#1599)."""
+    import src.faithfulness as fa
+    events = []
+    monkeypatch.setattr("src.log_rings.record_overseer",
+                        lambda level, kind, diagnosis, **kw: events.append((kind, kw)))
+
+    def _boom(_prompt):
+        raise RuntimeError("HTTP 400: Input required: specify prompt or messages")
+
+    v = fa.FaithfulnessJudge(_boom).assess("narr", {"board": {}}, "in-game")
+    assert v is None, "a raising judge fn must fall to the deterministic floor"
+    assert any(k == "faith:call-failed" and kw.get("ok") is False for (k, kw) in events), \
+        "assess()'s own call-failure must be surfaced RED, not swallowed"
+
+
 # ── BUG 2: the game-master narration temperature knob ──────────────────────────────────
 
 def _pin(monkeypatch, key, value):
