@@ -734,9 +734,7 @@ jobs:
       - name: mirror-parity gate — WebSocket transport (blocking)
         run: |
           set -uo pipefail
-          # 4 attempts (matched to the SSE leg): the widened token-delay window (run_mirror_gate.sh)
-          # is the real de-flake; this belt-and-suspenders retry covers a runner boot blip. 2026-07-14.
-          for attempt in 1 2 3 4; do
+          for attempt in 1 2 3; do
             echo "──── mirror-parity (WS) attempt $attempt ────"
             if MIRROR_WS_TRANSPORT=1 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
               echo "mirror-parity (WS): PASS on attempt $attempt"
