@@ -427,14 +427,6 @@ interface PrewarmCast {
 const PREWARM_PLAYER_NAME = "(pre-warm)";
 
 /**
- * FEATURE 0111 (Pillar 3, #906) — how many HOT first reads make the first power REACHABLE. "A couple":
- * house entry is fast + asymmetric, so the first HOH unlocks once the player has genuinely clocked 2–3
- * houseguests (met NPCs), with the rest met in motion. Never gates the OUTCOME (the HOH stays a real
- * seeded competition) — only the premiere GATE. Clamped to the cast size for tiny/degenerate houses.
- */
-const PREMIERE_HOT_READ_THRESHOLD = 2;
-
-/**
  * Flatten untrusted FE text before it rides into a SYSTEM prompt (the C8 pattern): collapse ALL
  * whitespace (newlines/tabs/control chars that could forge a prompt line) into single spaces and cap the
  * length. Used by the 0062 zeitgeist write-back (`recordWorldSnapshot`) — the snapshot is non-secret
@@ -4308,9 +4300,14 @@ export class GameSessionAdapter implements GameSession {
   /**
    * The premiere's meet-everyone progress (feature #380 follow-on) — the engine-tracked, Vault-free
    * answer to "who's met, who's still to introduce?". Only ACTIVE NPCs count (the cast at move-in);
-   * the player is implicitly met (counted in `metCount`/`total`), so `total` is the whole cast. The
-   * narrator reads `remaining` to drive the next introduction; `complete` is the structural gate the
-   * first HOH waits on. `null` outside the premiere.
+   * the player is implicitly met (counted in `metCount`/`total`), so `total` is the whole cast. `null`
+   * outside the premiere.
+   *
+   * CHAMPAGNE CIRCLE (owner ruling 2026-07-14): `premiereMet`/`premiereHotReads` are SEEDED at premiere
+   * entry (`meetWholeHouseAtChampagneCircle`) — the whole house is introduced at once at the toast, so
+   * during a live premiere every active NPC is already met: `remaining` is empty, `complete` is true, and
+   * `powerReachable` is true (the first HOH is ready the moment the toast is done — no manual roll-call).
+   * The narrator reads `met` (the whole cast) for the observable reads it voices at the circle.
    */
   premiereIntros(): PremiereIntrosView | null {
     this.clearPremiereIfOver();
@@ -4322,36 +4319,40 @@ export class GameSessionAdapter implements GameSession {
       const fi = this.firstImpressionOf(n);
       (fi.met ? met : remaining).push(fi);
     }
-    // FEATURE 0111 (Pillar 3, #906) — the ASYMMETRIC premiere gate. "No one is invisible, not everyone
-    // is equal": a few first reads run HOT (met NPCs), the rest are met IN MOTION (still on `remaining`),
-    // and NOBODY is invisible because the engine seats every active houseguest in the house at move-in
-    // (the presence map covers them all — the player can always at least cross paths). So the first HOH
-    // is REACHABLE once a couple of hot reads are formed AND everyone is visible, WITHOUT grinding through
-    // all fifteen formal introductions. The HOH itself stays a real seeded competition (only the gate
-    // is reframed, never the outcome). `hotReads`/`powerReachable` are pure counts/flags — no Vault data.
-    // #1318: a HOT read is a GENUINE player-formed read (`premiereHotReads`), NOT merely "met." The FE
-    // regex name-belt fills `premiereMet` (so intros keep shrinking) but is EXCLUDED here — otherwise the
-    // first HOH fired the moment two names were name-dropped in the move-in narration. Only a model-driven
-    // introduction the player was part of, or a recorded player↔NPC scene (notePremiereReads), counts.
+    // FEATURE 0111 (Pillar 3) — THE CHAMPAGNE CIRCLE (owner ruling 2026-07-14). The premiere's opening
+    // set-piece: the producers convene the WHOLE house for champagne-circle introductions, and every
+    // houseguest is met right there, at once (`meetWholeHouseAtChampagneCircle`, at premiere entry). So
+    // the meet-everyone tracker is `complete` for the whole premiere and the first HOH is REACHABLE the
+    // moment the toast is done — no manual roll-call, no milling about to stumble on strangers. `hotReads`
+    // is the reads formed at the circle (every met NPC); `powerReachable` === the circle introduced
+    // everyone (`remaining` empty) AND everyone is visible/seated in the house. The HOH itself stays a
+    // real, un-rigged seeded competition — only the GATE is reframed, never the outcome (mandate #3).
+    // (The `premiereHotReads`/name-belt machinery from #1318 stays wired but is dormant under this flow —
+    // the circle pre-registers every hot read, so any stray belt/model mark is an idempotent no-op.)
     const hotReads = activeNpcs.filter((n) => this.premiereHotReads.has(n.id)).length;
     const everyoneVisible = activeNpcs.every((n) => this.presence === null || this.presence.has(n.id));
+    const everyoneMet = remaining.length === 0;
     // +1 on both counts for the player (they ARE met — they're playing). total = the whole cast.
     return {
-      complete: remaining.length === 0,
+      complete: everyoneMet,
       metCount: met.length + 1,
       total: activeNpcs.length + 1,
       remaining,
       met,
       hotReads,
-      powerReachable: everyoneVisible && hotReads >= Math.min(PREMIERE_HOT_READ_THRESHOLD, activeNpcs.length),
+      powerReachable: everyoneMet && everyoneVisible,
     };
   }
 
   /**
-   * Mark a houseguest as introduced/met during the premiere (feature #380 follow-on). The structural
-   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for an
-   * unknown houseguest, the player (auto-met), an evicted/departed seat, or once the premiere is over.
-   * Persists (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
+   * Mark a houseguest as introduced/met during the premiere (feature #380 follow-on).
+   *
+   * CHAMPAGNE CIRCLE (owner ruling 2026-07-14): the whole house is met at the toast at premiere entry
+   * (`meetWholeHouseAtChampagneCircle`), so this is no longer the PRIMARY tracker — it is now an
+   * idempotent BACKSTOP (the model or the FE name-belt may still call it, but every active NPC is already
+   * met, so it is a no-op in the normal flow). Still a no-op for an unknown houseguest, the player
+   * (auto-met), an evicted/departed seat, or once the premiere is over. Persists only on a real change
+   * (durable resume, 0030) and returns the resulting progress (or `null` outside the premiere).
    */
   markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null {
     this.clearPremiereIfOver();
@@ -4402,6 +4403,31 @@ export class GameSessionAdapter implements GameSession {
       if (!this.house.npcs.some((n) => n.id === id && this.seatOf(n.id) === "active")) continue;
       if (!this.premiereMet.has(id)) { this.premiereMet.add(id); this.introducedNames.add(id); }
       this.premiereHotReads.add(id);
+    }
+  }
+
+  /**
+   * FEATURE 0111 (Pillar 3) — THE CHAMPAGNE CIRCLE (owner ruling 2026-07-14). The premiere's opening
+   * set-piece: the producers convene the WHOLE house for champagne-circle introductions, and every
+   * houseguest is met right there, at once — DETERMINISTICALLY, and RECORDED by the engine (not the
+   * model's progressive `markHouseguestMet` calls, and never engine-authored prose — the model still
+   * NARRATES the toast; the engine only records the meetings, ADR 0003). This is what makes meeting the
+   * whole house AUTO-HAPPEN at the toast: the player never mills about to stumble on strangers, and the
+   * meet-everyone tracker is `complete` (and first power reachable) the moment the premiere begins.
+   *
+   * Marks every active NPC met (`premiereMet`), a genuine read (`premiereHotReads`), and name-locked
+   * (`introducedNames`, the A1 durable companion). Vault-FREE (only public roster ids move) and
+   * seed-NEUTRAL (populates projection sets only — no rng draw, no relationship fold, no seeded stream),
+   * so it can never perturb a competition/vote/jury outcome. Does NOT persist (the caller, `createCharacter`,
+   * persists once at the end of season start). Idempotent; a no-op outside a live house.
+   */
+  private meetWholeHouseAtChampagneCircle(): void {
+    if (!this.house) return;
+    for (const n of this.house.npcs) {
+      if (this.seatOf(n.id) !== "active") continue; // at genesis this is every NPC (nobody evicted yet)
+      this.premiereMet.add(n.id);
+      this.premiereHotReads.add(n.id);
+      this.introducedNames.add(n.id);
     }
   }
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -4562,13 +4588,16 @@ export class GameSessionAdapter implements GameSession {
     this.intake = emptyIntake(); // the interview is over — its material lives on the player now
     this.week = 1;
     this.phase = "premiere";
-    // PREMIERE (feature #380 follow-on): start the meet-everyone tracker empty — nobody has been
-    // introduced yet. The producer (driven by the premiere moment prompt's who's-left list) walks the
-    // player through all 15 NPCs before the first HOH; `premiereMet` records who's been met. Persisted.
+    // PREMIERE (feature #380 follow-on; owner ruling 2026-07-14 — THE CHAMPAGNE CIRCLE): reset the
+    // meet-everyone trackers empty, then `meetWholeHouseAtChampagneCircle()` (below, after the live
+    // season exists) fills them deterministically — the premiere opens on the producers convening the
+    // whole house for champagne-circle introductions, so EVERY houseguest is met at the toast, at once
+    // (the engine records the meetings; the model still narrates the toast). No manual roll-call, no
+    // milling about to stumble on strangers; the first HOH is reachable the moment the toast is done.
     this.premiereMet = new Set();
-    // #1318: a fresh season has formed no hot reads yet — power waits for the first genuine one.
+    // #1318: reset the earned hot-read set too — the champagne circle refills it (a genuine group intro).
     this.premiereHotReads = new Set();
-    // A1: a fresh season starts with no locked names either — the new cast has not been introduced yet.
+    // A1: reset the durable name-lock — the champagne circle re-locks each houseguest's name as it introduces them.
     this.introducedNames = new Set();
     // #1322: a fresh season starts with no approach-rotation cooldown either — a reused adapter
     // instance (the one sanctioned restart door) must not carry a prior season's rotation forward.
@@ -4577,6 +4606,11 @@ export class GameSessionAdapter implements GameSession {
     this.lastApproachStretch = undefined;
     // Start the incremental weekly loop over the live house (player + NPCs).
     this.live = newLiveSeason([this.house.player.id, ...this.house.npcs.map((n) => n.id)]);
+    // THE CHAMPAGNE CIRCLE (owner ruling 2026-07-14): mark the whole house met at the toast — deterministic,
+    // engine-recorded, Vault-free and seed-neutral (projection sets only; no rng, no fold). The premiere's
+    // introductions auto-happen at the champagne toast (the first thing that happens), NOT via a manual
+    // roll-call. Done after `this.live` exists so seat resolution is unambiguous (every NPC is active at genesis).
+    this.meetWholeHouseAtChampagneCircle();
     if (this.reactiveTwistsEnabled) {
       // 0025 REACTIVE (PO ruling 2026-07-06): arm the standing pool — all three twists watch the live
       // house, each fires when the house EARNS its (per-season seeded) trigger, at most once, and all
@@ -9139,6 +9173,15 @@ export class GameSessionAdapter implements GameSession {
     const outgoingStretchKey = `${this.week}:${this.phase}`;
     this.week = s.week;
     this.phase = s.finished ? "finale" : s.beat;
+    // PREMIERE (owner ruling 2026-07-14): the champagne-circle trackers are premiere-scoped. Clear them
+    // as part of THIS commit the instant the phase leaves "premiere" (the first HOH begins), rather than
+    // lazily on a later read — a lazy clear would fire its own beatSeq-bumping persist at an arbitrary
+    // mid-season read (the pre-existing `clearPremiereIfOver` path). Done inside the already-committing
+    // advance, so it costs no extra beat. The DURABLE name-lock `introducedNames` is intentionally kept.
+    if (this.phase !== "premiere" && (this.premiereMet.size > 0 || this.premiereHotReads.size > 0)) {
+      this.premiereMet.clear();
+      this.premiereHotReads.clear();
+    }
     this.ceremony = {
       hoh: s.hoh,
       nominees: (s.finalNominees ?? s.nominees ?? []).slice(),
