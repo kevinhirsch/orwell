@@ -808,7 +808,7 @@
           </div>
           <div class="theme-fd-group">
             <label class="theme-fd-label">Harmony</label>
-            <select id="harmony-type" class="theme-fd-select">
+            <select id="harmony-type" class="ow-select">
               <option value="complementary">Complementary</option>
               <option value="analogous">Analogous</option>
               <option value="triadic">Triadic</option>
@@ -819,13 +819,13 @@
         <div class="theme-harmony-row" style="margin-top:6px;">
           <div class="theme-fd-group">
             <label class="theme-fd-label">Mode</label>
-            <select id="harmony-mode" class="theme-fd-select">
+            <select id="harmony-mode" class="ow-select">
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
           </div>
           <div class="theme-fd-group" style="justify-content:flex-end;">
-            <button id="harmony-generate-btn" class="harmony-generate-btn">Generate</button>
+            <button id="harmony-generate-btn" class="ow-btn ow-btn-secondary" style="width:100%;">Generate</button>
           </div>
         </div>
         <div id="harmony-preview" class="harmony-preview"></div>
@@ -835,7 +835,7 @@
         <div class="theme-fd-row">
           <div class="theme-fd-group">
             <label class="theme-fd-label">Font</label>
-            <select id="theme-font-select" class="theme-fd-select" aria-label="Font">
+            <select id="theme-font-select" class="ow-select" aria-label="Font">
               <option value="system">System (SF / Inter)</option>
               <option value="mono">Monospace</option>
               <option value="sans">Sans-serif</option>
@@ -844,7 +844,7 @@
           </div>
           <div class="theme-fd-group">
             <label class="theme-fd-label">Density</label>
-            <select id="theme-density-select" class="theme-fd-select" aria-label="Density">
+            <select id="theme-density-select" class="ow-select" aria-label="Density">
               <option value="compact">Compact</option>
               <option value="comfortable">Comfortable</option>
               <option value="spacious">Spacious</option>
@@ -886,8 +886,8 @@
             <div style="display:flex;gap:6px;align-items:center;">
               <input id="theme-google-font-input" class="theme-fd-select" list="theme-google-font-list" type="text" autocomplete="off" spellcheck="false" placeholder="Search or type a font name&hellip;" aria-label="Google font family" style="flex:1 1 0;min-width:0;" />
               <datalist id="theme-google-font-list"></datalist>
-              <button type="button" id="theme-google-font-apply" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Apply this Google font">Apply</button>
-              <button type="button" id="theme-google-font-clear" class="theme-io-btn" style="height:28px;flex:0 0 auto;" title="Use a built-in font instead">Clear</button>
+              <button type="button" id="theme-google-font-apply" class="ow-btn ow-btn-secondary" style="flex:0 0 auto;" title="Apply this Google font">Apply</button>
+              <button type="button" id="theme-google-font-clear" class="ow-btn ow-btn-secondary" style="flex:0 0 auto;" title="Use a built-in font instead">Clear</button>
             </div>
             <div class="theme-fd-label" style="opacity:0.4;font-weight:normal;">Pick (almost) any font from <code>fonts.google.com</code> — search the list or type any family name. Loaded on demand; falls back to a built-in font when offline.</div>
           </div>
@@ -898,7 +898,7 @@
             <!-- Source: an animated pattern (the canvas particle fields) OR a
                  wallpaper image (URL or upload). An image becomes #__wp, the
                  fixed full-bleed layer the glass material lenses. -->
-            <select id="theme-bg-source" class="theme-fd-select" aria-label="Background source">
+            <select id="theme-bg-source" class="ow-select" aria-label="Background source">
               <option value="animation">Animation</option>
               <option value="image">Image</option>
             </select>
@@ -909,7 +909,7 @@
           <div class="theme-fd-row">
             <div class="theme-fd-group" style="flex:1 1 0;">
               <label class="theme-fd-label">Pattern / Effect</label>
-              <select id="theme-bg-pattern-select" class="theme-fd-select">
+              <select id="theme-bg-pattern-select" class="ow-select">
                 <option value="none">Solid</option>
                 <option value="dots">Dots</option>
                 <option value="synapse">Synapse</option>
@@ -947,11 +947,11 @@
         <div class="theme-fd-row">
           <div class="theme-fd-group" id="theme-bg-intensity-group" style="flex:1 1 0;">
             <label class="theme-fd-label">Intensity</label>
-            <input type="range" id="theme-bg-intensity" class="theme-fd-range" min="0" max="100" step="5" value="100">
+            <input type="range" id="theme-bg-intensity" class="ow-slider" min="0" max="100" step="5" value="100" style="width:100%;">
           </div>
           <div class="theme-fd-group" id="theme-bg-size-group" style="flex:1 1 0;">
             <label class="theme-fd-label">Size</label>
-            <input type="range" id="theme-bg-size" class="theme-fd-range" min="30" max="250" step="10" value="100">
+            <input type="range" id="theme-bg-size" class="ow-slider" min="30" max="250" step="10" value="100" style="width:100%;">
           </div>
         </div>
       </div>
@@ -959,17 +959,17 @@
         <h5>Save / Share</h5>
         <div class="theme-save-row" id="theme-save-row">
           <input type="text" id="theme-save-name" placeholder="Theme name..." maxlength="32">
-          <button id="theme-save-go">Save</button>
+          <button id="theme-save-go" class="ow-btn ow-btn-secondary">Save</button>
         </div>
         <div class="theme-save-error" id="theme-save-error"></div>
         <div class="theme-io-row" style="margin-top:6px;">
-          <button id="theme-import-btn" class="theme-io-btn" title="Import a theme from JSON">&#x2912; Import</button>
-          <button id="theme-export-btn" class="theme-io-btn" title="Export current colors as JSON">&#x2913; Export</button>
+          <button id="theme-import-btn" class="ow-btn ow-btn-secondary" style="flex:1;" title="Import a theme from JSON">&#x2912; Import</button>
+          <button id="theme-export-btn" class="ow-btn ow-btn-secondary" style="flex:1;" title="Export current colors as JSON">&#x2913; Export</button>
         </div>
         <textarea id="theme-import-area" class="theme-import-area hidden" placeholder="Paste theme JSON here..." rows="3"></textarea>
         <div class="theme-import-actions hidden" id="theme-import-actions">
-          <button id="theme-import-go" class="theme-io-btn">Apply</button>
-          <button id="theme-import-cancel" class="theme-io-btn">Cancel</button>
+          <button id="theme-import-go" class="ow-btn ow-btn-secondary" style="flex:1;">Apply</button>
+          <button id="theme-import-cancel" class="ow-btn ow-btn-secondary" style="flex:1;">Cancel</button>
         </div>
       </div>
       <button id="theme-reset-btn">Reset to Default</button>
@@ -2209,7 +2209,7 @@
                 <div id="settings-account-role" style="font-size:var(--fs-xs);opacity:0.5;"></div>
               </div>
               <div id="settings-app-version" title="Orwell build version" style="font-size:var(--fs-xs);opacity:0.45;font-family:inherit;white-space:nowrap;align-self:flex-start;" aria-label="App version"></div>
-              <button id="settings-logout-btn" style="background:color-mix(in srgb, var(--color-error) 10%, transparent);border:1px solid var(--color-error);border-radius:6px;padding:6px 12px;color:var(--color-error);font-family:inherit;font-size:var(--fs-sm);font-weight:500;cursor:pointer;transition:opacity 0.15s,background 0.15s;display:inline-flex;align-items:center;gap:6px;">
+              <button id="settings-logout-btn" class="ow-btn ow-btn-destructive">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Logout
               </button>
@@ -2232,7 +2232,7 @@
               <input id="settings-pw-confirm" class="ow-field" type="password" placeholder="Confirm new password" autocomplete="new-password">
               <div class="settings-row" style="margin-top:2px;justify-content:flex-end;">
                 <span id="settings-pw-msg" style="font-size:var(--fs-xs);margin-right:auto;"></span>
-                <button class="admin-btn-add" id="settings-pw-save">Update Password</button>
+                <button class="ow-btn ow-btn-prominent" id="settings-pw-save">Update Password</button>
               </div>
             </div>
           </div>
@@ -2251,7 +2251,7 @@
                 <div class="admin-toggle-label">Reset progress</div>
                 <div class="admin-toggle-sub">Wipe this season and restart it from casting. Your season number stays the same — you restart the current level, you don't skip ahead. Irreversible.</div>
               </div>
-              <button class="admin-btn-delete" id="settings-reset-progress-btn" style="white-space:nowrap;flex-shrink:0;">Reset</button>
+              <button class="ow-btn ow-btn-destructive" id="settings-reset-progress-btn" style="white-space:nowrap;flex-shrink:0;">Reset</button>
             </div>
             <div id="settings-reset-progress-msg" style="margin-top:6px;font-size:var(--fs-xs);"></div>
           </div>
