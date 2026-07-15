@@ -176,6 +176,21 @@ def test_run_authoring_no_model_makes_no_write_back(monkeypatch):
     assert res["accepted"] is False and res["reason"] == "no-model"
 
 
+def test_run_authoring_is_fail_soft_when_the_resolver_raises(monkeypatch):
+    # A resolver/config error must NOT escape run_authoring (it promises never to raise) and must be
+    # surfaced as a DISTINCT "resolver-failed" reason — never mislabeled the expected "no-model" (#1599).
+    async def _boom(owner):
+        raise RuntimeError("endpoint config exploded")
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _boom)
+
+    async def _must_not_write(overlay, user=None):  # pragma: no cover - resolver died, no write-back
+        raise AssertionError("resolver failed ⇒ no write-back")
+    monkeypatch.setattr("src.orwell_engine.record_producer_profile", _must_not_write)
+
+    res = _run(P.run_authoring("user-boom"))  # does not raise
+    assert res["accepted"] is False and res["reason"] == "resolver-failed"
+
+
 def test_run_authoring_with_a_stub_model_writes_the_vault_free_overlay(monkeypatch):
     async def _stub_llm(messages):
         return json.dumps(_FULL)

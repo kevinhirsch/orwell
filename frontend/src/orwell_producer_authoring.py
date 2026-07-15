@@ -234,11 +234,15 @@ async def run_authoring(owner: Optional[str]) -> dict:
     identity is never threaded in. Never raises."""
     try:
         # Reuse the SHARED background-utility completion resolver (the same one zeitgeist / off-screen
-        # texture use) — an image-only / absent endpoint resolves to None ⇒ a clean no-op.
+        # texture use) — an image-only / absent endpoint resolves to None ⇒ a clean no-op. BOTH the
+        # import AND the resolve share ONE logged boundary: a resolver/config error must NOT escape
+        # (run_authoring promises never to raise) and must NOT be mislabeled "no-model" (#1599 — a real
+        # failure is logged + given a distinct reason; only a resolved None is the expected no-model).
         from src.orwell_cast_authoring import _resolve_llm_fn
-    except Exception:
-        return {"accepted": False, "reason": "no-model"}
-    llm_fn = await _resolve_llm_fn(owner)
+        llm_fn = await _resolve_llm_fn(owner)
+    except Exception as e:  # noqa: BLE001 — fail-soft background driver: never raise
+        logger.warning("[producer-authoring] utility-model resolution failed: %s", e)
+        return {"accepted": False, "reason": "resolver-failed"}
     if llm_fn is None:
         logger.debug("[producer-authoring] no utility model — keeping the seeded producer floor")
         return {"accepted": False, "reason": "no-model"}
