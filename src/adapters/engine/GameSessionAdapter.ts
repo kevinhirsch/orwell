@@ -14,6 +14,7 @@ import type {
   RecordCastIdentityReq, RecordCastIdentityResult, ProposedCastIdentityFacets,
   RecordCastGenesisReq, RecordCastGenesisResult, GenesisViolationDTO,
   WorldSnapshotView, RecordWorldSnapshotReq, RecordWorldSnapshotResult,
+  RecordProducerProfileReq, RecordProducerProfileResult,
   PremiereIntrosView, FirstImpressionView, MarkHouseguestMetOpts,
   StateDeltaView, DeltaEventView,
   BehavioralFlags,
@@ -195,7 +196,10 @@ import {
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
 import { buildSystemPrompt, momentForPhase, requiredLeverForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
-import { producerForSeed, renderProducerVoice, type Producer } from "../../engine/producerPersona";
+import {
+  producerForSeed, renderProducerVoice, mergeProducer, validateProducerProfile,
+  type Producer, type ProducerProfileOverlay,
+} from "../../engine/producerPersona";
 import { buildWorldSnapshot, renderZeitgeist, hasZeitgeist, ZEITGEIST, type WorldSnapshot, type ZeitgeistSlice } from "../../engine/zeitgeist";
 import type { CompetitionType, Intent } from "../../domain/competitionOutcome";
 import { strain as triggerStrain, shouldFire, eruptionEvent } from "../../engine/triggers";
@@ -1047,8 +1051,17 @@ export class GameSessionAdapter implements GameSession {
    * → same producer (reproducible across turns and a restart). Null until first established.
    */
   private producerSeed: number | null = null;
-  /** Memoized producer for `producerSeed` (rebuilt on restore / when the seed is first set). */
+  /** Memoized producer for `producerSeed` + `producerProfile` (rebuilt on restore / when either changes). */
   private producerCache: Producer | null = null;
+  /**
+   * The AI-authored producer-DEEPENING overlay (increment 3 of #1626): an OPTIONAL Vault-free overlay
+   * (backstory / temperament / disposition / wit / quirk) the FE writes back via `recordProducerProfile`
+   * to enrich the seeded producer WITHOUT touching the seeded NAME (the byline stays byte-stable). It
+   * ACCUMULATES (a later authoring adds fields, never loses one) and MERGES over the seeded floor
+   * (`mergeProducer`), so a field the model never authored keeps its seeded value (non-degradation).
+   * Persisted in the snapshot alongside `producerSeed`; null (⇒ the seeded floor stands) until authored.
+   */
+  private producerProfile: ProducerProfileOverlay | null = null;
   /**
    * 0070 — the additive prose texture layer: model-voiced content indexed by event id.
    * Persisted (serialized to/from `SessionCore.textureOverrides`). Absent on pre-0070 saves.
@@ -2945,6 +2958,9 @@ export class GameSessionAdapter implements GameSession {
       // The producer persona's seed (producer-persona feature) — persisted so the SAME off-camera casting
       // producer is voiced across turns and a restart (it is established pre-game, before any season seed).
       ...(this.producerSeed !== null ? { producerSeed: this.producerSeed } : {}),
+      // The AI-authored producer-DEEPENING overlay (increment 3 of #1626) — persisted alongside the seed so
+      // an authored persona survives a restart and only ever deepens (#4). Absent ⇒ the seeded floor stands.
+      ...(this.producerProfile ? { producerProfile: { ...this.producerProfile } } : {}),
       ...(this.portraitStyleAnchor !== null ? { portraitStyleAnchor: this.portraitStyleAnchor } : {}),
       // PREMIERE (feature #380 follow-on): persist who the player has met so a half-done premiere
       // resumes after a restart (0030) — the producer never re-introduces someone or loses track of
@@ -3243,7 +3259,10 @@ export class GameSessionAdapter implements GameSession {
     // it, fall back to the season seed (the producer becomes the season's producer, exactly as at cast
     // time). A fresh pre-interview session restores none and re-mints lazily on first need.
     this.producerSeed = core.producerSeed ?? core.seed ?? null;
-    this.producerCache = null; // rebuilt from the (possibly new) seed on next read
+    // The AI-authored producer-DEEPENING overlay (increment 3 of #1626): restore so an authored persona
+    // resumes after a restart. Absent on pre-feature saves / an unauthored session ⇒ the seeded floor stands.
+    this.producerProfile = core.producerProfile ? { ...core.producerProfile } : null;
+    this.producerCache = null; // rebuilt from the (possibly new) seed + overlay on next read
     // 0051: restore the per-season portrait style anchor. On a legacy save that predates it, re-seed
     // from the game seed (so the look stays stable for a resumed game), or fall back to the first
     // variant when there's no seed either — either way the season looks like itself.
@@ -9626,7 +9645,12 @@ export class GameSessionAdapter implements GameSession {
       this.producerCache = null;
       this.persist();
     }
-    if (!this.producerCache) this.producerCache = producerForSeed(this.producerSeed);
+    // Merge the seeded floor with the authored overlay (increment 3): the overlay DEEPENS the persona
+    // where present, the seeded floor fills the rest, and the NAME always comes from the seed (the byline
+    // never churns). No overlay ⇒ the floor is returned byte-identically (non-degradation / opt-in).
+    if (!this.producerCache) {
+      this.producerCache = mergeProducer(producerForSeed(this.producerSeed), this.producerProfile);
+    }
     return this.producerCache;
   }
 
@@ -9736,6 +9760,33 @@ export class GameSessionAdapter implements GameSession {
     };
     this.backgroundPersist(); // R-BND (#628): durable, but NOT a board beat — no beatSeq bump
     return { accepted: true, source: "web_search" };
+  }
+
+  /**
+   * The FE-driven producer-DEEPENING write-back (increment 3 of #1626) — fold an AUTHORED overlay onto
+   * the seeded off-camera casting producer so the ENGINE stays the source of truth (the
+   * `recordWorldSnapshot` / `recordCastProfile` handshake). Validate through the `validateProducerProfile`
+   * envelope (open-set prose only, length-capped, any stat/soul vocabulary stripped), then ACCUMULATE the
+   * accepted fields onto any prior overlay ({...prior, ...new} — a later authoring deepens, never loses a
+   * facet). The seeded NAME is never touched (the byline stays byte-stable). Vault-free by construction —
+   * no stat/number/hidden field is typed on the request, and any that sneaks in as prose is stripped.
+   * Durable pre-game state, but NOT a board beat (background persist, no beatSeq bump). Idempotent /
+   * fail-soft: an empty or all-rejected payload leaves the seeded producer standing (accepted:false).
+   */
+  recordProducerProfile(req: RecordProducerProfileReq): RecordProducerProfileResult {
+    const { overlay, fields, rejected } = validateProducerProfile(req as Record<string, unknown>);
+    if (fields.length === 0) {
+      // Nothing usable ⇒ the seeded floor (and any prior overlay) stands, unchanged.
+      return { accepted: false, fields: [], reason: rejected.length > 0 ? "rejected" : "empty" };
+    }
+    // Establish the producer seed if it isn't yet (pre-interview), so the byline is stable and the merge
+    // has a floor — and so the persisted snapshot carries the seed + overlay together.
+    this.producer();
+    // ACCUMULATE onto any prior overlay (non-degradation): the new fields deepen, none is lost.
+    this.producerProfile = { ...(this.producerProfile ?? {}), ...overlay };
+    this.producerCache = null; // rebuild the merged persona on next read
+    this.backgroundPersist(); // durable pre-game state, NOT a board beat — no beatSeq bump
+    return { accepted: true, fields };
   }
 
   /**

@@ -236,6 +236,15 @@ export interface SessionCore {
    * season `seed`. Absent on pre-feature saves AND a fresh pre-interview session (re-minted on first need).
    */
   producerSeed?: number;
+  /**
+   * The AI-authored producer-DEEPENING overlay (increment 3 of #1626): the OPTIONAL, Vault-free overlay
+   * (backstory / temperament / disposition / wit / quirk) the FE writes back via `recordProducerProfile`
+   * to enrich the seeded off-camera casting producer WITHOUT touching the seeded NAME (the byline stays
+   * byte-stable). Open-set public voice PROSE only — no stat/number/hidden field (structural). Persisted
+   * so an authored persona survives a restart and only ever deepens (#4). Absent on pre-feature saves /
+   * an unauthored session ⇒ the seeded floor producer stands.
+   */
+  producerProfile?: import("./producerPersona").ProducerProfileOverlay;
   /** A half-done casting interview (0050) — additive/optional, so legacy saves stay version-1 loadable. */
   casting?: CastingIntake;
   /** Per-season photorealistic style anchor (0051): seeded at cast time, stable through the season. Absent on older saves (falls back to a default). */

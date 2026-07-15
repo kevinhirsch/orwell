@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  generateProducer, producerForSeed, renderProducerVoice, type Producer,
+  generateProducer, producerForSeed, renderProducerVoice,
+  validateProducerProfile, mergeProducer, type Producer,
 } from "../../src/engine/producerPersona";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
@@ -223,5 +224,151 @@ describe("the producer carries no Vault content (it is a GM-voice entity)", () =
     s.getMomentPrompt({});
     const view = s.createCharacter({ playerName: "The Player", seed: 5 });
     expect(JSON.stringify(view)).not.toContain("producer");
+  });
+});
+
+// #1626 increment 3 — the producer can be DEEPENED by an FE-authored overlay (a richer backstory /
+// temperament / disposition / wit / quirk) while the seeded NAME stays byte-stable and the persona stays
+// Vault-free. Roles only (no houseguest names); the producer is compared only against its own seeded floor.
+describe("validateProducerProfile — the open-set / Vault-free authoring envelope (pure)", () => {
+  it("accepts open-set prose fields and neutralizes them (whitespace collapsed, length-capped)", () => {
+    const { overlay, fields, rejected } = validateProducerProfile({
+      backstory: "  ran   the casting desk\nfor years  ",
+      wit: "a dry aside before the hard question",
+    });
+    expect(rejected).toEqual([]);
+    expect(fields).toEqual(expect.arrayContaining(["backstory", "wit"]));
+    expect(overlay.backstory).toBe("ran the casting desk for years"); // control chars / runs collapsed
+  });
+
+  it("IGNORES a proposed name and any unknown key (the byline is seeded and immovable)", () => {
+    const { overlay, fields } = validateProducerProfile({ name: "New Name", nonsense: "x", quirk: "keeps a running tally out loud" } as Record<string, unknown>);
+    expect(fields).toEqual(["quirk"]);
+    expect(overlay).not.toHaveProperty("name");
+    expect(overlay).not.toHaveProperty("nonsense");
+  });
+
+  it("REJECTS a field carrying stat/soul vocabulary or a decimal rating (Vault-free by construction)", () => {
+    for (const bad of ["a keen physical read", "reads mental tells", "a social butterfly", "sees into their soul", "tracks stats", "rated 8.5 of ten"]) {
+      const { overlay, fields, rejected } = validateProducerProfile({ disposition: bad });
+      expect(fields).toEqual([]);
+      expect(rejected).toEqual(["disposition"]);
+      expect(overlay).not.toHaveProperty("disposition");
+    }
+  });
+
+  it("an empty/blank field is NOT a rejection — it simply keeps the seeded floor", () => {
+    const { fields, rejected } = validateProducerProfile({ backstory: "   ", wit: "" });
+    expect(fields).toEqual([]);
+    expect(rejected).toEqual([]); // absent/blank ⇒ floor stands, never a rejection
+  });
+});
+
+describe("mergeProducer — deepen without degrading (non-degradation)", () => {
+  it("with NO overlay the seeded floor stands byte-identical (same reference)", () => {
+    const floor = producerForSeed(7);
+    expect(mergeProducer(floor, null)).toBe(floor);
+    expect(mergeProducer(floor, undefined)).toBe(floor);
+  });
+
+  it("the overlay wins where present; the seeded floor fills every omitted field; the NAME stays seeded", () => {
+    const floor = producerForSeed(7);
+    const merged = mergeProducer(floor, { backstory: "AUTHORED-BACKSTORY: came up through the edit bay" });
+    expect(merged.backstory).toBe("AUTHORED-BACKSTORY: came up through the edit bay"); // deepened
+    expect(merged.disposition).toBe(floor.disposition); // omitted ⇒ seeded floor preserved (no loss)
+    expect(merged.wit).toBe(floor.wit);
+    expect(merged.quirk).toBe(floor.quirk);
+    expect(merged.name).toBe(floor.name); // byline never churns
+    // Structural off-camera flags are immovable.
+    expect(merged.offCamera).toBe(true);
+    expect(merged.headshot).toBe(false);
+    expect(merged.houseguest).toBe(false);
+  });
+
+  it("a merged (deepened) producer is still Vault-free — no numeric stat, no hidden vocabulary", () => {
+    const merged = mergeProducer(producerForSeed(13), {
+      backstory: "ran the desk for a long time and has watched a hundred would-be winners flame out",
+      disposition: "casts for the story, not the highlight reel",
+    });
+    const json = JSON.stringify(merged);
+    const block = renderProducerVoice(merged);
+    expect(json).not.toMatch(/\d\.\d/);
+    expect(block).not.toMatch(/\d\.\d/);
+    for (const key of ["physical", "mental", "social", "stats", "hiddenElements", "soul"]) {
+      expect(json).not.toContain(key);
+    }
+  });
+});
+
+describe("recordProducerProfile — authoring deepens the persona, persists, and never degrades", () => {
+  it("deepens the voiced persona; the seeded name is unchanged and no seeded facet is lost", () => {
+    const s = new GameSessionAdapter();
+    s.getMomentPrompt({}); // establish the seeded producer
+    const seed = s.snapshot().producerSeed!;
+    const floor = producerForSeed(seed);
+
+    const res = s.recordProducerProfile({ backstory: "AUTHORED-DEEPENING: crossed over from the edit bay" });
+    expect(res.accepted).toBe(true);
+    expect(res.fields).toEqual(["backstory"]);
+
+    const prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("AUTHORED-DEEPENING: crossed over from the edit bay"); // deepened, voiced
+    expect(prompt).toContain(floor.disposition); // a NOT-authored seeded facet is still present (no loss)
+    expect(s.getMomentPrompt({}).producerName).toBe(floor.name); // byline unchanged
+    expect(s.snapshot().producerSeed).toBe(seed); // the seed never moved
+  });
+
+  it("ACCUMULATES across authoring calls — a later authoring adds a facet, never loses a prior one", () => {
+    const s = new GameSessionAdapter();
+    s.getMomentPrompt({});
+    expect(s.recordProducerProfile({ backstory: "OVERLAY-BACKSTORY-ONE" }).accepted).toBe(true);
+    expect(s.recordProducerProfile({ wit: "OVERLAY-WIT-TWO" }).accepted).toBe(true);
+    let prompt = s.getMomentPrompt({}).systemPrompt;
+    // BOTH authored facets survive — the second call did not clobber the first.
+    expect(prompt).toContain("OVERLAY-BACKSTORY-ONE");
+    expect(prompt).toContain("OVERLAY-WIT-TWO");
+    // Re-authoring one field REPLACES only it and keeps the accumulated other (deepen, never thin).
+    expect(s.recordProducerProfile({ backstory: "OVERLAY-BACKSTORY-THREE" }).accepted).toBe(true);
+    prompt = s.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("OVERLAY-BACKSTORY-THREE");
+    expect(prompt).not.toContain("OVERLAY-BACKSTORY-ONE");
+    expect(prompt).toContain("OVERLAY-WIT-TWO"); // accumulated field retained
+  });
+
+  it("an empty or all-rejected payload leaves the seeded producer standing (accepted:false)", () => {
+    const s = new GameSessionAdapter();
+    s.getMomentPrompt({});
+    expect(s.recordProducerProfile({})).toEqual({ accepted: false, fields: [], reason: "empty" });
+    expect(s.recordProducerProfile({ backstory: "a keen social read" })).toEqual({ accepted: false, fields: [], reason: "rejected" });
+    // Nothing folded ⇒ no overlay persists; the seeded floor still voices the interview.
+    expect(s.snapshot().producerProfile).toBeUndefined();
+    const seed = s.snapshot().producerSeed!;
+    expect(s.getMomentPrompt({}).producerName).toBe(producerForSeed(seed).name);
+  });
+
+  it("the authored overlay survives a save/restore round-trip (non-degradation, 0007)", () => {
+    const s = new GameSessionAdapter();
+    s.getMomentPrompt({});
+    s.recordProducerProfile({ backstory: "DURABLE-OVERLAY: a chess-opening approach to the room", quirk: "answers a non-answer with a longer silence" });
+
+    const resumed = new GameSessionAdapter();
+    resumed.restore(JSON.parse(JSON.stringify(s.snapshot())));
+    const prompt = resumed.getMomentPrompt({}).systemPrompt;
+    expect(prompt).toContain("DURABLE-OVERLAY: a chess-opening approach to the room");
+    expect(prompt).toContain("answers a non-answer with a longer silence");
+    // The persisted overlay round-trips field-for-field.
+    expect(resumed.snapshot().producerProfile).toEqual(s.snapshot().producerProfile);
+    // The byline still tracks the seeded producer after the restore.
+    expect(resumed.getMomentPrompt({}).producerName).toBe(producerForSeed(resumed.snapshot().producerSeed!).name);
+  });
+
+  it("a deepened producer is STILL excluded from the cast (never one of the 16 / no portrait)", () => {
+    const s = new GameSessionAdapter();
+    s.getMomentPrompt({});
+    s.recordProducerProfile({ backstory: "DEEPENED but still off-camera" });
+    const view = s.createCharacter({ playerName: "The Player", seed: 5 });
+    expect(view.house.length).toBe(15);
+    expect(view.house.some((h) => h.id === "producer")).toBe(false);
+    expect(view.portraitPrompts!.some((pp) => pp.houseguestId === "producer")).toBe(false);
   });
 });

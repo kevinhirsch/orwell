@@ -23112,6 +23112,22 @@ body.theme-frosted .chat-top-bar {
   box-shadow: none !important;
   border-radius: 0 0 var(--ow-glass-radius, 26px) var(--ow-glass-radius, 26px) !important;
 }
+/* APP-OV-3 (2026-07-15 theme audit): on DESKTOP the frosted chat top bar read as an OVERSIZED
+   rounded capsule whose SQUARE top edge sat flush against the viewport top — the big 26px
+   BOTTOM-only glass radius on the ~30px-tall full-width strip made it look like a pill sliced
+   off at the top (owner report: oversized capsule clipped at the very top edge, bleeding above
+   the fold). In the floating-glass theme every other chrome surface floats inset with ALL corners
+   rounded, so match that here: lift the bar a few px off the container top so its rounded TOP
+   corners clear the overflow-hidden chat container (it no longer bleeds to the very top edge) and
+   round all four corners at the concentric inner-control radius (correctly sized, not a chopped
+   capsule). Desktop only (min-width 769px) — the narrow bar keeps its own corner-control geometry
+   and flush app-bar rounding below, untouched. */
+@media (min-width: 769px) {
+  body.theme-frosted .chat-top-bar {
+    margin-top: 6px;
+    border-radius: var(--ow-radius-inner, 16px) !important;
+  }
+}
 /* the model picker button is a compact capsule control */
 body.theme-frosted .model-picker-btn { border-radius: var(--ow-radius-pill, 999px) !important; }
 /* the tool indicator + attachment cards are small rounded chips */

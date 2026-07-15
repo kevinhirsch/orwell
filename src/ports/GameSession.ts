@@ -223,6 +223,48 @@ export interface RecordWorldSnapshotResult {
 }
 
 /**
+ * The FE-driven producer-DEEPENING write-back (increment 3 of #1626) — the front-end (which owns a
+ * utility LLM) AUTHORS a richer producer persona (backstory / temperament / disposition / wit / quirk)
+ * and writes it BACK so the ENGINE stays the source of truth (the `recordWorldSnapshot` / `recordCastProfile`
+ * handshake). It DEEPENS the seeded off-camera casting producer; it never touches the seeded NAME (the
+ * byline stays byte-stable, so the chat sender never churns). Every field is OPEN-SET public voice PROSE —
+ * there is NO stat, NO number, and NO hidden game state on this request BY CONSTRUCTION (no such field is
+ * typed), so the producer's Vault-free guarantee is structural. An authored overlay ACCUMULATES onto the
+ * seeded floor (and any prior overlay): a field the model omits keeps the seeded value (non-degradation).
+ * Best-effort / idempotent / fail-soft: with no model wired, the engine never receives a payload and the
+ * seeded producer simply stands. Not a model lever (FE-driven, like `recordWorldSnapshot`).
+ */
+export interface RecordProducerProfileReq {
+  /** Core temperament / register, in the model's own words. */
+  archetype?: string;
+  /** Observable demeanor / voice register. */
+  demeanor?: string;
+  /** The strategic read on running a casting room — the lens the producer probes a player through. */
+  disposition?: string;
+  /** The calculated, deliberate WIT style. */
+  wit?: string;
+  /** A small, distinct verbal quirk that colors the voice consistently. */
+  quirk?: string;
+  /** A richer backstory — who this producer is and how they came to the casting desk. */
+  backstory?: string;
+  /**
+   * IGNORED by construction — the byline is SEEDED and immovable so it never churns. Accepted on the
+   * request only so an FE payload that echoes a name never fails; the engine never applies it.
+   */
+  name?: string;
+}
+
+/** Whether the producer-deepening write-back was accepted, Vault-free — reports field NAMES only. */
+export interface RecordProducerProfileResult {
+  /** True iff at least one open-set field validated and was folded onto the overlay. */
+  accepted: boolean;
+  /** The accepted open-set field NAMES (never their values — though the values carry no secret anyway). */
+  fields: string[];
+  /** Set when nothing was accepted: "empty" (no usable fields) | "rejected" (all present fields carried forbidden Vault vocabulary). */
+  reason?: string;
+}
+
+/**
  * Feature #1400 — the "what to hand the model" projection for the CURRENTLY-STAGING competition, so the
  * FE can author a theme + premise + per-round fiction MATCHED to the engine's ALREADY-FIXED outcome. The
  * winner and the full drop order are FIXED before this is ever non-null (the model dresses a decided
@@ -2282,6 +2324,19 @@ export interface GameSession {
    * the fallback's value (a partial capture never thins the snapshot — non-degradation).
    */
   recordWorldSnapshot(req: RecordWorldSnapshotReq): RecordWorldSnapshotResult;
+
+  /**
+   * The FE-driven producer-DEEPENING write-back (increment 3 of #1626) — fold an AUTHORED overlay onto
+   * the seeded off-camera casting producer so the engine stays the source of truth. DEEPENS the persona
+   * (backstory / temperament / disposition / wit / quirk) while keeping the seeded NAME byte-stable (the
+   * byline never churns). Validated through the `validateProducerProfile` envelope (open-set prose only,
+   * length-capped, any stat/soul vocabulary stripped) and ACCUMULATED onto the seeded floor + any prior
+   * overlay (non-degradation — a field the model omits keeps the seeded value). Vault-free by construction
+   * (no stat/number/hidden field is typed on the request). Durable (persisted pre-game); NOT a board beat
+   * (no beatSeq bump). Idempotent / fail-soft: an empty or all-rejected payload leaves the seeded producer
+   * standing. Not a model lever (FE-driven, like `recordWorldSnapshot`).
+   */
+  recordProducerProfile(req: RecordProducerProfileReq): RecordProducerProfileResult;
 
   /**
    * Feature #1400 (READ) — the Vault-free "what to hand the model" projection for the currently-staging

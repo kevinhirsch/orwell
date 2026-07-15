@@ -4992,8 +4992,20 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     # zeitgeist kick EXACTLY ONCE (one watch per user; kickoff_capture is also
                     # once-per-season idempotent), and pushes a game-updated so open pages reconcile.
                     def _deferred_post_start():
-                        from src import orwell_zeitgeist
-                        orwell_zeitgeist.kickoff_capture(owner)
+                        # Two INDEPENDENT best-effort kicks — each guarded + logged on its own so a
+                        # zeitgeist hiccup never silently skips the producer deepening, or vice-versa (#1599).
+                        try:
+                            from src import orwell_zeitgeist
+                            orwell_zeitgeist.kickoff_capture(owner)
+                        except Exception as e:  # noqa: BLE001 — best-effort; never block the gate-clear
+                            logger.warning("[create] deferred zeitgeist kickoff failed: %s", e)
+                        # #1626 (increment 3): deepen the off-camera producer persona in the
+                        # background too — best-effort, no model ⇒ the seeded floor stands.
+                        try:
+                            from src import orwell_producer_authoring
+                            orwell_producer_authoring.kickoff_producer_authoring(owner)
+                        except Exception as e:  # noqa: BLE001 — persona flavor; never block anything
+                            logger.warning("[create] deferred producer-authoring kickoff failed: %s", e)
                     _authoring_gate.kickoff_house_ready_watch(
                         owner, on_ready=_deferred_post_start)
                     holding = {
@@ -5027,12 +5039,21 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
         # deterministic fallback ONCE per season. Best-effort: no model/search ⇒ the fallback stands. Gated
         # on a GENUINE start (never a no-op refusal of an already-running season), so it fires once per
         # season — including a confirmed restart (season 2 captures its own fresh, later snapshot).
-        try:
-            if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+        if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+            # 0062 zeitgeist + #1626-inc3 producer deepening: two INDEPENDENT best-effort background
+            # kicks, each guarded + logged on its own so one failing never silently skips the other,
+            # and a real failure surfaces at WARNING rather than being swallowed (#1599). Fires once per
+            # GENUINE season start (never a no-op refusal of an already-running season).
+            try:
                 from src import orwell_zeitgeist
                 orwell_zeitgeist.kickoff_capture(owner)
-        except Exception:
-            pass  # the zeitgeist is pure flavor — never let it affect game start
+            except Exception as e:  # noqa: BLE001 — best-effort; never block game start
+                logger.warning("[create] zeitgeist kickoff failed: %s", e)
+            try:
+                from src import orwell_producer_authoring
+                orwell_producer_authoring.kickoff_producer_authoring(owner)
+            except Exception as e:  # noqa: BLE001 — persona flavor; never block game start
+                logger.warning("[create] producer-authoring kickoff failed: %s", e)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}

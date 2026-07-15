@@ -6,7 +6,7 @@ import type { AdminPort } from "../../surfaces/admin/AdminPort";
 import type { SummaryService } from "../../services/SummaryService";
 import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, RecordImageBeatReq } from "../../ports/EngineCommands";
 import type { EntityId } from "../../domain/ids";
-import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordCastGenesisReq, RecordWorldSnapshotReq, RecordCompetitionFictionReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
+import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordCastGenesisReq, RecordWorldSnapshotReq, RecordProducerProfileReq, RecordCompetitionFictionReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
@@ -279,6 +279,16 @@ function requireShape(name: string, args: Record<string, unknown>): void {
         if (typeof s !== "object" || s === null || Array.isArray(s)) refuse("slices", "an object when present");
       }
       return;
+    case "recordProducerProfile": {
+      // #1626 (increment 3): the FE producer-deepening write-back. EVERY field is an OPTIONAL string (the
+      // engine keeps the seeded value for any omitted field, and validates/strips forbidden vocabulary in
+      // the adapter) — refuse ONLY a PRESENT non-string field (the R6 class that would cast blindly), so a
+      // leak/sentinel sweep calling the tool with `{}` is a clean no-op, never a 400.
+      for (const f of ["archetype", "demeanor", "disposition", "wit", "quirk", "backstory", "name"]) {
+        if (args[f] !== undefined && typeof args[f] !== "string") refuse(f, "a string when present");
+      }
+      return;
+    }
     case "recordCompetitionFiction":
       // #1400: the FE competition-fiction write-back. `comp`/`week` identify the staging comp (staleness
       // guards); `theme`/`premise` are the authored flavor; `eliminations` is the ORDERED per-drop
@@ -372,6 +382,11 @@ export class McpServer {
       case "recordWorldSnapshot":
         // 0062: freeze the FE-captured move-in zeitgeist (public flavor; never a game input). Idempotent.
         return this.deps.session.recordWorldSnapshot(args as unknown as RecordWorldSnapshotReq);
+      case "recordProducerProfile":
+        // #1626 (increment 3): fold the FE-authored producer DEEPENING overlay onto the seeded off-camera
+        // producer (open-set voice prose; keeps the seeded name; strips any stat/soul vocabulary). Not a
+        // board beat (background persist); reports accepted field NAMES only. Idempotent / fail-soft.
+        return this.deps.session.recordProducerProfile(args as unknown as RecordProducerProfileReq);
       case "worldSnapshotView":
         // BE-103/TCG-16: the read counterpart of recordWorldSnapshot — was fully implemented in the
         // port + adapter but never wired here, so it was a dead endpoint (no registry entry, no dispatch
