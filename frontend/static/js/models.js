@@ -195,7 +195,7 @@ function _buildModelRow(mid, url, displayName, endpointId, offline, modelType) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.textContent = offline ? 'Offline' : (modelType === 'image' ? '+ Image' : '+ Chat');
-  btn.className = 'model-chat-btn';
+  btn.className = 'model-chat-btn ow-btn ow-btn-compact';
   btn.style.transition = 'all 0.2s ease';
   if (offline) {
     btn.disabled = true;

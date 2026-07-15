@@ -7,7 +7,7 @@
  * @param {Object} Storage - Storage module
  */
 export function initSectionCollapse(Storage) {
-  const _chevronHtml = '<button type="button" class="section-collapse-btn" title="Collapse section"><svg class="section-collapse-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>';
+  const _chevronHtml = '<button type="button" class="section-collapse-btn ow-btn ow-btn-icon" title="Collapse section"><svg class="section-collapse-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>';
   const savedState = Storage.getJSON('section-collapsed') || {};
 
   // ── G3 (ruling 2026-06-11): no dead affordances. A chevron on a section
