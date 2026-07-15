@@ -3259,7 +3259,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   head.className = 'ask-user-head';
                   const closeBtn = document.createElement('button');
                   closeBtn.type = 'button';
-                  closeBtn.className = 'modal-close ask-user-close';
+                  closeBtn.className = 'ow-btn ow-btn-icon ask-user-close';
                   closeBtn.setAttribute('aria-label', 'Dismiss question');
                   closeBtn.textContent = '×';
                   closeBtn.addEventListener('click', () => {
@@ -3338,7 +3338,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   otherInput.setAttribute('aria-label', multi ? 'Add a custom option' : 'Type a custom answer');
                   const otherSend = document.createElement('button');
                   otherSend.type = 'button';
-                  otherSend.className = 'confirm-btn confirm-btn-primary ask-user-other-send';
+                  otherSend.className = 'ow-btn ow-btn-prominent ask-user-other-send';
                   otherSend.setAttribute('aria-label', 'Send answer');
                   otherSend.textContent = multi ? 'Send selection' : 'Send';
                   const _submit = () => {

@@ -358,7 +358,7 @@ def _has_token(sel, tok):
 # on-fill selectors (a colored/accent/danger FILL — white/on-accent ink is correct there, §5).
 # FULL class tokens covering every current #fff/white/on-fill-ink text site.
 _ON_FILL_TOKENS = (
-    ".send-btn", ".odec-confirm", ".confirm-btn-danger", ".admin-btn-delete", ".gallery-card-play",
+    ".send-btn", ".odec-confirm", ".admin-btn-delete", ".gallery-card-play",
     ".attach-ocr-btn", ".shortcut-warn", ".gallery-editor-draft-delete", ".settings-nav-item.active",
     ".admin-tab.active", ".msg-user", ".theme-seg", ".recording-content", "#stop-recording",
     ".stop-recording-btn", ".ow-btn-destructive", ".ow-close", ".gallery-card-delete",

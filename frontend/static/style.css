@@ -6088,12 +6088,8 @@ body.bg-pattern-perlin-flow {
     .confirm-btn-secondary:hover { background:var(--border); }
     .confirm-btn-primary { background:var(--accent-primary, var(--red, #4a9eff)); color:var(--on-accent, #fff); border-color:transparent; }
     .confirm-btn-primary:hover { filter:brightness(1.15); }
-    /* #1605 contrast sweep: white BODY text (0.85rem, regular) on a solid danger plate.
-       `--color-danger` is now the system red #ff453a (white ~3.4:1, fails AA), so this
-       one solid-fill site uses the AA-safe `--color-danger-strong` (white ~5.3:1); hover
-       darkens further, keeping the danger semantics without dropping below AA. */
-    .confirm-btn-danger { background:var(--color-danger-strong); color:#fff; border-color:transparent; }
-    .confirm-btn-danger:hover { background:color-mix(in srgb, var(--color-danger-strong) 88%, #000); }
+    /* (#1638 KM-W4) `.confirm-btn-danger` retired — the styledConfirm danger button now
+       composes the kit `.ow-btn-destructive` primitive (its own AA-tuned red plate). */
     /* Styled prompt — text-input dialog (used in place of window.prompt) */
     #styled-prompt-overlay {
       background:rgba(0,0,0,0.5);

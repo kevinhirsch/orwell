@@ -540,11 +540,11 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
     footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:4px;border-top:1px solid var(--border);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button'; cancelBtn.id = 'styled-confirm-cancel';
-    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.className = 'ow-btn';
     cancelBtn.textContent = cancelText;
     const okBtn = document.createElement('button');
     okBtn.type = 'button'; okBtn.id = 'styled-confirm-ok';
-    okBtn.className = danger ? 'confirm-btn confirm-btn-danger' : 'confirm-btn confirm-btn-primary';
+    okBtn.className = danger ? 'ow-btn ow-btn-destructive' : 'ow-btn ow-btn-prominent';
     okBtn.textContent = confirmText;
     footer.appendChild(cancelBtn); footer.appendChild(okBtn);
     box.appendChild(msg); box.appendChild(footer);
@@ -614,7 +614,7 @@ export function styledPrompt(message, {
     }
     const input = document.createElement('input');
     input.type = 'text'; input.id = 'styled-prompt-input';
-    input.className = 'styled-prompt-input';
+    input.className = 'ow-field';
     input.value = defaultValue || '';
     input.placeholder = placeholder || '';
     input.maxLength = maxLength;
@@ -622,11 +622,11 @@ export function styledPrompt(message, {
     footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button'; cancelBtn.id = 'styled-prompt-cancel';
-    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.className = 'ow-btn';
     cancelBtn.textContent = cancelText;
     const okBtn = document.createElement('button');
     okBtn.type = 'button'; okBtn.id = 'styled-prompt-ok';
-    okBtn.className = 'confirm-btn confirm-btn-primary';
+    okBtn.className = 'ow-btn ow-btn-prominent';
     okBtn.textContent = confirmText;
     footer.appendChild(cancelBtn); footer.appendChild(okBtn);
     box.appendChild(input); box.appendChild(footer);
