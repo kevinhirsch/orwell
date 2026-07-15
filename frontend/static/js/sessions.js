@@ -3197,6 +3197,8 @@ export function openArchive() {
     title: 'Archive',
     icon: _ARCHIVE_ICON,
     modal: true,
+    minimizable: false,     // a modal dialog dismisses on Escape — opt out of minimize (dismissTop
+                            // MINIMIZES a minimizable window without unmounting the scrim, locking the UI)
     minWidth: 560,
     minHeight: 320,
     content,
