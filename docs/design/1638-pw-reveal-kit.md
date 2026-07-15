@@ -208,3 +208,9 @@ Source-pinned, mirroring `test_1638_compact_icon_kit.py`.
    The *value* is the in-app fields gaining a reveal they never had. **Decision:** scope W-G3 to
    (a) login migration + (b) the ~4 in-scope in-app fields (recommended), or (a) only and file the
    in-app adoption as a follow-up.
+
+---
+
+## OWNER RULING (2026-07-15)
+
+**Reveal stays "as is" — do NOT expand the eye-toggle to API-key / secret fields.** Workflow-2 scope for this primitive is ONLY to standardize the EXISTING `login.html` toggle onto `.ow-pw-field` / `OrwellPwReveal` (folding in the `tabindex`/`aria-pressed` a11y fixes). The in-app secret inputs (search API key, endpoint API key, admin env) KEEP their current bare `type=password` with no reveal — no behavior change.

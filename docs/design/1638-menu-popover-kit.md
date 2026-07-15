@@ -474,3 +474,9 @@ CSS/JS/class swaps, no prompt / tool-schema / casting-flow change (§WAVE note i
 - Tokens: `--win-*` `frontend/static/style.css:190`, `--ow-ui-font` `:25`, `--ow-glass-light-color`
   `:20385`, `--ow-ios-blue` `:21573`.
 - Ledger row: `docs/audits/2026-07-15-total-kit-migration-inventory.md` §8 + the W10 wave entry.
+
+---
+
+## OWNER RULING (2026-07-15)
+
+**Menus stay anchored on mobile — NO bottom-sheet reflow for now.** Do NOT implement the `sheetOnNarrow` / `OrwellSheet` handoff in this kit; the mobile presentation is the same anchored popover as desktop. (The detent/sheet plumbing may be added later behind a flag, but it is OUT of Workflow-2 scope.) Also confirmed: the **Ctrl+K command palette is EXCLUDED** from this kit — it stays a centered modal, not an anchored menu.
