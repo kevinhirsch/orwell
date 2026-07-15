@@ -68,11 +68,16 @@ def test_frosted_sidebar_label_ink_is_dark_chrome_ink():
     the backdrop), so the theme's LIGHT cool var(--fg) here rendered light-on-light — the owner's
     unreadable 'Orwell' wordmark + 'New Chat'. Measured (headless, real stylesheet): the brand
     surface is IDENTICAL on the light and dark token sets, so its polarity is theme-independent."""
+    # Scope the match to the enclosing @media (prefers-reduced-transparency: no-preference)
+    # block: an identical selector at top level or in the `reduce` branch must NOT satisfy this
+    # test (the loose regex passed even when the rule sat outside the no-preference block).
     m = re.search(
+        r"@media\s*\(\s*prefers-reduced-transparency:\s*no-preference\s*\)\s*\{\s*"
         r"body\.theme-frosted\s+#sidebar\s+\.sidebar-brand-title,\s*"
         r"body\.theme-frosted\s+#sidebar\s+#sidebar-new-chat-btn\s+\.grow\s*\{[^}]*\}",
         CSS, re.S)
-    assert m, "missing the frosted sidebar label ink rule (.sidebar-brand-title et al.)"
+    assert m, ("missing the frosted sidebar label ink rule (.sidebar-brand-title et al.) inside "
+               "the @media (prefers-reduced-transparency: no-preference) block")
     body = m.group(0)
     assert "#16191f" in body, \
         "the label ink must be the sidebar's dark chrome ink (#16191f) on the light glass"
@@ -80,11 +85,17 @@ def test_frosted_sidebar_label_ink_is_dark_chrome_ink():
         "the theme's LIGHT cool var(--fg) is the light-on-light polarity bug this fix removes"
     assert "color: #fff" not in body, \
         "the hardcoded white ink (light-on-light on a light palette) must not come back"
-    # the legibility halo must be the LIGHT halo the rest of the light-glass chrome uses — a
-    # var(--bg)-derived DARK halo does nothing on the light surface (and smudges under dark ink).
-    assert "rgba(255,255,255" in body or "rgba(255, 255, 255" in body, \
-        "the label needs the LIGHT legibility halo used by the rest of the light-glass chrome"
-    assert "var(--bg" not in body, \
+    # the legibility halo must be a text-shadow DECLARATION using the LIGHT white rgba halo the
+    # rest of the light-glass chrome uses — matched DIRECTLY (not "rgba token anywhere in body")
+    # so a stray rgba elsewhere in the rule can't satisfy it, and the declaration must exist.
+    halo = re.search(r"text-shadow\s*:\s*([^;}]+)", body)
+    assert halo, "the label needs a text-shadow legibility halo declaration"
+    halo = halo.group(1)
+    assert "rgba(255,255,255" in halo or "rgba(255, 255, 255" in halo, \
+        "the text-shadow must use the LIGHT white rgba halo the rest of the light-glass chrome uses"
+    # RETAINED: a var(--bg)-derived DARK halo does nothing on the light surface (and smudges under
+    # dark ink) — it must not come back.
+    assert "var(--bg" not in halo, \
         "the old var(--bg)-derived DARK halo (invisible on light glass) must not come back"
     # APP-OV-3: no frosted rule may force the username back onto var(--fg) — light ink on the
     # light-glass chip is the polarity bug this fix removes.
@@ -244,7 +255,9 @@ def test_user_bar_polarity_follows_the_theme(_static_server):
             # APP-OV-5: the sidebar is a FIXED light-glass material (it never darkens on the dark
             # theme), so the brand title takes the same DARK chrome ink as the username + the rest
             # of the sidebar — a light-cool var(--fg) label here would be the light-on-light bug.
-            assert _mean(dark["brand"]) < 128, \
+            # Pin the EXACT chrome ink #16191f == (22, 25, 31), not merely "dark" — a cascade
+            # override to black or another dark hue would slip past a brightness-only mean check.
+            assert (dark["brand"].get("r"), dark["brand"].get("g"), dark["brand"].get("b")) == (22, 25, 31), \
                 f"DARK glass theme: the brand-title ink must be the DARK chrome ink ({dark['brand']['raw']})"
         finally:
             browser.close()
