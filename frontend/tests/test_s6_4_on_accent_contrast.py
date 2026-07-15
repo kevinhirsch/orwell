@@ -193,14 +193,25 @@ def test_non_accent_white_ctas_are_left_alone():
     (semantic danger / recording / dark image overlays) must stay white."""
     css = _read("static/style.css")
     # danger/error/recording buttons keep white on their own semantic bg.
-    # #1605: --color-danger is now the system red #ff453a (white ~3.4:1, fails AA on a
-    # solid fill), so the solid danger BUTTON uses the AA-safe darker pair
-    # --color-danger-strong — still WHITE text (not rewritten to dark --on-accent ink),
-    # which is what this guard protects.
-    assert "background:var(--color-danger-strong); color:#fff" in css, (
-        ".confirm-btn-danger (semantic danger bg) must keep white text (via the AA-safe "
-        "--color-danger-strong), NOT be rewritten to --on-accent."
-    )
+    # #1638 KM-W4: the bespoke .confirm-btn-danger was retired — the styledConfirm danger
+    # button now composes the kit .ow-btn-destructive, which inks white (--ow-on-danger) on
+    # its own semantic red plate (NOT rewritten to dark --on-accent ink). The kit owns the
+    # danger-CTA legibility now, so the guard checks the kit primitive.
+    # Inspect the `.ow-btn-destructive` rule's OWN declarations directly (not a global
+    # substring anywhere in the sheet): every base rule must ink white via --ow-on-danger,
+    # and must NOT ink its label via --on-accent (the dark accent token would be illegible
+    # on the red plate).
+    destructive_rules = re.findall(r"\.ow-btn-destructive\s*\{([^}]*)\}", css)
+    assert destructive_rules, "expected at least one base `.ow-btn-destructive` rule block in the CSS."
+    for body in destructive_rules:
+        assert "color: var(--ow-on-danger, #fff)" in body, (
+            ".ow-btn-destructive (semantic danger bg) must keep white text via --ow-on-danger "
+            "on its own rule, NOT be rewritten to --on-accent."
+        )
+        assert not re.search(r"color\s*:[^;]*--on-accent", body), (
+            ".ow-btn-destructive must NOT ink its label via --on-accent — the dark accent "
+            "token would be illegible on the semantic red plate."
+        )
     assert re.search(r"background:\s*var\(--color-error\);[^}]*\n?\s*color:\s*#fff", css) or \
         "background: var(--color-error)" in css and "color: #fff" in css, (
         "semantic-error backgrounds keep white text."

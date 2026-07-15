@@ -2577,8 +2577,8 @@ const _THEME_ZONE_MAP = {
   'adv-sendBtnHover':  '.send-btn',
   'adv-codeBg':        'pre, code',
   'adv-codeFg':        'pre code, p code',
-  'adv-toggleBg':      '.mode-toggle, .admin-switch',
-  'adv-toggleActive':  '.mode-toggle-btn.active, .admin-switch input:checked + .admin-slider',
+  'adv-toggleBg':      '.mode-toggle, .ow-switch',
+  'adv-toggleActive':  '.mode-toggle-btn.active, .ow-switch input:checked + .ow-switch-track',
   'adv-accentPrimary': '.send-btn, .icon-rail-btn.active',
   'adv-accentError':   '.toast.error',
 };

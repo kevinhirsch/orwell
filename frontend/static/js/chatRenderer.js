@@ -328,42 +328,43 @@ function _openImageLightbox(att) {
 // the LLM (e.g. when OCR misreads a word). Persists to the server's vision
 // cache (PUT /api/upload/{id}/vision), so any subsequent message that
 // references the same file picks up the corrected text.
-let _visionEditorEl = null;
-let _visionEditorEsc = null;
+// #1638 KM-W9: migrated onto the shared window kit (OrwellWindowKit, modal:true).
+// The kit OWNS the scrim + focus-trap + Escape (via the ui.js arbiter) + focus-
+// return, so the bespoke `.vision-editor-overlay` scrim and the hand-rolled
+// document-level Escape listener are retired here (folded into the kit's trap).
+const VISION_WIN_ID = 'vision-editor';
+// Eye icon matches the one in Settings → Vision so users recognise where this
+// text originates. Rendered by the kit titlebar as the window's mono icon.
+const _VISION_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+let _visionWin = null;
 function _closeVisionEditor() {
-  if (_visionEditorEsc) { document.removeEventListener('keydown', _visionEditorEsc); _visionEditorEsc = null; }
-  if (_visionEditorEl) { _visionEditorEl.remove(); _visionEditorEl = null; }
+  const w = _visionWin;
+  _visionWin = null;
+  if (w) { try { w.destroy(); } catch (_) {} }
 }
 function _openVisionEditor(att, userMsgEl) {
   if (!att?.id) return;
+  if (!(window.OrwellWindowKit && window.OrwellWindowKit.create)) return; // kit not ready → fail open
   _closeVisionEditor();
-  const overlay = document.createElement('div');
-  overlay.className = 'vision-editor-overlay';
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeVisionEditor(); });
+
   const panel = document.createElement('div');
-  panel.className = 'vision-editor-panel';
-  const title = document.createElement('div');
-  title.className = 'vision-editor-title';
-  // Eye icon matches the one in Settings → Vision so users recognise where
-  // this text originates.
-  title.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;flex-shrink:0"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><span>Vision text</span>';
-  panel.appendChild(title);
   const desc = document.createElement('div');
-  desc.className = 'vision-editor-desc';
+  desc.style.cssText = 'font-size:12px;opacity:0.6;line-height:1.4;margin-bottom:8px;';
   desc.textContent = 'Edit text and save, new chats will have the new context. Regenerate or continue from there.';
   panel.appendChild(desc);
   const ta = document.createElement('textarea');
-  ta.className = 'vision-editor-text';
+  ta.className = 'ow-input';
   ta.rows = 10;
+  ta.style.cssText = 'width:100%;resize:vertical;box-sizing:border-box;';
   ta.placeholder = 'Loading…';
   ta.disabled = true;
   panel.appendChild(ta);
   const actions = document.createElement('div');
-  actions.className = 'vision-editor-actions';
+  actions.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;';
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
-  closeBtn.className = 'vision-editor-btn';
-  closeBtn.innerHTML = '<span class="vision-btn-label">Close</span>';
+  closeBtn.className = 'ow-btn ow-btn-secondary';
+  closeBtn.textContent = 'Close';
   closeBtn.addEventListener('click', _closeVisionEditor);
   const _saveVisionText = async () => {
     const res = await fetch(`/api/upload/${att.id}/vision`, {
@@ -376,19 +377,19 @@ function _openVisionEditor(att, userMsgEl) {
   };
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
-  saveBtn.className = 'vision-editor-btn vision-editor-btn-primary';
-  saveBtn.innerHTML = '<span class="vision-btn-label">Save</span>';
+  saveBtn.className = 'ow-btn ow-btn-prominent';
+  saveBtn.textContent = 'Save';
   saveBtn.disabled = true;
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled = true;
-    saveBtn.innerHTML = '<span class="vision-btn-label">Saving…</span>';
+    saveBtn.textContent = 'Saving…';
     try {
       await _saveVisionText();
       if (uiModule?.showToast) uiModule.showToast('Saved');
       _closeVisionEditor();
     } catch (e) {
       saveBtn.disabled = false;
-      saveBtn.innerHTML = '<span class="vision-btn-label">Save</span>';
+      saveBtn.textContent = 'Save';
       if (uiModule?.showError) uiModule.showError('Failed to save OCR text');
     }
   });
@@ -396,9 +397,9 @@ function _openVisionEditor(att, userMsgEl) {
   // the user message so the new AI reply uses the edit immediately.
   const regenBtn = document.createElement('button');
   regenBtn.type = 'button';
-  regenBtn.className = 'vision-editor-btn vision-editor-btn-primary';
+  regenBtn.className = 'ow-btn ow-btn-prominent';
   regenBtn.title = 'Save and regenerate the message';
-  regenBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg><span class="vision-btn-label">Regenerate message</span>';
+  regenBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px"><path d="M3 12a9 9 0 1 0 9-9 9.74 9.74 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg><span>Regenerate message</span>';
   regenBtn.disabled = true;
   regenBtn.addEventListener('click', async () => {
     regenBtn.disabled = true;
@@ -421,14 +422,21 @@ function _openVisionEditor(att, userMsgEl) {
   actions.appendChild(saveBtn);
   actions.appendChild(regenBtn);
   panel.appendChild(actions);
-  overlay.appendChild(panel);
-  document.body.appendChild(overlay);
-  _visionEditorEl = overlay;
 
-  // ESC closes the popup. Registered on document so it works regardless of
-  // focus (the textarea swallows the event otherwise).
-  _visionEditorEsc = (e) => { if (e.key === 'Escape') _closeVisionEditor(); };
-  document.addEventListener('keydown', _visionEditorEsc);
+  _visionWin = window.OrwellWindowKit.create({
+    id: VISION_WIN_ID,
+    title: 'Vision text',
+    icon: _VISION_ICON,
+    modal: true,
+    minimizable: false,
+    resizable: false,
+    minWidth: 440,
+    content: panel,
+    // The kit's × / Escape / scrim-dismiss all tear down through here; just
+    // drop the reference (destroy already ran) so there is no double-teardown.
+    onClose: () => { _visionWin = null; },
+  });
+  _visionWin.open();
 
   fetch(`/api/upload/${att.id}/vision`, { credentials: 'same-origin' })
     .then(r => r.ok ? r.json() : Promise.reject(r))

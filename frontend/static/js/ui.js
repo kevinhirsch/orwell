@@ -528,8 +528,9 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
     let settled = false;
     const settle = (result) => { if (!settled) { settled = true; resolve(result); } };
 
-    // Body: the message + a footer with the cancel/confirm buttons. The `.confirm-btn*`
-    // classes (ancestry-independent) keep the exact button styling; the message + footer
+    // Body: the message + a footer with the cancel/confirm buttons. The buttons compose the
+    // element kit — the `.ow-btn` base plus the `.ow-btn-destructive` (danger) / `.ow-btn-prominent`
+    // (default confirm) variant — so styling is ancestry-independent; the message + footer
     // layout is inlined so nothing depends on the retired `.modal-*` container styling.
     const box = document.createElement('div');
     const msg = document.createElement('p');
@@ -540,11 +541,11 @@ export function styledConfirm(message, { confirmText = 'Confirm', cancelText = '
     footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:4px;border-top:1px solid var(--border);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button'; cancelBtn.id = 'styled-confirm-cancel';
-    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.className = 'ow-btn';
     cancelBtn.textContent = cancelText;
     const okBtn = document.createElement('button');
     okBtn.type = 'button'; okBtn.id = 'styled-confirm-ok';
-    okBtn.className = danger ? 'confirm-btn confirm-btn-danger' : 'confirm-btn confirm-btn-primary';
+    okBtn.className = danger ? 'ow-btn ow-btn-destructive' : 'ow-btn ow-btn-prominent';
     okBtn.textContent = confirmText;
     footer.appendChild(cancelBtn); footer.appendChild(okBtn);
     box.appendChild(msg); box.appendChild(footer);
@@ -614,7 +615,7 @@ export function styledPrompt(message, {
     }
     const input = document.createElement('input');
     input.type = 'text'; input.id = 'styled-prompt-input';
-    input.className = 'styled-prompt-input';
+    input.className = 'ow-field';
     input.value = defaultValue || '';
     input.placeholder = placeholder || '';
     input.maxLength = maxLength;
@@ -622,11 +623,11 @@ export function styledPrompt(message, {
     footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border);';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button'; cancelBtn.id = 'styled-prompt-cancel';
-    cancelBtn.className = 'confirm-btn confirm-btn-secondary';
+    cancelBtn.className = 'ow-btn';
     cancelBtn.textContent = cancelText;
     const okBtn = document.createElement('button');
     okBtn.type = 'button'; okBtn.id = 'styled-prompt-ok';
-    okBtn.className = 'confirm-btn confirm-btn-primary';
+    okBtn.className = 'ow-btn ow-btn-prominent';
     okBtn.textContent = confirmText;
     footer.appendChild(cancelBtn); footer.appendChild(okBtn);
     box.appendChild(input); box.appendChild(footer);

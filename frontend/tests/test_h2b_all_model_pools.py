@@ -79,9 +79,11 @@ TTS_MARKUP_FALLBACK = {"tts-1", "tts-1-hd", "gpt-4o-mini-tts"}
 
 def _settings_modal_markup():
     html = _read("static/index.html")
-    # The settings modal is the last modal in the document; the toast div is
-    # the first top-level element after it.
-    return _block(html, 'id="settings-modal"', 'id="toast"')
+    # The settings modal is the last modal in the document; the search overlay is
+    # the first top-level element after it. (#1638 KM-W9 retired the legacy #toast
+    # markup that used to anchor the end of this slice — toasts now render through
+    # the kit notice, so search-overlay is the stable end marker.)
+    return _block(html, 'id="settings-modal"', 'id="search-overlay"')
 
 
 def _select_markup(markup, sel_id):

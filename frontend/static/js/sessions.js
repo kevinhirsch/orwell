@@ -2479,6 +2479,9 @@ function _showDropdown(anchorEl, items) {
 
 // All mutable archive state lives here; reset on each openArchive().
 const _arc = { data: [], total: 0, search: '', offset: 0, sort: 'recent', model: '', debounce: null, selectMode: false, selected: new Set(), allModelCounts: null };
+// #1638 KM-W9: the archive window is now an OrwellWindowKit modal (kit-owned
+// scrim / focus-trap / Escape / drag). Held here so closeArchive() can tear it down.
+let _archiveWin = null;
 
 function _arcRelativeTime(iso) {
   if (!iso) return '';
@@ -3153,52 +3156,57 @@ export function closeLibrary() {
   }
 }
 
+// #1638 KM-W9: archive titlebar icon (mono, rendered by the kit titlebar).
+const _ARCHIVE_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+
 export function openArchive() {
-  if (document.getElementById('archive-modal')) return;
+  if (_archiveWin || document.getElementById('archive-modal')) return;
+  if (!(window.OrwellWindowKit && window.OrwellWindowKit.create)) return; // kit not ready -> fail open
   Object.assign(_arc, { data: [], total: 0, search: '', offset: 0, sort: 'recent', model: '', debounce: null, selectMode: false, selected: new Set(), allModelCounts: null });
 
-  const modal = document.createElement('div');
-  modal.className = 'modal';
-  modal.id = 'archive-modal';
-  modal.innerHTML = `
-    <div class="modal-content doclib-modal-content">
-      <div class="modal-header">
-        <h4><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:6px"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive <span id="archive-stats" style="font-size:0.8em;opacity:0.5;font-weight:normal;margin-left:4px"></span></h4>
-        <button class="close-btn" id="archive-close">✖</button>
-      </div>
-      <div class="modal-body">
-        <div class="doclib-chips" id="archive-chips"></div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <select class="memory-sort-select" id="archive-sort">
-            <option value="recent">Recent</option>
-            <option value="oldest">Oldest</option>
-            <option value="most-messages">Most messages</option>
-            <option value="alpha">A\u2013Z</option>
-          </select>
-          <input type="text" class="memory-search-input" id="archive-search" placeholder="Filter\u2026" style="flex:1;" />
-          <button class="memory-toolbar-btn" id="archive-select-btn" title="Select sessions">Select</button>
-        </div>
-        <div class="memory-bulk-bar hidden" id="archive-bulk-bar">
-          <label class="memory-bulk-check-all"><input type="checkbox" id="archive-select-all"> All</label>
-          <span id="archive-selected-count" style="color:color-mix(in srgb, var(--fg) 50%, transparent);font-size:10px;flex:1;">0 selected</span>
-          <button class="memory-toolbar-btn" id="archive-bulk-restore">Restore</button>
-          <button class="memory-toolbar-btn danger" id="archive-bulk-delete">Delete</button>
-        </div>
-        <div class="doclib-grid archive-list" id="archive-grid"></div>
-        <button class="doclib-load-more" id="archive-load-more" style="display:none">Load more</button>
-      </div>
+  // The kit OWNS the chrome (titlebar + Archive title/icon, close x, scrim,
+  // focus-trap, Escape, drag). Only the former `.modal-body` content lives here;
+  // the `#archive-stats` counter moved out of the legacy header into this body
+  // (its id is unchanged so `_arcSetStats` keeps updating it).
+  const content = document.createElement('div');
+  content.innerHTML = `
+    <div id="archive-stats" style="font-size:11px;opacity:0.5;margin-bottom:8px;min-height:1em"></div>
+    <div class="doclib-chips" id="archive-chips"></div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+      <select class="memory-sort-select ow-select" id="archive-sort">
+        <option value="recent">Recent</option>
+        <option value="oldest">Oldest</option>
+        <option value="most-messages">Most messages</option>
+        <option value="alpha">A\u2013Z</option>
+      </select>
+      <input type="text" class="memory-search-input ow-input" id="archive-search" placeholder="Filter\u2026" style="flex:1;" />
+      <button class="memory-toolbar-btn" id="archive-select-btn" title="Select sessions">Select</button>
     </div>
+    <div class="memory-bulk-bar hidden" id="archive-bulk-bar">
+      <label class="memory-bulk-check-all"><input type="checkbox" id="archive-select-all"> All</label>
+      <span id="archive-selected-count" style="color:color-mix(in srgb, var(--fg) 50%, transparent);font-size:10px;flex:1;">0 selected</span>
+      <button class="memory-toolbar-btn" id="archive-bulk-restore">Restore</button>
+      <button class="memory-toolbar-btn danger" id="archive-bulk-delete">Delete</button>
+    </div>
+    <div class="doclib-grid archive-list" id="archive-grid"></div>
+    <button class="doclib-load-more" id="archive-load-more" style="display:none">Load more</button>
   `;
-  document.body.appendChild(modal);
 
-  // Make draggable via header
-  const _arcContent = modal.querySelector('.modal-content');
-  const _arcHeader = modal.querySelector('.modal-header');
-  if (themeModule && themeModule.makeDraggable && _arcContent && _arcHeader) {
-    themeModule.makeDraggable(_arcContent, _arcHeader);
-  }
+  _archiveWin = window.OrwellWindowKit.create({
+    id: 'archive-modal',
+    title: 'Archive',
+    icon: _ARCHIVE_ICON,
+    modal: true,
+    minimizable: false,     // a modal dialog dismisses on Escape — opt out of minimize (dismissTop
+                            // MINIMIZES a minimizable window without unmounting the scrim, locking the UI)
+    minWidth: 560,
+    minHeight: 320,
+    content,
+    // The kit's close x / Escape tear down through here; just drop the reference.
+    onClose: () => { _archiveWin = null; },
+  });
+  _archiveWin.open();
 
-  document.getElementById('archive-close').addEventListener('click', closeArchive);
   document.getElementById('archive-sort').addEventListener('change', (e) => { _arc.sort = e.target.value; _arcFetch(false); });
   document.getElementById('archive-search').addEventListener('input', (e) => {
     clearTimeout(_arc.debounce);
@@ -3213,23 +3221,17 @@ export function openArchive() {
     else _arc.selected.clear();
     _arcRefreshUI();
   });
-  modal.addEventListener('click', (e) => { if (uiModule.isTouchInsideModal()) return; if (e.target === modal) closeArchive(); });
 
   _arcFetch(false);
 }
 
 export function closeArchive() {
+  const w = _archiveWin;
+  _archiveWin = null;
+  if (w) { try { w.destroy(); } catch (_) {} return; }
+  // Fallback: if a stray node exists without the kit handle, remove it directly.
   const modal = document.getElementById('archive-modal');
-  if (modal) {
-    const content = modal.querySelector('.modal-content');
-    if (content) {
-      content.classList.add('modal-closing');
-      content.addEventListener('animationend', () => modal.remove(), { once: true });
-      setTimeout(() => { if (modal.parentElement) modal.remove(); }, 250);
-    } else {
-      modal.remove();
-    }
-  }
+  if (modal && modal.remove) modal.remove();
 }
 
 /** Update has_documents flag for a session and re-render the sidebar icon */

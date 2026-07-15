@@ -72,10 +72,10 @@ async function loadUsers() {
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button class="admin-btn-sm" data-adm-role-user="${esc(u.username)}" data-adm-is-admin="${u.is_admin ? '1' : '0'}" style="font-size:11px;">${u.is_admin ? 'Revoke admin' : 'Make admin'}</button>
-          <button class="admin-btn-sm" data-adm-resetpw-user="${esc(u.username)}" style="font-size:11px;">Reset password</button>
-          <button class="admin-btn-sm" data-adm-rename-user="${esc(u.username)}" style="font-size:11px;">Rename</button>
-          ${canDelete ? `<button class="admin-btn-delete" data-adm-del-user="${esc(u.username)}" style="font-size:11px;">Remove</button>` : ''}
+          <button class="ow-btn ow-btn-compact" data-adm-role-user="${esc(u.username)}" data-adm-is-admin="${u.is_admin ? '1' : '0'}">${u.is_admin ? 'Revoke admin' : 'Make admin'}</button>
+          <button class="ow-btn ow-btn-compact" data-adm-resetpw-user="${esc(u.username)}">Reset password</button>
+          <button class="ow-btn ow-btn-compact" data-adm-rename-user="${esc(u.username)}">Rename</button>
+          ${canDelete ? `<button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-del-user="${esc(u.username)}">Remove</button>` : ''}
           ${u.is_admin ? '' : '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>'}
         </div>
       `;
@@ -93,7 +93,7 @@ async function loadUsers() {
           const checked = u.privileges && u.privileges[key] ? 'checked' : '';
           html += `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;">
             <span style="font-size:12px;">${label}</span>
-            <label class="admin-switch" style="transform:scale(0.85);"><input type="checkbox" data-priv="${key}" data-user="${esc(u.username)}" ${checked}><span class="admin-slider"></span></label>
+            <label class="ow-switch" style="transform:scale(0.85);"><input type="checkbox" data-priv="${key}" data-user="${esc(u.username)}" ${checked}><span class="ow-switch-track"></span></label>
           </div>`;
         }
         // Rate limit
@@ -131,7 +131,7 @@ async function loadUsers() {
         // Toggle panel visibility + rotate chevron + load models
         let _modelsLoaded = false;
         header.addEventListener('click', (e) => {
-          if (e.target.closest('.admin-btn-delete, [data-adm-rename-user], [data-adm-role-user], [data-adm-resetpw-user]')) return;
+          if (e.target.closest('.ow-btn, [data-adm-rename-user], [data-adm-role-user], [data-adm-resetpw-user]')) return;
           privPanel.classList.toggle('hidden');
           const chevron = header.querySelector('.admin-user-chevron');
           if (chevron) {
@@ -531,8 +531,8 @@ async function loadEndpoints() {
             </div>
             <div class="admin-ep-actions">
               ${_isLocalEndpoint(ep.base_url) ? '<select class="admin-tools-select" data-adm-tools-select="' + ep.id + '" title="Native tool calling mode. Auto = use heuristic (fenced blocks for Ollama /v1). On = always use native function calling. Off = always use fenced blocks."><option value="auto"' + (ep.supports_tools !== true && ep.supports_tools !== false ? ' selected' : '') + '>Tools: Auto</option><option value="true"' + (ep.supports_tools === true ? ' selected' : '') + '>Tools: On</option><option value="false"' + (ep.supports_tools === false ? ' selected' : '') + '>Tools: Off</option></select>' : ''}
-              <button class="admin-btn-sm" data-adm-toggle-ep="${ep.id}">${ep.is_enabled ? 'Disable' : 'Enable'}</button>
-              <button class="admin-btn-delete" data-adm-del-ep="${ep.id}" data-adm-ep-online="${ep.online ? '1' : '0'}">Delete</button>
+              <button class="ow-btn ow-btn-compact" data-adm-toggle-ep="${ep.id}">${ep.is_enabled ? 'Disable' : 'Enable'}</button>
+              <button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-del-ep="${ep.id}" data-adm-ep-online="${ep.online ? '1' : '0'}">Delete</button>
               ${hasModels ? '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>' : ''}
             </div>
           </div>
@@ -666,7 +666,7 @@ async function loadEndpoints() {
         // Don't let interactions inside the expanded panel re-fire the
         // expand/collapse handler — the search box was getting closed
         // because clicking it bubbled up to here.
-        if (e.target.closest('.admin-btn-sm, .admin-btn-delete, .mcp-tools-list, .mcp-tools-header, .mcp-tools-search, input, label')) return;
+        if (e.target.closest('.ow-btn, .mcp-tools-list, .mcp-tools-header, .mcp-tools-search, input, label')) return;
         const epId = header.dataset.admEpHeader;
         const panel = row.querySelector(`[data-adm-ep-models-panel="${epId}"]`);
         if (!panel) return;
@@ -1091,9 +1091,9 @@ function initEndpointForm() {
           '<div class="adm-copilot-coderow">' +
             '<span class="adm-copilot-code-label">Code</span>' +
             '<code class="adm-copilot-code">' + esc(user_code) + '</code>' +
-            '<button type="button" class="admin-btn-sm adm-copilot-copy">Copy</button>' +
+            '<button type="button" class="ow-btn ow-btn-compact adm-copilot-copy">Copy</button>' +
           '</div>' +
-          '<a class="admin-btn-add adm-copilot-auth" href="' + encodeURI(authUrl) + '" target="_blank" rel="noopener">Authorize on GitHub ↗</a>' +
+          '<a class="ow-btn ow-btn-prominent adm-copilot-auth" href="' + encodeURI(authUrl) + '" target="_blank" rel="noopener">Authorize on GitHub ↗</a>' +
           '<div class="adm-copilot-hint">A new tab opened on GitHub — approve there to finish. Didn\'t open? Use the button above.</div>' +
         '</div>';
       const copyBtn = status.querySelector('.adm-copilot-copy');
@@ -1541,9 +1541,9 @@ async function loadBuiltinTools() {
           <span>${esc(cat)}</span>
           <span style="display:flex;align-items:center;gap:6px;" class="admin-tool-cat-right">
             <span class="admin-tool-cat-count" style="font-size:10px;opacity:0.5;">${enabledCount}/${totalCount}</span>
-            <label class="admin-switch" style="flex-shrink:0;">
+            <label class="ow-switch" style="flex-shrink:0;">
               <input type="checkbox" data-tool-cat-toggle="${catId}" ${allEnabled ? 'checked' : ''}>
-              <span class="admin-slider"></span>
+              <span class="ow-switch-track"></span>
             </label>
             <svg class="admin-tool-cat-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>
           </span>
@@ -1564,9 +1564,9 @@ async function loadBuiltinTools() {
             ${optHint}
           </div>
           <span class="admin-tool-ctx" title="Approximate context tokens used">${esc(t.ctx)}</span>
-          <label class="admin-switch" style="flex-shrink:0;">
+          <label class="ow-switch" style="flex-shrink:0;">
             <input type="checkbox" data-tool-id="${esc(t.id)}" data-tool-optional="${t.optional ? '1' : '0'}" ${t.enabled ? 'checked' : ''}>
-            <span class="admin-slider"></span>
+            <span class="ow-switch-track"></span>
           </label>
         </div>`;
       }
@@ -1674,10 +1674,10 @@ async function loadMcpServers() {
             ${hasTools ? `<span style="font-size:10px;opacity:0.4;">Click to manage tools</span>` : ''}
           </div>
           <div style="display:flex;gap:4px;align-items:center;">
-            ${s.needs_oauth ? `<a href="/api/mcp/oauth/authorize/${s.id}" target="_blank" class="admin-btn-sm" style="background:var(--red);color:#fff;text-decoration:none;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;">Authorize</a>` : ''}
-            <button class="admin-btn-sm" data-adm-mcp-reconnect="${s.id}">Reconnect</button>
-            <button class="admin-btn-delete" style="border-color:${s.is_enabled ? 'color-mix(in srgb, var(--red) 30%, transparent)' : 'color-mix(in srgb, var(--fg) 30%, transparent)'};color:${s.is_enabled ? 'var(--red)' : 'var(--fg)'};" data-adm-mcp-toggle="${s.id}" data-adm-mcp-enable="${!s.is_enabled}">${s.is_enabled ? 'Disable' : 'Enable'}</button>
-            <button class="admin-btn-delete" data-adm-mcp-delete="${s.id}">Delete</button>
+            ${s.needs_oauth ? `<a href="/api/mcp/oauth/authorize/${s.id}" target="_blank" class="ow-btn ow-btn-compact ow-btn-destructive" style="text-decoration:none;">Authorize</a>` : ''}
+            <button class="ow-btn ow-btn-compact" data-adm-mcp-reconnect="${s.id}">Reconnect</button>
+            <button class="ow-btn ow-btn-compact${s.is_enabled ? ' ow-btn-destructive' : ''}" data-adm-mcp-toggle="${s.id}" data-adm-mcp-enable="${!s.is_enabled}">${s.is_enabled ? 'Disable' : 'Enable'}</button>
+            <button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-mcp-delete="${s.id}">Delete</button>
             ${hasTools ? '<svg class="admin-user-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;transition:transform 0.2s,opacity 0.2s;"><polyline points="6 9 12 15 18 9"/></svg>' : ''}
           </div>
         </div>
@@ -1717,7 +1717,7 @@ async function loadMcpServers() {
       let _toolsLoaded = false;
       row.style.cursor = 'pointer';
       row.addEventListener('click', async (e) => {
-        if (e.target.closest('.admin-btn-sm, .admin-btn-delete, a, .mcp-tools-list, .mcp-tools-header')) return;
+        if (e.target.closest('.ow-btn, a, .mcp-tools-list, .mcp-tools-header')) return;
         const sid = header.dataset.admMcpHeader;
         const panel = row.querySelector(`[data-adm-mcp-tools-panel="${sid}"]`);
         if (!panel) return;
@@ -2005,7 +2005,7 @@ async function loadRag() {
     const dirs = data.directories || [];
     if (dirs.length === 0) { dirList.innerHTML = '<div class="admin-empty">No directories indexed</div>'; }
     else {
-      dirList.innerHTML = dirs.map(d => `<div class="admin-rag-item"><span class="admin-rag-item-name" title="${esc(d)}">${esc(d)}</span><button class="admin-btn-delete" data-adm-rag-dir="${esc(d)}">Remove</button></div>`).join('');
+      dirList.innerHTML = dirs.map(d => `<div class="admin-rag-item"><span class="admin-rag-item-name" title="${esc(d)}">${esc(d)}</span><button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-rag-dir="${esc(d)}">Remove</button></div>`).join('');
       dirList.querySelectorAll('[data-adm-rag-dir]').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!await uiModule.styledConfirm(`Remove directory "${btn.dataset.admRagDir}" from RAG?`, { confirmText: 'Remove', danger: true })) return;
@@ -2024,7 +2024,7 @@ async function loadRag() {
     else {
       fileList.innerHTML = files.map(f => {
         const size = f.size ? (f.size > 1024 ? (f.size / 1024).toFixed(1) + ' KB' : f.size + ' B') : '';
-        return `<div class="admin-rag-item"><span class="admin-rag-item-name" title="${esc(f.path || f.name)}">${esc(f.name)}</span><span class="admin-rag-item-meta">${size}</span><button class="admin-btn-delete" data-adm-rag-file="${esc(f.path || f.name)}">Delete</button></div>`;
+        return `<div class="admin-rag-item"><span class="admin-rag-item-name" title="${esc(f.path || f.name)}">${esc(f.name)}</span><span class="admin-rag-item-meta">${size}</span><button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-rag-file="${esc(f.path || f.name)}">Delete</button></div>`;
       }).join('');
       fileList.querySelectorAll('[data-adm-rag-file]').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -2117,7 +2117,7 @@ async function loadTokens() {
           ${t.owner ? `<span style="font-size:0.75rem;opacity:0.5;">Owner: ${esc(t.owner)}</span>` : ''}
           ${t.last_used_at ? `<span style="font-size:0.75rem;opacity:0.5;">Last used: ${new Date(t.last_used_at).toLocaleDateString()}</span>` : '<span style="font-size:0.75rem;opacity:0.4;">Never used</span>'}
         </div>
-        <button class="admin-btn-delete" data-adm-del-token="${t.id}">Revoke</button>
+        <button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-del-token="${t.id}">Revoke</button>
       </div>`).join('');
     list.querySelectorAll('[data-adm-del-token]').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -2177,9 +2177,9 @@ async function loadWebhooks() {
             ${errorText}
           </div>
           <div class="admin-ep-actions">
-            <button class="admin-btn-sm" data-adm-wh-test="${w.id}">Test</button>
-            <button class="admin-btn-sm" data-adm-wh-toggle="${w.id}">${w.is_active ? 'Disable' : 'Enable'}</button>
-            <button class="admin-btn-delete" data-adm-wh-delete="${w.id}">Delete</button>
+            <button class="ow-btn ow-btn-compact" data-adm-wh-test="${w.id}">Test</button>
+            <button class="ow-btn ow-btn-compact" data-adm-wh-toggle="${w.id}">${w.is_active ? 'Disable' : 'Enable'}</button>
+            <button class="ow-btn ow-btn-compact ow-btn-destructive" data-adm-wh-delete="${w.id}">Delete</button>
           </div>
         </div>`;
     }).join('');
@@ -2241,7 +2241,7 @@ async function loadFeatures() {
     container.innerHTML = Object.entries(featureLabels).map(([key, label]) => `
       <div class="admin-toggle-row" style="padding:0.4rem 0;border-bottom:1px solid var(--border);">
         <div class="admin-toggle-label">${label}</div>
-        <label class="admin-switch"><input type="checkbox" data-adm-feature="${key}" ${features[key] ? 'checked' : ''}><span class="admin-slider"></span></label>
+        <label class="ow-switch"><input type="checkbox" data-adm-feature="${key}" ${features[key] ? 'checked' : ''}><span class="ow-switch-track"></span></label>
       </div>`).join('');
     container.querySelectorAll('input[data-adm-feature]').forEach(toggle => {
       toggle.addEventListener('change', async () => {
@@ -2437,8 +2437,8 @@ function initTranscripts() {
           <div class="admin-toggle-sub">${esc(r.owner || '(unknown)')} · ${r.message_count ?? 0} msg · ${esc((r.updated_at || '').slice(0, 16).replace('T', ' '))}</div>
         </div>
         <div style="display:flex;gap:6px;white-space:nowrap;">
-          <a class="admin-btn-sm" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=json" target="_blank" rel="noopener">JSON</a>
-          <a class="admin-btn-sm" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=md" target="_blank" rel="noopener">MD</a>
+          <a class="ow-btn ow-btn-compact" style="text-decoration:none;" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=json" target="_blank" rel="noopener">JSON</a>
+          <a class="ow-btn ow-btn-compact" style="text-decoration:none;" href="/api/admin/transcripts/${encodeURIComponent(r.id)}?format=md" target="_blank" rel="noopener">MD</a>
         </div>
       </div>`).join('');
   }
@@ -2766,7 +2766,7 @@ function initLocalTls() {
       if (on && ca.available && ca.downloadUrl) {
         caEl.innerHTML =
           `<div class="admin-toggle-label">Trust the local certificate (one time per device)</div>` +
-          `<div class="settings-row" style="margin-top:6px;"><a class="admin-btn-add" href="${esc(ca.downloadUrl)}" download>Download CA root</a></div>` +
+          `<div class="settings-row" style="margin-top:6px;"><a class="ow-btn ow-btn-prominent" style="text-decoration:none;" href="${esc(ca.downloadUrl)}" download>Download CA root</a></div>` +
           `<div class="admin-toggle-sub" style="margin-top:6px;">Install it as a trusted root: macOS → Keychain ▸ System ▸ Always Trust · Windows → Local Machine ▸ Trusted Root CAs · iOS → install profile, then Settings ▸ General ▸ About ▸ Certificate Trust · Android → Settings ▸ Security ▸ Install certificate.</div>`;
       } else {
         caEl.innerHTML = '';
