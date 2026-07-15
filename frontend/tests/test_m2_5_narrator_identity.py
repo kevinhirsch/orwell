@@ -72,11 +72,74 @@ def test_the_producer_name_is_plumbed_from_engine_to_client():
     # emitted on the stream (game/casting turns only), read from the stash
     assert "last_framed_producer_name" in loop
     assert '"type": "orwell_narrator"' in loop
-    # the client sets its byline from that event (main + mirror parsers) and persists it per-tab
+    # the client sets its byline from that event (main + mirror parsers) and persists it season-scoped
     chat = _read("static/js/chat.js")
-    assert "json.type === 'orwell_narrator'" in chat
+    assert chat.count("json.type === 'orwell_narrator'") >= 2   # main + mirror/resume parsers
     assert "setGameNarrator(json.name)" in chat
-    assert "orwell.gameNarrator" in chat  # sessionStorage key — reload keeps it (stable per season)
+    assert "orwell.gameNarrator" in chat  # sessionStorage key — reload keeps it for the same season
+
+
+def test_the_producer_byline_is_season_scoped_server_side():
+    """CONSENSUS must-fix (CodeRabbit Major / Greptile P1): because a blank producer fetch is
+    deliberately not-clobbering (stable per season), the cache is CLEARED at the season-reset
+    boundary — otherwise the SAME user's NEW season emits the PRIOR season's producer. The clear
+    lives in the not-started framing branch and pops the SAME `user or "default"` key the stash uses."""
+    helpers = _read("routes/chat_helpers.py")
+    assert '_LAST_FRAMED_PRODUCER_NAME.pop(user or "default", None)' in helpers, \
+        "season-reset must clear the cached producer so a new season re-resolves its own"
+
+
+def test_stash_producer_name_is_fail_open_but_not_silent():
+    """`_stash_producer_name` must be fail-open (a non-mapping/blank prompt never raises and never
+    clobbers a good name) WITHOUT a silent `except Exception: pass` (owner ruling #1599 / Ruff
+    S110/BLE001) — it narrows and logs at debug."""
+    from routes import chat_helpers as ch
+    # the source must not carry a blind swallow; it narrows + logs instead
+    src = _read("routes/chat_helpers.py")
+    fn = src[src.index("def _stash_producer_name("):src.index("def last_framed_producer_name(")]
+    assert "except Exception:\n        pass" not in fn, "no silent fail-soft (owner ruling #1599)"
+    assert "logger.debug(" in fn, "the skipped path must log the reason"
+    # behavior: strips, is fail-open on a non-mapping/blank prompt, and never clobbers a good name
+    key = "__m2_5_test_user__"
+    ch._LAST_FRAMED_PRODUCER_NAME.pop(key, None)
+    try:
+        ch._stash_producer_name(key, {"producerName": "  The Producer  "})
+        assert ch.last_framed_producer_name(key) == "The Producer"   # stripped
+        ch._stash_producer_name(key, None)                            # non-mapping ⇒ no raise, no clobber
+        ch._stash_producer_name(key, ["not", "a", "dict"])            # non-mapping ⇒ no raise, no clobber
+        ch._stash_producer_name(key, {"producerName": "   "})         # blank ⇒ keep the prior value
+        ch._stash_producer_name(key, {})                             # missing ⇒ keep the prior value
+        assert ch.last_framed_producer_name(key) == "The Producer"
+    finally:
+        ch._LAST_FRAMED_PRODUCER_NAME.pop(key, None)
+
+
+def test_client_refreshes_the_already_mounted_live_byline():
+    """#1626 review item 3: both stream handlers create the assistant holder BEFORE reading the SSE,
+    so the live bubble must be re-labeled when the producer resolves mid-stream (not only at
+    finalize/reload). The refresh routes through the canonical role-label path, preserving an
+    explicit character label."""
+    chat = _read("static/js/chat.js")
+    assert "function _refreshLiveByline(" in chat
+    # it re-applies via the canonical labeler, carrying the holder's explicit character label through
+    assert "_setRoleModelLabel(roleEl, liveHolder._requestedModel, liveHolder._actualModel" in chat
+    assert "characterName: liveHolder._characterName" in chat
+    # both the primary and the mirror/resume handlers refresh the live holder
+    assert chat.count("_refreshLiveByline(holder)") >= 2
+
+
+def test_client_persisted_byline_is_season_scoped():
+    """#1626 review item 1 (client): the persisted narrator is scoped to the stream's SESSION, and
+    restored only when the stored record matches the ACTIVE session — so a new season/session in the
+    same tab falls back to the default instead of restoring the prior producer."""
+    chat = _read("static/js/chat.js")
+    # persisted as a {sid, name} record keyed to the stream session, not a tab-global bare string
+    assert "function _persistNarratorForSession(" in chat
+    assert "JSON.stringify({ sid: sid || null, name: String(name) })" in chat
+    assert "_persistNarratorForSession(streamSessionId, json.name)" in chat  # primary
+    assert "_persistNarratorForSession(sessionId, json.name)" in chat        # mirror/resume
+    # restore validates the record against the active session before applying it
+    assert "_rec.sid === _curSid" in chat and "getCurrentSessionId" in chat
 
 
 def test_product_chrome_keeps_orwell():
