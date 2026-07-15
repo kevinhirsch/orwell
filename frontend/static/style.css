@@ -19989,10 +19989,11 @@ body.theme-frosted .modal {
 
 /* RESP-1/2 (touch-target roundup): controls the J5-01 floor block above didn't cover —
    the minimized-window dock row's only close `×` (16px, the sole close on every platform
-   after E95 removed drag-close) and the cast-panel body buttons (.oc-pin 28px / .oc-backfill
-   32px — "Generate cast portraits" is a universal action). Lift them to the 44px coarse-pointer
-   floor on TOUCH only so desktop chrome stays compact (same pattern as J5-01). Flex/centering
-   keeps the glyph/label centered as the box grows. */
+   after E95 removed drag-close) and the cast-panel body pin button (.oc-pin 28px). Lift them
+   to the 44px coarse-pointer floor on TOUCH only so desktop chrome stays compact (same pattern
+   as J5-01). Flex/centering keeps the glyph/label centered as the box grows. (The backfill
+   "Generate cast portraits" action migrated to the .ow-btn kit, which carries the 44px tap floor
+   on its base — no per-class roundup needed.) */
 @media (hover: none) and (pointer: coarse) {
   .minimized-dock-x {
     min-width: 44px !important;
@@ -20000,8 +20001,7 @@ body.theme-frosted .modal {
     width: auto;
     height: auto;
   }
-  #orwell-cast .oc-pin,
-  #orwell-cast .oc-backfill {
+  #orwell-cast .oc-pin {
     min-width: 44px;
     min-height: 44px;
   }

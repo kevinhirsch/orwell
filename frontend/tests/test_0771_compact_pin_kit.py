@@ -156,7 +156,7 @@ def test_compact_pin_has_a_44px_coarse_pointer_floor():
     css = _read(STYLE)
     # the RESP-1/2 touch block lifts .oc-pin to the 44px floor on a coarse pointer. Find the
     # `.oc-pin` rule, then confirm it lives in a coarse-pointer @media and carries 44px.
-    pin = css.index("#orwell-cast .oc-pin,\n  #orwell-cast .oc-backfill")
+    pin = css.index("#orwell-cast .oc-pin {")
     head = css[:pin]
     media = head.rindex("@media")
     block = css[media:pin + 200]

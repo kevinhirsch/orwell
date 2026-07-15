@@ -296,25 +296,16 @@
         #orwell-cast .oc-pin .oc-pin-ic { flex-shrink: 0; opacity: .8; }
         #orwell-cast .oc-pin:hover .oc-pin-ic { opacity: 1; }
         #orwell-cast .oc-actions { margin-top: .8rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-        #orwell-cast .oc-backfill {
-          cursor: pointer; font: inherit; font-size: .74rem; letter-spacing: .03em;
-          color: inherit; background: rgba(255,255,255,.06);
-          border: 1px solid var(--border, #355a66); border-radius: 8px;
-          padding: .4rem .7rem; min-height: 32px;
-        }
-        #orwell-cast .oc-backfill:hover:not(:disabled) { background: rgba(255,255,255,.12); }
-        #orwell-cast .oc-backfill:disabled { opacity: .5; cursor: default; }
         #orwell-cast .oc-backfill-note { font-size: .72rem; opacity: .65; line-height: 1.4; }
         /* Narrow: the slot engine's sheet host owns the position; just fit. */
         @media (max-width: 768px) {
           #orwell-cast { width: auto !important; max-width: none !important; }
         }
         /* #725: on the LIGHT glass var(--border) is a HARD dark stroke. Apple defines glass
-           by lensing, not a hard line — soften every inner stroke (portrait holders, the pin
-           + backfill controls) to the low-opacity WHITE hairline the windows/notices carry. */
+           by lensing, not a hard line — soften every inner stroke (portrait holders, the pin)
+           to the low-opacity WHITE hairline the windows/notices carry. */
         body.theme-frosted #orwell-cast .oc-portrait,
-        body.theme-frosted #orwell-cast .oc-pin,
-        body.theme-frosted #orwell-cast .oc-backfill {
+        body.theme-frosted #orwell-cast .oc-pin {
           border-color: rgba(255,255,255,0.14);
         }
       </style>
@@ -324,7 +315,7 @@
       <div class="oc-grid" id="oc-grid"></div>
       <div class="oc-empty" id="oc-empty" style="display:none"></div>
       <div class="oc-actions" id="oc-actions" style="display:none">
-        <button type="button" class="oc-backfill" id="oc-backfill">Generate cast portraits</button>
+        <button type="button" class="ow-btn ow-btn-secondary" id="oc-backfill">Generate cast portraits</button>
         <span class="oc-backfill-note" id="oc-backfill-note"></span>
       </div>`;
     _win = window.OrwellWindowKit.create({
