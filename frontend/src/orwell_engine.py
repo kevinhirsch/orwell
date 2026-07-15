@@ -521,6 +521,20 @@ async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict
     return await _call("recordWorldSnapshot", snapshot, user=user)
 
 
+async def record_producer_profile(overlay: dict, user: str | None = None) -> dict:
+    """Issue #1626 (increment 3): write an LLM-AUTHORED, richer OFF-CAMERA PRODUCER persona BACK to the
+    engine, which folds it onto the seeded producer as the source of truth. ``overlay`` carries any
+    subset of the OPEN-SET public-voice fields — ``archetype`` (core temperament / register),
+    ``demeanor``, ``disposition``, ``wit``, ``quirk``, ``backstory`` — all optional prose strings. The
+    engine validates (open-set voice PROSE only; strips any stat/soul/number vocabulary), ACCUMULATES
+    onto the seeded floor (a field the model omits keeps its seeded value; a later authoring never
+    loses a facet), and NEVER changes the seeded NAME — the byline stays byte-stable, so a ``name`` in
+    the payload is ignored. Returns ``{ accepted, fields, reason? }`` — the accepted field NAMES only,
+    Vault-free by construction. Mirror of the 0058 ``record_cast_profile`` handshake, scaled to the
+    single producer."""
+    return await _call("recordProducerProfile", overlay, user=user)
+
+
 async def get_offscreen_scene_skeletons(user: str | None = None) -> list:
     """Feature 0070: read the Vault-free SKELETONS of off-screen scenes recorded this tick — public
     participant ids + nature + the current template/voiced prose only (no hidden attributes, no

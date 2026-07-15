@@ -4994,6 +4994,10 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                     def _deferred_post_start():
                         from src import orwell_zeitgeist
                         orwell_zeitgeist.kickoff_capture(owner)
+                        # #1626 (increment 3): deepen the off-camera producer persona in the
+                        # background too — best-effort, no model ⇒ the seeded floor stands.
+                        from src import orwell_producer_authoring
+                        orwell_producer_authoring.kickoff_producer_authoring(owner)
                     _authoring_gate.kickoff_house_ready_watch(
                         owner, on_ready=_deferred_post_start)
                     holding = {
@@ -5031,8 +5035,14 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
             if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
                 from src import orwell_zeitgeist
                 orwell_zeitgeist.kickoff_capture(owner)
+                # #1626 (increment 3): deepen the off-camera casting PRODUCER persona (FE utility-LLM
+                # authors a richer backstory/temperament, written back via recordProducerProfile) in the
+                # background, ONCE per genuine season start. Best-effort: no model ⇒ the engine's seeded
+                # producer floor simply stands. Kicked exactly like the zeitgeist above.
+                from src import orwell_producer_authoring
+                orwell_producer_authoring.kickoff_producer_authoring(owner)
         except Exception:
-            pass  # the zeitgeist is pure flavor — never let it affect game start
+            pass  # producer deepening is pure persona flavor — never let it affect game start
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
