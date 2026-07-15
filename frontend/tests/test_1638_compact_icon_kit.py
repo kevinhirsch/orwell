@@ -101,8 +101,31 @@ def test_coarse_pointer_44_floor_exists_for_both():
     assert re.search(
         r"\.ow-btn-icon\s*\{[^}]*min-width:\s*44px\s*!important[^}]*min-height:\s*44px\s*!important", floor
     ), "the icon must snap to 44x44 (min-width+min-height 44px !important) on a coarse pointer"
-    assert re.search(r"\.ow-btn-compact\s*\{[^}]*min-height:\s*44px\s*!important", floor), \
-        "the compact text button must snap to 44px min-height on a coarse pointer"
+    # the compact text button must ALSO snap to 44px WIDE (a short label can render <44px wide),
+    # not just tall — WCAG 2.5.5 is 44x44 (#1653).
+    assert re.search(
+        r"\.ow-btn-compact\s*\{[^}]*min-width:\s*44px\s*!important[^}]*min-height:\s*44px\s*!important", floor
+    ), "the compact text button must snap to 44x44 (min-width+min-height 44px !important) on a coarse pointer"
+
+
+# ── 4b. flat no-lift hover: scoped + ordered so it WINS over the generic lift (#1653) ─
+def test_flat_no_lift_hover_scoped_and_ordered_after_generic():
+    # the flat compact/icon no-lift hover must be `body:not(.theme-frosted)`-scoped — EQUAL
+    # (0,3,1) specificity to the generic `.ow-btn:hover` — so nothing but source order decides.
+    icon_hover = CSS.find("body:not(.theme-frosted) .ow-btn-icon:hover")
+    compact_hover = CSS.find("body:not(.theme-frosted) .ow-btn-compact:hover")
+    assert icon_hover != -1, "the flat icon no-lift hover must be body:not(.theme-frosted)-scoped"
+    assert compact_hover != -1, "the flat compact no-lift hover must be body:not(.theme-frosted)-scoped"
+    # …and it must be DECLARED AFTER the generic `body:not(.theme-frosted) .ow-btn:hover`, so at
+    # equal specificity source order makes it win (the #1653 flat-hover fix — else the generic
+    # lift + `--own-flat-fill-hover` fill would override it).
+    generic = CSS.find("body:not(.theme-frosted) .ow-btn:hover")
+    assert generic != -1, "the generic flat `.ow-btn:hover` rule is missing"
+    assert icon_hover > generic and compact_hover > generic, \
+        "the flat no-lift hover must be ordered AFTER the generic `.ow-btn:hover` to win at equal specificity"
+    # and the no-lift rule actually neutralizes the lift.
+    body = _block(CSS, "body:not(.theme-frosted) .ow-btn-compact:hover")
+    assert "transform: none" in body, "the flat no-lift hover must set `transform: none`"
 
 
 # ── 5. wallpaper-aware ink + the W1 registry decision in the same change ──────────────

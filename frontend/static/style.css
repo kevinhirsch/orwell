@@ -21265,7 +21265,7 @@ body.theme-frosted .ow-btn-compact {
    it covers BOTH the frosted and flat `.ow-btn-icon` / `.ow-btn-compact`. */
 @media (any-pointer: coarse) {
   .ow-btn-icon { min-width: 44px !important; min-height: 44px !important; }
-  .ow-btn-compact { min-height: 44px !important; }
+  .ow-btn-compact { min-width: 44px !important; min-height: 44px !important; }
 }
 
 /* ── SECONDARY (default) glass buttons: translucent disc/capsule, light glyph ──*/
@@ -22519,17 +22519,20 @@ body:not(.theme-frosted) .ow-btn-compact {
   background: transparent; border-color: transparent; box-shadow: none;
   color: var(--fg);
 }
-/* #1638 flat-chrome hover: subtle adaptive `--fg` tint, no lift. */
-body:not(.theme-frosted) .ow-btn-icon:hover,
-body:not(.theme-frosted) .ow-btn-compact:hover {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
-  transform: none; filter: none;
-}
 /* STATES — same contract as frosted: hover lift, iOS press dim+scale, system-blue
    focus ring, a clear (opaque) disabled state. */
 body:not(.theme-frosted) .ow-btn:hover {
   background-color: var(--own-flat-fill-hover);
   transform: translateY(-1px);
+}
+/* #1638 flat-chrome hover: subtle adaptive `--fg` tint, no lift. Declared AFTER the generic
+   `.ow-btn:hover` above (mirrors the frosted tier) so — at EQUAL (0,3,1) specificity — source
+   order makes it WIN for the two compact/icon variants, overriding the generic lift + flat fill;
+   every OTHER `.ow-btn` keeps the generic hover unchanged. */
+body:not(.theme-frosted) .ow-btn-icon:hover,
+body:not(.theme-frosted) .ow-btn-compact:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  transform: none; filter: none;
 }
 body:not(.theme-frosted) .ow-btn-prominent:hover {
   /* single-percentage form so the mix sums to 100% (no alpha-thinning remainder) */
