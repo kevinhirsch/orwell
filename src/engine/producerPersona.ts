@@ -124,6 +124,112 @@ export function producerForSeed(seed: number): Producer {
   return generateProducer(new SeededRandom(hashSeed(`${seed}:producer`)));
 }
 
+// ── AI-authored DEEPENING overlay (increment 3) ──────────────────────────────────────────────────────
+/**
+ * An OPTIONAL, FE-driven authored overlay that DEEPENS the seeded producer persona (a richer backstory,
+ * a sharper disposition/wit/quirk, a distinct temperament/register) WITHOUT touching the seeded NAME —
+ * the byline must stay byte-stable so it never churns. Every field is OPEN-SET public voice PROSE (the
+ * `renderProducerVoice` block reads them as facts to voice, ADR 0003), so nothing here is Vault content:
+ * there is NO name, NO stat, NO number, and NO hidden game state — structurally unproposable, exactly the
+ * `validateCastGenesis` split (identity is open-set, power is closed-set-and-unproposable). A merged
+ * producer keeps the seeded floor value for every field the overlay omits (non-degradation — an authored
+ * overlay never LOSES seeded detail), so the floor always stands when there is no overlay.
+ */
+export interface ProducerProfileOverlay {
+  /** Core temperament / register (the "Core temperament" line) — how they come across, in the model's words. */
+  archetype?: string;
+  /** Observable demeanor / voice register. */
+  demeanor?: string;
+  /** Their strategic read on running a casting room — the lens they probe a player through. */
+  disposition?: string;
+  /** Their calculated, deliberate WIT style. */
+  wit?: string;
+  /** A small, distinct verbal quirk that colors the voice consistently. */
+  quirk?: string;
+  /** A richer backstory: who this producer is and how they came to the casting desk. */
+  backstory?: string;
+}
+
+/** The open-set overlay fields, in the order the deepening reports them (never includes `name`). */
+export const PRODUCER_OVERLAY_FIELDS = [
+  "archetype", "demeanor", "disposition", "wit", "quirk", "backstory",
+] as const;
+
+/**
+ * The Vault-vocabulary the overlay may NEVER carry (mandate #2/#3): the stat-key substrings the Vault
+ * sentinel sweeps hunt for, plus `soul`/`stats`. A field containing ANY of these (or a decimal number —
+ * a stat/rating shape) is REJECTED wholesale (the seeded floor for that field stands), so no numeric stat
+ * or hidden-layer word can ever ride the producer's PUBLIC voice block. Structural, not prompt-worded.
+ */
+const PRODUCER_FORBIDDEN_SUBSTRINGS: readonly string[] = ["physical", "mental", "social", "soul", "stats"];
+const PRODUCER_DECIMAL_RE = /\d\s*\.\s*\d/;
+const PRODUCER_BACKSTORY_MAX = 500;
+const PRODUCER_FIELD_MAX = 220;
+
+/** Flatten control chars / collapse whitespace / length-cap an FE-authored prose value. Empty ⇒ undefined. */
+function neutralizeProducerProse(v: unknown, max: number): string | undefined {
+  if (typeof v !== "string") return undefined;
+  // eslint-disable-next-line no-control-regex
+  const flat = v.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim();
+  if (flat.length === 0) return undefined;
+  return flat.length <= max ? flat : flat.slice(0, max);
+}
+
+/** True when a neutralized value carries forbidden Vault vocabulary or a stat/rating-shaped number. */
+function violatesProducerVaultVocab(v: string): boolean {
+  const low = v.toLowerCase();
+  if (PRODUCER_FORBIDDEN_SUBSTRINGS.some((k) => low.includes(k))) return true;
+  return PRODUCER_DECIMAL_RE.test(v);
+}
+
+/**
+ * Validate a proposed producer-deepening payload into a Vault-free overlay (the `validateCastGenesis`
+ * envelope pattern, scaled to the producer). PURE. Each open-set field is neutralized + length-capped;
+ * a field carrying stat/soul vocabulary (or a decimal number) is REJECTED and left to the seeded floor;
+ * an absent/blank field simply keeps the floor (NOT a rejection). `name` and any unknown key are IGNORED
+ * — the byline is seeded and immovable. Returns the accepted overlay, the accepted field NAMES, and the
+ * rejected field NAMES (for the caller's Vault-free result).
+ */
+export function validateProducerProfile(raw: Record<string, unknown> | undefined): {
+  overlay: ProducerProfileOverlay; fields: string[]; rejected: string[];
+} {
+  const overlay: ProducerProfileOverlay = {};
+  const fields: string[] = [];
+  const rejected: string[] = [];
+  for (const key of PRODUCER_OVERLAY_FIELDS) {
+    const flat = neutralizeProducerProse(raw?.[key], key === "backstory" ? PRODUCER_BACKSTORY_MAX : PRODUCER_FIELD_MAX);
+    if (!flat) continue; // absent/blank ⇒ the seeded floor stands (not a rejection)
+    if (violatesProducerVaultVocab(flat)) { rejected.push(key); continue; }
+    overlay[key] = flat;
+    fields.push(key);
+  }
+  return { overlay, fields, rejected };
+}
+
+/**
+ * Merge the seeded floor producer with an authored overlay: the overlay wins where present, the seeded
+ * floor fills every field the overlay omits, and the NAME + the structural flags ALWAYS come from the
+ * seeded floor (the byline never churns; the producer stays off-camera / head-shot-less / not-a-houseguest).
+ * No overlay ⇒ the floor is returned unchanged (byte-identical to today). PURE.
+ */
+export function mergeProducer(floor: Producer, overlay?: ProducerProfileOverlay | null): Producer {
+  if (!overlay) return floor;
+  return {
+    ...floor,
+    ...(overlay.archetype ? { archetype: overlay.archetype } : {}),
+    ...(overlay.demeanor ? { demeanor: overlay.demeanor } : {}),
+    ...(overlay.disposition ? { disposition: overlay.disposition } : {}),
+    ...(overlay.wit ? { wit: overlay.wit } : {}),
+    ...(overlay.quirk ? { quirk: overlay.quirk } : {}),
+    ...(overlay.backstory ? { backstory: overlay.backstory } : {}),
+    // The byline + the structural off-camera flags are seeded and immovable (never from the overlay).
+    name: floor.name,
+    offCamera: true,
+    headshot: false,
+    houseguest: false,
+  };
+}
+
 /**
  * The producer's PERSONA block woven into the casting prompt (facts to voice, ADR 0003) — guidance the
  * model voices the producer AS, never a script to recite. Public voice flavor only; carries no secret.
