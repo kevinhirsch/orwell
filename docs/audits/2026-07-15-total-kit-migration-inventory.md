@@ -112,12 +112,14 @@ Every gadget **card** is on the kit (§0). The gadgets are overwhelmingly read-o
 internal controls and the rail-host chrome are bespoke.
 
 ### 3a. Gadget-internal controls
+
 | Gadget | Element | file:line | Current | Target | Verdict |
 |---|---|---|---|---|---|
 | Cast-pin | "Open" / "Un-pin" header actions | `orwellCastPin.js:131,132` (via kit `addAction`) | `.og-act` (the gadget kit's OWN action primitive, `orwellGadget.js:84-90,289-291`) | `.ow-btn ow-btn-plain` (fix once in `orwellGadget.js` → migrates every gadget action at once) | **TODO** (single kit-internal fix) |
 | House Status | Premiere cast portrait tiles | `orwellStatusPanel.js:645-648` | `.os-tile` (bespoke `<button>` portrait tile) | shared "portrait tile" primitive (not `.ow-btn`) | **ACCEPTED-GAP** (portrait chip; no clean kit analog) |
 
 ### 3b. Gadget-rail HOST chrome (not gadget-internal, but rail controls)
+
 | Control | file:line | Current | Target | Verdict |
 |---|---|---|---|---|
 | Collapse toggle | `index.html:1552` | `.gadget-rail-toggle` | `.ow-btn ow-btn-plain` (icon) | **TODO** |
@@ -162,13 +164,18 @@ The Settings window is kit, but most panel controls below the Account/Appearance
   form), `:5556` (codex scope — *dropped*).
 - Also update the theme-var selector map `theme.js:2565-2566` (`adv-toggleBg`/`adv-toggleActive` point at
   `.admin-switch`).
-- **~11 IN-SCOPE switches** (Vision/Time/Image/TTS/Synthesis/auto-*/signup/new-admin/email) + ~4 that ride
-  dropped panels.
+- **16 IN-SCOPE switches** = **11 in `index.html`** (`:628,:635,:654` auto-*, `:1780` Vision, `:1857`
+  In-Game Time, `:1930` context-tiering, `:1940` Image Generation, `:1962` TTS, `:2332` AI Synthesis,
+  `:2365` signup, `:2377` new-admin) + **5 in `settings.js`** (`:3462,:3467` email STARTTLS/same-as-imap,
+  `:4791,:4796,:4799` user email form) + **3 DROPPED** that ride dropped panels (`:491` memory, `:581`
+  skills, `settings.js:5556` codex).
 
 ### 5b. Selects `.settings-select` (+ bare/inline `<select>`) → `.ow-select`
-- **`.settings-select` (~33):** `index.html:1704,1708,1712,1728,1732,1745,1753,1768,1772,1785,1800,1806,1812,1866,1872,1878,1884,1906,1916,1945,1949,1967,1975,1984,1999,2300,2309,2321`; `settings.js:3454,3466,4795`.
-  *(Caveat: `.settings-select` is reused as a class on numeric `<input>` fields `index.html:1824–1926` —
-  co-styled; migrate the true `<select>`s.)*
+- **`.settings-select` (31 true `<select>`s):** `index.html` (28) `:1704,1708,1712,1728,1732,1745,1753,1768,1772,1785,1800,1806,1812,1866,1872,1878,1884,1906,1916,1945,1949,1967,1975,1984,1999,2300,2309,2321`; `settings.js` (3) `:3454,3466,4795`.
+  *(Caveat: `.settings-select` is also reused as a class on ~23 co-styled numeric/text `<input>` and
+  `<textarea>` fields — e.g. `index.html:1824–1926,2053,2058–2066,2282,2313–2325,2341` — which are **not**
+  selects and are excluded from this count; migrate only the true `<select>`s. Two more true search
+  selects exist at `:2032,:2046` — folded into the §8 search panel, not double-counted here.)*
 - **Bare / inline `<select>`:** `index.html:1149` (model-select), `:2402,2450,2470,2474` (adm-ep*);
   `settings.js:1755,4231,4774,5442` (hidden mirror selects).
 
@@ -187,8 +194,8 @@ The Settings window is kit, but most panel controls below the Account/Appearance
   `:796` → `.ow-btn-plain` **or ACCEPTED-GAP** (tiny per-row reset).
 - Theme import/export residuals `.theme-io-btn` (`index.html:526,527,551` — memory/skills IO, *dropped*).
 
-**Net for §5 (IN SCOPE): ~11 switches + ~36 selects + ~2 sliders + 1 segmented + ~1 shortcut-reset ≈ 51
-TODO controls** (plus ~19 color-reset = ruling-dependent).
+**Net for §5 (IN SCOPE): 16 switches + 40 selects (31 `.settings-select` + 9 bare/hidden) + 2 sliders +
+1 segmented + 1 shortcut-reset = 60 TODO controls** (plus ~19 color-reset = ruling-dependent).
 
 ---
 
@@ -255,10 +262,12 @@ the window/element kit as-is, or (b) a **separate future initiative** to add a s
 | Color picker | `colorPicker.js:99` | `.cp-popover` | IN SCOPE |
 | Slash autocomplete | `slashAutocomplete.js:107` | `.slash-autocomplete-popup` | ACCEPTED-GAP (inline typeahead) |
 | Message overflow / context popups | `chatRenderer.js:1496,1693` (`.msg-overflow-menu`), `:687,1807` (`.ctx-popup`), `:1885` (`.ctx-detail-popup`) | bespoke | IN SCOPE |
-| **search-overlay / search-popup** | `index.html:2730` (`.search-overlay`) + `.search-popup` `:2731` (toggled `search-chat.js:14/28/186`) | bespoke overlay+popup | IN SCOPE — could be a **kit window** (the one true window candidate here) |
+| **search-overlay / search-popup** | `index.html:2730` (`.search-overlay`) + `.search-popup` `:2731` (toggled `search-chat.js:14/28/186`) | bespoke overlay+popup (Ctrl+K palette) | IN SCOPE — ruling-dependent popover (scrim+popup, dismissed like the others; **not** in the §9 window backlog) |
 
-**Net for §8: ~14 popover surfaces (ruling-dependent).** One genuine window candidate:
-**search-overlay** → could become a kit window.
+**Net for §8: ~14 popover surfaces (ruling-dependent).** The **search-overlay** (Ctrl+K command palette)
+is folded into this popover ruling — a scrim+popup dismissed like the rest, so it is counted here,
+**not** in the §9 window backlog; under W10 the owner may accept it as a popover or, if ruled a window,
+promote it to a kit window.
 
 ---
 
@@ -267,21 +276,23 @@ the window/element kit as-is, or (b) a **separate future initiative** to add a s
 Split by reachability (the 2026-06-23 audit classified the inherited ones Class C — game-build-dropped).
 
 ### 9a. IN SCOPE — game-build reachable bespoke windows (TODO → kit window)
+
 | Surface | file:line | Current | Notes |
 |---|---|---|---|
 | **rename-session-modal** | `index.html:1575` (`.modal`, `.modal-content` `:1576`, header/body) | legacy `.modal` (fixed `width:400px`) | history kept → reachable; small dialog → kit `modal:true`. *(Prior audit flagged "verify" — session rename is a kept flow.)* |
 | **archive-modal** (session archive) | `sessions.js:3160-3169` (`id=archive-modal`, `.modal-content doclib-modal-content`) | legacy `.modal` | opened `openArchive()` `sessions.js:3156`; history-adjacent. |
 | **vision-editor overlay** | `chatRenderer.js:340-346` (`.vision-editor-overlay` + `.vision-editor-panel`, own Esc `:334`) | bespoke custom overlay (own scrim/keydown) | opened from image-attachment OCR `chatRenderer.js:171`; vision is kept. → kit window (modal). |
+| **custom-preset-modal** (the "Prompt" / persona window) | `index.html:1462` (`.modal`, `.preset-modal-content`) | legacy `.modal` | **Corrected: IN SCOPE, not inherited.** The game build strips only *scripts* (`presets.js` is **not** in `GAME_DROP_SCRIPTS`, `settings.py:634`) and no `preset`/`prompt` feature is in `GAME_DROP_SET`, so the markup is always served and wired by `presets.js`/`app.js`/`modalManager.js` (registered as the "Prompt" dock window `modalManager.js:153`). Reachable via the `#character-indicator-btn` composer chip (`index.html:1431`; opened `presets.js:989` / `app.js:3125`). *Inner controls already tracked — sliders in §5c (`:1485,:1495`), char/preset buttons in §7.* |
 | Static `#toast` element | `index.html:2738` (`.toast`) | **ORPHANED** — no JS references `#toast` (superseded by kit toast §0) | **cleanup:** dead markup, safe to delete. |
 
 ### 9b. OUT OF SCOPE — inherited-workspace bespoke windows (game-build-dropped; Class C)
 Documented for completeness; **not** in the game kit backlog (migrate only if the full workspace build
 becomes a target).
+
 | Surface | file:line | Dropped by |
 |---|---|---|
 | memory-modal (Brain) | `index.html:472` | `memory` ∈ DROP_SET; `memory.js` stripped |
 | cookbook-modal | `index.html:1601` | `cookbook` ∈ DROP_SET; `cookbook.js` stripped |
-| custom-preset-modal (prompt editor) | `index.html:1462` | prompt-library / inherited chrome (`presets.js`, `group.js:154`) |
 | library-modal (doclib) | `sessions.js:2790` | `documents` ∈ DROP_SET |
 | Assistant settings | `assistant.js:90-102` | `companion` ∈ DROP_SET |
 | Plan window | `planWindow.js:16-31` | plan mode — inherited |
@@ -292,7 +303,7 @@ Their element families are likewise out of scope: `.memory-toolbar-btn`/`.memory
 `.theme-io-btn` memory/skills IO, `.cal-btn` (assistant), `.plan-approve-btn` (planWindow), doclib
 buttons — all ride dropped panels.
 
-**Net for §9: 3 TODO windows (+1 dead-markup cleanup) IN SCOPE; 8 inherited windows OUT OF SCOPE.**
+**Net for §9: 4 TODO windows (+1 dead-markup cleanup) IN SCOPE; 7 inherited windows OUT OF SCOPE.**
 
 ---
 
@@ -324,15 +335,15 @@ menu/popover surfaces (§8).
 | §2 | Generated cast wall (`orwellCast.js`) | **1** | `.oc-backfill` → `.ow-btn` |
 | §3 | Gadgets (internal + rail host) | **7** | 1 `og-act` kit-internal fix + 6 rail-host icon buttons |
 | §4 | Confirm/prompt/ask-user inner controls | **~4** | `.confirm-btn` ×2 dialogs, prompt input, ask-user |
-| §5 | Settings sub-panel controls | **~51** | ~11 switches + ~36 selects + ~2 sliders + 1 segmented + 1 shortcut-reset (+~19 color-reset ruling) |
+| §5 | Settings sub-panel controls | **60** | 16 switches + 40 selects + 2 sliders + 1 segmented + 1 shortcut-reset (+~19 color-reset ruling) |
 | §6 | Admin panel + admin forms | **~115** | ~110 `.admin-btn-*` + 4 admin switches + tool-row + provider |
 | §7 | App chrome (composer/topbar/sidebar) | **~24** | + ruling clusters: icon-rail 20, close-X, tour 44 |
-| §8 | Menus / popovers | **~14 surfaces** | ruling-dependent (no kit menu primitive); search-overlay = window candidate |
-| §9a | Bespoke reachable windows → kit | **3** (+1 dead-markup cleanup) | rename-session, archive, vision-editor |
-| — | **OUT OF SCOPE (inherited)** | 8 windows + their element families | game-build-dropped; documented only |
+| §8 | Menus / popovers | **~14 surfaces** | ruling-dependent (no kit menu primitive); search-overlay counted here as a popover (Ctrl+K palette), not a §9 window |
+| §9a | Bespoke reachable windows → kit | **4** (+1 dead-markup cleanup) | rename-session, archive, vision-editor, custom-preset-modal |
+| — | **OUT OF SCOPE (inherited)** | 7 windows + their element families | game-build-dropped; documented only |
 
-**Headline IN-SCOPE backlog: ≈ 205 element migrations + 3 windows** (excluding ruling-dependent clusters
-and OUT-OF-SCOPE inherited surfaces). The mass is §6 (admin, ~115) and §5 (settings, ~51).
+**Headline IN-SCOPE backlog: ≈ 211 element migrations + 4 windows** (excluding ruling-dependent clusters
+and OUT-OF-SCOPE inherited surfaces). The mass is §6 (admin, ~115) and §5 (settings, 60).
 
 ---
 
@@ -341,31 +352,36 @@ and OUT-OF-SCOPE inherited surfaces). The mass is §6 (admin, ~115) and §5 (set
 Ordered per the owner's priority (cast-photo + generated-photos + gadgets first), then most-visible
 player chrome, then settings, then admin. **Each lane = one window/surface, migration-only.**
 
-> **File-overlap serialization.** Two shared files are touched by many lanes and MUST be serialized to
-> avoid conflicts: **`frontend/static/index.html`** (lanes W2, W3, W5, W6, W9) and
-> **`frontend/static/style.css`** (nearly every lane — deletes the retired bespoke rules). Land these
-> lanes **one at a time, rebasing between**. Self-contained JS-only lanes (W1 partly, W4, W8) can run in
-> parallel with the index.html/style.css chain. **The golden-path fixture is not affected** (these are
-> pure CSS/class swaps, no prompt/tool-schema/casting-flow change) — but run the full FE pytest suite
-> (`cd frontend && python3 -m pytest tests/`) each lane; the g15/reasoning/render convention gates and
-> the keep-set-label gate can trip on class renames.
+> **File-overlap serialization.** **`frontend/static/style.css` is touched by EVERY lane** (each deletes
+> the bespoke rules it retires — see the Files column below: W1…W9 all list `style.css`), and
+> **`frontend/static/index.html`** by many (W2, W3, W5, W6, W9). Because style.css is a shared write on
+> *every* lane, **all lanes must land one at a time, rebasing between** — there is **no** genuinely
+> style.css-free lane to run in parallel. (The earlier "run W1/W4/W7 in parallel" guidance was wrong:
+> W1, W4, and W7 each edit style.css too.) The only way to parallelize would be to split a lane so its
+> pure JS class-swap lands separately from its style.css cleanup; as scoped below every lane edits
+> style.css, so treat the whole plan as one serialized chain. **The golden-path fixture is not affected**
+> (these are pure CSS/class swaps, no prompt/tool-schema/casting-flow change) — but run the full FE
+> pytest suite (`cd frontend && python3 -m pytest tests/`) each lane; the g15/reasoning/render convention
+> gates and the keep-set-label gate can trip on class renames.
 
 | Lane | Scope | Files | TODO | Overlap flag |
 |---|---|---|---|---|
-| **W1 — Cast wall + photo** | `.oc-backfill` → `.ow-btn`; (optional) drop `.hs-btn`/`.oc-pin` fallback classes | `orwellCast.js`, `orwellHeadshot.js`, `style.css` | 1 (+cleanup) | style.css |
+| **W1 — Cast wall + photo** | `.oc-backfill` → `.ow-btn`; (optional) drop `.hs-btn`/`.oc-pin` fallback classes | `orwellCast.js`, `orwellHeadshot.js`, `style.css` | 1 (+cleanup) | **style.css → serialize** |
 | **W2 — Gadget action + rail chrome** | `og-act` → `.ow-btn-plain` (one kit fix migrates Cast-pin); rail-host `.gadget-rail-*` + `.grail-ico` icons → `.ow-btn-plain` | `orwellGadget.js`, `orwellGadgetRail.js`, `index.html`, `style.css` | 7 | **index.html, style.css** |
 | **W3 — Composer + topbar + sidebar chrome** | `.send-btn`→`.ow-btn-prominent`; `.input-icon-btn`/`.topbar-*`/`.model-*`/`.section-*`/`.session-bulk-*`/`.hamburger-btn` → `.ow-btn-plain`/variants | `index.html`, `section-management.js`, `style.css` | ~24 | **index.html, style.css** |
-| **W4 — Confirm/Prompt/ask-user inner controls** | `.confirm-btn*`→`.ow-btn*`; `.styled-prompt-input`→`.ow-input`; ask-user `.modal-close`/`.confirm-btn` | `ui.js`, `chat.js`, `style.css` | ~4 | style.css (JS-only otherwise — parallelizable) |
-| **W5 — Settings switches** | `.admin-switch`/`.admin-slider` → `.ow-switch` (Vision/Time/Image/TTS/Synthesis/auto-*/signup/email) + `theme.js` selector-map | `index.html`, `settings.js`, `theme.js`, `style.css` | ~11 | **index.html, style.css** |
-| **W6 — Settings selects + sliders + segmented** | `.settings-select`→`.ow-select`; `.preset-range`→`.ow-slider`; `.mode-toggle`→`.ow-segmented`; `.shortcut-action-btn`→`.ow-btn` | `index.html`, `settings.js`, `style.css` | ~40 | **index.html, style.css** |
-| **W7 — Admin panel (admin.js)** | `.admin-btn-*`→`.ow-btn`/`-destructive`; `.admin-switch`→`.ow-switch`; `.admin-tool-row`/`.admin-danger-card`; `.adm-provider-btn` | `admin.js`, `style.css` | ~30 | style.css (admin.js self-contained — parallelizable with W-chain) |
+| **W4 — Confirm/Prompt/ask-user inner controls** | `.confirm-btn*`→`.ow-btn*`; `.styled-prompt-input`→`.ow-input`; ask-user `.modal-close`/`.confirm-btn` | `ui.js`, `chat.js`, `style.css` | ~4 | **style.css → serialize** (ui.js/chat.js otherwise self-contained) |
+| **W5 — Settings switches** | `.admin-switch`/`.admin-slider` → `.ow-switch` (Vision/Time/Image/TTS/Synthesis/auto-*/signup/email) + `theme.js` selector-map | `index.html`, `settings.js`, `theme.js`, `style.css` | 16 | **index.html, style.css** |
+| **W6 — Settings selects + sliders + segmented** | `.settings-select`→`.ow-select`; `.preset-range`→`.ow-slider`; `.mode-toggle`→`.ow-segmented`; `.shortcut-action-btn`→`.ow-btn` | `index.html`, `settings.js`, `style.css` | ~44 | **index.html, style.css** |
+| **W7 — Admin panel (admin.js)** | `.admin-btn-*`→`.ow-btn`/`-destructive`; `.admin-switch`→`.ow-switch`; `.admin-tool-row`/`.admin-danger-card`; `.adm-provider-btn` | `admin.js`, `style.css` | ~30 | **style.css → serialize** (admin.js self-contained, but style.css cleanup shares the chain) |
 | **W8 — Admin forms in settings.js** | `.admin-btn-*` (~65) in endpoint/email/user forms → `.ow-btn` | `settings.js`, `style.css` | ~65 | style.css (settings.js; serialize vs W5/W6 which also touch settings.js) |
-| **W9 — Bespoke reachable windows → kit** | rename-session-modal, archive-modal, vision-editor → `OrwellWindowKit.create`; delete dead `#toast` markup | `index.html`, `sessions.js`, `chatRenderer.js`, `style.css` | 3 (+cleanup) | **index.html, style.css** |
-| **W10 — (ruling first) Menus/popovers** | add a kit menu-popover primitive OR formally ACCEPT §8 as-is; then `.dropdown-item`/`.overflow-menu-item` → menu items; search-overlay → kit window | many | ~14 | **needs owner ruling before scoping** |
+| **W9 — Bespoke reachable windows → kit** | rename-session-modal, archive-modal, vision-editor, **custom-preset-modal** (the "Prompt"/persona window) → `OrwellWindowKit.create`; delete dead `#toast` markup | `index.html`, `sessions.js`, `chatRenderer.js`, `app.js`, `style.css` | 4 (+cleanup) | **index.html, style.css** |
+| **W10 — (ruling first) Menus/popovers** | add a kit menu-popover primitive OR formally ACCEPT §8 as-is; then `.dropdown-item`/`.overflow-menu-item` → menu items; **search-overlay** (Ctrl+K palette) — accept as popover or, if ruled a window, promote to a kit window | many | ~14 | **needs owner ruling before scoping** |
 | **(deferred) Ruling clusters** | `.icon-rail-btn` (20), `.close-btn`, `.tour-btn-*` (44), `.color-reset-btn` (19), `.shortcut-key` — accept or migrate | index.html, slashCommands.js, style.css | ruling | owner call |
-| **(out of scope) Inherited windows** | memory/cookbook/preset/library/assistant/plan/workspace/group + their element families | — | — | game-build-dropped; skip unless full workspace build |
+| **(out of scope) Inherited windows** | memory/cookbook/library/assistant/plan/workspace/group + their element families | — | — | game-build-dropped; skip unless full workspace build |
 
-**Recommended serialized order of the index.html/style.css chain:** W2 → W3 → W5 → W6 → W9 (rebasing
-each). Run **W1, W4, W7** in parallel off to the side (W7 = admin.js self-contained; W4 = ui.js/chat.js;
-W1 mostly JS). Sequence **W8 after W5/W6** (all three touch `settings.js`). Land **W10** only after the
-menu-primitive ruling.
+**Recommended serialized order (single chain — every lane touches `style.css`):** W1 → W2 → W3 → W4 →
+W5 → W6 → W7 → W8 → W9 (rebasing each), ordered by user visibility (cast photo → gadgets → chrome →
+confirm/prompt → settings → admin → windows). **None run in parallel** — style.css is a shared write on
+all of them, so W1/W4/W7 stay in the chain (only if a lane deferred its style.css cleanup could its pure
+class-swap be split off to parallelize). **W8 must follow W5/W6** (all three also touch `settings.js`).
+Land **W10** only after the menu-primitive ruling.
