@@ -254,7 +254,10 @@ def test_desktop_frosted_topbar_floats_rounded_off_the_top_edge():
 def test_desktop_frosted_topbar_fix_does_not_touch_mobile():
     # The geometry override is desktop-scoped: the mobile (≤768px) bar keeps its -31px corner-control
     # pull-up and its own flush app-bar radius — the fix must NOT appear in a max-width:768px block.
-    assert not _mobile_block_with("body.theme-frosted .chat-top-bar", "border-radius: var(--ow-radius-inner"), (
+    # Paren-free needle (the token itself) — the desktop override's radius is the ONLY use of
+    # --ow-radius-inner on the top bar; the mobile bar uses its own glass-radius. (An unbalanced
+    # `var(--ow-radius-inner` substring reads as a stray open-paren and misleads reviewers.)
+    assert not _mobile_block_with("body.theme-frosted .chat-top-bar", "--ow-radius-inner"), (
         "APP-OV-3: the floating-bar radius override must stay DESKTOP-only — the narrow bar keeps "
         "its own corner-control geometry."
     )
