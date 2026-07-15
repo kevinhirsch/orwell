@@ -23285,6 +23285,34 @@ body.theme-frosted .msg-ai [style*="color:var(--red)"] {
 body.theme-frosted .msg-ai a.chat-link {
   border-bottom-color: color-mix(in srgb, currentColor 45%, transparent) !important;
 }
+/* ── #1644 (2026-07-15 rendered-audit BLOCKER #1): the bolded houseguest-NAME accent inside the
+   received bubble must FOLLOW the bubble ink, exactly like the link fix above ─────────────────
+   The base prose-emphasis rules (`.msg strong`/`.msg b`, `.msg em`/`.msg i`, and the bold-italic
+   combo) ink markdown emphasis with the COOL syntax-highlight tokens (`--hl-builtin` #56b6c2 teal,
+   `--hl-params` #a8c0d4 light-blue-grey, `--hl-keyword` #c678dd purple). Narration bolds every
+   houseguest name (`**Keith**` → <strong>), so on the #744 adaptiveGlass `.msg-ai` bubble — which
+   flips to DARK ink over a light wallpaper — the teal name stayed teal and did NOT follow the flip:
+   teal-on-light-glass rendered ~1.0–2.4:1 (effectively invisible), the audit's #1 blocker. The
+   bubble's own `.body` already does `color: inherit` to track the adaptive ink; do the SAME for its
+   emphasis so the name reads DARK on the light glass and flips LIGHT with the bubble over a dark
+   wallpaper — never a fixed cool hue. `font-weight`/`font-style` are untouched, so bold stays bold
+   and italic stays italic; only the cool COLOR is dropped. Mirrors #1639's `.msg-ai a` link fix. */
+body.theme-frosted .msg-ai strong,
+body.theme-frosted .msg-ai b,
+body.theme-frosted .msg-ai em,
+body.theme-frosted .msg-ai i,
+body.theme-frosted .msg-ai strong em,
+body.theme-frosted .msg-ai em strong,
+body.theme-frosted .msg-ai b i,
+body.theme-frosted .msg-ai i b,
+body.theme-frosted .msg-ai b em,
+body.theme-frosted .msg-ai em b,
+body.theme-frosted .msg-ai strong i,
+body.theme-frosted .msg-ai i strong {
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
+  text-shadow: inherit !important;
+}
 /* #1601 / OWN-3 (FOLLOW-UP, out of scope here): the pre-game cast-photo headshot dialog
    is the OTHER dark-veil-vs-light-glass surface the owner ruling names — it "follows the
    same ONE-light-glass ruling" as the chat column above. It is deliberately left as-is in
