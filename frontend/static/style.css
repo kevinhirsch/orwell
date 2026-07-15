@@ -21886,7 +21886,16 @@ body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff
      `--color-danger` drift. (Solid-fill-behind-white-body-text uses `--color-danger-strong`;
      see ~136.) */
   --ow-danger: #ff453a;
-  --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
+  /* white on the RAW system red (#ff453a) is ~3.9:1 — it clears the 3:1 UI/large floor but
+     NOT the 4.5:1 normal-text floor. That is fine for the DEFAULT destructive button because
+     its fill is the translucent RED TINT over glass (--ow-btn-tint-danger), a deeper effective
+     background where white clears AA. The opt-in SOLID plate (.ow-btn-destructive-solid) can't
+     rely on that, so it paints white on the AA-safe DARKENED red (--ow-danger-strong, ~5.5:1),
+     not the raw token. */
+  --ow-on-danger: #fff;
+  /* AA-safe opaque red for the solid destructive plate's white body text (mirrors the app-layer
+     --color-danger-strong; the kit keeps its own so it never inherits --color-danger drift). */
+  --ow-danger-strong: color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000);
 
   /* ── TINT PROMINENCE (WWDC25 310 "Build an AppKit app with the new design") ──────
      310's key button correction: "tint, don't fill" — a prominent button TINTS the
@@ -21946,8 +21955,10 @@ body.theme-frosted .ow-btn-destructive {
 /* Opt-in PRIMARY-prominence destructive: the loud opaque-red plate (a final, irreversible
    confirm). Reserve it like the -xl size — one per context, the point-of-no-return action. */
 body.theme-frosted .ow-btn-destructive.ow-btn-destructive-solid {
-  background: var(--ow-danger, #ff453a);
-  border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a));
+  /* AA-safe darkened red (--ow-danger-strong ~5.5:1 under white), NOT the raw system red
+     (~3.9:1, below the normal-text floor) — the solid plate carries white BODY text. */
+  background: var(--ow-danger-strong, color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000));
+  border-color: color-mix(in srgb, #000 22%, var(--ow-danger, #ff453a));
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 14px rgba(0,0,0,0.22);
 }
 
@@ -22470,8 +22481,10 @@ body:not(.theme-frosted) .ow-btn-destructive {
   color: var(--ow-on-danger, #fff);
 }
 body:not(.theme-frosted) .ow-btn-destructive.ow-btn-destructive-solid {
-  background-color: var(--ow-danger, #ff453a);
-  border-color: color-mix(in srgb, #000 20%, var(--ow-danger, #ff453a));
+  /* AA-safe darkened red under the white body text (see --ow-danger-strong) — a deeper, more
+     serious red also suits the "final, irreversible" role this opt-in plate is reserved for. */
+  background-color: var(--ow-danger-strong, color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000));
+  border-color: color-mix(in srgb, #000 26%, var(--ow-danger, #ff453a));
 }
 /* PROMINENT — the single default action: the STRONGEST fill + STRONGEST border in
    the set (mirrors frosted's "primary reads first" hierarchy, KIT-F-02's fix). */

@@ -42,6 +42,17 @@ def _rule_blocks(css):
         yield m.group(1).strip(), m.group(2)
 
 
+# `"backdrop-filter: none" in body` is ALSO satisfied by "-webkit-backdrop-filter: none"
+# (the former is a substring of the latter), so a substring check would pass on the prefixed
+# declaration alone — defeating a gate meant to pin the UNPREFIXED property. Match the real
+# unprefixed declaration with a negative-lookbehind boundary.
+_UNPREFIXED_NONE = re.compile(r"(?<!-webkit-)backdrop-filter:\s*none")
+
+
+def _has_unprefixed_none(body):
+    return bool(_UNPREFIXED_NONE.search(body))
+
+
 def test_nested_glass_card_deglass_rule_exists():
     """A frosted rule that nests .og-card/.on-card inside .ow-window/.ow-body (the window
     /body glass surface) MUST drop BOTH backdrop-filter properties — no second sample."""
@@ -51,7 +62,7 @@ def test_nested_glass_card_deglass_rule_exists():
             continue
         if not re.search(r"\.(ow-window|ow-body)\s+\.(og|on)-card", sel):
             continue
-        if "backdrop-filter: none" in body and "-webkit-backdrop-filter: none" in body:
+        if _has_unprefixed_none(body) and "-webkit-backdrop-filter: none" in body:
             hits.append(sel)
     assert hits, (
         "#1604 regression: no frosted rule de-glasses a .og-card/.on-card nested inside "
@@ -66,7 +77,7 @@ def test_deglass_covers_the_window_body_card_composition():
     robust to the rule being split, but pinned to the real selector forms."""
     covered = "\n".join(
         sel for sel, body in _rule_blocks(CSS)
-        if "theme-frosted" in sel and "backdrop-filter: none" in body
+        if "theme-frosted" in sel and _has_unprefixed_none(body)
     )
     assert re.search(r"\.ow-window\s+\.og-card", covered), (
         "#1604: a .og-card nested under .ow-window must be de-glassed."
@@ -85,7 +96,7 @@ def test_deglass_fallback_uses_a_non_glass_fill_not_transparent():
             continue
         if not re.search(r"\.(ow-window|ow-body)\s+\.(og|on)-card", sel):
             continue
-        if "backdrop-filter: none" not in body:
+        if not _has_unprefixed_none(body):
             continue
         assert "background-color" in body, (
             "#1604: the de-glassed nested card must set a vibrant fill (background-color), "
