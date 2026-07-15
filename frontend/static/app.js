@@ -656,8 +656,13 @@ function initializeEventListeners() {
         'memory-modal': null,
       };
 
-      // Dynamic modals (removed from DOM on close)
-      const dynamicModals = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal', 'email-lib-modal'];
+      // Dynamic modals (removed from DOM on close).
+      // #1638 KM-W9: 'archive-modal' migrated to the OrwellWindow kit — its
+      // Escape/close is owned by the ui.js kit arbiter (OrwellWindowKit.dismissTop),
+      // exactly like Settings/Theme; a legacy dismissModal() here would `.remove()`
+      // the `.ow-window` without the kit's teardown (orphaning its scrim), so it is
+      // deliberately NOT listed.
+      const dynamicModals = ['library-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal', 'email-lib-modal'];
       for (const id of dynamicModals) {
         const m = document.getElementById(id);
         if (id === 'gallery-modal') {
@@ -705,7 +710,9 @@ function initializeEventListeners() {
     'memory-modal': null,
     'theme-modal': null,
   };
-  const _dynamicModalIds = ['library-modal', 'archive-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
+  // #1638 KM-W9: 'archive-modal' is now an OrwellWindow kit modal (kit-owned teardown);
+  // it must NOT be in this legacy "remove() on dismiss" set (that would bypass the kit).
+  const _dynamicModalIds = ['library-modal', 'doclib-modal', 'gallery-modal', 'tasks-modal'];
   function dismissModal(modal) {
     if (!modal || modal.classList.contains('hidden')) return;
     if (modal.id === 'gallery-modal') {
