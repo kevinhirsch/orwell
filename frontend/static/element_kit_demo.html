@@ -432,6 +432,28 @@
     </section>
     <div class="ek-wins ek-onwall" id="ek-windows"></div>
 
+    <!-- #1604 / KIT-G-05 — GLASS-ON-GLASS FORBIDDEN (owner ruling; LIQUID_GLASS_REFERENCE §1).
+         A .og-card nested inside a .ow-window > .ow-body must NOT sample its OWN glass: it
+         de-glasses (drops its blur, rides the window's SINGLE glass sample with a vibrant
+         opaque-ish fill) — exactly like a .ow-btn-group shares one sample. Two independently-
+         sampling glass planes stacked read muddy/illegible. This STATIC composition floats on
+         the wallpaper so the WINDOW glass samples the real backdrop while the nested card shows
+         the flat vibrant fill (never a second frosted plane). The frosted-fallback rule lives in
+         style.css; liquidGlass.js mirrors it for the LIVE refraction (isNestedGlassCard). -->
+    <div class="ek-label">Glass-on-glass forbidden (#1604) — a <code>.og-card</code> nested in a <code>.ow-window &gt; .ow-body</code> rides the window's ONE glass sample (de-glassed vibrant fill), never a second frosted plane</div>
+    <div class="ek-wins ek-onwall" id="ek-deglass">
+      <div class="ow-window">
+        <div class="ow-titlebar"><span class="ow-title">Nested card — de-glassed</span></div>
+        <div class="ow-body">
+          <p style="margin:0 0 10px 0">This window is the single glass sample.</p>
+          <div class="og-card">
+            <div class="og-head"><span class="og-title">Nested .og-card</span></div>
+            <div class="og-body">Rides the window's glass with a vibrant fill — no second sample, so no glass-on-glass.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- NOTIFICATIONS (OrwellNotice kit) -->
     <section class="ek-card">
       <h2>Notifications — OrwellNoticeKit.create(…)</h2>
