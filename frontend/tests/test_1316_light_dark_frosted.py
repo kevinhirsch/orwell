@@ -1,37 +1,34 @@
-"""#1316 (P1) — Light + Dark as first-class base identities, each toggleable glass/frosted,
-frosted default; a PROMINENT picker-level glass/frosted control (not buried in
-Customize -> Font & Layout).
+"""#1316 (P1) — Light + Dark as first-class base identities with a PROMINENT picker-level
+glass control (not buried in Customize -> Font & Layout).
+
+UPDATED for the frosted-tier COLLAPSE (owner ruling): the glass control is now ONE
+user-facing choice — Glass (full) or Flat (normal). The old 'frosted' middle segment is
+gone — it was glass material minus the SVG refraction, and the refraction ALREADY
+auto-downgrades full→frosted on constrained devices (theme.js glassTierCeiling), so
+frosted-as-a-manual-choice was invisible/redundant. 'frosted' now survives ONLY as the
+automatic downgrade target; the resolution layer never yields it (a legacy saved 'frosted'
+folds to Glass), so every theme's glass DEFAULT — light/dark included — is Glass ('full'),
+which the auto-downgrade ceiling re-drops to frosted on a constrained device.
 
 Source-pinned, JS/HTML-as-text like the sibling `test_739_glass_tint_toggle.py` /
 `test_l32_l33_l34_theme_defaults.py` gates (the pytest lane has no DOM runtime; the
 browser-smoke + responsive-matrix gates cover the live DOM).
 
-What shipped:
-  1. A NEW compact 3-way segmented control, `#theme-glass-tier-quick` (Glass / Frosted /
-     Flat — matching the Customize ladder's full | frosted | normal EXACTLY), lives on the
-     Browse/Presets tab (the FIRST tab you see opening Theme), bound to the ACTIVE theme's
-     tier. (It initially shipped 2-way; the Greptile P2 on PR #1343 caught that a 'normal'
-     tier set from the Customize control was then UNREPRESENTABLE here — the shared sync
-     wrote data-value="normal" but both segments rendered aria-pressed="false" — so the
-     quick control now carries the full ladder.) It reuses the EXACT SAME `applyGlassTier`
-     + `save()` persistence path as the existing Customize-tab `#theme-glass-tier` control
-     — no new storage shape, no parallel state. theme.js's `_syncGlassTierControl` keeps
-     BOTH controls in lockstep (`GLASS_TIER_CONTROL_IDS`) for EVERY tier in BOTH directions,
-     and the click-binding loop wires both identically. Frosted keeps the default visual
-     emphasis (the pressed default segment).
+What holds now:
+  1. The compact segmented control, `#theme-glass-tier-quick` (Glass / Flat — matching the
+     Customize ladder's full | normal EXACTLY), lives on the Browse/Presets tab (the FIRST
+     tab you see opening Theme), bound to the ACTIVE theme's tier. It reuses the EXACT SAME
+     `applyGlassTier` + `save()` persistence path as the Customize-tab `#theme-glass-tier`
+     control — no new storage shape, no parallel state. theme.js's `_syncGlassTierControl`
+     keeps BOTH controls in lockstep (`GLASS_TIER_CONTROL_IDS`) in BOTH directions, and the
+     click-binding loop wires both identically. Glass is the pressed default segment.
   2. `light` and `dark` (the two named base-identity presets) carry no `glass`/`glassTier`
-     override in THEMES, so `defaultGlassTierFor` already resolves them to 'frosted' — the
-     issue's "frosted default" requirement was already true for these two and this pins it
-     explicitly (a regression guard: nobody should give either preset a `glass`/`glassTier:
-     'full'` override later without a deliberate decision).
-  3. DEFAULT_THEME was deliberately left as 'glass' (NOT swapped to the literal 'dark' preset,
-     and the 'glass' preset's own Full-tier default was NOT touched) — see the report / commit
-     message for the reasoning: `test_l32_l33_l34_theme_defaults.py` already hard-pins
-     `DEFAULT_THEME = 'glass'` plus a NEGATIVE guard forbidding `DEFAULT_THEME = 'dark'`, and
-     CLAUDE.md documents the Apple Liquid-Glass default as recent, deliberate, heavily-audited
-     work (#738/#660/the HIG audit) — reverting it wasn't in scope for this ticket without a
-     product-owner ruling. This file does not re-pin that decision (the L32 tests already do);
-     it only proves light/dark's OWN frosted default, which is the part actually in scope here.
+     override in THEMES, so `defaultGlassTierFor` resolves them through its shared default —
+     now Glass ('full'), auto-downgrading to frosted per device (a regression guard: nobody
+     should hard-pin either preset to a literal tier override without a deliberate decision).
+  3. DEFAULT_THEME stays 'glass' — `test_l32_l33_l34_theme_defaults.py` hard-pins it plus a
+     NEGATIVE guard forbidding `DEFAULT_THEME = 'dark'`. This file does not re-pin that; it
+     proves light/dark's glass default + the collapsed 2-way control.
 """
 import os
 import re
@@ -65,28 +62,31 @@ def test_quick_glass_control_exists_on_the_browse_tab():
     )
 
 
-def test_quick_control_is_the_full_three_way_ladder():
-    """Greptile P2 (PR #1343): the quick control MUST offer every tier the Customize ladder
-    can set — with a 2-way cut, a 'normal' tier synced over from Customize had no matching
-    [data-tier] segment, so data-value said 'normal' while every button rendered
-    aria-pressed="false" (the prominent control showed NO active state)."""
+def test_quick_control_is_the_collapsed_two_way_ladder():
+    """The collapse (owner ruling): the quick control offers exactly the two user-facing
+    tiers — Glass (full) and Flat (normal). 'frosted' is NOT a segment (it is only the
+    automatic downgrade target). Both remaining tiers are still representable so the shared
+    sync never leaves the control with no active state (the Greptile P2 failure shape)."""
     html = _read("static", "index.html")
     ctrl_m = re.search(
         r'<div id="theme-glass-tier-quick"[^>]*>(.*?)</div>\s*</div>', html, re.S)
     assert ctrl_m, "#theme-glass-tier-quick control body not found"
     body = ctrl_m.group(1)
-    for tier in ("full", "frosted", "normal"):
+    for tier in ("full", "normal"):
         assert f'data-tier="{tier}"' in body, (
-            f"#1316/P2: the quick control must carry a data-tier=\"{tier}\" segment so "
-            "EVERY tier the shared sync can write is representable (a tier with no segment "
-            "renders as no-active-state)"
+            f"the quick control must carry a data-tier=\"{tier}\" segment so both "
+            "user-facing tiers (Glass / Flat) are representable"
         )
+    assert 'data-tier="frosted"' not in body, (
+        "the collapsed quick control must NOT carry a frosted segment — frosted is no "
+        "longer a manual choice"
+    )
 
 
 def test_quick_control_tiers_exactly_match_the_customize_ladder():
     """Both controls are driven by ONE sync writing ONE tier value — so their [data-tier]
     vocabularies must be identical sets, or some synced value is unrepresentable on one of
-    them (the exact P2 failure shape, in either direction)."""
+    them. Post-collapse that shared set is exactly {full, normal}."""
     html = _read("static", "index.html")
 
     def _tiers(ctrl_id):
@@ -97,35 +97,31 @@ def test_quick_control_tiers_exactly_match_the_customize_ladder():
 
     quick = _tiers("theme-glass-tier-quick")
     customize = _tiers("theme-glass-tier")
-    assert quick == customize == {"full", "frosted", "normal"}, (
-        f"#1316/P2: the two glass-tier controls must carry IDENTICAL tier sets "
-        f"(quick={sorted(quick)}, customize={sorted(customize)}) — a mismatch makes some "
-        "synced tier unrepresentable on one control"
+    assert quick == customize == {"full", "normal"}, (
+        f"the two glass-tier controls must carry IDENTICAL tier sets "
+        f"(quick={sorted(quick)}, customize={sorted(customize)}) — the collapsed set is "
+        "{full, normal}; a mismatch makes some synced tier unrepresentable on one control"
     )
 
 
-def test_quick_control_defaults_to_frosted():
+def test_quick_control_defaults_to_glass():
     html = _read("static", "index.html")
     ctrl_m = re.search(r'<div id="theme-glass-tier-quick"[^>]*>', html)
     assert ctrl_m, "#theme-glass-tier-quick control not found"
-    assert 'data-value="frosted"' in ctrl_m.group(0), (
-        "#1316: the quick control must default to Frosted (data-value='frosted')"
+    assert 'data-value="full"' in ctrl_m.group(0), (
+        "the quick control must default to Glass (data-value='full') — the single glass "
+        "state after the frosted collapse"
     )
     body_m = re.search(
         r'<div id="theme-glass-tier-quick"[^>]*>(.*?)</div>\s*</div>', html, re.S)
     body = body_m.group(1)
-    frosted_btn = re.search(r'data-tier="frosted"[^>]*>', body).group(0)
-    assert 'aria-pressed="true"' in frosted_btn, (
-        "#1316: the Frosted button must be the pressed default"
-    )
     full_btn = re.search(r'data-tier="full"[^>]*>', body).group(0)
-    assert 'aria-pressed="false"' in full_btn, (
-        "#1316: Glass (full) must NOT be pressed by default"
+    assert 'aria-pressed="true"' in full_btn, (
+        "Glass (full) must be the pressed default segment"
     )
     normal_btn = re.search(r'data-tier="normal"[^>]*>', body).group(0)
     assert 'aria-pressed="false"' in normal_btn, (
-        "#1316: Flat (normal) must NOT be pressed by default — frosted keeps the "
-        "default visual emphasis"
+        "Flat (normal) must NOT be pressed by default — Glass keeps the default emphasis"
     )
 
 
@@ -263,7 +259,7 @@ def test_getopts_still_reads_the_customize_tab_control_which_stays_synced():
     assert "if (gt && gt.dataset.value) opts.glassTier = gt.dataset.value;" in js
 
 
-# ── Light + Dark default to Frosted (the issue's headline requirement) ────────────────────
+# ── Light + Dark default to Glass (post-collapse: frosted is no longer a resolved tier) ────
 
 
 def test_light_and_dark_presets_carry_no_glass_override():
@@ -275,21 +271,26 @@ def test_light_and_dark_presets_carry_no_glass_override():
         entry = m.group(1)
         assert "glass:" not in entry and "glassTier:" not in entry, (
             f"#1316: {name} must carry no glass/glassTier override so it resolves through "
-            "defaultGlassTierFor's frosted fallback, not a hardcoded tier"
+            "defaultGlassTierFor's shared default, not a hardcoded tier"
         )
 
 
-def test_default_glass_tier_for_light_and_dark_is_frosted():
+def test_default_glass_tier_for_light_and_dark_is_glass():
     js = _read("static", "js", "theme.js")
-    # defaultGlassTierFor: 'glass' (or an explicit glass/full flag) -> full; explicit
-    # 'normal' -> normal; everything else (incl. light/dark) -> frosted.
+    # defaultGlassTierFor (post-collapse): 'glass' (or an explicit glass/full flag) -> full;
+    # explicit 'normal' -> normal; everything else (incl. light/dark) -> full. 'frosted' is
+    # no longer a resolved tier — it survives only as the applyGlassTier auto-downgrade
+    # target, so the resolution layer must NEVER return it.
     m = re.search(r"function defaultGlassTierFor\([^)]*\)\s*\{(.*?)\n\}", js, re.S)
     assert m, "defaultGlassTierFor body not found"
     body = m.group(1)
-    assert "return 'frosted';" in body
+    assert "return 'frosted'" not in body, (
+        "defaultGlassTierFor must not resolve to 'frosted' — the collapse maps every "
+        "theme's glass default to Glass ('full'); the ceiling handles the per-device drop"
+    )
     # light/dark are neither 'glass' nor glass/full-flagged nor 'normal', so they fall
-    # through every branch to the frosted return — this is the ACTUAL resolution path a
-    # brand-new player choosing Light or Dark takes.
+    # through every branch to the Glass ('full') default — the ACTUAL path a brand-new
+    # player choosing Light or Dark takes (auto-downgraded to frosted on a constrained device).
     assert "name === 'glass'" in body
     assert "t.glassTier === 'normal'" in body
 

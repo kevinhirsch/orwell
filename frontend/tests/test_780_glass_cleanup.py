@@ -178,10 +178,12 @@ def _extract_fn(js, name):
 
 
 def test_saved_glass_tier_behaviorally_overrides_glass_named_theme():
-    """The audit's #4: a saved `glassTier: 'frosted'/'normal'` did NOT override the dedicated
-    `glass` named theme (both spot-checks resolved glass-full). Prove the fix BEHAVIOURALLY by
-    running the real resolveGlassTier/defaultGlassTierFor (lifted from theme.js) in node — an
-    explicit saved tier must win; only an unset tier falls to the per-theme default."""
+    """The audit's #4 (an explicit saved tier must win over the per-theme default), re-pinned
+    through the frosted-COLLAPSE (owner ruling). 'frosted' is no longer a resolved tier — a
+    saved 'frosted' (explicit string OR the legacy `frosted:true` bool) FOLDS to Glass
+    ('full'); Flat ('normal') still wins over the glass default; and every theme's per-theme
+    default is now Glass ('full'). Proven BEHAVIOURALLY by running the real
+    resolveGlassTier/defaultGlassTierFor (lifted from theme.js) in node."""
     node = shutil.which("node")
     if not node:
         pytest.skip("node not available to evaluate the theme resolution logic")
@@ -194,18 +196,20 @@ def test_saved_glass_tier_behaviorally_overrides_glass_named_theme():
         + _extract_fn(js, "resolveGlassTier") + "\n"
         + r"""
 const cases = [
-  // THE #780-4 CORE: a saved explicit tier beats the glass named-theme 'full' default.
-  ["saved frosted overrides the glass named theme", resolveGlassTier({name:'glass',glassTier:'frosted'},'glass'), 'frosted'],
+  // COLLAPSE: a saved 'frosted' folds to Glass ('full') — frosted is never a resolved tier.
+  ["saved frosted folds to Glass", resolveGlassTier({name:'glass',glassTier:'frosted'},'glass'), 'full'],
+  // Flat ('normal') STILL beats the glass named-theme 'full' default (explicit tier wins).
   ["saved normal overrides the glass named theme",  resolveGlassTier({name:'glass',glassTier:'normal'},'glass'),  'normal'],
-  // legacy back-compat bool still overrides the named-theme default.
-  ["legacy frosted:true overrides glass",  resolveGlassTier({name:'glass',frosted:true},'glass'),  'frosted'],
-  ["legacy frosted:false overrides glass", resolveGlassTier({name:'glass',frosted:false},'glass'), 'normal'],
+  // legacy back-compat bool: frosted:true folds to Glass; frosted:false stays Flat.
+  ["legacy frosted:true folds to Glass",  resolveGlassTier({name:'glass',frosted:true},'glass'),  'full'],
+  ["legacy frosted:false stays Flat", resolveGlassTier({name:'glass',frosted:false},'glass'), 'normal'],
   // and ONLY an unset tier falls through to the per-theme default (glass -> full).
   ["unset tier keeps the glass default full", resolveGlassTier({name:'glass'},'glass'), 'full'],
   ["null record keeps the glass default full", resolveGlassTier(null,'glass'), 'full'],
-  // a non-glass theme: a saved tier still wins; its default is frosted.
+  // a non-glass theme: a saved tier still wins; its default is now Glass ('full'), too.
   ["saved full on a house theme wins", resolveGlassTier({name:'the-feed',glassTier:'full'},'the-feed'), 'full'],
-  ["house-theme default is frosted",   resolveGlassTier(null,'the-feed'), 'frosted'],
+  ["house-theme default is Glass",   resolveGlassTier(null,'the-feed'), 'full'],
+  ["saved normal on a house theme wins", resolveGlassTier({name:'the-feed',glassTier:'normal'},'the-feed'), 'normal'],
 ];
 let bad = 0;
 for (const [d, got, exp] of cases) {
@@ -222,7 +226,7 @@ if (bad) process.exit(1); else console.log('ALL_PASS');
     finally:
         os.unlink(path)
     assert r.returncode == 0, (
-        "saved glassTier does not override the glass named theme:\n" + r.stdout + r.stderr
+        "glass-tier resolution regressed:\n" + r.stdout + r.stderr
     )
     assert "ALL_PASS" in r.stdout
 
@@ -230,11 +234,14 @@ if (bad) process.exit(1); else console.log('ALL_PASS');
 def test_first_paint_head_script_resolves_saved_tier_before_glass_default():
     """The cold-load head script in index.html paints the glass tier from the FIRST frame; it
     must resolve a SAVED glassTier (and the legacy `frosted` bool) BEFORE it falls to the
-    per-theme default — otherwise a saved 'frosted'/'normal' would flash glass-full on load."""
+    per-theme default — otherwise a saved 'normal' (Flat) would flash glass on load. Post
+    frosted-collapse the legacy bool's true branch folds to Glass ('full') and the per-theme
+    default is Glass ('full') too (the #777 ceiling below drops it per device)."""
     html = _read("static", "index.html")
-    saved = html.index("t.glassTier === 'full' || t.glassTier === 'frosted' || t.glassTier === 'normal'")
-    legacy = html.index("t.frosted ? 'frosted' : 'normal'")
-    default = html.index("(_name === 'glass' || t.glass) ? 'full' : 'frosted'")
+    saved = html.index("t.glassTier === 'full' || t.glassTier === 'frosted'")
+    legacy = html.index("t.frosted ? 'full' : 'normal'")
+    # the per-theme default branch: every theme resolves to Glass ('full') at first paint.
+    default = html.index("_tier = 'full';", legacy)
     assert saved < legacy < default, (
         "the first-paint tier resolution must read the saved glassTier, then the legacy bool, "
         "and only THEN the per-theme glass default"

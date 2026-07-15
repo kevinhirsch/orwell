@@ -74,13 +74,14 @@ def test_l32_first_paint_head_script_defaults_to_glass():
     assert "glassTier: 'full'" in block
 
 
-# ── L33: frosted is ON by default on every theme ──────────────────────────────
+# ── L33: glass material is ON by default on every theme (post frosted-collapse) ────────
 
-def test_l33_glass_tier_resolver_defaults_to_frosted():
-    # The 3-tier model (Full Glass ▸ Frosted ▸ Normal) replaces the frosted bool.
-    # defaultGlassTierFor: the glass theme → 'full'; an explicit normal → 'normal';
-    # every other theme → 'frosted' (keeps the glass material, drops the heavy
-    # Chromium refraction).
+def test_l33_glass_tier_resolver_defaults_to_glass():
+    # COLLAPSED tier (owner ruling): 'frosted' is no longer user-selectable and the
+    # resolution layer never yields it — it survives ONLY as the applyGlassTier
+    # auto-downgrade target. defaultGlassTierFor: the glass theme → 'full'; an explicit
+    # normal → 'normal'; every other theme → 'full' (Glass), which the ceiling drops to
+    # frosted on a constrained device.
     js = _read("static", "js", "theme.js")
     assert "function defaultGlassTierFor(" in js, \
         "the glass tier default must be resolved through defaultGlassTierFor()"
@@ -88,16 +89,19 @@ def test_l33_glass_tier_resolver_defaults_to_frosted():
     assert m, "defaultGlassTierFor body not found"
     body = m.group(1)
     assert "name === 'glass'" in body and "'full'" in body
-    assert "'normal'" in body and "return 'frosted'" in body, \
-        "defaultGlassTierFor must default to 'frosted' for any non-glass theme"
+    assert "'normal'" in body
+    assert "return 'frosted'" not in body, \
+        "defaultGlassTierFor must NOT resolve to 'frosted' — the collapse maps every " \
+        "theme's glass default to Glass ('full'); the auto-downgrade ceiling drops it per device"
     # The old frosted-bool resolver + opt-out map must be gone.
     assert "function defaultFrostedFor(" not in js
     assert "THEME_DEFAULT_FROSTED_OFF" not in js and "THEME_DEFAULT_FROSTED[" not in js
 
 
 def test_l33_glass_is_first_and_only_full_by_default():
-    # glass leads the picker (default + first); every OTHER preset defaults to the
-    # 'frosted' tier (none ship 'normal'); only glass declares 'full'.
+    # glass leads the picker (default + first). No preset ENTRY ships a literal glassTier
+    # override except glass (which declares 'full'); the per-theme default for the rest is
+    # resolved by defaultGlassTierFor (now Glass/'full', auto-downgraded per device).
     js = _read("static", "js", "theme.js")
     body = re.search(r"export const THEMES = \{(.*?)\n\};", js, re.S).group(1)
     themes = re.findall(r"^\s*'?([a-zA-Z0-9-]+)'?:\s*\{", body, re.M)
@@ -135,12 +139,14 @@ def test_l33_glass_tier_is_persisted_with_backcompat():
 
 
 def test_l33_head_script_resolves_tier_and_adds_classes():
-    # The first-paint head-script resolves the tier (saved glassTier → legacy
-    # frosted → per-theme default) and applies the body classes before paint:
-    # theme-frosted for full+frosted, glass-full for full only.
+    # The first-paint head-script resolves the tier (saved glassTier → legacy frosted →
+    # per-theme default) and applies the body classes before paint: theme-frosted for
+    # full+frosted, glass-full for full only. Post-collapse the head-script still RECOGNIZES
+    # a saved 'frosted' (to fold it to Glass) but resolves the legacy bool's true branch to
+    # 'full' (frosted is never a resolved tier).
     html = _read("static", "index.html")
     assert "t.glassTier === 'full'" in html and "t.glassTier === 'frosted'" in html
-    assert "t.frosted ? 'frosted' : 'normal'" in html  # legacy back-compat branch
+    assert "t.frosted ? 'full' : 'normal'" in html  # legacy bool: frosted folds to Glass
     assert "document.body.classList.add('theme-frosted')" in html
     assert "document.body.classList.add('glass-full')" in html
 
