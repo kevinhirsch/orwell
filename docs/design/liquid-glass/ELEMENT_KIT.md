@@ -293,6 +293,40 @@ JS) to color the filled portion on WebKit. `:focus-visible` ring; `:disabled`.
 <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%">
 ```
 
+### Portrait tile — `.ow-portrait` / `.ow-portrait-tile` (#1638)
+
+The square, clipped, radiused **frame** around a houseguest's face — a generated portrait or the
+designed monogram fallback (`OrwellMonogram.face()`) — plus the chrome the frame owns. The face
+content stays owned by the monogram kit; `.ow-portrait` is the frame + states only (never a new
+image system). Sizing is **caller-owned** via the grid track + three tokens — no fixed width/height
+on the primitive.
+
+- **`.ow-portrait`** — the frame: `aspect-ratio` (token, default `1 / 1`), `overflow: hidden`,
+  radius (token), a `--panel`/`--border` fill on the flat tier, the luminous `--ow-glass-rim` edge
+  on the frosted tier (no second `backdrop-filter` — glass-on-glass ban). The inner face/`img`
+  fills it and inherits the radius.
+- **`.ow-portrait-tile`** — the interactive variant on a bare `<button>` (button-chrome reset,
+  `height:auto` so the app-wide `button{height}` reset can't letterboxthe aspect-ratio, a hover
+  lift, the system-blue `:focus-visible` ring, and the coarse-pointer 44px hit floor via an
+  invisible `::after`).
+- **States** — `.is-selected` / `[aria-pressed="true"]` (system-blue ring, never an accent fill),
+  `.is-loading` (token shimmer skeleton, `@keyframes owPortraitSkeleton`), `.is-broken` (static
+  fill), `.ow-portrait--muted` (dim), `.ow-portrait--muted-grey` (dim **and** desaturate — the
+  not-yet-met state, carries both `opacity` and `grayscale`), `.ow-portrait--reveal` (generic
+  arrival fade), `.ow-portrait--sm` (compact cap for narrow portrait-less tiles). Eviction
+  monochrome stays owned by `.ow-mono-face.ow-mono-evicted` — the frame never re-declares it.
+- **Tokens** — `--ow-portrait-radius` (per-tier radius: cast 10px, headshot 8px, premiere 7px),
+  `--ow-portrait-aspect`, `--ow-portrait-cap`.
+
+Consumers (frame-only migration): cast cards (`.oc-portrait` / `.oc-hg`), casting-headshot tiles
+(`.hs-cand` / `.hs-libitem` / `.hs-preview`), premiere status tiles (`.os-tile`).
+
+```html
+<button type="button" class="ow-portrait ow-portrait-tile" aria-label="Open …'s dossier">
+  <span class="ow-mono-face">…</span>
+</button>
+```
+
 ## Demo / verification — the full kit reference
 
 `frontend/static/element_kit_demo.html` is a self-contained, sectioned **full kit reference**

@@ -552,6 +552,60 @@
       </div>
     </section>
 
+    <!-- PORTRAIT TILE (.ow-portrait / .ow-portrait-tile) -->
+    <section class="ek-card">
+      <h2>Portrait tile — .ow-portrait / .ow-portrait-tile (#1638)</h2>
+      <p class="ek-note">The square, clipped, radiused frame around a houseguest's face — a generated
+        portrait or the designed monogram fallback — plus the chrome the frame owns: selected (the kit
+        system-blue ring, never an accent fill), loading (a token shimmer skeleton), broken (a static
+        fill), muted (dim), and muted-grey (dim <b>and</b> desaturate — the not-yet-met state). One
+        primitive behind three drifted frames (cast <code>.oc-portrait</code>, headshot
+        <code>.hs-cand</code>, premiere <code>.os-tile</code>). Sizing is caller-owned via the grid
+        track + <code>--ow-portrait-radius</code> / <code>--ow-portrait-aspect</code> /
+        <code>--ow-portrait-cap</code>. The interactive <code>.ow-portrait-tile</code> adds the button
+        reset, focus ring, and the coarse-pointer 44px hit floor.</p>
+
+      <div class="ek-label">Frame states — interactive tiles (.ow-portrait-tile), radius token 12px</div>
+      <div class="ek-row" style="gap:14px; --ow-portrait-radius:12px">
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile" aria-label="A portrait">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">A</span>
+          </button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">image / monogram</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-selected" aria-pressed="true" aria-label="Selected portrait">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8a5a9c,#3a2352);color:#f0e6f4;font-weight:800;font-size:1.6rem">B</span>
+          </button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">selected (ring)</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-loading" aria-label="Loading portrait"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt=""></button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">loading (skeleton)</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-broken" aria-label="Broken portrait"></button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">broken</div>
+        </div>
+      </div>
+
+      <div class="ek-label">Muted modifiers — display frames (.ow-portrait)</div>
+      <div class="ek-row" style="gap:14px; --ow-portrait-radius:12px">
+        <div style="width:84px">
+          <div class="ow-portrait ow-portrait--muted">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">C</span>
+          </div>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">muted (dim)</div>
+        </div>
+        <div style="width:84px">
+          <div class="ow-portrait ow-portrait--muted-grey">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">D</span>
+          </div>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">muted-grey (dim+grey)</div>
+        </div>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->

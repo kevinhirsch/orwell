@@ -175,8 +175,10 @@
         @container oc-win (min-width: 620px) {
           #orwell-cast .oc-grid { --oc-cols: 4; }
         }
+        /* #1638: aspect-ratio / radius / overflow now come from the shared .ow-portrait kit frame;
+           the radius token pins the cast tier's 10px, the face/img inherit it. */
         #orwell-cast .oc-portrait {
-          width: 100%; aspect-ratio: 1 / 1; border-radius: 10px; overflow: hidden;
+          --ow-portrait-radius: 10px; width: 100%;
           background: rgba(255,255,255,.05); border: 1px solid var(--border, #355a66);
           display: flex; align-items: center; justify-content: center;
         }
@@ -552,9 +554,12 @@
     const out = hg.status && hg.status !== "active";
     const evicted = hg.status === "evicted"; // L16: grayscale only on eviction
     const card = document.createElement("div");
-    card.className = "oc-hg" + (out ? " oc-out" : "") + (evicted ? " oc-evicted" : "");
+    // #1638 frame-only migration: the card door adopts the kit interactive-tile chrome and the
+    // holder adopts the kit frame — the hand-rolled two-layer reveal seam (oc-img-pending / ocFadeIn
+    // + manual badge composite) is DELIBERATELY kept (owner ruling §6.1), so only the frame moves.
+    card.className = "oc-hg ow-portrait-tile" + (out ? " oc-out" : "") + (evicted ? " oc-evicted" : "");
     const holder = document.createElement("div");
-    holder.className = "oc-portrait";
+    holder.className = "oc-portrait ow-portrait";
     const nameEl = document.createElement("div");
     nameEl.className = "oc-name";
     const nameB = document.createElement("b");
