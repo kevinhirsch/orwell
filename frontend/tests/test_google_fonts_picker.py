@@ -170,10 +170,10 @@ def test_picker_ui_present_and_styled_like_settings():
     assert 'id="theme-google-font-input"' in html
     assert 'list="theme-google-font-list"' in html
     assert '<datalist id="theme-google-font-list">' in html
-    # Apply + Clear, using the existing settings button class.
+    # Apply + Clear, on the kit secondary button (THM-05 / #1606 migrated off .theme-io-btn).
     assert 'id="theme-google-font-apply"' in html
     assert 'id="theme-google-font-clear"' in html
-    assert "theme-io-btn" in re.search(r'id="theme-google-font-apply"[^>]*', html).group(0)
+    assert "ow-btn-secondary" in re.search(r'id="theme-google-font-apply"[^>]*', html).group(0)
 
 
 def test_free_text_entry_is_accepted():

@@ -7300,35 +7300,9 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       font-family: inherit; cursor: pointer;
     }
     .theme-fd-select:focus { outline: none; border-color: var(--red); }
-    .theme-fd-range {
-      width: 100%;
-      max-width: 100%;
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      height: 24px;
-      background: transparent;
-      cursor: pointer;
-      -webkit-appearance: none;
-      appearance: none;
-      accent-color: var(--red);
-    }
-    .theme-fd-range::-webkit-slider-runnable-track {
-      height: 4px; background: var(--border); border-radius: 2px;
-    }
-    .theme-fd-range::-moz-range-track {
-      height: 4px; background: var(--border); border-radius: 2px;
-    }
-    .theme-fd-range::-webkit-slider-thumb {
-      -webkit-appearance: none; appearance: none;
-      width: 14px; height: 14px; border-radius: 50%;
-      background: var(--red); border: none; margin-top: -5px; cursor: pointer;
-    }
-    .theme-fd-range::-moz-range-thumb {
-      width: 14px; height: 14px; border-radius: 50%;
-      background: var(--red); border: none; cursor: pointer;
-    }
-    .theme-fd-range:focus { outline: none; }
+    /* THM-05 (#1606): `.theme-fd-range` migrated to the `.ow-slider` kit primitive
+       (index.html) — the bespoke range styling (and its `var(--red)` accent leak) is
+       removed here. */
     /* THM-02: Customize never reflowed narrow — the Colors 2-col grid (.theme-custom)
        and the 4-across Font & Layout row (.theme-fd-row, no flex-wrap) both overflowed
        to a horizontal scrollbar at the kit window's 320px floor. #theme-popup already
@@ -7343,13 +7317,9 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     }
     /* Color Harmony Generator */
     .theme-harmony-row { display: flex; gap: 8px; align-items: flex-end; }
-    .harmony-generate-btn {
-      padding: 5px 14px; border: 1px solid var(--red); border-radius: 6px;
-      background: transparent; color: var(--red); cursor: pointer;
-      font-size: 12px; white-space: nowrap; transition: all 0.15s;
-      font-family: inherit; width: 100%;
-    }
-    .harmony-generate-btn:hover { background: color-mix(in srgb, var(--red) 11%, transparent); }
+    /* THM-06 (#1606): `#harmony-generate-btn` migrated to the `.ow-btn-secondary` kit
+       primitive (index.html) — the bespoke hand-rolled button look (and its `var(--red)`
+       accent leak) is removed here. */
     .harmony-preview {
       display: flex; height: 20px; border-radius: 6px; overflow: hidden;
       margin-top: 8px; border: 1px solid var(--border);
