@@ -403,7 +403,14 @@ class DeterministicOverseer:
             if not should_assess(signals):
                 return None
             return _heuristic_verdict(signals)
-        except Exception:
+        except Exception as _err:
+            # #1599: the heuristic self-erroring is a genuine guard failure — be LOUD (RED +
+            # WARN), never a silent swallow. Still fail-soft to the benign hold verdict.
+            try:
+                from src import log_rings as _lr
+                _lr.record_soft_failure("overseer:heuristic-error", _err, corrected="hold")
+            except Exception:
+                pass
             # Fail-soft: the supervisor must never crash the loop. A safe, do-nothing verdict.
             return Verdict(
                 level="observation",
@@ -525,7 +532,17 @@ class LlmOverseer:
                 return None
             raw = self._llm_fn(self._prompt(signals))
             return self.verdict_from_reply(raw, signals)
-        except Exception:
+        except Exception as _err:
+            # #1599: a genuine judge model-call error is the reasoning guard going down — be LOUD
+            # (RED + WARN), never a silent swallow. Still fail-soft to the deterministic floor.
+            # (An unparseable/out-of-contract reply does NOT raise — verdict_from_reply routes it
+            # to the floor without an exception, so it never reaches here and is not flagged.)
+            try:
+                from src import log_rings as _lr
+                _lr.record_soft_failure("overseer:judge-call-failed", _err,
+                                        corrected="deterministic-floor")
+            except Exception:
+                pass
             # Any error in the model call / parse path -> the deterministic floor.
             try:
                 return self._fallback.assess(signals)

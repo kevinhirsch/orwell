@@ -111,6 +111,20 @@ def record_failure(user: Optional[str], call_class: str, reason: str,
             + " (strict enrichment policy: this failure is LOUD, never a silent floor)")
     except Exception:  # pragma: no cover - defensive: the ledger must never break a flow
         pass
+    # #1599 — EVERY enrichment failure (a failed LLM call, garbage output, a refused write-back,
+    # or a no-model refusal) is a genuine class-A fault: emit a RED-eligible health event so it
+    # shows RED on /admin/status, not only an ERROR log line + ledger row. Covers all 6 enrichment
+    # driver classes at this one seam (the ERROR log above is the "log first" step; this is the RED
+    # record). Fail-safe: the health-event write must never break the flow. (The separate no-model
+    # overseer assessment below still runs — it adds the resolvable-now/escalate diagnosis.)
+    try:
+        from src import log_rings as _lr
+        _diag = (f"enrichment {call_class} failed: {reason}"
+                 + (f" — {str(detail)[:200]}" if detail else ""))
+        _lr.record_overseer("anomaly", f"enrichment:{call_class}", _diag, lever=None, ok=False,
+                            user=user)
+    except Exception:  # pragma: no cover - defensive
+        pass
     # 2026-07-12 — the runtime overseer NOTICES the model-wiring failure class (the ledger IS
     # its signal, same list the admin health payload surfaces): a recorded no-model failure
     # triggers the overseer's assessment, which reports resolvable-now (the resolver's

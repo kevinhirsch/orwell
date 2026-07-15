@@ -6342,7 +6342,16 @@ async def _stream_agent_loop_impl(
                                             if _ov_insp.isawaitable(_ov_rawc):
                                                 _ov_rawc = await asyncio.wait_for(_ov_rawc, timeout=12)
                                             _ov_verdict_a = _ov_inst.verdict_from_reply(_ov_rawc, _ov_sig_a)
-                                        except Exception:
+                                        except Exception as _ov_judge_err:
+                                            # #1599: the active-mode LLM judge call failed — LOUD
+                                            # (RED + WARN), then fall to the deterministic floor.
+                                            try:
+                                                from src import log_rings as _ov_lrf
+                                                _ov_lrf.record_soft_failure(
+                                                    "overseer:judge-call-failed", _ov_judge_err,
+                                                    corrected="deterministic-floor", user=owner)
+                                            except Exception:
+                                                pass
                                             _ov_verdict_a = _OvDet().assess(_ov_sig_a)
                                         # `hold` (and a None verdict) take NO action ⇒ fall through to the
                                         # heuristic floor unchanged. Only an ACTIONABLE lever dispatches.
@@ -7584,7 +7593,18 @@ async def _stream_agent_loop_impl(
                     try:
                         from src.orwell_cast_authoring import _resolve_llm_fn
                         _ov_llm = await _resolve_llm_fn(owner)
-                    except Exception:
+                    except Exception as _ov_resolve_err:
+                        # #1599: a genuine RAISE while resolving the utility model is a real fault —
+                        # be LOUD (RED + WARN), then fall to the deterministic floor. (A `None`
+                        # RETURN = no model wired = expected/Class-B — it never reaches here, it
+                        # takes the `else` branch below silently.)
+                        try:
+                            from src import log_rings as _ov_lrr
+                            _ov_lrr.record_soft_failure(
+                                "overseer:model-resolve-error", _ov_resolve_err,
+                                corrected="deterministic-floor", user=owner)
+                        except Exception:
+                            pass
                         _ov_llm = None
                     _ov_verdict = None
                     if _ov_llm is not None:
@@ -7595,7 +7615,16 @@ async def _stream_agent_loop_impl(
                             if _ov_inspect.isawaitable(_ov_raw):
                                 _ov_raw = await asyncio.wait_for(_ov_raw, timeout=15)
                             _ov_verdict = _ov.verdict_from_reply(_ov_raw, _ov_sig)
-                        except Exception:
+                        except Exception as _ov_judge_err2:
+                            # #1599: the live overseer judge call failed — LOUD (RED + WARN), then
+                            # fall to the deterministic floor.
+                            try:
+                                from src import log_rings as _ov_lrf2
+                                _ov_lrf2.record_soft_failure(
+                                    "overseer:judge-call-failed", _ov_judge_err2,
+                                    corrected="deterministic-floor", user=owner)
+                            except Exception:
+                                pass
                             _ov_verdict = DeterministicOverseer().assess(_ov_sig)
                     else:
                         _ov_verdict = DeterministicOverseer().assess(_ov_sig)
@@ -7606,7 +7635,12 @@ async def _stream_agent_loop_impl(
                             lever=_ov_verdict.lever, beat_before=_ledger_beat_seq_before,
                             beat_after=_ov_beat_after, ok=True, user=owner)
         except Exception as _ov_err:  # fail-soft: the overseer must never hurt a turn
-            logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
+            # #1599: the whole overseer hook erroring is a real fault — RED + WARN, not a bare debug.
+            try:
+                from src import log_rings as _ov_lre
+                _ov_lre.record_soft_failure("overseer:hook-error", _ov_err, user=owner)
+            except Exception:
+                logger.debug(f"[orwell] overseer hook skipped: {_ov_err}")
 
         # 0081 P2 — the narration-FAITHFULNESS gate (SHADOW: judge + log, no correction). Its OWN
         # dial (faithfulness_mode), independent of the overseer above. Runs once per turn, post-turn,
@@ -7627,7 +7661,13 @@ async def _stream_agent_loop_impl(
                 endpoint_url=_belt_endpoint, model=_belt_model, headers=_belt_headers,
                 last_user=_extract_last_user_message(messages))
         except Exception as _faith_err:  # fail-soft: the faithfulness gate must never hurt a turn
-            logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
+            # #1599: the in-game faithfulness gate raising BEFORE its own record is a guard-down —
+            # RED + WARN, not a bare debug. (_faith_check's own internal failures already record.)
+            try:
+                from src import log_rings as _faith_lr
+                _faith_lr.record_soft_failure("faith:gate-error", _faith_err, user=owner)
+            except Exception:
+                logger.debug(f"[orwell] faithfulness gate skipped: {_faith_err}")
 
     # 0081 P5 — the CASTING junction. The in-game hook above is gated to live-game turns, so the
     # casting interview (a separate mode) gets its OWN faithfulness check against a casting projection
@@ -7643,7 +7683,14 @@ async def _stream_agent_loop_impl(
                 last_user=_extract_last_user_message(messages),
                 projection=_cast_proj, context="casting")
         except Exception as _cast_faith_err:  # fail-soft: never hurt the casting turn
-            logger.debug(f"[orwell] casting faithfulness gate skipped: {_cast_faith_err}")
+            # #1599: the casting faithfulness gate raising before its own record is a guard-down —
+            # RED + WARN, not a bare debug.
+            try:
+                from src import log_rings as _cast_faith_lr
+                _cast_faith_lr.record_soft_failure(
+                    "faith:casting-gate-error", _cast_faith_err, user=owner)
+            except Exception:
+                logger.debug(f"[orwell] casting faithfulness gate skipped: {_cast_faith_err}")
 
         # VERBOSE OVERSEER/CORRECTOR DEBUG TELEMETRY — the CASTING twin (opt-in, default OFF). One
         # Vault-free entry per casting turn: which casting tools the MODEL called itself, and each

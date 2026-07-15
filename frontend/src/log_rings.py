@@ -163,4 +163,77 @@ def record_overseer(level, kind, diagnosis, *, lever=None,
         pass
 
 
+# The disposition marker the health rollup / RED-alarm builder keys on to tell an
+# auto-corrected soft failure from an uncorrected one. Kept as a literal so both the
+# recorder and the reader (routes/admin_health_routes.py) agree by construction.
+SOFT_FAIL_AUTOCORRECTED = "auto-corrected"
+SOFT_FAIL_UNCORRECTED = "uncorrected"
+
+_soft_fail_logger = logging.getLogger("orwell.softfail")
+
+
+def record_soft_failure(anomaly_class, exc, *, corrected=None, **ctx) -> None:
+    """#1599 — the ONE no-silent-fail-soft recorder. Promotes the reference pattern
+    (``faithfulness._record_faith_guard_down``) to a shared seam every class-A swallow wires
+    through BEFORE it falls to its deterministic floor / hold:
+
+      1. WARN-log the genuine failure FIRST — class + error (+ correction + any context) — so
+         even a telemetry-write failure below can never make the diagnosis fully invisible.
+      2. Record a RED-eligible health event via :func:`record_overseer` with ``ok=False`` — RED on
+         /admin/status. The disposition is annotated: ``auto-corrected by <corrected>`` when a
+         belt/lever/floor corrected it, else ``uncorrected``. **A correction is NOT a cloak** — an
+         auto-corrected fault is still RED (owner ruling 2026-07-14, issue #1599).
+      3. If step 2's write itself fails, demote it to DEBUG AFTER the WARN — never raise.
+
+    Fail-safe by construction (logging must never hurt a turn): every step is best-effort and this
+    function never propagates an exception.
+
+      anomaly_class  the failure class token (namespaced, e.g. ``overseer:judge-call-failed`` /
+                     ``faith:gate-error`` / ``enrichment:cast-authoring``).
+      exc            the caught exception (or a short reason string) — formatted into the diagnosis.
+      corrected      the belt/lever/floor that auto-corrected the fault (drives the disposition +
+                     the ``lever`` field), or None ⇒ ``uncorrected``.
+      ctx            extra Vault-free scalars folded into the diagnosis (pass ``user=`` to key the
+                     overseer entry to a user).
+    """
+    try:
+        if isinstance(exc, BaseException):
+            err_txt = f"{type(exc).__name__}: {exc}"
+        else:
+            err_txt = str(exc)
+    except Exception:
+        err_txt = "<unrepresentable error>"
+    disposition = (f"{SOFT_FAIL_AUTOCORRECTED} by {corrected}"
+                   if corrected else SOFT_FAIL_UNCORRECTED)
+    user = ctx.pop("user", None) if ctx else None
+    ctx_txt = ""
+    if ctx:
+        try:
+            ctx_txt = " " + " ".join(f"{k}={v}" for k, v in ctx.items())
+        except Exception:
+            ctx_txt = ""
+    diagnosis = f"{anomaly_class} — {err_txt} [{disposition}]{ctx_txt}"
+
+    warned = False
+    try:
+        _soft_fail_logger.warning("[orwell] soft-fail %s", diagnosis)
+        warned = True
+    except Exception:
+        # The logger itself is unavailable — nowhere left to write. Terminal (this guards the
+        # LOGGING path, per "logging must never hurt the app"), not a swallowed business error.
+        pass
+    try:
+        record_overseer("anomaly", anomaly_class, diagnosis,
+                        lever=corrected, ok=False, user=user)
+    except Exception as _rec_err:
+        # The RED health-event write failed — but the WARN above already surfaced the diagnosis,
+        # so this is NOT the silent-fail #1599 bans. Note the telemetry-write failure at DEBUG.
+        if warned:
+            try:
+                _soft_fail_logger.debug(
+                    "[orwell] soft-fail health-event write failed: %s", _rec_err)
+            except Exception:
+                pass
+
+
 ensure_live_handler()

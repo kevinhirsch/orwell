@@ -333,6 +333,13 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict) -> None:
             "msg": f"{kind_label} · {record['model']} {verb} {record['durationMs']}ms · "
                    f"in {in_chars} out {out_chars} chars{finish_suffix}{tool_suffix}",
             "args": req_summary,
+            # #1599 WI2 — structured triage fields for the per-class health rollup (kept beside the
+            # glanceable msg so the rollup never has to parse it): the call class, terminal stop
+            # reason, and ok flag. Vault-free scalars only.
+            "kind": record["kind"],
+            "callClass": cls,
+            "finishReason": finish,
+            "ok": bool(record["ok"]),
             "result": res_summary,
         })
     except Exception:
