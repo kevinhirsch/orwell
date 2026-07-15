@@ -45,6 +45,12 @@ BUTTON_SELECTORS = (
 )
 CARD_SELECTORS = (".og-card", ".on-card")
 
+# A representative slice of the window/chrome/nav layer that must always outrank the buttons (the
+# HIG functional layer wins the cap first). Not the full prefix — enough DISTINCT chrome surfaces
+# (window, sidebar, composer, modal, top-bar) that a regression sliding any ONE of them below the
+# buttons trips this guard, without pinning the exact chrome ordering among themselves.
+CHROME_SELECTORS = (".ow-window", "#sidebar", ".chat-input-bar", ".modal-content", ".chat-top-bar")
+
 
 def _selectors():
     """The ordered `SELECTORS` priority list, parsed from the source.
@@ -100,14 +106,17 @@ def test_cards_are_the_lowest_priority_tail():
 
 
 def test_chrome_still_outranks_the_buttons():
-    # The full intended order is windows/chrome -> buttons -> cards: the big chrome
-    # panels keep top priority so a button-heavy view never starves the
-    # windows/sidebar/composer.
+    # The full intended order is windows/chrome -> buttons -> cards: the big chrome panels keep
+    # top priority so a button-heavy view never starves the windows/sidebar/composer. Guard the
+    # whole representative chrome slice (window, sidebar, composer, modal, top-bar) — not just
+    # .ow-window — so a future move of ANY of them below the buttons trips this.
     sels = _selectors()
     first_button = min(sels.index(b) for b in BUTTON_SELECTORS)
-    assert sels.index(".ow-window") < first_button, (
-        "chrome (.ow-window) must still outrank the buttons in the cap order"
-    )
+    for chrome in CHROME_SELECTORS:
+        assert chrome in sels, f"{chrome} (chrome) missing from the SELECTORS priority list"
+        assert sels.index(chrome) < first_button, (
+            f"{chrome} (chrome) must still outrank the buttons in the cap order"
+        )
 
 
 def test_reorder_only_the_caps_still_exist_and_are_unpinned():
@@ -115,5 +124,7 @@ def test_reorder_only_the_caps_still_exist_and_are_unpinned():
     # separate perf ruling the issue still tracks). The cap constants must still
     # exist; their numeric VALUES are intentionally NOT asserted here so that future
     # ruling can raise them without breaking this ordering guard.
-    assert "MAX_LIVE_SURFACES" in JS
-    assert "MAX_LIVE_SURFACES_MOBILE" in JS
+    # Match DECLARATIONS (`\bNAME\s*=`), not bare substrings, so the desktop cap can't be
+    # spuriously satisfied by the `MAX_LIVE_SURFACES_MOBILE` prefix if it were removed.
+    assert re.search(r"\bMAX_LIVE_SURFACES\s*=", JS), "desktop cap declaration missing"
+    assert re.search(r"\bMAX_LIVE_SURFACES_MOBILE\s*=", JS), "mobile cap declaration missing"
