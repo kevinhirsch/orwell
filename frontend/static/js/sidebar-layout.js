@@ -767,7 +767,7 @@ export function syncRailIcons() {
       btn = document.createElement('button');
       btn.type = 'button';
       btn.id = spec.rail;
-      btn.className = 'icon-rail-btn';
+      btn.className = 'icon-rail-btn ow-btn ow-btn-icon';
       btn.dataset.railSource = spec.source;
       if (spec.section) btn.dataset.section = spec.section;
       const label = src.title || src.getAttribute('aria-label') || '';

@@ -933,21 +933,16 @@ body.bg-pattern-perlin-flow {
       background: var(--border);
       margin: 4px 0;
     }
+    /* Migrated onto the .ow-btn .ow-btn-icon kit primitive (#1638 R3): the flat
+       transparent square icon-button, adaptive var(--fg) ink, subtle radius, hover
+       tint, focus ring, coarse-pointer 44px floor and a11y trio all now come from the
+       kit. Only the rail-specific residue stays here — the 34px rail size (via the kit's
+       `--ow-btn-icon-size` token), the idle 0.5 dim, and `position: relative` for the
+       absolutely-positioned notify/notes/minimized badges. */
     .icon-rail-btn {
       position: relative;
-      width: 34px;
-      height: 34px;
-      border: none;
-      background: transparent;
-      color: var(--accent, var(--red));
-      font-size: 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      --ow-btn-icon-size: 34px;
       opacity: 0.5;
-      transition: opacity 0.08s, background 0.08s;
     }
     /* H4: every rail icon is a CLONE of its expanded row's svg (single icon
        source — see sidebar-layout.js syncRailIcons). The source rows draw at
