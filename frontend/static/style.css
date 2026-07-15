@@ -1999,15 +1999,18 @@ body.bg-pattern-perlin-flow {
     /* Header controls never crowd the (ellipsizing) title at a narrow width — they
        hold a fixed size and don't shrink, so the title yields first. A 30px min box
        keeps them comfortably tappable without bloating the header. */
+    /* #1638 KM-W2-rail: rail-head chrome now composes .ow-btn ow-btn-icon (adaptive var(--fg)
+       ink over the dark wallpaper). Only the layout/state that the kit doesn't own stays bespoke:
+       the no-shrink flex (so the header controls never crowd the ellipsizing title) and the
+       resting dim. */
     .gadget-rail-toggle, .gadget-rail-swap, .gadget-rail-close, .gadget-rail-rearrange {
-      flex: 0 0 auto; background: transparent; border: none; color: var(--fg); cursor: pointer;
-      font-size: 1rem; line-height: 1; padding: .25rem .35rem; border-radius: 6px; opacity: .7;
-      min-width: 30px; min-height: 30px;
-      display: inline-flex; align-items: center; justify-content: center;
+      flex: 0 0 auto; opacity: .7;
     }
     .gadget-rail-toggle:hover, .gadget-rail-swap:hover, .gadget-rail-close:hover, .gadget-rail-rearrange:hover {
-      opacity: 1; background: color-mix(in srgb, var(--fg) 10%, transparent); }
-    .gadget-rail-rearrange[aria-pressed="true"] { opacity: 1; color: var(--accent, #e06c75); }
+      opacity: 1; }
+    /* aria-pressed accent must beat .ow-btn-icon's higher-specificity adaptive var(--fg) ink,
+       hence !important (not a bespoke-appearance override the kit already supplies). */
+    .gadget-rail-rearrange[aria-pressed="true"] { opacity: 1; color: var(--accent, #e06c75) !important; }
     /* #8/#9: the rail-head controls are now SVG line icons (were text glyphs). Size + inherit
        the button's currentColor so the legible-ink rule (light --fg under glass) drives them. */
     .gadget-rail-rearrange svg, .gadget-rail-swap svg, .gadget-rail-close svg { display: block; width: 18px; height: 18px; }
@@ -2051,14 +2054,14 @@ body.bg-pattern-perlin-flow {
       overflow-y: auto; overflow-x: hidden;
       scrollbar-width: none; -ms-overflow-style: none; }
     .gadget-rail-strip::-webkit-scrollbar { width: 0; height: 0; }
-    .grail-ico { flex-shrink: 0; background: transparent; border: none; cursor: pointer;
-      font-size: 1.1rem; width: 38px; height: 38px; min-width: 38px; padding: 0;
-      display: inline-flex; align-items: center; justify-content: center;
-      border-radius: 8px; line-height: 1; color: var(--fg); }
-    /* #8/#9: condensed-strip icons are SVG line icons (were emoji). Size + inherit currentColor
-       so they match the kit iconography and pick up the legible ink under glass. */
+    /* #1638 KM-W2-rail: the collapsed-strip icons compose .ow-btn ow-btn-icon (adaptive var(--fg)
+       ink over the dark wallpaper, flat chrome, coarse-pointer 44px snap). The strip icon is a
+       touch larger than the default 30px chrome icon, so tune the kit size token instead of
+       re-declaring the box; the no-shrink flex keeps each tap target full-height in the scroller. */
+    .grail-ico { flex-shrink: 0; --ow-btn-icon-size: 38px; }
+    /* #8/#9: condensed-strip icons are SVG line icons (were emoji). Size the inner glyph (the kit
+       sizes the button box, not its SVG child). */
     .grail-ico svg { display: block; width: 20px; height: 20px; }
-    .grail-ico:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
     /* collapsed: a thin icon strip; the body + most chrome hide, the chevron flips */
     .gadget-rail[data-collapsed="true"] { width: 50px; }
     .gadget-rail[data-collapsed="true"] .gadget-rail-body,
@@ -2241,7 +2244,7 @@ body.bg-pattern-perlin-flow {
       .gadget-rail[data-collapsed="true"] .gadget-rail-title,
       .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: inline; }
       .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
-      .gadget-rail-toggle, .gadget-rail-swap { display: none; }
+      .gadget-rail-toggle, .gadget-rail-swap { display: none !important; }
       body[data-game-build] .gadget-rail-open { display: block; }
       /* #551 — on mobile the gadget opener moves to the TOP-RIGHT (it pairs with
          the sidebar hamburger, which stays TOP-LEFT). Desktop is untouched. It
@@ -2316,7 +2319,7 @@ body.bg-pattern-perlin-flow {
       .gadget-rail[data-collapsed="true"] .gadget-rail-title,
       .gadget-rail[data-collapsed="true"] .gadget-rail-close { display: inline; }
       .gadget-rail[data-collapsed="true"] .gadget-rail-strip { display: none; }
-      .gadget-rail-toggle, .gadget-rail-swap { display: none; }
+      .gadget-rail-toggle, .gadget-rail-swap { display: none !important; }
       body[data-game-build] .gadget-rail-open { display: block; }
       body.hamburger-right .hamburger-btn,
       .hamburger-btn { left: 9px; right: auto; }

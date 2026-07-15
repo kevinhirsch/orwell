@@ -238,7 +238,7 @@
       var g = REG_BY_ID[id];
       var b = document.createElement("button");
       b.type = "button";
-      b.className = "grail-ico";
+      b.className = "grail-ico ow-btn ow-btn-icon";
       b.setAttribute("data-grail-gadget", id);
       b.title = g.title;
       b.setAttribute("aria-label", g.title);
