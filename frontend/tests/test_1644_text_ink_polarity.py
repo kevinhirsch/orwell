@@ -501,15 +501,26 @@ KNOWN_RESIDUAL = [
     #      • the two Danger-Zone `#e55` heads + the debug-vault-button `#f0a6a6` → the standard
     #        `var(--color-danger)` (Apple system red, polarity-aware), classified by `_standard_danger`. ──
 
-    # ── W6 — FIXED (#1638 kit migration W6): the five bespoke style.css status/accent/chrome hexes were
-    #    repointed onto standard tokens, so their KNOWN_RESIDUAL entries were removed here to keep the
-    #    anti-rot check honest:
+    # ── W6 — FIXED (#1638 kit migration W6): three of the five bespoke style.css status/accent/chrome
+    #    hexes were repointed onto standard tokens, so their KNOWN_RESIDUAL entries were removed here to
+    #    keep the anti-rot check honest:
     #      • `.compare-parallel-toggle` amber `#e0a050` → `var(--color-warning)` and its `.active` blue
     #        `#5b8def` → `var(--color-accent)` (color + border + tint mix, polarity-aware);
-    #      • `.notes-pane-archive` title gold `#b48a4a` → `var(--color-warning)` (the badge's SVG icon
-    #        stroke stays gold — a data-URI can't take a CSS var — so the warm amber keeps it coherent);
-    #      • `.cookbook-gpu-btn.gpu-free` green `#4ade80` → `var(--color-success)`;
-    #      • `#orwell-status .og-chev` chevron `#000` → `var(--ow-control-ink)` (the standard chrome ink). ──
+    #      • `.cookbook-gpu-btn.gpu-free` green `#4ade80` → `var(--color-success)`.
+    #    Two of the five stayed bespoke and are tracked residuals below:
+    #      • `#orwell-status .og-chev` was REVERTED to `#000` — `var(--ow-control-ink)` (rgb(22,25,31))
+    #        failed the a11y-matrix contrast gate on the textured status pill;
+    #      • `.notes-pane-archive` title gold stayed `#b48a4a` (not `var(--color-warning)` #f0ad4e) — the
+    #        badge's fill/border/data-URI SVG-icon stroke all use #b48a4a and a data-URI can't take a CSS
+    #        var, so the label rejoined #b48a4a for ONE coherent accent rather than a two-tone badge. ──
+    {"file": "static/style.css", "line": 23991, "find": "color: #000", "sel": "#orwell-status .og-chev", "count": 1,
+     "wave": "W6", "why": "a11y-matrix contrast requires pure-black max-contrast ink over the textured "
+                          "status-pill backdrop; --ow-control-ink (rgb(22,25,31)) drops to 3.61:1 < 4.5. "
+                          "Intentional bespoke exception."},
+    {"file": "static/style.css", "line": 18265, "find": "color: #b48a4a", "sel": ".notes-pane-archive", "count": 1,
+     "wave": "W6", "why": "archive badge uses ONE accent source: the label, fill, border and data-URI SVG "
+                          "icon stroke all use the muted archive gold #b48a4a. --color-warning (#f0ad4e) is "
+                          "a brighter amber that would visibly shift the badge and can't reach the SVG stroke."},
 ]
 
 # ── ACCEPTED exceptions (contrast holds / semantically correct — audit §5) ──────────

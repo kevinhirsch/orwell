@@ -81,8 +81,9 @@
       ".og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--ow-space-1, 4px); }" +
       // The action button (Open / Un-pin …) now composes the shared kit primitive
       // (.ow-btn ow-btn-plain — see addAction below); its bespoke appearance rules were
-      // retired in the #1638 kit migration. The .og-act class is retained for the
-      // coarse-pointer 44px floor (style.css) + frosted glass coherence (KIT-F-01).
+      // retired in the #1638 kit migration. The .og-act class is retained ONLY for the
+      // coarse-pointer 44px tap floor (style.css); the frosted KIT-F-01 vibrant-fill
+      // override now EXCLUDES it (:not(.ow-btn)) so the plain kit variant wins in frosted too.
       // The collapse chevron — only when collapsible. Reduced-motion strips its transition.
       ".og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: var(--ow-space-1, 4px); transition: transform .15s; }" +
       ".og-card.og-collapsed .og-chev { transform: rotate(-90deg); }" +
@@ -283,7 +284,8 @@
     if (!this.actions) this.mount();
     var b = document.createElement("button");
     // #1638 kit migration: the gadget action is a shared kit plain button. The .og-act
-    // class is kept (classList.add) for the coarse-pointer tap floor + frosted coherence.
+    // class is kept (classList.add) ONLY for the coarse-pointer tap floor; the frosted
+    // KIT-F-01 fill override excludes kit buttons (:not(.ow-btn)) so .ow-btn-plain wins.
     b.type = "button"; b.className = "ow-btn ow-btn-plain"; b.classList.add("og-act");
     if (cfg.label) b.textContent = cfg.label;
     if (cfg.title) b.title = cfg.title;
