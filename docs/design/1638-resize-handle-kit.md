@@ -90,19 +90,24 @@ is styling-only and the value logic lives in the consumer.
 
 | Selector | Role | Declarations |
 |---|---|---|
-| `.ow-resize-handle` | the hit strip | `position:absolute; width: var(--ow-resize-thickness, 8px); touch-action:none; background:transparent; border:none; padding:0; margin:0; cursor: var(--ow-resize-cursor, ew-resize); z-index: var(--ow-resize-z, 4)` |
+| `.ow-resize-handle` | the hit strip | `position:absolute; inset-block:0; width: var(--ow-resize-thickness, 8px); touch-action:none; background:transparent; border:none; padding:0; margin:0; cursor: var(--ow-resize-cursor, ew-resize); z-index: var(--ow-resize-z, 4)` — **`inset-block:0`** (the old `top:0; bottom:0`) is authored in the kit so the strip is full-height; the *horizontal* edge anchor (old `left:-3px` / side-swapped `right:-3px`) is the consumer's via `[data-edge]` below |
 | `.ow-resize-handle::before` | the visible bar | `content:""; position:absolute; inset-block:0; width: var(--ow-resize-bar, 2px); background:transparent; border-radius: var(--ow-radius-pill); transition: background .12s ease` |
 | `.ow-resize-handle:hover::before`, `.ow-resize-handle.is-active::before` | hover / drag | `background: var(--ow-glass-rim-strong, rgba(255,255,255,.55))` — neutral luminous rim, **no accent** |
 | `.ow-resize-handle:focus-visible::before` | keyboard focus | `background: var(--ow-focus-ring, var(--ow-ios-blue))` |
 | `.ow-resize-handle:focus-visible` | focus | `outline: none` (the bar *is* the focus signal) |
 | `.ow-resize-handle[aria-orientation="horizontal"]` | height grip variant | swaps axis: `inset-inline:0; height: var(--ow-resize-thickness); cursor: ns-resize`; bar becomes a horizontal line |
-| `.ow-resize-handle[data-edge="start"]` / `[data-edge="end"]` | edge side | positions the strip + bar on the leading/trailing edge (generalizes the `data-gadget-side` mirroring) |
+| `.ow-resize-handle[data-edge="start"]` / `[data-edge="end"]` | edge side | positions the strip + bar on the leading/trailing edge (generalizes the `data-gadget-side` mirroring), preserving the exact offsets: `[data-edge="start"] { inset-inline-start:-3px }` + its `::before { inset-inline-start:3px }`, `[data-edge="end"]` mirrored to `inset-inline-end`. **Do not drop these** — without the edge offset the strip detaches from the rail, and without the `::before` inset the 2px bar collapses onto the wrong edge |
 
 **Consumer keeps its own edge placement** (`left:-3px` vs side-swap `right:-3px`) via the `data-edge`
 attribute or a thin consumer override — the primitive provides the *look*, the consumer the *anchor*.
 The active-drag class becomes `.is-active` on the handle (the consumer currently keys off
 `.grail-resizing` on the *rail*; either works — recommend the handle owns `.is-active` so the primitive
 rule is self-contained, with the rail's `.grail-resizing` kept only for its `transition:none`).
+**`.is-active` lifecycle:** the consumer adds `.is-active` on `pointerdown` (drag start) and removes it
+on `pointerup`, `pointercancel`, **and** any aborted drag — mirroring the existing `grail-resizing`
+add/remove (`orwellGadgetRail.js:805` add on `pointerdown`; `:792` remove inside `endDrag`, bound to
+`pointerup`/`pointercancel` at `:808-809`). So a released or cancelled drag always drops the active
+bar paint back to the hover/rest state.
 
 ### 3.3 Two-tier + a11y
 
@@ -127,8 +132,8 @@ rule is self-contained, with the rail's `.grail-resizing` kept only for its `tra
 | `resizeHandle.className = "gadget-rail-resize-handle"` (`:749`) | `"ow-resize-handle gadget-rail-resize-handle"` (dual-class: kit look + the consumer's edge-position/`display:none`-when-collapsed overrides) |
 | hover/drag `rgba(255,255,255,.55)` bar | `--ow-glass-rim-strong` token (same value, now shared) |
 | `:focus-visible::before { --ow-ios-blue }` | `--ow-focus-ring` (same value, shared) |
-| `body[data-gadget-side="left"]` edge mirror | keep as the consumer override (edge anchor is consumer-owned) OR move to `[data-edge]` on the handle |
-| `.grail-resizing` drag class | keep on the rail for `transition:none`; add `.is-active` on the handle for the bar paint |
+| `body[data-gadget-side="left"]` edge mirror + the strip `left:-3px` / `::before left:3px` offsets | keep as the consumer override (edge anchor is consumer-owned) OR move to `[data-edge]` on the handle — **the horizontal edge offsets MUST survive the move** (the kit only supplies `inset-block:0` + width; the leading/trailing `-3px`/`3px` anchoring is consumer/`[data-edge]`-owned, §3.2), or the strip detaches from the rail |
+| `.grail-resizing` drag class | keep on the rail for `transition:none`; add `.is-active` on the handle for the bar paint — added on `pointerdown` (`:805`), removed on `pointerup`/`pointercancel`/aborted drag inside `endDrag` (`:792`,`:808-809`) |
 | `role="slider"` + full `aria-value*` set + arrow-key nudge (`:753-822`) | **unchanged** — the consumer keeps all a11y/keyboard/clamp/persist logic |
 
 Net: one CSS block moves into the kit + a class dual-classing on one line. **No behavior change**, no
@@ -140,8 +145,10 @@ Source-pinned, mirroring `test_1638_compact_icon_kit.py`. Bind the ELEMENT KIT r
 pins and the consumer JS for the adoption pins.
 
 1. **`test_resize_handle_primitive_exists`** — `.ow-resize-handle` and `.ow-resize-handle::before`
-   are authored in KIT; the strip is `background: transparent` + `touch-action: none` and the bar is
-   token-driven (`--ow-resize-bar`).
+   are authored in KIT; the strip is `background: transparent` + `touch-action: none`, carries
+   `inset-block:0` (the full-height extent from the old `top:0; bottom:0`), and the bar is
+   token-driven (`--ow-resize-bar`); the `[data-edge]` variants keep the `-3px`/`3px` edge offsets so
+   the strip stays anchored to the rail.
 2. **`test_hover_and_drag_rim_is_neutral_not_accent`** — the hover / `.is-active` bar uses the neutral
    glass-rim token, and the primitive's resize rules contain **no** `--accent`/`var(--red`/`#f` red —
    the #8/#9 "no red on the resize affordance" contract, pinned in the kit now.
@@ -156,7 +163,10 @@ pins and the consumer JS for the adoption pins.
    - the handle **still** sets `role="slider"`, `tabindex="0"`, `aria-valuemin/now/max/text`, and the
      `ArrowLeft`/`ArrowRight` keydown branch survives (the keyboard-a11y regression guard — see §6);
    - `style.css` no longer contains a standalone `.gadget-rail-resize-handle { … cursor: ew-resize`
-     appearance block (moved to the kit), keeping only the consumer's edge/`display:none` overrides.
+     appearance block (moved to the kit), keeping only the consumer's edge/`display:none` overrides;
+   - the handle's `.is-active` (bar-paint) class is added on `pointerdown` and removed on
+     `pointerup`/`pointercancel` (mirrors the `grail-resizing` add/remove) so a released/cancelled
+     drag drops the active bar back to rest.
 7. **`test_desktop_only_no_coarse_pointer_obligation`** — assert the consumer still gates the handle
    behind `isResizable()`/`_isNarrow()` (the handle must not appear on touch, so the sub-44px grip is
    never a tap-target violation).

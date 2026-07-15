@@ -84,19 +84,21 @@ There is **no `:focus-visible` rule** today — the roving-tabindex `.focus()` l
 
 ### 2a. Class API
 
-```
+```text
 .ow-swatch-grid            the grid container (role="listbox"); auto-fill minmax tiles
 .ow-swatch                 a selectable tile (role="option"); hover / focus-visible / [aria-selected]
   .ow-swatch__dots         the color-preview dot row (was .theme-swatch-colors)
   .ow-swatch__dot          one preview dot (was .theme-swatch-colors span)
   .ow-swatch__name         the tile label (was .theme-swatch-name)
 .ow-swatch--preview        the "paint the tile in the theme's own bg/fg" preview variant
-.ow-swatch.is-selected     selected state (mirrors aria-selected="true"; kit neutral ring, no accent hue)
+.ow-swatch[aria-selected="true"]  selected state — the SOLE selection source (kit neutral ring, no accent hue)
 ```
 
-Selected state is driven by **`[aria-selected="true"]`** (the source of truth the roving-tabindex code
-already sets) with `.is-selected` as an optional co-class — so the visual and the AT state can never
-drift. (Preferred over the current bespoke `.active` class, which duplicates `aria-selected`.)
+Selected state is driven **solely** by **`[aria-selected="true"]`** (the source of truth the
+roving-tabindex code already sets). The CSS never matches a bare `.is-selected`, so a stale or omitted
+ARIA attribute can never leave a tile rendered-selected. If a `.is-selected` co-flag is kept, it MUST
+be gated by the attribute (`.is-selected[aria-selected="true"]`) and never style on its own.
+(Preferred over the current bespoke `.active` class, which duplicates `aria-selected`.)
 
 ### 2b. CSS contract (authored in the ELEMENT KIT region of `style.css`)
 
@@ -114,8 +116,10 @@ drift. (Preferred over the current bespoke `.active` class, which duplicates `ar
 }
 .ow-swatch:hover { transform: scale(1.06); }
 /* SELECTED — a NEUTRAL luminous ring (emphasis = luminosity + weight, NOT accent hue).
-   Driven by aria-selected so the visual never diverges from the AT state. */
-.ow-swatch[aria-selected="true"], .ow-swatch.is-selected {
+   Keyed SOLELY off aria-selected so the visual can never diverge from the AT state. We do NOT
+   match a bare `.is-selected` (a stale/omitted attribute must never render a tile as selected);
+   if a class co-flag is wanted, gate it: `.ow-swatch.is-selected[aria-selected="true"]`. */
+.ow-swatch[aria-selected="true"] {
   border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
 }
@@ -153,6 +157,16 @@ drift. (Preferred over the current bespoke `.active` class, which duplicates `ar
   `aria-label`, e.g. "Preset themes" / "Custom themes"); the current grids omit it, leaving
   `role="option"` children orphaned. Add it in the host markup (or have `theme.js` set it). Keep the
   existing roving-tabindex + Enter/Space activation (already compliant with WCAG 2.1.1).
+- **A listbox holds ONLY `role="option"` swatches — move the non-option controls out.** A
+  `role="listbox"` must not contain interactive descendants other than its options. Two current
+  offenders (verified in source) MUST move **outside** the listbox as part of this migration:
+  - **`#theme-show-all`** — today `theme.js:1591` injects the "show all" `<button>` (and its
+    `#theme-extra` overflow group) **inside `#themeGrid`**. Render it as a **sibling of** the grid
+    (before/after the `.ow-swatch-grid`), not a child, so the listbox contains only swatches.
+  - **`.theme-delete-btn`** — today `theme.js:1625` nests the per-tile delete `<button>` **inside**
+    each custom swatch (the `role="option"` element, `:1617`). Move it to be a **sibling of** the
+    swatch inside a small per-tile wrapper (option + delete side-by-side), so the option is not an
+    interactive-nesting violation. Its own click handler + 44px coarse floor are unchanged.
 - **Focus ring:** newly added (system-blue) — the roving `.focus()` was previously invisible.
 - **Selected announcement:** `aria-selected` already toggled by the handlers; binding the *visual* to
   `[aria-selected="true"]` removes the `.active`/`aria-selected` dual-source drift risk.
@@ -173,9 +187,9 @@ drift. (Preferred over the current bespoke `.active` class, which duplicates `ar
 | `theme.js:1376-1414` (roving helpers) | selectors `.theme-swatch` → `.ow-swatch`, `.closest('.theme-grid')` → `.closest('.ow-swatch-grid')` | JS selector swap |
 | `theme.js:1666-1687,1873,1955,2034,2435` (select/clear) | replace `.classList.add/remove('active')` with `.setAttribute('aria-selected', …)` as the single source (drop `.active`), and re-point `.querySelectorAll('.theme-swatch')` → `.ow-swatch` | JS state-source consolidation |
 | `theme.js:1560,1562,1616,1617` `aria-selected` | already present — keep; the CSS now consumes it | none |
-| `style.css:7126-7167,7204` | DELETE `.theme-grid` / `.theme-swatch*` bespoke rules; behavior moves to the kit region. `.theme-show-all`/`.theme-extra` (`:7132-7144`) — keep (layout siblings) but re-point their `.theme-grid`-nested selectors if any | CSS retire + re-point |
+| `style.css:7126-7167,7204` | DELETE `.theme-grid` / `.theme-swatch*` bespoke rules; behavior moves to the kit region. `.theme-show-all`/`.theme-extra` (`:7132-7144`) — keep the CSS, but **re-parent `#theme-show-all`/`#theme-extra` OUTSIDE `#themeGrid`** (`theme.js:1591`) so the `role="listbox"` grid holds only `role="option"` swatches (§2d) | CSS retire + re-point + markup re-parent |
 | `.theme-swatch[data-custom]` (`:7204`) | → `.ow-swatch--custom` | CSS + template |
-| `.theme-delete-btn` (`:7208`) | **unchanged** — the per-tile delete X is out of primitive scope (its own micro-control) | none |
+| `.theme-delete-btn` (`:7208`) | CSS **unchanged** (out of primitive scope), but its **markup moves OUT of the `role="option"` swatch** (`theme.js:1625` currently nests it inside the tile) — render it as a sibling of the swatch in a per-tile wrapper, so the listbox has no interactive nesting (§2d) | markup re-parent (JS template) |
 
 The `.active`→`aria-selected` consolidation is the only non-mechanical step; if the owner prefers a pure
 class swap, keep `.active` as a co-class (`.ow-swatch.active`) and add `.ow-swatch.active` to the
@@ -198,9 +212,13 @@ THEME = _read("static", "js", "theme.js")
    `KIT`**.
 2. `test_swatch_grids_are_listboxes` — `index.html` `#themeGrid`/`#themeUserGrid` carry
    `class="ow-swatch-grid"` **and** `role="listbox"` + an `aria-label`; assert `class="theme-grid"` gone.
-3. `test_swatch_selected_state_is_neutral_not_accent` — the `[aria-selected="true"]`/`.is-selected` rule
+   Also assert the listbox holds only options: `theme.js` no longer emits `#theme-show-all` **inside**
+   the grid, and `.theme-delete-btn` is rendered as a **sibling** of (not nested inside) the
+   `role="option"` swatch.
+3. `test_swatch_selected_state_is_neutral_not_accent` — the `[aria-selected="true"]` selected rule
    uses `--ow-control-ink`; assert **no** `var(--red)`/`--accent` in the selected rule (kills the old
-   accent ring).
+   accent ring), **and** that no rule styles a bare `.ow-swatch.is-selected` without the
+   `[aria-selected="true"]` attribute (selection stays ARIA-driven, never class-only).
 4. `test_swatch_has_focus_visible_ring` — a `.ow-swatch:focus-visible` rule using `--ow-focus-ring`
    exists (the roving-tabindex focus was previously ring-less).
 5. `test_swatch_selection_is_aria_driven` — `theme.js` sets `aria-selected` on select and the CSS keys

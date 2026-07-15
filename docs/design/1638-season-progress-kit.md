@@ -71,7 +71,7 @@ budget, upload progress):
 | Selector | Role | Declarations |
 |---|---|---|
 | `.ow-progress` | track | `overflow:hidden; border-radius: var(--ow-progress-radius, var(--ow-radius-pill)); height: var(--ow-progress-h, 6px); background: var(--ow-progress-track, color-mix(in srgb, var(--fg) 12%, transparent))` |
-| `.ow-progress-fill` | fill | `height:100%; width:0%; background: var(--ow-progress-fill-color, var(--accent, var(--accent-primary))); transition: width .5s ease-out; will-change: width` |
+| `.ow-progress-fill` | fill | `height:100%; width:0%; background: var(--ow-progress-fill-color, var(--accent, var(--accent-primary, #6d4aff))); transition: width .5s ease-out; will-change: width` — the final `#6d4aff` literal is **retained** from the bespoke chain (`:90-95`) so the fill never falls through to an unpainted default if both accent tokens are unset |
 | `.ow-progress--edge` | fixed bottom-edge variant | `position:fixed; left:0; right:0; bottom:0; z-index: var(--ow-progress-z, 60); height: var(--ow-progress-edge-h, 4px); pointer-events:none; border-radius:0` |
 | `@media (prefers-reduced-motion: reduce)` | | `.ow-progress-fill { transition:none }` |
 
@@ -87,7 +87,9 @@ The chip is a status pill, which is squarely the **notice** family's territory (
 `#orwell-season-chip` id for positioning + JS:
 
 ```html
-<div class="on-chip on-chip--season" id="orwell-season-chip" aria-label="Season number">Season N</div>
+<!-- aria-label carries the season VALUE, JS-synced to the visible text (never the bare word
+     "Season number", which would override the text and hide the number from screen readers) -->
+<div class="on-chip on-chip--season" id="orwell-season-chip" aria-label="Season 5">Season 5</div>
 ```
 
 | Selector | Role | Declarations |
@@ -107,8 +109,10 @@ for legible `--fg`; use `--ow-glass-rim-border` for the hairline instead of `--a
   backdrop sample). Author them where the other display primitives live.
 - **a11y trio:** reduced-motion freezes the fill transition (already true for the bar; add for the
   primitive); contrast strengthens the track/fill delta and the chip border; reduced-transparency
-  solidifies the chip fill (`--panel` opaque). The bar's `role="progressbar"` + description and the
-  chip's `aria-label` are **preserved verbatim** — both are already correct.
+  solidifies the chip fill (`--panel` opaque). The bar's `role="progressbar"` + description is
+  **preserved verbatim**; the chip's `aria-label` is **preserved as the value-bearing name**
+  (`Season N`, JS-synced to the visible text — never the bare "Season number", which would hide the
+  number from AT).
 - **Non-interactive is preserved:** both keep `pointer-events: none`; neither is a tab stop; the
   primitive must not add `:hover`/`:focus`/`cursor` (they are display overlays, not controls).
 
@@ -118,11 +122,11 @@ for legible `--fg`; use `--ow-glass-rim-border` for the hairline instead of `--a
 |---|---|
 | `#orwell-season-progress` inline shell CSS (`:84-89`) | `.ow-progress.ow-progress--edge`; keep the id for JS + z/placement overrides |
 | `.osp-fill` inline fill CSS (`:90-95`) | `.ow-progress-fill.osp-fill` (dual-class; `paint()` selector unchanged) |
-| bar `color-mix(--accent 16%)` track + `--accent` fill | `--ow-progress-track` / `--ow-progress-fill-color` tokens (season bar sets fill-color to `--accent`, so the *look* is preserved while the structure is shared) |
+| bar `color-mix(--accent 16%)` track + `--accent` fill | `--ow-progress-track` / `--ow-progress-fill-color` tokens (season bar sets fill-color to `--accent`, so the *look* is preserved while the structure is shared). The fill token chain **keeps the `#6d4aff` final fallback** from the bespoke rule (`:92`) so the fill can't render unpainted |
 | bar reduced-motion rule (`:96-98`) | inherits `.ow-progress` reduced-motion (delete the local dup) |
 | `#orwell-season-chip` inline shell CSS (`:177-187`) | `.on-chip.on-chip--season`; keep the id for `positionChip()` |
 | chip `--mono` face + `--accent` ink/border | `--ow-ui-font` + `--fg` + `--ow-glass-rim-border` (drift-fix) |
-| ARIA on bar + chip (`role`, `aria-*`) | **unchanged** |
+| ARIA on bar + chip (`role`, `aria-*`) | **unchanged** — the chip's `aria-label` stays value-bearing (`Season N`, JS-synced to the visible text), never the bare "Season number" |
 | `paint()`, `positionChip()`, show/hide logic | **unchanged** |
 
 Net: two CSS blocks become kit-token compositions + a class addition on each element. No JS behavior
@@ -150,7 +154,8 @@ Source-pinned, mirroring `test_1638_compact_icon_kit.py`.
 7. **`test_season_chip_adopts_treatment`** — the chip markup carries `on-chip`/`on-chip--season`, and
    its bespoke `font-family: var(--mono …)` / `--accent`-tinted CSS is gone.
 8. **`test_aria_preserved`** — the bar still emits `role="progressbar"` + `aria-valuemin/max/now` +
-   `aria-describedby`, and the chip still emits `aria-label` (no ARIA regression through the restyle).
+   `aria-describedby`, and the chip's `aria-label` carries the season **value** (`Season <n>`, set
+   from the live season — assert it is not the static "Season number") so AT announces the number.
 9. **`test_pointer_events_none_preserved`** — both overlays keep `pointer-events: none` (they must
    never intercept clicks meant for chat/composer beneath them).
 10. **`test_demo_and_docs_reference_the_primitive`** — `element_kit_demo.html` shows an `.ow-progress`

@@ -57,8 +57,9 @@ doesn't). `.ow-portrait` **unifies the frame** and standardizes on `face()` as i
 | Markup + reveal JS | `makeCard():560-607`, `setPortrait():455-542`, `syncBadge():546-558` | hand-rolled two-layer reveal (monogram base + img fade), `.ow-mono-badge` composited manually |
 
 G6 hand-rolls its **own** two-layer reveal (monogram base → decoded-img crossfade) and its own badge
-composite because it predates `face()`'s onerror-heal. This is the primary migration target: it
-duplicates ~80 lines of what `face()` + `.ow-portrait` states give for free.
+composite because it predates `face()`'s onerror-heal. It is the richest *frame* consumer — but under
+the **frame-only ruling (§6.1)** G6 keeps this reveal seam and gains only the `.ow-portrait` frame +
+states; the ~80-line `face()` consolidation is **deferred**, not part of this lane.
 
 ### G4 — Headshot studio tiles (`orwellHeadshot.js`) — image thumbnails, own skeleton
 
@@ -132,7 +133,8 @@ skeleton inside the same frame.
 | `.ow-portrait.is-selected` / `[aria-pressed="true"]` | selected | system-blue ring `outline: 3px solid var(--ow-ios-blue); outline-offset:1px` (G4's `.sel` pattern, kit-owned) |
 | `.ow-portrait.is-loading` | skeleton | shimmer gradient over `--ow-control-fill`/`--ow-glass-rim-border`, `@keyframes owPortraitSkeleton`; inner img `opacity:0` |
 | `.ow-portrait.is-broken` | hard failure | static token fill, no shimmer (mirrors `.hs-broken`; note `face()` heals to monogram before this fires) |
-| `.ow-portrait--muted` | out / not-yet-met | `opacity:.5` (generalizes `oc-out` + `os-tile-unmet`); optional `filter:grayscale(.7)` via `.ow-portrait--muted-grey` |
+| `.ow-portrait--muted` | out (dim only) | `opacity: var(--ow-portrait-muted-opacity, .5)` (generalizes `oc-out`) |
+| `.ow-portrait--muted-grey` | not-yet-met (dim **and** desaturate) | carries **BOTH** `opacity: .34` **and** `filter: grayscale(.7)` — the full `os-tile-unmet` state in one class (do **not** drop the grayscale; map `.os-tile-unmet` to `--muted-grey`, or to `--muted --muted-grey`, so neither the .34 opacity nor the grayscale is lost) |
 | `.ow-portrait--reveal` | arrival fade | `@keyframes owPortraitFadeIn .35s` (generalizes `oc-justin`), reduced-motion → none |
 | `.ow-portrait--sm` | compact cap | `max-width: var(--ow-portrait-cap)` for narrow-tier portrait-less tiles (generalizes `oc-portrait-ph`) |
 
@@ -166,19 +168,18 @@ and a **flat/Normal** author (`22371-22781`), exactly like every other kit primi
 |---|---|
 | `.oc-hg` door button | `.ow-portrait-tile` **+** keep `.oc-hg` for cast-grid layout only (dual-class, like `.oc-pin`) |
 | `.oc-portrait` holder | fold into `.ow-portrait` (aspect/radius/border/overflow/position) |
-| `.oc-ph.oc-monogram` + manual `svg()` + `setPortrait()` two-layer reveal + `syncBadge()` | **replace with `OrwellMonogram.face(card, {role, alt})`** — deletes the hand-rolled reveal seam (`oc-img-pending`, `ocFadeIn`, `.oc-justin`, the retire timer) and the manual badge composite; `face()`'s onerror-heal + `--reveal` class cover it |
+| `.oc-ph.oc-monogram` + manual `svg()` + `setPortrait()` two-layer reveal + `syncBadge()` | **KEEP as-is (frame-only ruling, §6.1)** — G6 retains its hand-rolled two-layer reveal (`oc-img-pending`, `ocFadeIn`/`.oc-justin`, the retire timer) and manual badge composite; it does **not** swap to `OrwellMonogram.face()`. Only the outer frame moves to `.ow-portrait`. |
 | `.oc-portrait.oc-portrait-ph` narrow cap | `.ow-portrait--sm` (token cap) |
 | `.oc-hg.oc-evicted .oc-portrait img{grayscale}` | delete — `face()` owns eviction via `card.status` |
 | `.oc-out` dim | `.ow-portrait--muted` |
 | `.oc-name` / `.oc-status` | `.ow-portrait-caption` / `.ow-portrait-sub` (or keep bespoke — caption is layout, low priority) |
 
-> **Owner-visible behavior to preserve exactly:** the OWN-9 "never a bare grey holder" guarantee (a
-> slow/hung portrait shows the designed monogram, never an empty box). `face()` already delivers this
-> — it mounts the monogram inner and only swaps to the img; but G6's current seam *layers* img over a
-> live monogram and crossfades. Migrating to `face()` changes the reveal from *crossfade-over-monogram*
-> to *img-src-with-onerror-heal*. **Verify the G22 arrival fade still reads** (use `.ow-portrait--reveal`
-> on newly-arrived faces) — this is the one behavioral risk in the lane and belongs in the live-verify
-> note, not a silent swap.
+> **Owner-visible behavior preserved by the frame-only ruling:** the OWN-9 "never a bare grey holder"
+> guarantee (a slow/hung portrait shows the designed monogram, never an empty box) and the G22 arrival
+> fade are **untouched** — G6 keeps its existing two-layer reveal (img layered over a live monogram,
+> crossfaded). Because the reveal seam does **not** migrate to `face()`, there is **no** behavioral risk
+> and nothing to live-verify in this lane: it is a pure frame/state-class swap. (`.ow-portrait--reveal`
+> remains available as a generic primitive fade for *future* consumers, but G6 does not switch to it.)
 
 ### G4 — Headshot (`orwellHeadshot.js`)
 
@@ -191,7 +192,7 @@ and a **flat/Normal** author (`22371-22781`), exactly like every other kit primi
 | `.hs-cand:focus-visible { --brand-color }` | inherits `.ow-portrait-tile:focus-visible` (**fixes the focus-color drift** to `--ow-ios-blue`) |
 | `.hs-libitem`/`.hs-libpick`/`.hs-libdel` | `.hs-libitem` → `.ow-portrait` (frame); `.hs-libpick`/`.hs-libdel` stay bespoke (pick-overlay + corner-delete are not the tile) |
 | `.hs-preview` 92×92 | `.ow-portrait` with `--ow-portrait-radius:8px` (display variant) |
-| loading/broken wiring `:391-400` | unchanged (still toggles `is-loading`/`is-broken` on the img events) |
+| loading/broken wiring `:391-400` | **update the handlers to toggle the kit state classes** `.ow-portrait.is-loading` / `.is-broken` on the img load/error events. Today they toggle the legacy `.hs-loading`/`.hs-broken`; the wiring must emit the real `is-*` classes (or dual-emit both), or the shared kit states never activate. Test both the load→cleared and error→broken transitions. |
 
 ### G5 — House status (`orwellStatusPanel.js`)
 
@@ -200,7 +201,7 @@ and a **flat/Normal** author (`22371-22781`), exactly like every other kit primi
 | `.os-tile` frame | `.ow-portrait-tile` (keep `.os-tile` for strip layout) |
 | `.os-tile .ow-mono-face { radius:7px }` | drop — `--ow-portrait-radius:7px` on the tile, face inherits |
 | `.os-tile:focus-visible` box-shadow | inherits `.ow-portrait-tile:focus-visible` |
-| `.os-tile-unmet` | `.ow-portrait--muted-grey` |
+| `.os-tile-unmet` (`opacity:.34; grayscale(.7)`) | `.ow-portrait--muted-grey` — which carries **BOTH** the opacity dim (.34) **and** `grayscale(.7)`, preserving the met/unmet look exactly (drop neither) |
 | coarse `::after` 44px hit | inherits `.ow-portrait-tile` coarse rule |
 | `OrwellMonogram.face(...)` inner | unchanged |
 
@@ -218,7 +219,9 @@ KIT = CSS[CSS.index("── ELEMENT KIT ──"):CSS.index("── END ELEMENT K
    with `aspect-ratio`, `overflow: hidden`, and a `border-radius: var(--ow-portrait-radius` token
    (no hard-coded radius on the base).
 2. **`test_portrait_full_state_set`** — `.ow-portrait.is-selected`, `.is-loading`, `.is-broken`,
-   `.ow-portrait--muted`, `.ow-portrait-tile:hover`, `.ow-portrait-tile:focus-visible` all present.
+   `.ow-portrait--muted`, `.ow-portrait--muted-grey`, `.ow-portrait-tile:hover`,
+   `.ow-portrait-tile:focus-visible` all present; assert `.ow-portrait--muted-grey` carries **both** an
+   `opacity` dim **and** `filter: grayscale(…)` (the `os-tile-unmet` state loses neither).
 3. **`test_focus_ring_is_system_blue_not_brand`** — the tile focus uses `--ow-focus-ring`/`--ow-ios-blue`,
    and the KIT block contains **no** `--brand-color`/`--accent` on any `.ow-portrait` focus/selected
    rule (the G4 drift-fix pin).
@@ -234,11 +237,13 @@ KIT = CSS[CSS.index("── ELEMENT KIT ──"):CSS.index("── END ELEMENT K
 8. **`test_eviction_not_duplicated`** — assert `.ow-portrait` does **not** re-declare a
    `grayscale` eviction filter (owned by `.ow-mono-face.ow-mono-evicted`); prevents the G6 dup returning.
 9. **Per-consumer adoption pins:**
-   - `orwellCast.js` no longer contains the hand-rolled `ocFadeIn`/`oc-img-pending` reveal seam
-     **or** composes `OrwellMonogram.face` (assert the migration actually landed, not a class rename);
-     `.oc-hg` carries `ow-portrait-tile`.
+   - `orwellCast.js` **keeps** its hand-rolled `ocFadeIn`/`oc-img-pending` two-layer reveal seam
+     (frame-only ruling §6.1 — do **not** assert it was deleted or that it composes
+     `OrwellMonogram.face`); assert only that `.oc-hg` carries `ow-portrait-tile` (the frame swap landed).
    - `orwellHeadshot.js` `.hs-cand` markup carries `ow-portrait-tile`; the local `hsSkeleton`
-     keyframes are deleted (moved to the kit `owPortraitSkeleton`).
+     keyframes are deleted (moved to the kit `owPortraitSkeleton`); and the load/error handlers
+     (`:391-400`) toggle the kit `is-loading`/`is-broken` classes (not only the legacy `hs-*`), so the
+     shared states actually activate.
    - `orwellStatusPanel.js` `.os-tile` carries `ow-portrait-tile`; the local `.os-tile .ow-mono-face`
      radius override is gone.
 10. **`test_demo_and_docs_reference_the_primitive`** — `element_kit_demo.html` gains a
@@ -249,16 +254,18 @@ KIT = CSS[CSS.index("── ELEMENT KIT ──"):CSS.index("── END ELEMENT K
 
 Also **re-run** `test_g22_cast_progressive_render.py`, `test_own3456_headshot_dialog.py`,
 `test_m1_9_portrait_honesty.py`, and `browser_smoke` (the "no placeholder glyph on provider-on cards"
-gate) — the G6 reveal swap is the behavioral risk.
+gate) as a regression check on the frame swap. With the **frame-only ruling (§6.1)** G6's reveal
+behavior does not change, so these should stay green without a live-verify gate.
 
 ## 6. Owner decisions needed
 
-1. **G6 reveal swap (the one real behavior change).** Adopting `OrwellMonogram.face()` for the cast
-   grid replaces the bespoke *crossfade-monogram-under-decoding-img* seam with `face()`'s
-   *onerror-heal* model. Both satisfy OWN-9 ("never a bare grey holder"), but the arrival animation
-   changes subtly. **Decision:** accept the `face()` model + `.ow-portrait--reveal` fade (recommended —
-   one code path, deletes ~80 lines), or keep G6's bespoke reveal and migrate *frame-only* (G6 gains
-   `.ow-portrait` states but keeps its own inner reveal). Recommend the former with a live-verify gate.
+1. **G6 reveal swap — ✅ RESOLVED by the ruling: migrate FRAME-ONLY.** G6 does **not** adopt
+   `OrwellMonogram.face()`'s reveal-seam swap. It keeps its existing bespoke
+   *crossfade-monogram-under-decoding-img* two-layer reveal — which already satisfies OWN-9 ("never a
+   bare grey holder") and the G22 arrival fade — and gains **only** the `.ow-portrait` frame + state
+   classes. This moots the `face()` OWN-9 / slow-portrait / G22-fade behavioral risk entirely: there is
+   no reveal-model change to live-verify and no ~80-line deletion in this lane. (The deeper `face()`
+   consolidation can be revisited as its own later lane if ever wanted.)
 2. **Caption scope.** Fold `.oc-name`/`.oc-status` into `.ow-portrait-caption`/`-sub`, or leave
    captions consumer-owned (they are layout, not the tile)? Recommend **leave captions bespoke** —
    keeps the lane tight (frame + states only) and avoids touching cast-grid typography.

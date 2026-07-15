@@ -29,8 +29,9 @@ have **none**; (4) **a11y** — **no** `role="menu"`/`menuitem`, **no** `aria-ex
 None reflow to a mobile sheet (#893) except the session-row menu's one bespoke "Cancel" item.
 
 The kit collapses all of that into **one** anchoring engine, **one** dismiss seat, **one** roving
-keyboard contract, **one** a11y contract, and **one** mobile bottom-sheet path — exactly as
-`OrwellWindow` did for windows.
+keyboard contract, and **one** a11y contract — exactly as `OrwellWindow` did for windows. (A shared
+mobile bottom-sheet path is designed but **deferred** — per the owner ruling menus stay anchored on
+mobile in Workflow-2; see §2.3.)
 
 ---
 
@@ -90,8 +91,9 @@ file** `frontend/static/js/orwellMenu.js` exposing **two seams** on `window`:
 
 - **`OrwellPopover`** — the base **anchored-surface** primitive. Owns positioning (flip/shift),
   dismissal (outside-click + Escape via `escMenuStack`), optional focus-trap + focus-return, the
-  mobile bottom-sheet handoff, the z-layer, and teardown. Content is arbitrary (Node|string|builder).
-  **Serves the rich pickers** (emoji, color, model-picker, provider) and info popovers.
+  z-layer, and teardown (the mobile bottom-sheet handoff is **deferred**, §2.3 — anchored on mobile in
+  W2). Content is arbitrary (Node|string|builder). **Serves the rich pickers** (emoji, color,
+  model-picker, provider) and info popovers.
 - **`OrwellMenu`** — built **on** `OrwellPopover`; adds the item model, `role="menu"/"menuitem"`,
   roving-tabindex keyboard nav (↑/↓/Home/End/typeahead/Enter/Esc/→←-for-submenus), separators,
   danger/disabled/checkbox items, submenus, and `aria-expanded`/`aria-haspopup` wiring on the trigger.
@@ -105,8 +107,10 @@ for free, the moment the kit registers through `escMenuStack`.
 ### 2.1 `OrwellPopover` — the base surface
 
 ```js
-// window.OrwellPopoverKit.open(opts) → an OrwellPopover instance (opened).
-// window.OrwellPopoverKit.closeAll(), .openCount()  — bulk/introspection for gates.
+// window.OrwellPopoverKit — API surface: .open(opts) → an OrwellPopover instance (opened);
+//   .closeAll(); .openCount()  — bulk/introspection for gates. (NO .attach — that declarative
+//   trigger-wiring helper is OrwellMenu-only, since it needs an item model. See §2.2 for the
+//   exact per-kit method matrix the test plan pins.)
 OrwellPopoverKit.open({
   id,                        // stable id (one live instance per id; re-open closes the prior)
   anchor,                    // REQUIRED: the trigger Element the surface positions against
@@ -118,11 +122,21 @@ OrwellPopoverKit.open({
   minWidth: 180, maxWidth,  // clamp; maxHeight defaults to viewport-fit w/ internal scroll
   focusTrap: false,         // trap Tab inside (pickers w/ inputs → true; plain menus manage focus)
   returnFocus: true,        // restore focus to `anchor` (or document.activeElement) on close
-  sheetOnNarrow: 'auto',    // 'auto'|true|false — ≤768px present as a bottom action-sheet (#893)
-  role: 'dialog',           // ARIA role for the surface (OrwellMenu overrides to 'menu')
-  ariaLabel,                // names the surface
+  sheetOnNarrow: false,     // DEFERRED / out of Workflow-2 scope (owner ruling below): menus stay
+                            //   ANCHORED on mobile. The option is reserved for a future flagged sheet
+                            //   mode — in W2 it is a no-op and the surface anchors on every viewport.
+  role: 'dialog',           // ARIA role (OrwellMenu overrides to 'menu'; 'listbox' for the model picker)
+  ariaLabel,                // REQUIRED when role === 'dialog' (a dialog surface MUST have an accessible
+                            //   name, or callers create an unnamed dialog); optional only for roles that
+                            //   name themselves (a 'menu'/'listbox' named via aria-labelledby/its items)
   className,                // extra class(es) on .ow-popover (e.g. 'ow-popover-emoji')
-  dismissOnScroll: true,    // close when an ancestor scrolls out from under the anchor
+  dismissOnScroll: true,    // policy: REPOSITION on scroll while the anchor stays in view; CLOSE only
+                            //   when the anchor scrolls OUT of the viewport (not on every scroll event).
+                            //   See positioning-engine step 5 + the browser assertion in §5.4.
+  onKeydown,                // optional (ev, popover)=>bool — the real keyboard seam for custom
+                            //   listbox/roving content (the model picker wires _handlePickerKeydown
+                            //   here). OrwellPopover does NOT provide roving nav itself — that lives in
+                            //   OrwellMenu; a listbox consumer either wires onKeydown or uses OrwellMenu.
   onOpen, onClose,          // lifecycle hooks
 });
 // instance: .close(reason), .reposition(), .isOpen(), .el, .setContent(node)
@@ -142,8 +156,10 @@ OrwellPopoverKit.open({
 4. **Fit**: cap `max-height` to the available space and let the body scroll internally (never let a
    menu run off the bottom — the emoji picker's `:171` height-cap generalized).
 5. Uses `position: fixed` + viewport coords (the `session-dropdown-menu` model), so the surface is
-   robust to scrolled/overflow-clipped ancestors. Re-run on `resize`/`scroll` (rAF-debounced) via
-   `.reposition()`; `dismissOnScroll` closes instead when the anchor scrolls away.
+   robust to scrolled/overflow-clipped ancestors. On `resize`/`scroll` (rAF-debounced) it
+   **repositions** via `.reposition()` **while the anchor stays in view**; with `dismissOnScroll:true`
+   it **closes** only when the anchor scrolls **out of the viewport** (its rect leaves the visible
+   area) — not on every scroll tick. This is the exact behaviour §5.4's scroll assertion pins.
 
 **Dismissal (one seat):** on open, register through `escMenuStack.bindMenuDismiss(el, onClose,
 isOutside)` — this wires **both** the deferred outside-click listener **and** the Escape stack entry
@@ -159,14 +175,24 @@ sheet kit's trap, `orwellSheet.js:462`) for pickers that contain inputs.
 ### 2.2 `OrwellMenu` — the action-menu layer
 
 ```js
-// window.OrwellMenuKit.open(opts) → opens an anchored role=menu. Returns the instance.
-// window.OrwellMenuKit.attach(triggerEl, buildItems)  — declarative helper: wires the trigger's
-//   click to open/close a menu, and keeps aria-expanded/aria-haspopup in sync. buildItems may be a
-//   static array or a () => items[] fn re-evaluated on each open (session/model menus rebuild).
+// window.OrwellMenuKit — API surface (the full matrix the test plan pins):
+//   .open(opts) → opens an anchored role=menu, returns the instance;
+//   .attach(triggerEl, buildItems) → declarative helper: wires the trigger's click to open/close the
+//     menu and keeps aria-expanded/aria-haspopup in sync (buildItems = a static array OR a
+//     () => items[] fn re-evaluated on each open — session/model menus rebuild);
+//   .closeAll(); .openCount() → shared bulk/introspection (delegate to the OrwellPopover registry).
+// So the matrix is: OrwellPopoverKit = {open, closeAll, openCount};
+//                   OrwellMenuKit    = {open, attach, closeAll, openCount}   (.attach is Menu-only).
 OrwellMenuKit.open({
   anchor,                  // REQUIRED trigger (also gets aria-haspopup='menu' + aria-expanded)
   items,                   // REQUIRED: the item model (below)
-  placement, align, offset, matchAnchorWidth, sheetOnNarrow,   // passed through to OrwellPopover
+  placement, align, offset, matchAnchorWidth,   // passed through to OrwellPopover (sheetOnNarrow is
+                           //   DEFERRED — anchored on mobile per the owner ruling; see §2.3)
+  role: 'menu',            // 'menu' (default) | 'listbox' — a listbox consumer (the MODEL PICKER) sets
+                           //   'listbox'; then items render role=option, selection is aria-selected
+                           //   (not activation), and the kit's roving nav drives ↑/↓/Home/End/typeahead.
+                           //   This is the a11y-correct home for the picker's key handling — NOT an
+                           //   undefined OrwellPopover onKey hook.
   ariaLabel,
   onSelect(item),          // optional global select hook (in addition to per-item onSelect)
 });
@@ -176,9 +202,15 @@ items = [
   { id, label, icon,           // icon: SVG string | Node — rendered in the leading .ow-menu-icon
     onSelect(item, ev),        // fired on click/Enter/Space; menu auto-closes unless returns false
     danger: false,            // destructive styling (→ .ow-menu-item-danger, was .dropdown-item-danger)
-    disabled: false,
+    disabled: false,          // a disabled item is NON-INTERACTIVE on EVERY path: it cannot take roving
+                              //   focus (skipped by ↑/↓/Home/End + typeahead), and pointer, Enter/Space,
+                              //   submenu-open, and typeahead can NEVER invoke its onSelect — it only
+                              //   carries aria-disabled='true' + dimmed styling.
     checked,                  // tri-state: true/false renders a checkmark (role=menuitemcheckbox)
     shortcut,                 // right-aligned hint text (was .dropdown-shortcut) — hidden on coarse
+    description,              // OPTIONAL second line → rendered as .ow-menu-item-sub (the session-
+                              //   actions two-line rows). Omit for single-line items; consumers needing
+                              //   richer layout use `render:` instead.
     submenu: () => items[],   // nested menu (the folder submenu) → role=menu on →/click, ←/Esc back
     keepOpen: false,          // don't auto-close after select (Rearrange toggle, Favorite dot)
     render: (el) => {…},      // ESCAPE HATCH: custom row content (sort's inline Tidy row, logos)
@@ -201,20 +233,31 @@ container listens for:
 - **Esc** — close (already routed through `escMenuStack`; returns focus to the trigger).
 - **Tab** — closes the menu and lets focus proceed (menus are not focus-trapped by default; ARIA
   APG menu-button pattern). Pickers that opt into `focusTrap` are the exception.
+- **Disabled items** — never take roving focus and can't be activated by any path: ↓/↑/Home/End and
+  typeahead **skip** them, and pointer / Enter/Space / submenu-open are inert on them (they carry only
+  `aria-disabled='true'` + dimmed styling).
 
 **ARIA wiring (uniform, replacing the current near-total absence):**
 
-- surface: `role="menu"`, `aria-label`, `aria-orientation="vertical"`.
+- surface: `role="menu"`, `aria-label`, `aria-orientation="vertical"`. **Listbox variant
+  (`role:'listbox'`, the model picker):** surface `role="listbox"`, rows `role="option"` with
+  `aria-selected` — selection, not activation, and the kit's roving nav drives it.
 - items: `role="menuitem"` (or `menuitemcheckbox` when `checked` is defined); `aria-disabled`,
   `aria-checked`; a submenu parent gets `aria-haspopup="menu"` + `aria-expanded`.
 - **trigger**: `OrwellMenuKit` sets `aria-haspopup="menu"` and toggles `aria-expanded="true|false"`
   on the anchor automatically (today only the overflow `+` sets `aria-haspopup`, and **nothing** sets
   `aria-expanded`).
 
-### 2.3 Mobile bottom-sheet presentation (#893 reuse — no parallel family)
+### 2.3 Mobile presentation — ANCHORED (the bottom-sheet handoff is DEFERRED)
 
-On ≤768px (`isNarrow()` from `platform.js`), a menu/popover with `sheetOnNarrow !== false`
-**delegates to `OrwellSheetKit.create()`** rather than anchoring — an iOS-style **action sheet**:
+**Owner ruling (below): menus stay ANCHORED on mobile — there is NO bottom-sheet reflow in
+Workflow-2.** On ≤768px the surface presents as the **same anchored `.ow-popover`** as desktop
+(viewport-clamped, internal scroll); `sheetOnNarrow` is a no-op in W2, and the Ctrl+K palette is
+excluded from this kit entirely (it stays a centered modal).
+
+The rest of this section documents the **deferred** sheet handoff for a *future flagged mode only*
+(it is NOT built in this lane). If it is ever enabled, a menu/popover would
+**delegate to `OrwellSheetKit.create()`** rather than anchoring — an iOS-style **action sheet**:
 
 - `OrwellMenu` → a **modal** `OrwellSheet` (`anchored:false`) whose body renders the same items as
   full-width, 44px-tall rows (danger items tinted, a section header as the sheet title). Scrim +
@@ -228,8 +271,8 @@ On ≤768px (`isNarrow()` from `platform.js`), a menu/popover with `sheetOnNarro
   **F-CHROME-1 II** (never a second window/sheet family) exactly as `orwellWindow.js`'s sheet mode
   does.
 
-`sheetOnNarrow:'auto'` sheets menus and pickers; `false` keeps a surface anchored on narrow (e.g. a
-tiny 2-item context popover where a full sheet is overkill — owner call, §6).
+(When/if that flagged mode ships, `sheetOnNarrow:true` would sheet a surface and `false` keeps it
+anchored. **In Workflow-2 every surface stays anchored regardless** — the ruling holds.)
 
 ---
 
@@ -242,7 +285,7 @@ template** (the notice-kit footgun the sheet kit documents).
 
 ### 3.1 Selectors
 
-```
+```css
 .ow-popover            /* the base anchored surface (position:fixed, the frame + shadow + glass)   */
 .ow-menu               /* .ow-popover specialized for a role=menu list (padding, item flow)        */
 .ow-menu-item          /* a role=menuitem row  (was .dropdown-item / .overflow-menu-item / …)       */
@@ -251,6 +294,8 @@ template** (the notice-kit footgun the sheet kit documents).
 .ow-menu-item.ow-active               /* roving-focus / hover highlight                             */
 .ow-menu-icon          /* leading icon slot    (was .dropdown-icon / .menu-icon / .overflow-icon)   */
 .ow-menu-label         /* trailing text label                                                       */
+.ow-menu-item-sub      /* optional 2nd-line description under an item (item.description; was the       */
+                       /* session-actions .menu-text <p>) — muted, smaller than the label            */
 .ow-menu-shortcut      /* right-aligned key hint (was .dropdown-shortcut)                            */
 .ow-menu-check         /* leading checkmark for menuitemcheckbox                                     */
 .ow-menu-sep           /* 1px divider          (was the inline-styled sep div / .dropdown-divider)   */
@@ -263,7 +308,7 @@ template** (the notice-kit footgun the sheet kit documents).
 The surface frame reuses the **same `--win-*` tokens** the window kit and legacy modals consume, so
 menus paint the same glass and the 0052 house themes hit them for free:
 
-```
+```css
 background: var(--win-bg, var(--panel));            /* :root --win-bg = var(--panel)  (style.css:190) */
 color:      var(--fg);
 border:     1px solid var(--win-border, var(--border));
@@ -284,7 +329,7 @@ already uses); danger rows use `var(--red)`.
 Mirror the #738 item-5 fold: under `body.theme-frosted` the surface rides the **shared light-glass
 material** so it is not a dark opaque box in the light theme:
 
-```
+```css
 @media (prefers-reduced-transparency: no-preference) {
   body.theme-frosted .ow-popover {
     background-color: var(--ow-glass-light-color, rgba(255,255,255,.6));   /* style.css:20385 */
@@ -308,22 +353,23 @@ The **flat / Normal** tier is the literal fallback (`var(--panel)` fill, no blur
 menu opened *inside* the Settings modal (z 1001) must sit above it, and the Escape arbiter already
 dismisses menus before modals. Define a single token:
 
-```
+```css
 :root { --ow-z-menu: 1100; }        /* window band 500–980 < modal scrim/modal 1000/1001 < menus 1100 */
 .ow-popover { z-index: var(--ow-z-menu, 1100); }
 ```
 
 This replaces the current spread (adm-provider **100**, msg-overflow **100**, ctx **250**,
-model-picker/search/export **300**, dropdown/overflow **1000**, emoji **10000**). The **mobile-sheet
-path** uses the sheet kit's own band (scrim 1200 / sheet 1201, `orwellSheet.js`) which is higher
-still — correct, since a sheet is the top surface on a phone.
+model-picker/search/export **300**, dropdown/overflow **1000**, emoji **10000**). (The *deferred*
+mobile-sheet path, §2.3, would use the sheet kit's own band — scrim 1200 / sheet 1201,
+`orwellSheet.js` — but W2 anchors on mobile, so `--ow-z-menu` is the operative band.)
 
 ### 3.5 Tap targets & motion
 
 - **Coarse-pointer floor:** `@media (pointer: coarse) { .ow-menu-item { min-height: 44px; } }`
-  (WCAG 2.5.5 / HIG 44pt). The desktop density (~28–32px rows) is unchanged on fine pointers. This
-  is *automatic* on the mobile-sheet path (sheet rows are already 44px) but the anchored path needs
-  the floor too. Shortcut hints hide on coarse (`.dropdown-shortcut` already does, `style.css:6828`).
+  (WCAG 2.5.5 / HIG 44pt). The desktop density (~28–32px rows) is unchanged on fine pointers. Since
+  menus stay **anchored** on mobile (no sheet, per the ruling), this floor is the **sole** guarantee
+  of a 44px touch target — the anchored path must carry it. Shortcut hints hide on coarse
+  (`.dropdown-shortcut` already does, `style.css:6828`).
 - **Motion:** a single open keyframe (the `dropdown-in` scale+fade, `style.css:6738`) on
   `.ow-popover`, stripped under `@media (prefers-reduced-motion: reduce)` (kit rule). The staggered
   per-item entrance the overflow menu has today is **dropped** (decorative; not worth per-item CSS —
@@ -333,8 +379,9 @@ still — correct, since a sheet is the top surface on a phone.
 
 ## 4. Migration mapping (per consumer)
 
-**All migration-only** (no behavior change beyond the intended a11y/keyboard/mobile-sheet uplift).
-Each lane **deletes** the retired bespoke CSS + JS in the same PR (the F-2 wave discipline). Because
+**All migration-only** (no behavior change beyond the intended a11y/keyboard uplift; anchored on
+mobile — no bottom-sheet reflow, per the owner ruling). Each lane **deletes** the retired bespoke CSS
++ JS in the same PR (the F-2 wave discipline). Because
 `style.css` is a shared write, W10 serializes after W1–W9 like the rest of the chain (audit §WAVE).
 
 | Consumer | What changes | Retire |
@@ -347,10 +394,10 @@ Each lane **deletes** the retired bespoke CSS + JS in the same PR (the F-2 wave 
 | **8 Archive-row dropdown** | Same as #6 via `OrwellMenuKit.open`. | `.archive-dd` residual |
 | **10 Message overflow menu** | Already uses `bindMenuDismiss`; swap the manual build + position (`chatRenderer.js:1495–1525`) for `OrwellMenuKit.open({anchor: moreBtn, items: overflow.map(a => ({label:a.title, icon:a.icon, onSelect:a.handler}))})`. Keep `_trackAction`. | `.msg-overflow-menu/-item` CSS |
 | **export popover** | `OrwellMenuKit.attach(headerMoreBtn, [Rename, Copy, PDF])`. | `.export-dropdown-menu/-item` CSS |
-| **1 Model picker** | **Popover path** (rich rows, not plain menuitems): keep `_populate()` building `.model-switch-item` rows (favorite dots, sections, logos, stale badges) but mount them via `OrwellPopoverKit.open({anchor:#model-picker-btn, placement:'top', focusTrap:false, content: listEl, sheetOnNarrow:'auto'})`. Delete the ad-hoc doc-click/Escape (`:743`), the `.closing` hand-anim, and the bespoke position CSS. **Reuse** `_handlePickerKeydown` as the popover's `onKey`, OR (preferred) let the kit's roving nav drive `.model-switch-item` (give rows `role=option`, surface `role=listbox` — a picker is a listbox, not a menu). | `.model-picker-menu` CSS + ad-hoc listeners |
+| **1 Model picker** | **Listbox path (preferred): route through `OrwellMenuKit.open({anchor:#model-picker-btn, role:'listbox', placement:'top', items})`** — rows render `role=option` and the kit's roving nav (↑/↓/Home/End/typeahead, selection via `aria-selected`) drives them; a picker is a listbox, not a menu. If the rich bespoke rows (favorite dots, sections, logos, stale badges) must stay hand-built, use the **Popover path** instead — `OrwellPopoverKit.open({anchor:#model-picker-btn, placement:'top', focusTrap:false, ariaLabel:'Model picker', content: listEl})` and wire `_handlePickerKeydown` through the documented **`onKeydown`** hook (NOT an undefined `onKey`). Either way delete the ad-hoc doc-click/Escape (`:743`), the `.closing` hand-anim, and the bespoke position CSS; anchored on mobile (no sheet, per the ruling). | `.model-picker-menu` CSS + ad-hoc listeners |
 | **9 Provider menu** | **Popover or Menu w/ icons.** The logo rows map cleanly to `{icon: logoSvg, label, checked}` menu items (`matchAnchorWidth:true` to keep the full-width look). Wire via `OrwellMenuKit.attach(#search-provider-btn, buildProviderItems)`; keep the hidden `<select>` mirror write in `onSelect`. The caret rotation moves to `aria-expanded`-driven CSS. | `.adm-provider-menu`/`-item` CSS (keep `.adm-provider-btn` per §7 button lane) |
-| **11 Emoji picker** | **Popover path**: `OrwellPopoverKit.open({anchor, focusTrap:true, content:_buildPicker(), sheetOnNarrow:true})`; delete `togglePicker`'s manual position + ad-hoc listeners + ghost-click guard (the kit's deferred-attach + 400ms open-guard cover it). Keep the search input + grid. | ad-hoc position/listeners; `.emoji-picker` frame CSS folds to `.ow-popover` |
-| **12 Color picker** | **Popover path** (or keep, §6): `OrwellPopoverKit.open({anchor, focusTrap:true, content:buildPopover()})`. The HSV drags are internal. | ad-hoc listeners; `.cp-popover` frame folds to `.ow-popover` |
+| **11 Emoji picker** | **Popover path**: `OrwellPopoverKit.open({anchor, focusTrap:true, ariaLabel:'Emoji picker', content:_buildPicker()})` (anchored on mobile per the ruling — no sheet); delete `togglePicker`'s manual position + ad-hoc listeners + ghost-click guard (the kit's deferred-attach + 400ms open-guard cover it). Keep the search input + grid. | ad-hoc position/listeners; `.emoji-picker` frame CSS folds to `.ow-popover` |
+| **12 Color picker** | **Popover path** (or keep, §6): `OrwellPopoverKit.open({anchor, focusTrap:true, ariaLabel:'Color picker', content:buildPopover()})` (dialog role ⇒ `ariaLabel` required). The HSV drags are internal. | ad-hoc listeners; `.cp-popover` frame folds to `.ow-popover` |
 | **13 ctx-popup / detail** | **Popover (info), low-pri.** Already `bindMenuDismiss`; optionally re-home onto `.ow-popover` for one glass surface. Non-interactive → `role` stays informational (not `menu`). | optional |
 | **14 Search overlay (Ctrl+K)** | **Ruling (§6).** It is a *centered modal palette*, not an anchored menu — recommend leaving it OR promoting to a **modal `OrwellWindow`** (`modal:true`, `sheet:'auto'`), NOT this kit. | n/a (ruling) |
 
@@ -370,16 +417,29 @@ Mirrors `test_f_window_kit.py` (source-pin convention checks) + `test_0753_sheet
 
 ### 5.1 Kit-contract source pins (pytest, no DOM)
 
-- **Kit exists + seams:** `orwellMenu.js` present; exports `OrwellMenuKit` **and**
-  `OrwellPopoverKit` on `window` with `.open`/`.attach`/`.closeAll`/`.openCount`; `index.html` loads
-  it (module script, before consumers).
+- **Kit exists + seams (the exact per-kit method matrix):** `orwellMenu.js` present; exports
+  `OrwellPopoverKit` on `window` with **`.open`/`.closeAll`/`.openCount`** (NO `.attach`), and
+  `OrwellMenuKit` with **`.open`/`.attach`/`.closeAll`/`.openCount`** (`.attach` is Menu-only);
+  `index.html` loads it (module script, before consumers). Assert the matrix explicitly per kit — do
+  not assume `.attach` on the Popover.
 - **Owns the contracts** (grep the kit source, à la `test_sourcepin_kit_owns_the_contracts`): the CSS
-  selectors `ow-popover`, `ow-menu`, `ow-menu-item`, `ow-menu-sep`; the anchoring engine
-  (`getBoundingClientRect`, a flip branch, a shift/clamp branch); dismissal through **`escMenuStack`**
-  (`bindMenuDismiss` or `registerMenuDismiss` imported — *not* a raw `document.addEventListener`
-  `'click'` for dismissal); `role="menu"` + `role="menuitem"` + `aria-expanded` + `aria-haspopup`;
-  roving nav keys (`ArrowDown`, `ArrowUp`, `Home`, `End`, typeahead buffer); `prefers-reduced-motion`;
-  `AbortController` teardown; the narrow-sheet handoff (`isNarrow` + `OrwellSheetKit`).
+  selectors `ow-popover`, `ow-menu`, `ow-menu-item`, `ow-menu-item-sub`, `ow-menu-sep`; the anchoring
+  engine (`getBoundingClientRect`, a flip branch, a shift/clamp branch); dismissal through
+  **`escMenuStack`** (`bindMenuDismiss` or `registerMenuDismiss` imported — *not* a raw
+  `document.addEventListener` `'click'` for dismissal); `role="menu"` + `role="menuitem"` +
+  `aria-expanded` + `aria-haspopup`, **plus the `role:'listbox'` variant** (rows `role=option`,
+  `aria-selected`) for the model picker; roving nav keys (`ArrowDown`, `ArrowUp`, `Home`, `End`,
+  typeahead buffer); `prefers-reduced-motion`; `AbortController` teardown.
+- **ariaLabel-for-dialog contract (C6):** when `role === 'dialog'` the kit **requires** `ariaLabel`
+  (grep-assert the open path errors/warns on a dialog surface with no accessible name); a `menu`/
+  `listbox` surface may name itself via items/`aria-labelledby`.
+- **Disabled items are inert (C9):** the kit source shows a disabled item is skipped by roving focus
+  and cannot fire `onSelect` via pointer, Enter/Space, submenu-open, or typeahead — only
+  `aria-disabled='true'` + dimmed styling.
+- **Anchored on mobile (the owner ruling):** assert the kit does **NOT** wire a narrow-sheet handoff —
+  `OrwellSheetKit` is **not** referenced for a `sheetOnNarrow` reflow (the surface anchors on every
+  viewport in W2). (This replaces the earlier "narrow-sheet handoff" pin, which contradicted the
+  ruling.)
 - **CSS family + tokens** (`style.css`): `.ow-menu`/`.ow-menu-item` blocks exist; consume `--win-bg`
   / `--win-shadow` / `--ow-ui-font`; the coarse-pointer 44px floor on `.ow-menu-item`; the
   `--ow-z-menu` token ≥ 1002 (above the modal tier); focus ring is `--ow-ios-blue` (assert no
@@ -421,8 +481,16 @@ Behavior the source-pins can't see — one representative menu (the composer ove
    `escMenuStack` seat) and returns focus.
 5. **Flip:** open a menu whose anchor is near the bottom edge → surface renders **above** the anchor,
    fully on-screen (no clipping).
-6. **Mobile (≤768px viewport):** open a menu → an `OrwellSheet` (`.ow-sheet[role=dialog]`) mounts
-   with the items as 44px rows; swipe/× dismisses.
+6. **Mobile (≤768px viewport):** open a menu → it stays an **anchored `.ow-menu`** (NOT an
+   `OrwellSheet`), clamped fully on-screen with 44px coarse rows; outside-tap / Escape dismiss. (Per
+   the owner ruling — no bottom-sheet reflow.)
+7. **Scroll policy (`dismissOnScroll`):** with the surface open, scrolling an ancestor **while the
+   anchor stays in view repositions** it (tracks the anchor, stays open); scrolling until the anchor
+   **leaves the viewport closes** it — it is not closed on the first scroll tick.
+8. **Disabled item (C9):** a `disabled` item is skipped by ↓/↑ roving + typeahead, and
+   clicking/Entering it fires no `onSelect` and does not close the menu.
+9. **Dialog-role popover naming (C6):** a `role="dialog"` popover (emoji/color) exposes a non-empty
+   accessible name (`ariaLabel`).
 
 ### 5.5 Whole-suite + golden-path
 
@@ -434,25 +502,22 @@ CSS/JS/class swaps, no prompt / tool-schema / casting-flow change (§WAVE note i
 
 ## 6. Owner decisions needed
 
-1. **Mobile bottom-sheet for ALL menus (behaviour change).** Today these anchored dropdowns stay
-   anchored on phones (only the session-row menu has a bespoke "Cancel" item). The kit's #893 default
-   turns every menu/picker into a **bottom action-sheet on ≤768px** — a visible, uniform UX shift
-   (bigger tap targets, scrim, swipe-to-dismiss). **Recommend: yes, uniformly** (it's the #893
-   philosophy the window/sheet kits already commit to), *except* the Ctrl+K palette (#14) and tiny
-   info popovers (#13). Confirm, or name exceptions (`sheetOnNarrow:false`). **← highest-impact call.**
+1. **Mobile bottom-sheet for ALL menus — ✅ RESOLVED by the ruling: NO.** Menus stay **anchored** on
+   mobile in Workflow-2; there is **no** bottom-sheet reflow. The `sheetOnNarrow` / `OrwellSheet`
+   handoff is deferred (a later flagged mode, §2.3), so the surface presents as the same anchored
+   `.ow-popover` on every viewport.
 
-2. **Ctrl+K search overlay (#14): this kit, a modal window, or leave it?** It is a *centered modal
-   command palette* with a full-viewport scrim and roving results — structurally a **modal dialog**,
-   not an anchored menu. The §8 ledger folds it into W10 but flags it ruling-dependent.
-   **Recommend: exclude from the menu kit**; either leave as-is or promote to a `modal:true`
-   `OrwellWindow` (its own small lane). Ruling needed so W10 scope is exact.
+2. **Ctrl+K search overlay (#14) — ✅ RESOLVED by the ruling: EXCLUDED from this kit.** It stays a
+   *centered modal palette* (full-viewport scrim, roving results), not an anchored menu — leave it
+   as-is or promote to a `modal:true` `OrwellWindow` in its own lane. W10 scope excludes it.
 
 3. **Model / emoji / color / provider = Popover (rich) vs Menu (item-model).** The model picker
    (favorite dots, sections, logos, stale badges) and emoji/color pickers are **not plain action
    lists** — recommend the **`OrwellPopover` path** (keep bespoke inner content, gain only
-   chrome/positioning/dismiss/mobile-sheet/a11y). The model picker is semantically a **listbox**
-   (`role=listbox`/`option`), not a menu — confirm we render it as a listbox (correct a11y) rather
-   than forcing `role=menu`. The provider menu *does* fit the item model (icon + label + checked) —
+   chrome/positioning/dismiss/a11y — anchored on mobile, no sheet). The model picker is semantically a
+   **listbox** — render it via `OrwellMenuKit`'s `role:'listbox'` variant (rows `role=option`, the
+   kit's roving nav driving them), **not** `role=menu` and **not** an undefined `OrwellPopover.onKey`
+   hook (§2.2). The provider menu *does* fit the item model (icon + label + checked) —
    confirm Menu-with-icons is acceptable there.
 
 4. **Two minor drops:** (a) the overflow menu's decorative **staggered per-item entrance** (20 CSS

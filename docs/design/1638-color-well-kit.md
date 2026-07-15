@@ -84,7 +84,7 @@ keep that dual selector.
 
 ### 2a. Class API
 
-```
+```text
 .ow-color-well                     the row frame (label + swatch + trailing action), flex, gap
   > label / .ow-color-well__label  the field label (neutral --fg ink, no accent)
   > input[type="color"]            the swatch, pre-JS-swap  ┐ styled identically
@@ -130,15 +130,23 @@ and `── END ELEMENT KIT ──` markers so `test_0773_element_kit.py`'s regi
   outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
   outline-offset: 2px;
 }
-/* trailing action slot (the reset ↺, or the hex readout) */
+/* trailing action slot (the reset ↺, or the hex readout).
+   The rest state hides it from SIGHT (opacity:0) and POINTER (pointer-events:none), but a native
+   <button> stays KEYBOARD-focusable/activatable — so the consumer MUST also toggle `disabled`
+   (or tabindex=-1 + aria-hidden) in lockstep with `.changed` (see §2d), or a keyboard user could
+   Tab to and fire an invisible reset. */
 .ow-color-well__reset {
   width: 24px; height: 24px; flex-shrink: 0; padding: 0; line-height: 1;
   border: none; background: none; cursor: pointer; font-size: 1.15rem;
   color: var(--ow-control-ink, #16191f); opacity: 0;
   pointer-events: none; transition: opacity .15s, color .15s;
 }
+.ow-color-well__reset:disabled { cursor: default; }             /* unchanged = inert (JS sets [disabled]) */
 .ow-color-well__reset.changed { opacity: 0.4; pointer-events: auto; }
 .ow-color-well__reset.changed:hover { opacity: 1; }
+.ow-color-well__reset.changed:focus-visible {                    /* a visible ring once it is actionable */
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff); outline-offset: 2px;
+}
 /* Full-Glass: the swatch is a genuine glass chip → take the specular rim like other kit controls */
 body.glass-full .ow-color-well input[type="color"],
 body.glass-full .ow-color-well input.cp-swatch-input {
@@ -161,11 +169,21 @@ body.glass-full .ow-color-well input.cp-swatch-input {
 
 ### 2d. Tap target / a11y
 
-- **Coarse-pointer floor (WCAG 2.5.5):** add a coarse-pointer `@media` rule (owned in `style.css`,
-  mirroring the `.oc-pin` 44px precedent at `style.css` RESP block) that lifts the swatch's *hit area*
-  to `--ow-tap-min` (44px) without growing the 24px visual chip — expand the tap box with
-  `padding`+negative `margin` or a `::before` overlay, keeping the compact grid layout. The trailing
-  `.ow-color-well__reset` gets the same 44px coarse floor.
+- **Coarse-pointer floor (WCAG 2.5.5) — wrapper-owned, single box model:** on
+  `@media (pointer: coarse)` the **`.ow-color-well` wrapper** owns the 44px hit area as a single box
+  model (`min-height: var(--ow-tap-min, 44px)` on the row, with the swatch's hit box grown via
+  `padding` on that box), while the **inner swatch stays a 24px visual chip**. Do **NOT** use a
+  `::before`/`::after` overlay on the swatch: standard pseudo-elements are suppressed on the replaced
+  `input[type="color"]` element (spec-suppressed on replaced elements, and unreliable across engines),
+  so the enlarged hit target must be a real box on the wrapper, not a pseudo-element and not a
+  negative-margin hack. The trailing `.ow-color-well__reset` control gets the same 44px coarse floor
+  (`min-width`/`min-height: var(--ow-tap-min, 44px)`).
+- **Reset keyboard state (a11y, fixes a hidden-but-focusable control):** `opacity:0` +
+  `pointer-events:none` does not remove a native `<button>` from the tab order, so an *unchanged*
+  reset would still be Tab-focusable and Enter/Space-activatable. The consumer therefore toggles the
+  reset's **`disabled`** (or `tabindex="-1"` + `aria-hidden="true"`) in lockstep with `.changed`: an
+  unchanged reset is inert and unreachable; a changed reset is focusable and shows the system-blue
+  `:focus-visible` ring (authored above).
 - **Keyboard/AT:** the native input is natively focusable and labelled by its adjacent `<label>` (keep
   the label association — several rows use an implicit wrapping `<label>` or a text `<label>` adjacent;
   where the label is an SVG-only glyph, `index.html:772`, keep its `title`/add `aria-label`). The
@@ -185,7 +203,7 @@ body.glass-full .ow-color-well input.cp-swatch-input {
 | `style.css:7170-7198` | DELETE the `.color-row` / `.color-reset-btn` block; its behavior moves into the kit region | CSS retire |
 | `style.css:12123-12127` | re-point `#theme-tab-customize .color-row` hover-highlight → `.ow-color-well` (or delete if folded into the kit rule) | CSS re-point |
 | `colorPicker.js` | **no change** — it already targets `input[type="color"]` / adds `.cp-swatch-input`; the kit dual selector matches | none |
-| `theme.js` (`.color-reset-btn.changed` toggles, `data-reset*` handlers) | JS toggles the `.changed` class and reads `data-reset*` attrs — **keep both**; only the base class name changes. Verify `querySelector('.color-reset-btn')` call sites are renamed to `.ow-color-well__reset` | JS class-name swap (grep `color-reset-btn` in `theme.js`) |
+| `theme.js` (`.color-reset-btn.changed` toggles, `data-reset*` handlers) | JS toggles the `.changed` class and reads `data-reset*` attrs — **keep both**; only the base class name changes. Verify `querySelector('.color-reset-btn')` call sites are renamed to `.ow-color-well__reset`. **Additionally toggle the reset's `disabled` (or `tabindex`/`aria-hidden`) alongside `.changed`** (§2d) so an unchanged, invisible reset is not keyboard-reachable. | JS class-name swap + keyboard-state sync (grep `color-reset-btn` in `theme.js`) |
 
 **JS class-name references to update** (grep `color-reset-btn` across `js/`): the change/reset wiring in
 `theme.js` selects `.color-reset-btn` to toggle `.changed`. Rename those selectors in the same PR, or
@@ -220,7 +238,11 @@ HTML = _read("static", "index.html")
 5. `test_color_well_hairline_is_tokenized` — swatch `border` uses `--ow-control-rim`, not
    `var(--border)`.
 6. `test_color_well_has_44px_coarse_pointer_floor` — a coarse-pointer `@media` block in `style.css`
-   raises the swatch + reset hit area to `--ow-tap-min`/`44px` (mirror the `.oc-pin` floor test).
+   raises the swatch + reset hit area to `--ow-tap-min`/`44px` **on the `.ow-color-well` wrapper's own
+   box** (single box model), with **no** `::before`/`::after` pseudo-element on the color input (they
+   are unreliable on the replaced element); the trailing `.ow-color-well__reset` carries the same floor.
+   Also pins the reset's `disabled`/`tabindex` sync with `.changed` (an unchanged reset is
+   inert/unreachable) and the `.changed:focus-visible` system-blue ring on the actionable reset.
 7. `test_index_color_wells_migrated` — `index.html` has **0** `class="color-row"` occurrences and
    **20** `input[type="color"]` each inside an `.ow-color-well`; the two inline-styled rows
    (`harmony-accent`, `theme-bg-effect-color`) carry `--start` / `--compact` and no residual inline

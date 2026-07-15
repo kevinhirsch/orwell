@@ -16,9 +16,12 @@ at all.
 
 **The state of the world today:** the reveal exists in **exactly one place** — the login/auth page
 (`login.html` `.pw-toggle`). Every in-app secret field (search API key, admin password, LLM endpoint
-API key, …) is a bare `type="password"` with **no reveal at all**. So G3 is two jobs: (1) lift the
-login toggle into a kit treatment, and (2) let the in-app secret fields *adopt* it so a user can verify
-a pasted API key.
+API key, …) is a bare `type="password"` with **no reveal at all**. **Per the owner ruling (below),
+Workflow-2 scope is LOGIN-ONLY:** the single job is to lift the login toggle into the `.ow-pw-field` /
+`OrwellPwReveal` treatment, folding in the `tabindex`/`aria-pressed`/mobile-keyboard a11y fixes. The
+in-app secret fields **keep their bare `type="password"` with no reveal** — they are documented below
+as *intentionally excluded*, not adoption targets (they are the obvious future targets if the ruling is
+ever revisited).
 
 ## 2. Consumer inventory (file:line + current markup/CSS)
 
@@ -41,18 +44,20 @@ a pasted API key.
 - Uses `aria-label` swap ("Show"/"Hide") but **no `aria-pressed`** — the toggle's on/off state is not
   exposed as a toggle-button state to AT.
 
-### G3b — In-app secret fields with NO reveal today (adoption targets) — **IN SCOPE**
+### G3b — In-app secret fields with NO reveal today — **OUT OF SCOPE (intentionally excluded)**
 
 Game-build-reachable secret fields (settings + accounts are keep-set), each a bare `type="password"`
-with no toggle:
+with no toggle. **Per the owner ruling these KEEP their bare `type="password"` and gain NO reveal in
+Workflow-2** — listed only to document the deliberate exclusion (the obvious future adoption targets if
+the ruling is revisited):
 
 | Field | file:line | Panel / reachability |
 |---|---|---|
-| Web-search API key | `index.html:2069` (`#set-searchApiKey`, `class="settings-select"`) | Settings › search — **IN SCOPE** (search is keep-set) |
-| Admin — new-user password | `index.html:2383` (`#adm-newPassword`) | Admin › accounts — IN SCOPE (admin-gated) |
-| Admin — endpoint API key | `index.html:2476` (`#adm-epApiKey`) | Admin › model endpoint — IN SCOPE (admin-gated) |
-| Endpoint API key | `settings.js:4245` (`#uf-api-key`) | Settings › connections endpoint form — IN SCOPE |
-| Generic env/secret fields | `admin.js:1870` | Admin env editor: `type = …includes('secret'\|'token'\|'key'\|'password') ? 'password' : 'text'` — IN SCOPE (admin) |
+| Web-search API key | `index.html:2069` (`#set-searchApiKey`, `class="settings-select"`) | Settings › search — **EXCLUDED** (keep bare `type=password`) |
+| Admin — new-user password | `index.html:2383` (`#adm-newPassword`) | Admin › accounts — EXCLUDED (keep bare `type=password`) |
+| Admin — endpoint API key | `index.html:2476` (`#adm-epApiKey`) | Admin › model endpoint — EXCLUDED (keep bare `type=password`) |
+| Endpoint API key | `settings.js:4245` (`#uf-api-key`) | Settings › connections endpoint form — EXCLUDED (keep bare `type=password`) |
+| Generic env/secret fields | `admin.js:1870` | Admin env editor: `type = …includes('secret'\|'token'\|'key'\|'password') ? 'password' : 'text'` — EXCLUDED (keep bare `type=password`) |
 
 ### G3c — Secret fields on GAME-DROPPED panels — **OUT OF SCOPE** (documented only)
 
@@ -62,7 +67,8 @@ served in the game build; adopt only if the full inherited workspace becomes a t
 
 > **Note:** `.settings-select` is (mis)used as the class on `#set-searchApiKey` even though it's an
 > `<input>`, not a `<select>` — the §5b inventory already excludes it from the select-migration count.
-> Under W6 that input goes to `.ow-input`; G3 then wraps it in `.ow-pw-field` and adds the reveal.
+> Under W6 that input goes to `.ow-input`, but per the owner ruling it stays a **bare
+> `type="password"` with no reveal** (G3 does **not** wrap it in `.ow-pw-field`).
 
 ## 3. Proposed markup + CSS contract
 
@@ -105,7 +111,13 @@ whole product uses one eye. Expose them from a shared helper (see §3.4) rather 
   is only its ink: frosted uses the neutral `--ow-control-ink-muted`; flat uses `color-mix(--fg …)`.
   Author both in the ELEMENT KIT region beside `.ow-field`.
 - **a11y trio:** reduced-motion drops any glyph transition; contrast raises the rest-state ink from
-  55%→~80% and thickens the focus ring; reduced-transparency is a no-op (already opaque ink).
+  55%→~80% and thickens the focus ring; **reduced-transparency solidifies the ink** — the muted
+  rest-state ink is a `color-mix(… var(--fg) 55%, transparent)` (a *translucency*), so under
+  `prefers-reduced-transparency: reduce` it must resolve to a **solid** `--fg`-derived ink (drop the
+  `transparent` term), not stay a see-through glyph.
+- **Mobile-keyboard focus-keep:** the login toggle's `touchstart` **`preventDefault()`**
+  (`login.html:752-757`) is carried into the standardized treatment — tapping the eye on a phone must
+  not blur the input and dismiss the soft keyboard. Preserve it as the toggle wires up.
 - **The a11y contract (fixes the login gaps):**
   - **`aria-pressed`** reflects revealed state (`false` = masked, `true` = shown) — a proper toggle
     button, not just an `aria-label` swap.
@@ -131,9 +143,11 @@ window.OrwellPwReveal = {
 };
 ```
 
-Login keeps its inline `wireToggle` (it predates the app bundle and ships on a separate page), but its
-CSS + markup adopt `.ow-pw-field`/`.ow-pw-reveal`/`aria-pressed`. In-app fields call
-`OrwellPwReveal.attach(...)` after render.
+Login adopts `.ow-pw-field`/`.ow-pw-reveal` + the `aria-pressed`/`tabindex`/`touchstart` a11y fixes —
+either by calling `OrwellPwReveal.attach(...)` or by keeping its inline `wireToggle` updated to the
+same contract (login predates the app bundle and ships on a separate page). **Per the owner ruling, no
+in-app field calls `attach` in Workflow-2** — the helper exists for the login standardization (and any
+future, ruling-gated in-app adoption), and is **not** wired into the secret inputs now.
 
 ## 4. Migration mapping per consumer
 
@@ -144,20 +158,19 @@ CSS + markup adopt `.ow-pw-field`/`.ow-pw-reveal`/`aria-pressed`. In-app fields 
 | `.pw-wrapper` | `.ow-pw-field` (keep `.pw-wrapper` dual-class if any selector depends on it) |
 | `.pw-toggle` | `.ow-pw-reveal` |
 | CSS `:321-336` | delete; inherit the kit treatment (the login page already links `style.css`) |
-| `wireToggle` JS | keep, **add `aria-pressed` toggling** alongside the `aria-label` swap and glyph swap |
-| `tabindex="-1"` | owner decision (§6) — keep as a login-only override, or drop to match the focusable kit default |
+| `wireToggle` JS | keep, **add `aria-pressed` toggling** alongside the `aria-label` swap and glyph swap; keep the `touchstart` `preventDefault()` focus-keep |
+| `tabindex="-1"` | **DROP** — per the ruling the login toggle becomes keyboard-reachable (the focusable kit default), gaining `aria-pressed` |
 
-### G3b — In-app secret fields (adoption)
+### G3b — In-app secret fields — **excluded (no change)**
 
-For each in-scope field: after it becomes `.ow-input` (W6 lands `#set-searchApiKey`; the others may
-already be plain inputs), call `OrwellPwReveal.attach(el)` (or hand-author the `.ow-pw-field` wrapper).
-Net markup delta per field: wrap in `.ow-pw-field` + add the `.ow-pw-reveal` button. No change to the
-input's id / name / handler / submit payload.
+Per the owner ruling these fields **keep their bare `type="password"` and gain no reveal** in
+Workflow-2. Listed here only as the deliberate exclusion (and the future adoption list if the ruling is
+ever revisited) — no markup, wiring, or class change lands on any of them:
 
 - `#set-searchApiKey` (`index.html:2069`) — Settings search key.
 - `#adm-newPassword` (`index.html:2383`), `#adm-epApiKey` (`index.html:2476`) — admin forms.
 - `#uf-api-key` (`settings.js:4245`) — endpoint form.
-- `admin.js:1870` env editor — attach when the field is created as `type="password"`.
+- `admin.js:1870` env editor.
 
 ## 5. Test plan (`frontend/tests/test_1638_pw_reveal_kit.py`)
 
@@ -170,8 +183,8 @@ Source-pinned, mirroring `test_1638_compact_icon_kit.py`.
    (assert the demo markup + `OrwellPwReveal.attach` set/toggle `aria-pressed`) and swap the
    `aria-label` Show↔Hide.
 3. **`test_reveal_is_keyboard_reachable_by_default`** — the kit `.ow-pw-reveal` in the demo (and the
-   `attach` helper) does **not** set `tabindex="-1"` (the kit default is focusable); login may keep the
-   override, pinned separately.
+   `attach` helper) does **not** set `tabindex="-1"` (the kit default is focusable), **and** the login
+   toggle drops `tabindex="-1"` too (per the ruling, folding in the a11y fix).
 4. **`test_focus_is_system_blue`** — `.ow-pw-reveal:focus-visible` uses `--ow-focus-ring`/`--ow-ios-blue`.
 5. **`test_native_reveal_suppressed`** — the treatment includes `::-ms-reveal`/`::-ms-clear`
    `display:none` (so Edge's duplicate glyph never appears beside the kit eye).
@@ -183,31 +196,37 @@ Source-pinned, mirroring `test_1638_compact_icon_kit.py`.
 9. **`test_honors_a11y_trio`** — reduced-motion / contrast branches present for the treatment.
 10. **`test_shared_helper_exists`** — `OrwellPwReveal.attach` is defined (source pin) and is loaded in
     `index.html` (so in-app fields can adopt it).
-11. **Adoption pins (per landed field):** `#set-searchApiKey` / `#adm-epApiKey` / `#uf-api-key` markup
-    (or their render sites) are wrapped in `.ow-pw-field` and carry a `.ow-pw-reveal`.
-12. **`test_login_adopts_the_treatment`** — `login.html` uses `.ow-pw-field`/`.ow-pw-reveal` and its
-    `wireToggle` now toggles `aria-pressed`; the standalone `.pw-toggle { position:absolute … }` CSS
+11. **Exclusion pins (per the owner ruling — the login-only scope):** the in-app secret fields
+    (`#set-searchApiKey`, `#adm-newPassword`, `#adm-epApiKey`, `#uf-api-key`, and the `admin.js` env
+    editor) are **NOT** wrapped in `.ow-pw-field` and carry **no** `.ow-pw-reveal` — they stay bare
+    `type="password"`, so the reveal never regresses in beyond login.
+12. **`test_login_adopts_the_treatment`** — `login.html` uses `.ow-pw-field`/`.ow-pw-reveal`, its
+    `wireToggle` now toggles `aria-pressed` (alongside the `aria-label` swap), and it keeps the
+    `touchstart` `preventDefault()` focus-keep; the standalone `.pw-toggle { position:absolute … }` CSS
     block is gone (moved to the kit).
 13. **`test_demo_and_docs_reference_the_treatment`** — `element_kit_demo.html` shows a masked +
     revealed `.ow-pw-field`; `ELEMENT_KIT.md` documents it.
+14. **`test_login_reveal_behavior` (browser_smoke, behavioral):** on the login page, activating
+    `.ow-pw-reveal` flips the input `type` password↔text, flips `aria-pressed` false↔true, and swaps
+    the `aria-label` Show↔Hide — the behavior the source pins can't observe.
 
 ## 6. Owner decisions needed
 
-1. **Focus order on login (`tabindex="-1"`).** The login toggle is intentionally out of the tab order
-   (keeps tab flow password→submit). The kit **default must be focusable** (keyboard users on the
-   API-key fields need it). **Decision:** keep `tabindex="-1"` as a *login-only* per-site override
-   (recommended — preserves the sign-in flow while the app default is accessible), or drop it
-   everywhere for a uniform focusable reveal. This spec assumes the former.
-2. **Reveal on secret *API-key* fields — desired, but confirm the security posture.** Showing a pasted
-   API key in plaintext is standard and helpful (verify a paste), but it is a secret on screen.
-   **Decision:** enable `.ow-pw-reveal` on the search/endpoint API-key fields (recommended — they're
-   user-entered credentials the user already holds), or restrict the reveal to *account passwords*
-   only. No Vault/engine implication either way (these are FE-entered provider creds, never Vault
-   state).
-3. **Adopt-everywhere vs login-only for this lane.** Minimum to close G3 is lifting login into the kit.
-   The *value* is the in-app fields gaining a reveal they never had. **Decision:** scope W-G3 to
-   (a) login migration + (b) the ~4 in-scope in-app fields (recommended), or (a) only and file the
-   in-app adoption as a follow-up.
+1. **Focus order on login (`tabindex="-1"`) — ✅ RESOLVED by the ruling: fold in the tabindex a11y
+   fix.** The ruling standardizes login "folding in the `tabindex`/`aria-pressed` a11y fixes," so the
+   login toggle becomes **keyboard-reachable** (drop `tabindex="-1"`) alongside gaining `aria-pressed`
+   — a keyboard-only user can now reveal the password. (If the strict password→submit tab flow is later
+   preferred, `tabindex="-1"` may return as a login-only override, but the ruling's default is the
+   accessible, focusable reveal.)
+2. **Reveal on secret *API-key* fields — ✅ RESOLVED by the ruling: NO.** The in-app API-key / secret
+   fields (search key, endpoint key, admin env) **keep their bare `type="password"` with no reveal** —
+   the reveal is not enabled on them in Workflow-2. (No Vault/engine implication either way; these are
+   FE-entered provider creds, never Vault state.)
+3. **Adopt-everywhere vs login-only for this lane — ✅ RESOLVED by the ruling: LOGIN-ONLY.** W-G3 is
+   scoped to **(a) the login migration only** — standardize the existing `login.html` toggle onto
+   `.ow-pw-field` / `OrwellPwReveal` with the `tabindex`/`aria-pressed`/`touchstart` a11y fixes. The
+   in-app fields (formerly the "~4 in-scope" list) are **excluded**, documented in §2/§4 as the future
+   adoption list if the ruling is revisited.
 
 ---
 

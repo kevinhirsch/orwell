@@ -72,7 +72,7 @@ Surrounding (kept, out of scope): `.shortcut-key` button (`:15621-15627`), `.sho
 
 ### 2a. Class API
 
-```
+```text
 .ow-kbd            a single keycap chip (put it on the <kbd> element; or a <kbd class="ow-kbd">)
 .ow-kbd-group      OPTIONAL wrapper for a run of chips in a combo (flex, tight gap) — the visual
                    "Ctrl + Shift + K" cluster (maps the inside of .shortcut-key)
@@ -110,6 +110,9 @@ body.glass-full .ow-kbd {
 /* a11y trio */
 @media (prefers-reduced-transparency: reduce) {
   .ow-kbd { background: var(--panel, var(--bg)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* MUST match the body.glass-full .ow-kbd specificity, or the Full-Glass rule's higher
+     specificity keeps its backdrop-filter active and the user preference is ignored. */
+  body.glass-full .ow-kbd { -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-contrast: more) {
   .ow-kbd { border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent); }
@@ -150,7 +153,7 @@ body.glass-full .ow-kbd {
 | `settings.js:2389` `_formatKeyCaps` | `return \`<kbd>${label}</kbd>\`` → `return \`<kbd class="ow-kbd">${label}</kbd>\`` (optionally wrap the `.join('')` in `<span class="ow-kbd-group">…</span>`) | render-template class add |
 | `settings.js:2507` (rebind-cancel re-render) | same — calls `_formatKeyCaps`, so it inherits the class automatically | none (covered by above) |
 | `style.css:15638-15650` `.shortcut-key kbd` | DELETE the accent-hued keycap block; behavior moves to `.ow-kbd` in the kit region. (Or, transitional, re-point `.shortcut-key kbd` → compose `.ow-kbd`.) | CSS retire |
-| `style.css:15655` `.shortcut-key.listening kbd` | drop or re-point (the `.listening` chip no longer needs an accent border; the "Press keys…" label replaces chips during listening anyway) | CSS retire/re-point |
+| `style.css:15655` `.shortcut-key.listening kbd` | **DELETE the accent `border-color: var(--accent…)`** — this legacy selector MUST be removed (or re-pointed to `.ow-kbd` with **no** accent), so the listening state can't reintroduce an accent border. The "Press keys…" label replaces the chips during listening anyway. | CSS retire (accent-free) |
 | `.shortcut-key` button (`style.css:15621`) | **out of scope** here — audit §5e migrates it to `.ow-btn-plain` in the settings lane (W6). Keep functional | none (separate lane) |
 | `.shortcut-action-btn` (`style.css:15656`) | **out of scope** — §5e → `.ow-btn` | none (separate lane) |
 
@@ -186,8 +189,11 @@ SETTINGS = _read("static", "js", "settings.js")
    `prefers-contrast: more` border bump.
 7. `test_settings_emits_kit_keycap` — `settings.js` `_formatKeyCaps` emits `<kbd class="ow-kbd">`;
    assert a bare `<kbd>` (no class) no longer appears in `settings.js`.
-8. `test_bespoke_shortcut_key_kbd_css_retired` — the accent-hued `.shortcut-key kbd { … color:
-   var(--accent …) }` block is gone from `style.css` (folded into `.ow-kbd`).
+8. `test_bespoke_shortcut_key_kbd_css_retired` — **both** legacy accent selectors are gone from
+   `style.css`: the `.shortcut-key kbd { … color: var(--accent …) }` block **and** the
+   `.shortcut-key.listening kbd { border-color: var(--accent …) }` rule (folded into `.ow-kbd`).
+   Assert **no** `var(--accent)`/`var(--red)` remains on either `.shortcut-key kbd` selector, so the
+   listening border can't reintroduce accent styling.
 9. `test_keycap_is_not_interactive_floor` — `.ow-kbd` sets no `min-height: 44px` / tap floor of its own
    (the floor is the `.shortcut-key` button's job); a light guard that the primitive stays a passive
    glyph.
