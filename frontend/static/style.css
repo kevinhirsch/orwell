@@ -22664,6 +22664,77 @@ body.glass-full .ow-color-well input.cp-swatch-input {
   .ow-color-well__reset { min-width: var(--ow-tap-min, 44px); min-height: var(--ow-tap-min, 44px); }
 }
 
+/* ── PROGRESS: .ow-progress / .ow-progress-fill — a display-only progressbar (#1638, G8) ──
+   A genuinely reusable kit progressbar primitive (future callers: portrait-backfill progress,
+   image-gen budget, upload progress). Track + fill are TOKEN-driven and tier-agnostic (the
+   .og-card cross-tier idiom — no `body.theme-frosted` gate; they never stack a backdrop sample,
+   so one author reads coherently on frosted AND flat). DISPLAY-ONLY: no :hover / :focus / cursor,
+   never a tab stop — the ARIA `role="progressbar"` + value lives on the consumer element. The
+   `.ow-progress--edge` variant is the fixed bottom-edge season-progress bar. */
+.ow-progress {
+  overflow: hidden;
+  border-radius: var(--ow-progress-radius, var(--ow-radius-pill));
+  height: var(--ow-progress-h, 6px);
+  background: var(--ow-progress-track, color-mix(in srgb, var(--fg) 12%, transparent));
+}
+.ow-progress-fill {
+  height: 100%; width: 0%;
+  /* A progress FILL is a legitimate accent use (a branded completion cue), unlike chrome TEXT —
+     so the accent chain is intentional. The final #6d4aff literal is RETAINED from the bespoke
+     season-bar chain so the fill can never render unpainted if both accent tokens are unset. */
+  background: var(--ow-progress-fill-color, var(--accent, var(--accent-primary, #6d4aff)));
+  transition: width .5s ease-out;
+  will-change: width;
+}
+/* fixed bottom-edge variant — the season progress bar (a non-interactive overlay). left:0/right:0
+   (NOT 100vw) so the bar spans the viewport WITHOUT adding a horizontal scrollbar. */
+.ow-progress--edge {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  z-index: var(--ow-progress-z, 60);
+  height: var(--ow-progress-edge-h, 4px);
+  pointer-events: none; border-radius: 0;
+}
+/* a11y trio */
+@media (prefers-reduced-motion: reduce) {
+  .ow-progress-fill { transition: none; }
+}
+@media (prefers-contrast: more) {
+  .ow-progress { background: var(--ow-progress-track, color-mix(in srgb, var(--fg) 24%, transparent)); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ow-progress { background: color-mix(in srgb, var(--fg) 20%, var(--panel, var(--bg))); }
+}
+
+/* ── CHIP: .on-chip — a display-only notice-family status pill (#1638, G8) ──
+   A static labelled pill (the "Season N" chip). A NON-INTERACTIVE member of the notice family
+   (.on-*) — passive, never dismissible. Drift-fixes folded in vs the old bespoke chip: the
+   canonical --ow-ui-font face (the "no stray monospace chrome" rule the cast-pin fix #771
+   established — drops the old `--mono, monospace`); legible --fg ink (NO accent hue on chrome
+   text, #726/#773 — drops the old accent-tinted color); and the --ow-glass-rim-border hairline
+   (drops the old accent-tinted border). Tier-agnostic (the .og-card idiom). */
+.on-chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--ow-radius-pill);
+  font: 600 var(--fs-2xs)/1 var(--ow-ui-font);
+  letter-spacing: .04em;
+  color: var(--fg);
+  background: var(--on-chip-bg, color-mix(in srgb, var(--panel) 82%, transparent));
+  border: 1px solid var(--ow-glass-rim-border);
+}
+/* placement variant — the season chip pinned top-right (a non-interactive overlay). */
+.on-chip--season {
+  position: fixed; top: 8px; right: 10px; z-index: 58;
+  pointer-events: none; opacity: .9;
+}
+/* a11y trio — reduced-transparency solidifies the fill; contrast strengthens the hairline. */
+@media (prefers-reduced-transparency: reduce) {
+  .on-chip { background: var(--panel, var(--bg)); }
+}
+@media (prefers-contrast: more) {
+  .on-chip { border-color: color-mix(in srgb, var(--fg) 45%, transparent); }
+}
+
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
 
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */

@@ -78,28 +78,18 @@
     if (bar) return bar;
     const css = document.createElement("style");
     css.id = BAR_ID + "-css";
+    // The look now composes the .ow-progress / .ow-progress-fill kit primitive (#1638, G8 —
+    // authored in style.css ELEMENT KIT region). This block keeps ONLY what the consumer owns:
+    // the initial hidden state (paint()/hideBar() toggle inline display). Placement, z-index,
+    // edge height, pointer-events:none, the track fill, and reduced-motion all come from
+    // `.ow-progress.ow-progress--edge`.
     css.textContent = `
-      /* left:0/right:0 (NOT 100vw) so the bar spans the viewport width WITHOUT adding a
-         horizontal scrollbar — 100vw includes the scrollbar gutter and would overflow. */
-      #${BAR_ID} {
-        position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
-        height: 4px;
-        pointer-events: none; display: none;
-        background: color-mix(in srgb, var(--accent, var(--accent-primary, #6d4aff)) 16%, transparent);
-      }
-      #${BAR_ID} > .osp-fill {
-        height: 100%; width: 0%;
-        background: var(--accent, var(--accent-primary, #6d4aff));
-        transition: width .5s ease-out;
-        will-change: width;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        #${BAR_ID} > .osp-fill { transition: none; }
-      }`;
+      #${BAR_ID} { display: none; }`;
     document.head.appendChild(css);
 
     bar = document.createElement("div");
     bar.id = BAR_ID;
+    bar.className = "ow-progress ow-progress--edge";
     bar.setAttribute("role", "progressbar");
     bar.setAttribute("aria-label", "Season progress");
     bar.setAttribute("aria-valuemin", "0");
@@ -112,7 +102,9 @@
     desc.textContent = "Advances as houseguests are evicted";
     bar.setAttribute("aria-describedby", BAR_ID + "-desc");
     const fill = document.createElement("div");
-    fill.className = "osp-fill";
+    // Dual-classed: `.ow-progress-fill` supplies the kit look; `.osp-fill` is retained so
+    // paint()'s `querySelector('.osp-fill')` width-set is untouched.
+    fill.className = "ow-progress-fill osp-fill";
     bar.appendChild(fill);
     bar.appendChild(desc);
     document.body.appendChild(bar);
@@ -173,22 +165,20 @@
     if (chip) return chip;
     const css = document.createElement("style");
     css.id = CHIP_ID + "-css";
+    // The look now composes the .on-chip / .on-chip--season notice-family pill (#1638, G8 —
+    // authored in style.css ELEMENT KIT region; the drift-fix: --ow-ui-font not --mono, --fg
+    // ink not --accent, --ow-glass-rim-border not an accent border). This block keeps ONLY the
+    // consumer-owned initial hidden state; paintChip()/hide toggle inline display, and
+    // positionChip() owns the live top/right collision-avoidance placement.
     css.textContent = `
-      #${CHIP_ID} {
-        position: fixed; top: 8px; right: 10px; z-index: 58;
-        display: none; pointer-events: none;
-        padding: 2px 9px; border-radius: 999px;
-        font-family: var(--mono, monospace);
-        font-size: 11px; font-weight: 600; letter-spacing: .04em;
-        color: color-mix(in srgb, var(--accent, var(--accent-primary, #9cdef2)) 88%, var(--fg, #cfd8e3));
-        background: color-mix(in srgb, var(--panel, #161616) 78%, transparent);
-        border: 1px solid color-mix(in srgb, var(--accent, var(--accent-primary, #355a66)) 38%, transparent);
-        opacity: .82;
-      }`;
+      #${CHIP_ID} { display: none; }`;
     document.head.appendChild(css);
     chip = document.createElement("div");
     chip.id = CHIP_ID;
-    chip.setAttribute("aria-label", "Season number");
+    chip.className = "on-chip on-chip--season";
+    // The accessible name is VALUE-bearing — paintChip() sets it to the live "Season N" (never a
+    // static value-less label, which would hide the number from AT). Not set here (chip stays
+    // display:none until paintChip runs).
     document.body.appendChild(chip);
     return chip;
   }

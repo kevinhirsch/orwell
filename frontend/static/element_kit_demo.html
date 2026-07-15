@@ -703,6 +703,39 @@
       </div>
     </section>
 
+    <!-- PROGRESS + CHIP (.ow-progress / .on-chip) -->
+    <section class="ek-card">
+      <h2>Progress &amp; chip — .ow-progress / .on-chip (#1638)</h2>
+      <p class="ek-note">Two <b>display-only</b> overlays (both <code>pointer-events:none</code> in the
+        wild) migrated off bespoke fills onto kit tokens (G8, season-progress). The
+        <code>.ow-progress</code> primitive is a reusable progressbar (token track +
+        <code>.ow-progress-fill</code>; the fill keeps the accent chain — a progress FILL is a
+        legitimate accent use); <code>.ow-progress--edge</code> is the fixed bottom-edge season bar.
+        The <code>.on-chip</code> is a static notice-family pill — the drift-fix drops the old
+        <code>--mono</code> face for <code>--ow-ui-font</code>, the accent-tinted ink for legible
+        <code>--fg</code>, and the accent border for <code>--ow-glass-rim-border</code>. Neither is
+        interactive — no hover / focus / tab-stop; the ARIA <code>role="progressbar"</code> lives on
+        the consumer element.</p>
+
+      <div class="ek-label">Progressbar — .ow-progress + .ow-progress-fill (60%)</div>
+      <div class="ek-row" style="gap:14px; flex-direction:column; align-items:stretch; max-width:340px">
+        <div class="ow-progress" role="progressbar" aria-label="Demo progress"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+          <div class="ow-progress-fill" style="width:60%"></div>
+        </div>
+        <div class="ow-progress" role="progressbar" aria-label="Demo progress (near done)"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="92">
+          <div class="ow-progress-fill" style="width:92%"></div>
+        </div>
+      </div>
+
+      <div class="ek-label">Season chip — .on-chip (static label pill, value-bearing name)</div>
+      <div class="ek-row" style="gap:12px">
+        <div class="on-chip" aria-label="Season 5">Season 5</div>
+        <div class="on-chip" aria-label="Season 12">Season 12</div>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->

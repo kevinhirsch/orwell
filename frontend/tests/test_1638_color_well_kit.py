@@ -34,8 +34,10 @@ def _read(*p):
 
 CSS = _read("static", "style.css")
 KIT = CSS[CSS.index("── ELEMENT KIT ──"):CSS.index("── END ELEMENT KIT ──")]
-# the color-well sub-block (authored last, just before the END marker).
-COLORWELL = KIT[KIT.index(".ow-color-well {"):]
+# the color-well sub-block — bounded to end at the next kit primitive (#1638 G8 added the
+# .ow-progress / .on-chip display primitives after it, so slice up to their section header
+# rather than to the region end).
+COLORWELL = KIT[KIT.index(".ow-color-well {"):KIT.index("/* ── PROGRESS:")]
 COLORWELL_NC = re.sub(r"/\*.*?\*/", "", COLORWELL, flags=re.S)   # comments blanked (avoid prose hits)
 HTML = _read("static", "index.html")
 DEMO = _read("static", "element_kit_demo.html")
