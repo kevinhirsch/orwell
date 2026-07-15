@@ -246,6 +246,7 @@ def record_llm_call(
     ok: bool = True,
     duration_ms: int = 0,
     call_class: Optional[str] = None,
+    user: Optional[str] = None,
 ) -> None:
     """Persist one full request→response record (ring + on-disk archive).
 
@@ -285,6 +286,9 @@ def record_llm_call(
             "error": response.get("error"),
             "finishReason": response.get("finishReason"),
         })
+        # The owning user for #1599 per-user health scoping (explicit arg → always-on call-user
+        # context → obs context). None ⇒ userless/system ⇒ the shared "default" rollup bucket.
+        eff_user = _resolve_call_user(user)
         ts = int(time.time() * 1000)
         record = {
             "ts": ts,
@@ -296,17 +300,19 @@ def record_llm_call(
             # `response`, kept there for back-compat) and the ADR-0010 call class. None = unknown.
             "finishReason": resp.get("finishReason"),
             "callClass": str(call_class) if call_class else None,
+            # #1599 — the owning user, so the health rollup scopes per-class failure rates per user.
+            "user": str(eff_user) if eff_user is not None else None,
             "request": req,
             "response": resp,
         }
         _append_trace_file(record)
-        _push_ring(record, messages, resp)
+        _push_ring(record, messages, resp, eff_user)
         _maybe_auto_trim()
     except Exception:
         pass  # logging must never hurt the app
 
 
-def _push_ring(record: dict, messages: List[Dict], resp: dict) -> None:
+def _push_ring(record: dict, messages: List[Dict], resp: dict, user: Optional[str] = None) -> None:
     try:
         from src import log_rings
         sys_txt, last_user = _system_and_last_user(messages)
@@ -333,6 +339,15 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict) -> None:
             "msg": f"{kind_label} · {record['model']} {verb} {record['durationMs']}ms · "
                    f"in {in_chars} out {out_chars} chars{finish_suffix}{tool_suffix}",
             "args": req_summary,
+            # #1599 WI2 — structured triage fields for the per-class health rollup (kept beside the
+            # glanceable msg so the rollup never has to parse it): the call class, terminal stop
+            # reason, the ok flag, and the owning user (so the rollup scopes per-class failure rates
+            # PER USER — a failure in user A's sandbox never alarms user B). Vault-free scalars only.
+            "kind": record["kind"],
+            "callClass": cls,
+            "finishReason": finish,
+            "ok": bool(record["ok"]),
+            "user": user,
             "result": res_summary,
         })
     except Exception:
@@ -386,7 +401,9 @@ def seed_ring_from_file(limit: int = 200) -> int:
                 continue
             msgs = (rec.get("request") or {}).get("messages") or []
             resp = rec.get("response") or {}
-            _push_ring(rec, msgs, resp)
+            # Preserve the archived record's #1599 user attribution across a restart-time reseed
+            # (records written before the field simply carry None ⇒ the shared "default" bucket).
+            _push_ring(rec, msgs, resp, rec.get("user"))
             n += 1
         return n
     except Exception:
@@ -671,6 +688,49 @@ def _current_context() -> dict:
         return dict(c) if isinstance(c, dict) else {}
     except Exception:
         return {}
+
+
+# ── always-on call-user attribution (independent of the observability gate) ──────────
+# The 0112 observability context above is only populated when observability is ENABLED
+# (default off). But the LLMIO ring is ALWAYS written, and the #1599 health rollup scopes
+# its per-class failure rates (and the narration-failure RED alarm) PER USER — so a call's
+# owning user must be attributable even with observability off. This dedicated ContextVar
+# is set by the agent-loop turn wrapper for every game turn (regardless of the obs gate) and
+# read at the single record point, so a narration failure in user A's sandbox can never raise
+# a RED alarm in user B's /api/admin/health (cross-user isolation). Task-local ⇒ concurrent
+# turns never cross users. Unset/system call ⇒ None ⇒ the shared "default" bucket, which never
+# leaks to a NAMED user.
+_CALL_USER: "contextvars.ContextVar[Optional[str]]" = contextvars.ContextVar(
+    "orwell_llm_call_user", default=None)
+
+
+def set_call_user(user: Optional[str]) -> "contextvars.Token":
+    """Bind the current turn's owning user for LLM-call attribution. Returns the reset token."""
+    return _CALL_USER.set(user)
+
+
+def reset_call_user(token: "contextvars.Token") -> None:
+    try:
+        _CALL_USER.reset(token)
+    except Exception:
+        pass
+
+
+def _resolve_call_user(explicit: Optional[str]) -> Optional[str]:
+    """The owning user for an LLM-call record: an explicit arg wins, else the always-on
+    call-user context, else the 0112 obs context (when enabled). None ⇒ userless/system."""
+    if explicit is not None:
+        return explicit
+    try:
+        u = _CALL_USER.get()
+        if u is not None:
+            return u
+    except Exception:
+        pass
+    try:
+        return _current_context().get("user")
+    except Exception:
+        return None
 
 
 # ── sampling (deterministic by session) ────────────────────────────────────────────

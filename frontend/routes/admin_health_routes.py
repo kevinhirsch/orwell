@@ -1234,6 +1234,295 @@ async def _producer_vault_section(user: str | None) -> dict:
     return dump
 
 
+# ── #1599 WORK ITEMS 2 + 3: per-class/-tool health rollup + RED alarms ──────────────────────
+#
+# WI2 — a rolling, Vault-free FAILURE-RATE rollup keyed by class, built entirely from the existing
+# in-process signals (the LLMIO / Engine-I/O / OVERSEER rings + the sync ledger). WI3 — the RED
+# alarms for game-breaking signals, derived from that rollup + the snapshot's engine/embeddings/
+# sandbox reads. Both ride on /api/admin/health (the 10s-polled status payload) so the operator sees
+# them without opening the debug bundle. Nothing here reads game content or the Vault — only tool
+# names, call classes, counts, timings, and the ok/degraded/circuit booleans.
+
+_ROLLUP_WINDOW_S = 3600  # the rolling window (seconds) the rollup + alarms aggregate over
+
+# Engine write-back / progression tools whose failure STORM is game-breaking (WI3).
+_WRITEBACK_TOOLS = frozenset({
+    "recordImageBeat", "recordInteraction", "recordCastProfile", "recordWorldSnapshot",
+    "preSeedCast", "recordDeepProfile", "advanceGame", "submitDecision", "makeDeal",
+    "createCharacter",
+})
+# The soft-failure class namespaces record_soft_failure emits (log_rings) — the rollup buckets
+# OVERSEER-ring failures under these, distinct from ordinary 0079 overseer report entries.
+_SOFT_FAIL_PREFIXES = ("overseer:", "faith:", "enrichment:")
+_STORM_THRESHOLD = 3  # N failures in the window ⇒ a RED "storm/burst" alarm
+
+
+def _within_window(ts_ms, now_ms, window_s) -> bool:
+    if ts_ms is None:
+        return True  # entries predating the ts field still count (best-effort)
+    try:
+        return (now_ms - int(ts_ms)) <= window_s * 1000
+    except (TypeError, ValueError):
+        return True
+
+
+def _norm_user(user) -> str:
+    """Normalize a user key the SAME way the sync ledger (`orwell_sync_ledger._key`) and the rest
+    of the relay do — a missing/blank user maps to the shared ``default`` bucket. Used to match an
+    OVERSEER ring entry's ``user`` field against the REQUESTING user so the per-user rollup/alarms
+    show only that user's soft-failures. Cross-user isolation is first-class alongside the Vault
+    Wall: user A's soft-failure must NEVER light RED (or inflate the rollup) in user B's
+    /api/admin/health."""
+    try:
+        return (user or "default").strip() or "default"
+    except Exception:
+        return "default"
+
+
+def _llm_class_of(entry) -> str:
+    """The call class for an LLMIO ring entry — the structured field if present (#1599 WI2 seeded
+    it), else parsed from the ``kind[callClass]`` msg prefix, else the bare kind."""
+    cls = entry.get("callClass")
+    if cls:
+        return str(cls)
+    msg = str(entry.get("msg") or "")
+    head = msg.split(" · ", 1)[0]
+    if "[" in head and head.endswith("]"):
+        return head[head.index("[") + 1:-1] or str(entry.get("kind") or "?")
+    return str(entry.get("kind") or head or "?")
+
+
+def _entry_failed(entry) -> bool:
+    if entry.get("ok") is False:
+        return True
+    return str(entry.get("level") or "").upper() in ("ERROR", "CRITICAL")
+
+
+def _is_auto_corrected(entry) -> bool:
+    """A soft-failure OVERSEER entry that record_soft_failure marked auto-corrected (a belt/lever/
+    floor stood): the ``lever`` carries the correction and the diagnosis carries the marker."""
+    if entry.get("lever"):
+        return True
+    return log_rings.SOFT_FAIL_AUTOCORRECTED in str(entry.get("diagnosis") or "")
+
+
+def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
+                           user: str | None = None) -> dict:
+    """WI2 — the per-class/-tool rolling failure-rate rollup. Reads the in-process rings only;
+    best-effort and Vault-free. Structure::
+
+      { windowSeconds,
+        llm:    {<callClass>: {total, failed, failureRate, lastFailureAt}},
+        tools:  {<engineTool>: {total, failed, failureRate, lastFailureAt}},
+        guards: {<softFailClass>: {failed, autoCorrected, lastFailureAt}} }
+
+    ALL THREE buckets are USER-SCOPED — every ring now carries a per-entry ``user`` (``record_llm_call``
+    stamps LLMIO, ``record_io`` stamps IO, ``record_overseer`` stamps OVERSEER), so each is filtered to
+    the REQUESTING user exactly as the snapshot's sibling reads (``sync_recent`` / ``belt_totals`` /
+    ``sandbox_health``) are. Otherwise a failure in user A's sandbox — a narration 5xx, a failed
+    ``recordInteraction``, a soft-failure — would inflate the rollup AND raise a RED alarm
+    (``narration-failure`` / ``write-back storm`` / ``guard-judge-failure``) in user B's
+    /api/admin/health, a cross-user isolation breach (first-class alongside the Vault Wall). A
+    genuinely userless/system call maps to the shared ``default`` bucket, which never matches a NAMED
+    user. (An explicitly operator-global panel, if ever wanted, must be a SEPARATE admin-gated path.)
+    """
+    now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    want_user = _norm_user(user)
+    llm: dict = {}
+    tools: dict = {}
+    guards: dict = {}
+
+    def _bump(bucket, key, failed, ts):
+        d = bucket.setdefault(key, {"total": 0, "failed": 0, "lastFailureAt": None})
+        d["total"] += 1
+        if failed:
+            d["failed"] += 1
+            d["lastFailureAt"] = ts
+
+    try:
+        _, llm_lines = log_rings.LLMIO.since(0, limit=_BUNDLE_RING_LIMIT)
+    except Exception:
+        llm_lines = []
+    for e in llm_lines:
+        if not isinstance(e, dict) or not _within_window(e.get("ts"), now_ms, window_s):
+            continue
+        if _norm_user(e.get("user")) != want_user:
+            continue  # cross-user isolation: this LLM call counts for THIS user only
+        _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"))
+
+    try:
+        _, io_lines = log_rings.IO.since(0, limit=_BUNDLE_RING_LIMIT)
+    except Exception:
+        io_lines = []
+    for e in io_lines:
+        if not isinstance(e, dict) or not _within_window(e.get("ts"), now_ms, window_s):
+            continue
+        if _norm_user(e.get("user")) != want_user:
+            continue  # cross-user isolation: this engine tool call counts for THIS user only
+        _bump(tools, str(e.get("tool") or "?"), e.get("ok") is False, e.get("ts"))
+
+    try:
+        _, ov_lines = log_rings.OVERSEER.since(0, limit=_BUNDLE_RING_LIMIT)
+    except Exception:
+        ov_lines = []
+    for e in ov_lines:
+        if not isinstance(e, dict) or e.get("ok") is not False:
+            continue
+        # Cross-user isolation: this soft-failure counts for THIS user only. The OVERSEER ring is
+        # global (one ring, every sandbox); scope it by the per-entry `user` the recorder stamps,
+        # matching how sync_recent / belt_totals / sandbox_health are already user-scoped.
+        if _norm_user(e.get("user")) != want_user:
+            continue
+        kind = str(e.get("kind") or "")
+        if not kind.startswith(_SOFT_FAIL_PREFIXES):
+            continue  # an ordinary 0079 overseer report, not a #1599 soft failure
+        if not _within_window(e.get("ts"), now_ms, window_s):
+            continue
+        g = guards.setdefault(kind, {"failed": 0, "autoCorrected": 0, "lastFailureAt": None})
+        g["failed"] += 1
+        if _is_auto_corrected(e):
+            g["autoCorrected"] += 1
+        g["lastFailureAt"] = e.get("ts")
+
+    for d in list(llm.values()) + list(tools.values()):
+        d["failureRate"] = round(d["failed"] / d["total"], 3) if d["total"] else 0.0
+
+    return {"windowSeconds": window_s, "llm": llm, "tools": tools, "guards": guards}
+
+
+def _alarm(code, label, count, detail, *, auto_corrected=False) -> dict:
+    return {"code": code, "severity": "red", "label": label, "count": int(count),
+            "detail": detail, "autoCorrected": bool(auto_corrected)}
+
+
+def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_totals=None,
+                    sandbox=None) -> list:
+    """WI3 — derive the RED alarms for game-breaking signals from the rollup + the snapshot reads.
+    Pure over its inputs (unit-testable): returns a list of ``{code, severity:'red', label, count,
+    detail, autoCorrected}``. Vault-free — every input is a count / flag / class token."""
+    alarms: list = []
+    guards = (rollup or {}).get("guards") or {}
+    llm = (rollup or {}).get("llm") or {}
+    tools = (rollup or {}).get("tools") or {}
+
+    # 1) A guard / judge class failing AT ALL (grounding guard / overseer judge down).
+    guard_classes = {k: v for k, v in guards.items() if k.startswith(("overseer:", "faith:"))}
+    if guard_classes:
+        total = sum(int(v.get("failed", 0)) for v in guard_classes.values())
+        auto = sum(int(v.get("autoCorrected", 0)) for v in guard_classes.values())
+        if total:
+            alarms.append(_alarm(
+                "guard-judge-failure", "Guard/judge failure", total,
+                "a grounding guard or overseer judge could not run ("
+                + ", ".join(sorted(guard_classes)) + ")",
+                auto_corrected=(auto >= total)))
+
+    # 2) Narration call failure (5xx / timeout / empty completion).
+    nar = llm.get("narration")
+    if isinstance(nar, dict) and nar.get("failed"):
+        alarms.append(_alarm(
+            "narration-failure", "Narration call failure", nar["failed"],
+            "narration LLM failed (5xx / timeout / empty completion) — "
+            f"{nar['failed']}/{nar.get('total', '?')} in-window"))
+
+    # 3) Write-back / enrichment refusal STORM.
+    wb = sum(int(v.get("failed", 0)) for t, v in tools.items() if t in _WRITEBACK_TOOLS)
+    enr = sum(int(v.get("failed", 0)) for k, v in guards.items() if k.startswith("enrichment:"))
+    if (wb + enr) >= _STORM_THRESHOLD:
+        alarms.append(_alarm(
+            "writeback-storm", "Write-back / enrichment failure storm", wb + enr,
+            f"{wb} engine write-back failure(s) + {enr} enrichment failure(s) in-window "
+            "(refused / failing writes)"))
+
+    # 4) Desync / stale-beat burst.
+    stale = 0
+    desync = 0
+    for e in (sync_recent or []):
+        if not isinstance(e, dict):
+            continue
+        try:
+            stale += int(e.get("staleRejections") or 0)
+        except (TypeError, ValueError):
+            pass
+        if e.get("desyncDetected"):
+            desync += 1
+    if (stale + desync) >= _STORM_THRESHOLD:
+        alarms.append(_alarm(
+            "desync-burst", "Desync / stale-beat burst", stale + desync,
+            f"{stale} stale-beat rejection(s) + {desync} desync(s) in recent turns"))
+
+    # 5) Embeddings degraded (semantic recall fell back).
+    if isinstance(embeddings, dict) and embeddings.get("degraded"):
+        alarms.append(_alarm(
+            "embeddings-degraded", "Embeddings degraded", 1,
+            "semantic recall fell back to the deterministic floor "
+            f"(provider {embeddings.get('provider') or '?'})"))
+
+    # 6) Integrity faults / circuit-open (the engine's fail-closed corruption alarm).
+    if isinstance(sandbox, dict):
+        faults = sandbox.get("faults") if isinstance(sandbox.get("faults"), list) else []
+        state_faults = [f for f in faults
+                        if isinstance(f, dict) and f.get("kind") != "persist-failure"]
+        circuit_open = bool(sandbox.get("circuitOpen"))
+        if circuit_open or state_faults or sandbox.get("lastIntegrity") == "fault":
+            alarms.append(_alarm(
+                "integrity-fault", "Integrity fault / circuit open",
+                len(state_faults) or len(faults) or 1,
+                ("corruption circuit OPEN — off-screen ticks are skipping this sandbox; "
+                 if circuit_open else "")
+                + f"{len(state_faults)} state-integrity fault(s) on record"))
+
+    # 7) Auto-corrected faults (belts fired / floors stood) — RED-with-auto-corrected.
+    #    A correction is NOT a cloak (owner ruling 2026-07-14): surface it RED, annotated.
+    auto_soft = sum(int(v.get("autoCorrected", 0)) for v in guards.values())
+    belt_n = 0
+    for v in (belt_totals or {}).values():
+        try:
+            belt_n += int(v)
+        except (TypeError, ValueError):
+            pass
+    if (auto_soft + belt_n) > 0:
+        alarms.append(_alarm(
+            "auto-corrected", "Auto-corrected fault(s)", auto_soft + belt_n,
+            "a genuine fault was auto-corrected (a belt fired / a floor stood) — recorded RED, "
+            "not silently cloaked", auto_corrected=True))
+
+    return alarms
+
+
+async def _rollup_and_alarms(user: str | None, engine: dict) -> tuple[dict, list]:
+    """Assemble the WI2 rollup + the WI3 RED alarms for the health snapshot. Best-effort throughout
+    (a broken read simply contributes nothing) — the 10s poll must never hard-fail."""
+    try:
+        rollup = _compute_health_rollup(user=user)
+    except Exception:
+        rollup = {}
+    try:
+        from src import orwell_sync_ledger as _sl
+        sync_recent = _sl.get_recent(user, limit=50)
+    except Exception:
+        sync_recent = []
+    try:
+        from src import orwell_sync_ledger as _sl
+        belt_totals = _sl.get_belt_totals(user)
+    except Exception:
+        belt_totals = {}
+    sandbox = None
+    try:
+        if engine.get("ok"):
+            sandbox = await orwell_engine.sandbox_health(user)
+            if not isinstance(sandbox, dict):
+                sandbox = None
+    except Exception:
+        sandbox = None
+    try:
+        alarms = _compute_alarms(rollup, embeddings=engine.get("embeddings"),
+                                 sync_recent=sync_recent, belt_totals=belt_totals, sandbox=sandbox)
+    except Exception:
+        alarms = []
+    return rollup, alarms
+
+
 async def _health_snapshot(user: str | None) -> dict:
     """The aggregated health view both routes share."""
     detail = await orwell_engine.engine_health_detail()  # FE's view: ok + error + lastError
@@ -1286,6 +1575,10 @@ async def _health_snapshot(user: str | None) -> dict:
     except Exception:
         enrichment = None
 
+    # #1599 WI2/WI3 — the per-class/-tool failure-rate rollup + the RED alarms, both Vault-free and
+    # best-effort (a broken read contributes nothing; the poll must never hard-fail).
+    health_rollup, alarms = await _rollup_and_alarms(user, engine)
+
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "engine": engine,
@@ -1294,6 +1587,10 @@ async def _health_snapshot(user: str | None) -> dict:
         "images": images,
         "castAuthoring": cast_authoring,
         "enrichment": enrichment,
+        # #1599 — the per-class/-tool rolling failure-rate rollup (WI2) and the RED game-breaking
+        # alarms (WI3). Vault-free: counts / class tokens / booleans only.
+        "healthRollup": health_rollup,
+        "alarms": alarms,
         # Build + version (PR) for one-glance triage on the status page. version is the
         # PR-derived "vX.XX"; build is the deployed checkout's short commit SHA.
         "versions": _versions(),
@@ -1325,6 +1622,8 @@ def setup_admin_health_routes() -> APIRouter:
                 "frontend": {"lastError": None, "store": {}},
                 "tiersAgree": False,
                 "images": {"available": False},
+                "healthRollup": {},
+                "alarms": [],
                 "versions": _versions(),  # build/PR is git-derived — still resolvable when the DB/engine is down
                 "error": "health snapshot degraded — recovery actions remain available",
             }
@@ -1778,6 +2077,11 @@ _STATUS_PAGE = """<!doctype html>
      data store (init_db failed) — the operator's cue that the recovery actions below are the
      next step. Hidden when the store is healthy. -->
 <div id="degraded" style="display:none;margin:0 0 14px;border:1px solid #7a3b3b;border-radius:8px;padding:10px 12px;background:#231414;max-width:760px;color:#f0a6a6"></div>
+<!-- #1599 WI3 — the RED alarm banner. Hidden when clear. Each alarm is a genuine game-breaking
+     signal (a guard/judge down, narration failing, a write-back / desync storm, embeddings
+     degraded, an integrity fault / open circuit) — INCLUDING auto-corrected faults (a correction
+     is not a cloak: still RED, annotated). Populated from the health payload's `alarms` array. -->
+<div id="alarms" style="display:none;margin:0 0 14px;max-width:760px"></div>
 <div class="grid" id="grid">Loading…</div>
 <div class="actions">
   <a class="btn" href="/api/admin/debug-bundle" download>Download debug bundle</a>
@@ -1826,6 +2130,11 @@ _STATUS_PAGE = """<!doctype html>
 <style>@keyframes opsspin { to { transform: rotate(360deg); } }</style>
 <!-- END ops-progress lane -->
 <div id="failwrap"></div>
+<!-- #1599 WI2 — the per-class/-tool rolling failure-rate rollup (LLM call classes + engine tools +
+     guard/judge soft-failure classes). Populated from the health payload's `healthRollup`. -->
+<h1 style="margin-top:26px">HEALTH ROLLUP</h1>
+<div class="sub">Rolling failure rates over the last hour, by LLM call class, engine tool, and guard/judge class — the same signal the RED alarms above are derived from.</div>
+<div id="rollupwrap"></div>
 <h1 style="margin-top:26px">CAST AUTHORING &middot; ENRICHMENT</h1>
 <div class="sub">The model-driven cast pipeline (genesis → identity → deep authoring → zeitgeist/texture): the runtime policy, the authoring run state, and every recorded per-class failure — a "no model wired" refusal lands here loudly instead of reading as in-fiction stalling.</div>
 <div id="enrichwrap"></div>
@@ -1879,6 +2188,27 @@ function render(d) {
     ["Front-end store", (st.degraded ? B(false, "DEGRADED") + " · " : "") + esc(st.sessions ?? "?") + " session(s) · " + esc(st.messages ?? "?") + " message(s)" + (st.database_size_mb != null ? " · " + esc(st.database_size_mb) + " MB" : "")],
   ];
   document.getElementById("grid").innerHTML = rows.map(r => '<div class="k">' + esc(r[0]) + "</div><div>" + r[1] + "</div>").join("");
+  // #1599 WI3 — the RED alarm banner: each game-breaking signal (or auto-corrected fault) as its
+  // own red card. A correction is not a cloak — an auto-corrected alarm is still RED, tagged.
+  const alarms = Array.isArray(d.alarms) ? d.alarms : [];
+  // Null-guard the element like renderRollup (`if (!el) return;`) — a missing #alarms must never
+  // throw and wedge the 10s status-page poll on "Loading…".
+  const alarmsEl = document.getElementById("alarms");
+  if (alarmsEl && alarms.length) {
+    alarmsEl.style.display = "";
+    alarmsEl.innerHTML = alarms.map(a =>
+      '<div style="border:1px solid #7a3b3b;border-radius:8px;padding:8px 12px;margin:0 0 8px;background:#231414;color:#f0a6a6">' +
+      '<strong>● ' + esc(a.label || a.code || "ALARM") + "</strong>" +
+      (a.count != null ? ' <span class="sub" style="color:#f0a6a6">×' + esc(a.count) + "</span>" : "") +
+      (a.autoCorrected ? ' <span style="border:1px solid #7a3b3b;border-radius:6px;padding:0 6px;font-size:11px">auto-corrected</span>' : "") +
+      (a.detail ? '<div class="sub" style="color:#d79a9a;margin-top:3px">' + esc(a.detail) + "</div>" : "") +
+      "</div>").join("");
+  } else if (alarmsEl) {
+    alarmsEl.style.display = "none";
+    alarmsEl.innerHTML = "";
+  }
+  // #1599 WI2 — the per-class/-tool failure-rate rollup table (LLM classes, engine tools, guards).
+  renderRollup(d.healthRollup || {});
   // P1: surface a clear DEGRADED-boot banner when the data store failed to initialize.
   // The app booted past it on purpose so this page stays reachable — point the operator at
   // the recovery actions above.
@@ -1923,6 +2253,33 @@ function render(d) {
     (eFails.map(f => "<tr><td>" + esc(fmt((f.at || 0) * 1000)) + "</td><td>" + esc(f.callClass) + "</td><td>" +
                      esc(f.reason) + (f.detail ? " — " + esc(f.detail) : "") + "</td></tr>").join("") ||
      "<tr><td colspan=3>No enrichment failures on record.</td></tr>") + "</tbody></table>";
+}
+// #1599 WI2 — render the per-class/-tool failure-rate rollup as three small tables (LLM call
+// classes, engine tools, guard/judge soft-failure classes). Vault-free: class tokens + counts.
+function renderRollup(rl) {
+  const el = document.getElementById("rollupwrap");
+  if (!el) return;
+  const rate = (f, t) => t ? '<span class="' + (f ? "warn" : "ok") + '">' + esc(f) + "/" + esc(t) +
+    " (" + Math.round((f / t) * 100) + "%)</span>" : '<span class="sub">0/0</span>';
+  const rows = (obj, cols) => {
+    const keys = Object.keys(obj || {}).sort();
+    if (!keys.length) return "<tr><td colspan=" + cols + " class='sub'>none in window</td></tr>";
+    return keys.map(k => {
+      const v = obj[k] || {};
+      const gc = v.total == null;  // guards carry failed/autoCorrected, no total
+      return "<tr><td>" + esc(k) + "</td><td class='num'>" +
+        (gc ? '<span class="warn">' + esc(v.failed || 0) + "</span>" +
+              (v.autoCorrected ? " <span class='sub'>(" + esc(v.autoCorrected) + " auto-corrected)</span>" : "")
+            : rate(v.failed || 0, v.total || 0)) + "</td></tr>";
+    }).join("");
+  };
+  el.innerHTML =
+    "<table style='margin-bottom:10px'><thead><tr><th>LLM call class</th><th style='text-align:right'>failed/total</th></tr></thead><tbody>" +
+    rows(rl.llm, 2) + "</tbody></table>" +
+    "<table style='margin-bottom:10px'><thead><tr><th>Engine tool</th><th style='text-align:right'>failed/total</th></tr></thead><tbody>" +
+    rows(rl.tools, 2) + "</tbody></table>" +
+    "<table><thead><tr><th>Guard / judge class</th><th style='text-align:right'>failures</th></tr></thead><tbody>" +
+    rows(rl.guards, 2) + "</tbody></table>";
 }
 // ── update-awareness that SURVIVES the restart (localStorage) ──
 // The Update button restarts BOTH tiers, including this page's own host. An in-memory reconnect
