@@ -87,6 +87,7 @@ implements — not a flat approximation. The technique sources:
 | `--ow-control-rim` | the control's hairline rim |
 | `--ow-control-ink` | the control's legible ink (→ `--fg`, never accent) |
 | `--ow-danger` / `--ow-on-danger` | system red + its legible on-red label (Destructive role) |
+| `--ow-glass-rim-strong` | the bright NEUTRAL luminous rim a grip paints on hover/active-drag (`rgba(255,255,255,.55)`; a brighter sibling of the soft `--ow-glass-rim`) |
 
 Reused from the existing design system: `--ow-tap-min`, `--ow-ui-font`, `--ow-fw-*`,
 `--ow-fs-*`, `--ow-space-*`, `--ow-radius-*`, `--ow-btn-glass`, `--ow-ios-blue`,
@@ -325,6 +326,39 @@ Consumers (frame-only migration): cast cards (`.oc-portrait` / `.oc-hg`), castin
 <button type="button" class="ow-portrait ow-portrait-tile" aria-label="Open …'s dossier">
   <span class="ow-mono-face">…</span>
 </button>
+```
+
+### Resize handle — `.ow-resize-handle` (#1638)
+
+The thin, edge-hugging grab affordance that drives a container's width (or height) by drag **and**
+keyboard — today the gadget-rail width grip (`.gadget-rail-resize-handle`). It is a **grip, not a
+value control**, which is exactly **why it is not `.ow-slider`**: `.ow-slider` is a track + thumb
+that paints a *value*, whereas this is a transparent hit strip that only signals *where to grab*. The
+primitive is presentation + affordance **only** — the drag / keyboard / clamp / persist logic stays in
+the consumer (the kit never owns width state), mirroring how `.ow-slider` is styling-only.
+
+- **`.ow-resize-handle`** — the hit strip: `position:absolute`, full-height `inset-block:0`, a tunable
+  `--ow-resize-thickness` (8px) width, `touch-action:none`, transparent background. It paints a 2px
+  `::before` bar (`--ow-resize-bar`, pill-radiused).
+- **States** — `:hover` / `.is-active` (the drag class, added on `pointerdown`, removed on
+  `pointerup`/`pointercancel`/aborted drag) paint the **neutral** `--ow-glass-rim-strong` bar — **no
+  accent, no red** (the colorless-glass-chrome contract); `:focus-visible` paints the one sanctioned
+  system-blue (`--ow-focus-ring`) and drops the outline (the bar **is** the focus signal).
+- **Edge anchor** — consumer-owned via `[data-edge="start"]` / `[data-edge="end"]` (the leading /
+  trailing `−3px` strip offset + `3px` bar inset), so the strip stays hugged to the rail's edge and
+  mirrors under side-swap. The kit supplies only the full-height extent + width.
+- **Orientation** — `[aria-orientation="horizontal"]` swaps the axis into a **height** grip
+  (`ns-resize`, a horizontal bar).
+- **a11y** — reduced-motion drops the bar transition; increased-contrast thickens the bar + strengthens
+  the rim; reduced-transparency solidifies the fill. The grip is **desktop-only** (pointer-fine): the
+  consumer hides it on touch and the kit reinforces it on `@media (pointer: coarse)`, so the sub-44px
+  grip is never a tap-target violation. Keyboard resize (`role="slider"` + `aria-value*` + Arrow-key
+  nudges) is preserved in the consumer.
+
+```html
+<div class="ow-resize-handle" data-edge="start" role="slider" aria-orientation="vertical"
+     aria-label="Resize the control room" aria-valuemin="220" aria-valuenow="300"
+     aria-valuemax="520" aria-valuetext="300 pixels" tabindex="0"></div>
 ```
 
 ## Demo / verification — the full kit reference

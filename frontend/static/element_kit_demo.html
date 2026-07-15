@@ -606,6 +606,58 @@
       </div>
     </section>
 
+    <!-- RESIZE HANDLE (.ow-resize-handle) -->
+    <section class="ek-card">
+      <h2>Resize handle — .ow-resize-handle (#1638)</h2>
+      <p class="ek-note">The thin, edge-hugging grab affordance that drives a container's width (or
+        height) by drag <b>and</b> keyboard — the gadget-rail width grip. It is a <b>grip</b>, not a
+        value control, so it is <b>not <code>.ow-slider</code></b> (a track + thumb painting a value):
+        a transparent hit strip that paints a 2px <b>neutral glass-rim</b> bar on hover / active-drag
+        (never an accent or red — the colorless-glass contract) and the one sanctioned system-blue on
+        keyboard focus (the bar <i>is</i> the focus signal). The kit supplies the full-height extent
+        (<code>inset-block:0</code>) + strip width; the edge anchor is consumer-owned via
+        <code>[data-edge]</code>. The consumer keeps all drag / keyboard / clamp / persist logic
+        (<code>role="slider"</code> + <code>aria-value*</code> + Arrow-key nudges).</p>
+
+      <div class="ek-label">Vertical edge grip (drives width) — rest / hover-active / focus</div>
+      <div class="ek-row" style="gap:22px">
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (rest)" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">rest</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (active drag)" aria-valuemin="220" aria-valuenow="360" aria-valuemax="520"
+               aria-valuetext="360 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">hover / active-drag</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle ek-force-focus" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (focus)" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">keyboard focus</div>
+        </div>
+      </div>
+
+      <div class="ek-label">End-edge + horizontal (height) variant</div>
+      <div class="ek-row" style="gap:22px">
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="end" role="slider" aria-orientation="vertical"
+               aria-label="Resize from the trailing edge" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">data-edge="end"</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="start" aria-orientation="horizontal" role="slider"
+               aria-label="Resize height" aria-valuemin="120" aria-valuenow="200" aria-valuemax="480"
+               aria-valuetext="200 pixels" tabindex="0" style="inset-block-start:-3px"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">horizontal (height)</div>
+        </div>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->

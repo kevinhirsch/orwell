@@ -1957,34 +1957,16 @@ body.bg-pattern-perlin-flow {
       transition: width 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
     }
     .gadget-rail[hidden] { display: none; }
-    /* width drag-resize: a thin grab-handle on the rail's INNER edge (the edge facing
-       the chat). Default the rail sits on the right, so the handle is on its LEFT edge;
-       under side-swap the rail is on the left, so the handle moves to its RIGHT edge.
-       Disabled (hidden) when collapsed and on the mobile drawer. */
-    .gadget-rail-resize-handle {
-      position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; z-index: 4;
-      cursor: ew-resize; touch-action: none; background: transparent;
-      border: none; padding: 0; margin: 0;
-    }
-    .gadget-rail-resize-handle::before {
-      content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
-      background: transparent; transition: background .12s ease;
-    }
-    /* #8/#9: the resize affordance was a RED glow (var(--accent)/--red) — colorless glass chrome
-       carries NO accent hue. Hover + active-drag show a NEUTRAL luminous white bar (the glass
-       rim language); keyboard focus shows the ONE sanctioned system-blue (matching the kit's
-       focus-ring contract). NO red on the gadget-sidebar resize/hover state. */
-    .gadget-rail-resize-handle:hover::before,
-    .gadget-rail.grail-resizing .gadget-rail-resize-handle::before {
-      background: rgba(255,255,255,0.55);
-    }
-    .gadget-rail-resize-handle:focus-visible::before {
-      background: var(--ow-ios-blue, #0a84ff);
-    }
-    .gadget-rail-resize-handle:focus-visible { outline: none; }
-    body[data-gadget-side="left"] .gadget-rail-resize-handle {
-      left: auto; right: -3px;
-    }
+    /* width drag-resize: a thin grab-handle on the rail's INNER edge (the edge facing the chat).
+       The grip LOOK (hit strip, 2px NEUTRAL glass-rim bar on hover/drag, system-blue focus — the
+       #8/#9 "no accent/red on the resize affordance" contract) is now the `.ow-resize-handle` KIT
+       primitive (ELEMENT KIT region). The consumer keeps ONLY what it owns: the horizontal EDGE
+       anchor and the hide-when-collapsed. Default the rail sits on the right, so the handle is on
+       its LEFT edge; under side-swap the rail is on the left, so the handle moves to its RIGHT
+       edge. Hidden when collapsed and on the mobile drawer (below). */
+    .gadget-rail-resize-handle { left: -3px; right: auto; }
+    .gadget-rail-resize-handle::before { left: 3px; right: auto; }
+    body[data-gadget-side="left"] .gadget-rail-resize-handle { left: auto; right: -3px; }
     body[data-gadget-side="left"] .gadget-rail-resize-handle::before { left: auto; right: 3px; }
     /* while actively dragging, kill the width transition so the rail tracks the pointer */
     .gadget-rail.grail-resizing { transition: none; }
@@ -21718,6 +21700,10 @@ body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff
      never trips the no-accent-on-glass contract). HIG: focus is system-driven. */
   --ow-focus-ring: var(--ow-ios-blue, #0a84ff);
   --ow-focus-ring-w: 3px;
+  /* The STRONG luminous glass rim — the bright neutral edge a grip/affordance paints on
+     hover/active-drag (a brighter sibling of the soft --ow-glass-rim bloom). Neutral white,
+     NO accent hue, so an edge-resize grip reads as glass chrome, never a colored control. */
+  --ow-glass-rim-strong: rgba(255,255,255,0.55);
   /* THE GLASS TECHNIQUE for kit controls (owner directive). The in-browser Liquid
      Glass method is kube.io "Liquid Glass with CSS + SVG"
      (https://kube.io/blog/liquid-glass-css-svg/) + Frontend-Masters "Liquid Glass on
@@ -22480,6 +22466,71 @@ body.theme-frosted .ow-portrait {
     transform: translate(-50%, -50%);
   }
 }
+
+/* ── RESIZE HANDLE: .ow-resize-handle — an edge-hugging drag/keyboard GRIP (#1638, G7) ──
+   The thin grab affordance that drives a container's width (or height) by drag AND keyboard.
+   It is a GRIP, not a value control, so it is NOT `.ow-slider` (a track + thumb painting a
+   VALUE): a transparent hit strip that paints a 2px NEUTRAL glass-rim bar on hover/active-drag
+   and the ONE sanctioned system-blue on keyboard focus (the bar IS the focus signal). This is
+   presentation + affordance ONLY — the drag/keyboard/clamp/persist logic stays in the consumer
+   (orwellGadgetRail.js); the kit never owns width state. #8/#9: NO accent hue on the bar. The
+   kit supplies the full-height extent (`inset-block:0`) + the strip width; the horizontal edge
+   anchor is consumer-owned (via `[data-edge]` or a thin consumer override, §3.2). */
+.ow-resize-handle {
+  position: absolute; inset-block: 0;
+  width: var(--ow-resize-thickness, 8px); z-index: var(--ow-resize-z, 4);
+  cursor: var(--ow-resize-cursor, ew-resize); touch-action: none;
+  background: transparent; border: none; padding: 0; margin: 0;
+}
+.ow-resize-handle::before {
+  content: ""; position: absolute; inset-block: 0;
+  width: var(--ow-resize-bar, 2px);
+  background: transparent; border-radius: var(--ow-radius-pill, 999px);
+  transition: background .12s ease;
+}
+/* hover / active-drag: the NEUTRAL luminous rim — never an accent / red (#8/#9 contract) */
+.ow-resize-handle:hover::before,
+.ow-resize-handle.is-active::before {
+  background: var(--ow-glass-rim-strong, rgba(255,255,255,0.55));
+}
+/* keyboard focus: the bar IS the focus signal — the one sanctioned system-blue */
+.ow-resize-handle:focus-visible::before {
+  background: var(--ow-focus-ring, var(--ow-ios-blue, #0a84ff));
+}
+.ow-resize-handle:focus-visible { outline: none; }
+/* EDGE anchor (consumer-owned): the leading/trailing −3px strip offset + the 3px ::before inset.
+   These MUST survive the migration — without the edge offset the strip detaches from the rail,
+   and without the ::before inset the 2px bar collapses onto the wrong edge (§3.2 / migration map). */
+.ow-resize-handle[data-edge="start"] { inset-inline-start: -3px; inset-inline-end: auto; }
+.ow-resize-handle[data-edge="start"]::before { inset-inline-start: 3px; inset-inline-end: auto; }
+.ow-resize-handle[data-edge="end"] { inset-inline-end: -3px; inset-inline-start: auto; }
+.ow-resize-handle[data-edge="end"]::before { inset-inline-end: 3px; inset-inline-start: auto; }
+/* HORIZONTAL variant — a HEIGHT grip: swap the axis so the strip spans the inline extent and the
+   2px bar becomes a horizontal line (so the primitive isn't width-only). */
+.ow-resize-handle[aria-orientation="horizontal"] {
+  inset-block: auto; inset-inline: 0;
+  width: auto; height: var(--ow-resize-thickness, 8px);
+  cursor: var(--ow-resize-cursor, ns-resize);
+}
+.ow-resize-handle[aria-orientation="horizontal"]::before {
+  inset-block: auto; inset-inline: 0;
+  width: auto; height: var(--ow-resize-bar, 2px);
+}
+/* a11y trio */
+@media (prefers-reduced-motion: reduce) { .ow-resize-handle::before { transition: none; } }
+@media (prefers-contrast: more) {
+  .ow-resize-handle { --ow-resize-bar: 3px; }              /* thicken the bar so the grip is unmistakable */
+  .ow-resize-handle:hover::before,
+  .ow-resize-handle.is-active::before { background: rgba(255,255,255,0.85); }   /* strengthen the rim */
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ow-resize-handle:hover::before,
+  .ow-resize-handle.is-active::before { background: rgba(255,255,255,1); }      /* solid neutral fill */
+}
+/* Desktop-only affordance (§3.3): the sub-44 grip carries NO coarse-pointer tap-target obligation
+   because the consumer already hides it on touch (mobile uses the full drawer, not a width grip).
+   The kit reinforces it — a resize grip is a pointer-fine affordance. */
+@media (pointer: coarse) { .ow-resize-handle { display: none; } }
 
 /* ── COLOR WELL: .ow-color-well — kit frame around a native color swatch (#1638) ────
    The Theme → Customize color rows: a label + a native <input type="color"> swatch (which

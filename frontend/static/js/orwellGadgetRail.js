@@ -746,7 +746,10 @@
   function ensureResizeHandle() {
     if (resizeHandle && rail.contains(resizeHandle)) return resizeHandle;
     resizeHandle = document.createElement("div");
-    resizeHandle.className = "gadget-rail-resize-handle";
+    // #1638 G7: dual-class — the `.ow-resize-handle` KIT primitive owns the grip LOOK (hit strip,
+    // 2px neutral glass-rim bar, system-blue focus); `.gadget-rail-resize-handle` keeps only the
+    // consumer's edge anchor + hide-when-collapsed overrides.
+    resizeHandle.className = "ow-resize-handle gadget-rail-resize-handle";
     // F-NEW-9: this handle is keyboard-OPERATED (arrows nudge the width), so it is a slider,
     // not a non-interactive separator. role="slider" + the value range lets AT announce the
     // current width and that it's adjustable.
@@ -790,6 +793,7 @@
       if (!dragging) return;
       dragging = false;
       rail.classList.remove("grail-resizing");
+      handle.classList.remove("is-active");   // #1638 G7: drop the kit bar-paint on release/cancel/abort
       try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", endDrag);
@@ -803,6 +807,7 @@
       startX = e.clientX;
       startW = currentWidth();
       rail.classList.add("grail-resizing");
+      handle.classList.add("is-active");   // #1638 G7: paint the kit active-drag bar
       try { handle.setPointerCapture(e.pointerId); } catch (_) {}
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", endDrag);
