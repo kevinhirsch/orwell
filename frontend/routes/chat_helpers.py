@@ -3476,15 +3476,19 @@ async def apply_game_framing(
         else:
             preface.insert(0, {"role": "system", "content": gm_prompt})
     else:
+        _was_active = _gkey in _GAME_WAS_ACTIVE  # capture BEFORE discard: the active→inactive edge
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
         clear_social_runway(user)  # no live season — drop any held runway so a new one starts clean
         _DR_INVITED_BEATS.pop(_gkey, None)  # 0013 §5: a fresh season re-invites cleanly
         # #1626: a new season for the SAME user must re-resolve its own producer byline — clear the
-        # last season's cached name here (the season-reset boundary) so `last_framed_producer_name`
-        # returns None (⇒ client keeps "Production") until this season's casting/live moment prompt
-        # re-stashes it below. Without this the not-clobber-on-blank fail-open would emit the PRIOR
-        # season's producer (CodeRabbit "Major" / Greptile "P1").
-        _LAST_FRAMED_PRODUCER_NAME.pop(user or "default", None)
+        # last season's cached name at the season-reset BOUNDARY (active→inactive) so
+        # `last_framed_producer_name` returns None (⇒ client keeps "Production") until this season's
+        # casting/live moment prompt re-stashes it below. Without this the not-clobber-on-blank
+        # fail-open would emit the PRIOR season's producer. Gate on the boundary — NOT every
+        # steady-state casting turn — so a transient get_moment_prompt hiccup mid-casting can't wipe
+        # a validly-stashed producer and drop resumed/new clients back to "Production" (Greptile "P1").
+        if _was_active:
+            _LAST_FRAMED_PRODUCER_NAME.pop(user or "default", None)
         if game_build:
             # The game IS the product but this sandbox has no season: pre-game, the chat IS
             # the producer's casting interview (0050). Fetch the engine's interview moment

@@ -79,11 +79,12 @@ def test_the_producer_name_is_plumbed_from_engine_to_client():
     assert "orwell.gameNarrator" in chat  # sessionStorage key — reload keeps it for the same season
 
 
-def test_the_producer_byline_is_cleared_at_the_season_reset_boundary(monkeypatch):
-    """BEHAVIORAL (CodeRabbit Major / Greptile P1): drive the not-started (season-reset) framing entry
-    point and assert the cached producer for `user or "default"` is actually REMOVED — so the test
-    fails if the pop ever moves to a branch that doesn't run at the boundary. A blank/absent fetch then
-    leaves nothing cached (⇒ the client keeps the "Production" default); a resolved one re-stashes."""
+def test_the_producer_byline_is_cleared_at_the_reset_boundary_but_survives_casting_hiccups(monkeypatch):
+    """BEHAVIORAL (CodeRabbit Major / Greptile P1): the cached producer is cleared ONLY at the true
+    season-reset boundary (an ACTIVE season transitioning to not-started), NOT on every steady-state
+    casting turn. So (1) at the boundary the prior season's producer is removed (a new season starts
+    from "Production"), but (2) a later casting turn whose get_moment_prompt hiccups PRESERVES the
+    already-stashed producer instead of wiping resumed/new clients back to "Production" (Greptile P1)."""
     import asyncio
     import importlib
     orwell_engine = importlib.import_module("src.orwell_engine")
@@ -92,7 +93,6 @@ def test_the_producer_byline_is_cleared_at_the_season_reset_boundary(monkeypatch
     def _run(coro):
         return asyncio.get_event_loop().run_until_complete(coro)
 
-    ch._GAME_WAS_ACTIVE.clear()
     monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)  # game build defaults ON
 
     async def not_started(user=None):
@@ -105,18 +105,32 @@ def test_the_producer_byline_is_cleared_at_the_season_reset_boundary(monkeypatch
     monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_no_producer)
 
     try:
-        # seed the PRIOR season's producer, then drive the season-reset (not-started) framing entry
+        # (1) BOUNDARY: the season WAS active, now it's not-started ⇒ the prior producer is cleared.
+        ch._GAME_WAS_ACTIVE.clear()
+        ch._GAME_WAS_ACTIVE.add("p")
         ch._LAST_FRAMED_PRODUCER_NAME["p"] = "Prev Producer"
         _run(ch.apply_game_framing([{"role": "system", "content": "base"}], "p"))
-        # the boundary popped it — a new season starts from "Production" (None ⇒ client default)
         assert "p" not in ch._LAST_FRAMED_PRODUCER_NAME
         assert ch.last_framed_producer_name("p") is None
 
-        # and when the new season DOES resolve a producer, pop-then-restash yields the NEW one
+        # (2) STEADY CASTING HICCUP (Greptile P1): a later casting turn (NOT the active→inactive edge)
+        # whose get_moment_prompt THROWS must PRESERVE the already-stashed producer, not wipe it.
+        async def mp_boom(moment=None, user=None):
+            raise RuntimeError("transient engine hiccup")
+
+        monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_boom)
+        ch._GAME_WAS_ACTIVE.clear()  # steady-state casting: never active this turn
+        ch._LAST_FRAMED_PRODUCER_NAME["p"] = "Stable Producer"
+        _run(ch.apply_game_framing([{"role": "system", "content": "base"}], "p"))
+        assert ch.last_framed_producer_name("p") == "Stable Producer"
+
+        # (3) at the boundary, a new season that DOES resolve a producer yields the NEW one.
         async def mp_new_producer(moment=None, user=None):
             return {"systemPrompt": "CASTING", "producerName": "New Producer"}
 
         monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_new_producer)
+        ch._GAME_WAS_ACTIVE.clear()
+        ch._GAME_WAS_ACTIVE.add("p")
         ch._LAST_FRAMED_PRODUCER_NAME["p"] = "Prev Producer"
         _run(ch.apply_game_framing([{"role": "system", "content": "base"}], "p"))
         assert ch.last_framed_producer_name("p") == "New Producer"

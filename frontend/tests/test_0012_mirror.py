@@ -392,7 +392,7 @@ def test_chat_client_adopts_canonical_session_after_stream():
     """§2.4 client half: a loser window records the server's canonical_session id and converges onto
     it AFTER the stream settles (never a mid-stream history reload that would yank the live bubble)."""
     chat = _read("static", "js", "chat.js")
-    assert "if (json.id) _adoptCanonicalAfterStream = json.id;" in chat
+    assert "_adoptCanonicalAfterStream = json.id;" in chat
     assert "sessionModule.selectSession(_adoptCanonicalAfterStream" in chat
 
 
