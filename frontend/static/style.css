@@ -7805,12 +7805,12 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       background: color-mix(in srgb, var(--red) 10%, transparent);
     }
     .compare-parallel-toggle {
-      opacity: 1; color: #e0a050; border-color: #e0a050;
-      background: rgba(224, 160, 80, 0.1);
+      opacity: 1; color: var(--color-warning); border-color: var(--color-warning);
+      background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     }
     .compare-parallel-toggle.active {
-      color: #5b8def; border-color: #5b8def;
-      background: rgba(91, 141, 239, 0.1);
+      color: var(--color-accent); border-color: var(--color-accent);
+      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
     }
     @media (max-width: 480px) {
       .compare-toggle-label { display: none; }      .compare-blind-toggle,
@@ -14972,8 +14972,8 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
 /* Probe annotation states (set by "Free?" button) */
 .cookbook-gpu-btn.gpu-free {
   opacity: 1;
-  border-color: #4ade80;
-  color: #4ade80;
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 .cookbook-gpu-btn.gpu-busy {
   opacity: 0.85;
@@ -18262,7 +18262,7 @@ body.notes-drag-mode .note-card-pin svg {
   font-weight: 700;
   letter-spacing: 1px;
   text-transform: uppercase;
-  color: #b48a4a;
+  color: var(--color-warning);
   background-color: color-mix(in srgb, #b48a4a 18%, transparent);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23b48a4a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='20' height='5' rx='1'/%3E%3Cpath d='M4 8v11a2 2 0 002 2h12a2 2 0 002-2V8'/%3E%3Cpath d='M10 12h4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -23992,7 +23992,7 @@ body.theme-frosted .icon-rail button {
      dark-ink polarity but drive it to full black + drop the .55 dimming so it clears AA, with a
      light halo (dark-ink-on-light legibility, matching the card's other ink). */
   body.theme-frosted #orwell-status .og-chev {
-    color: #000 !important;
+    color: var(--ow-control-ink) !important;
     opacity: 1 !important;
     text-shadow: 0 0 2px rgba(255,255,255,0.65) !important;
   }
