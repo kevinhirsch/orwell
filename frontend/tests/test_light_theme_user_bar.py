@@ -56,22 +56,36 @@ def test_frosted_user_bar_band_is_the_kit_light_glass():
         "the hardcoded dark band (the light-theme 'dark chip' bug) must not come back"
 
 
-def test_frosted_sidebar_label_ink_derives_from_theme_fg():
-    """The brand-title / New-Chat ink + halo still follow the theme's polarity (they float on
-    unbounded glass with no backing chip). The USERNAME is deliberately NOT in this group any
-    more (APP-OV-3): it sits on the light-glass footer chip and takes the sidebar's blanket
-    dark chrome ink."""
+def test_frosted_sidebar_label_ink_is_dark_chrome_ink():
+    """APP-OV-5 (2026-07-15): the frosted #sidebar is a FIXED light-glass material
+    (`background: var(--ow-glass-light-color)` — the ~.60 white kube fill, applied regardless of
+    the theme tokens — style.css L20396/L20420), so its brand title + New-Chat label sit on light
+    glass and MUST take the sidebar's blanket dark chrome ink (#16191f + a LIGHT halo), exactly
+    like every other node under the `#sidebar *` rule and like the username on the footer chip.
+
+    This SUPERSEDES the old "labels float on unbounded glass over dark game content ⇒ theme --fg"
+    reasoning: the sidebar never goes dark on the dark theme (a fixed .60-white fill only lightens
+    the backdrop), so the theme's LIGHT cool var(--fg) here rendered light-on-light — the owner's
+    unreadable 'Orwell' wordmark + 'New Chat'. Measured (headless, real stylesheet): the brand
+    surface is IDENTICAL on the light and dark token sets, so its polarity is theme-independent."""
     m = re.search(
         r"body\.theme-frosted\s+#sidebar\s+\.sidebar-brand-title,\s*"
         r"body\.theme-frosted\s+#sidebar\s+#sidebar-new-chat-btn\s+\.grow\s*\{[^}]*\}",
         CSS, re.S)
     assert m, "missing the frosted sidebar label ink rule (.sidebar-brand-title et al.)"
     body = m.group(0)
-    assert "var(--fg" in body, "the label ink must be the theme's own --fg"
+    assert "#16191f" in body, \
+        "the label ink must be the sidebar's dark chrome ink (#16191f) on the light glass"
+    assert "var(--fg" not in body, \
+        "the theme's LIGHT cool var(--fg) is the light-on-light polarity bug this fix removes"
     assert "color: #fff" not in body, \
         "the hardcoded white ink (light-on-light on a light palette) must not come back"
-    assert "color-mix(in srgb, var(--bg" in body, \
-        "the legibility halo must follow the theme's bg polarity, not a fixed dark shadow"
+    # the legibility halo must be the LIGHT halo the rest of the light-glass chrome uses — a
+    # var(--bg)-derived DARK halo does nothing on the light surface (and smudges under dark ink).
+    assert "rgba(255,255,255" in body or "rgba(255, 255, 255" in body, \
+        "the label needs the LIGHT legibility halo used by the rest of the light-glass chrome"
+    assert "var(--bg" not in body, \
+        "the old var(--bg)-derived DARK halo (invisible on light glass) must not come back"
     # APP-OV-3: no frosted rule may force the username back onto var(--fg) — light ink on the
     # light-glass chip is the polarity bug this fix removes.
     # `[^{}]*` (not `[^}]*`) in the body so an @media wrapper can't swallow its first nested
@@ -179,10 +193,13 @@ def _mean(c):
 
 
 def test_user_bar_polarity_follows_the_theme(_static_server):
-    """APP-OV-3: the frosted material is LIGHT regardless of theme tokens, so on BOTH token sets
-    the footer chip renders as light glass and the username as dark chrome ink. The brand title
-    (no backing chip) keeps following the theme's --fg. Rendered from the real stylesheet, so a
-    reintroduced token-polarity band (the dark-capsule-on-light-sidebar glitch) fails here."""
+    """APP-OV-3 / APP-OV-5: the frosted material is LIGHT regardless of theme tokens, so on BOTH
+    token sets the footer chip renders as light glass and the username as dark chrome ink. The
+    brand title takes the SAME dark chrome ink on both themes (APP-OV-5): the sidebar is a fixed
+    .60-white glass panel that never goes dark on the dark theme, so its ink is theme-independent
+    dark — it just lacks the username's double-glass backing chip. Rendered from the real
+    stylesheet, so a reintroduced token-polarity band (the dark-capsule-on-light-sidebar glitch)
+    or a light-cool var(--fg) label (light-on-light) fails here."""
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
@@ -224,8 +241,10 @@ def test_user_bar_polarity_follows_the_theme(_static_server):
                 f"DARK glass theme: the user-bar chip must stay LIGHT glass ({dark['band']['raw']})"
             assert _mean(dark["name"]) < 128, \
                 f"DARK glass theme: the username ink must be the DARK chrome ink ({dark['name']['raw']})"
-            # the brand title has no chip — it keeps the theme's own (light) ink over the glass.
-            assert _mean(dark["brand"]) > 200, \
-                f"DARK glass theme: the brand-title ink must stay theme-fg LIGHT ({dark['brand']['raw']})"
+            # APP-OV-5: the sidebar is a FIXED light-glass material (it never darkens on the dark
+            # theme), so the brand title takes the same DARK chrome ink as the username + the rest
+            # of the sidebar — a light-cool var(--fg) label here would be the light-on-light bug.
+            assert _mean(dark["brand"]) < 128, \
+                f"DARK glass theme: the brand-title ink must be the DARK chrome ink ({dark['brand']['raw']})"
         finally:
             browser.close()

@@ -45,21 +45,73 @@ CSS = _read("static/style.css")
 CSS_NC = _strip_css_comments(CSS)
 
 
-# ── declaration parsing (comment-free, exact-selector, cascade last-wins) ─────────
-def _rule_blocks(css):
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-        yield m.group(1).strip(), m.group(2)
+# ── declaration parsing (comment-free, exact-selector, cascade last-wins, @media-aware) ──
+# The DEFAULT render = top-level rules PLUS `@media (prefers-reduced-transparency: no-preference)`
+# (the default transparency state, where the sweep's light-glass fixes live). Every OTHER at-rule
+# context — the `prefers-reduced-transparency: reduce` / `prefers-contrast: more` a11y fallbacks,
+# width breakpoints, @supports/@keyframes — is a CONDITIONAL override and is EXCLUDED, so a nested
+# rule can never fold into this cascade as if it were unconditional. (The old flat
+# `[^{}]+\{[^{}]*\}` scan was blind to nesting and read those overrides as top-level.)
+_DEFAULT_MEDIA = "prefers-reduced-transparency: no-preference"
+
+
+def _iter_rules(css):
+    """Yield (selector, body, at_stack) for each style rule, brace-depth aware, tracking the
+    stack of enclosing at-rule preludes. at_stack is a tuple of prelude strings; the empty tuple
+    marks a top-level rule. A style-rule body holds no nested `{}` (this file's CSS uses no CSS
+    nesting), so its end is the next `}`; at-rule blocks push/pop the stack around their contents."""
+    at_stack = []
+    depth_is_at = []
+    prelude_start = 0
+    i, n = 0, len(css)
+    while i < n:
+        c = css[i]
+        if c == "{":
+            prelude = css[prelude_start:i].strip()
+            if prelude.startswith("@"):
+                at_stack.append(prelude)
+                depth_is_at.append(True)
+                prelude_start = i + 1
+                i += 1
+            else:
+                j = css.find("}", i)
+                if j == -1:
+                    break
+                yield prelude, css[i + 1:j], tuple(at_stack)
+                prelude_start = j + 1
+                i = j + 1
+        elif c == "}":
+            if depth_is_at:
+                depth_is_at.pop()
+                if at_stack:
+                    at_stack.pop()
+            prelude_start = i + 1
+            i += 1
+        elif c == ";":  # terminates a bare at-statement (@import/@charset) — reset the prelude
+            prelude_start = i + 1
+            i += 1
+        else:
+            i += 1
+
+
+def _is_default_render(at_stack):
+    """True for the default cascade: top-level, or nested ONLY inside the default-transparency
+    media. Any other conditional at-rule context (reduce / prefers-contrast / breakpoints) is
+    excluded so it is not read as unconditional."""
+    return all(_DEFAULT_MEDIA in prelude for prelude in at_stack)
 
 
 def _effective_decls(css, selector, split_groups=True):
-    """Effective cascade for `selector` across every plain rule. With split_groups (default),
-    a grouped list `A, B {…}` contributes to both A and B — needed to reach the sweep's own
-    grouped fix rules. With split_groups=False, only a rule whose WHOLE selector string equals
-    `selector` matches (mirrors test_1601: excludes grouped media-query siblings like the
-    reduced-transparency `.msg-ai, .msg-user {…}` solid-panel block). !important never lost to
-    a later normal. Returns {prop: value} with `!important` normalized off."""
+    """Effective DEFAULT-render cascade for `selector`. With split_groups (default), a grouped
+    list `A, B {…}` contributes to both A and B — needed to reach the sweep's own grouped fix
+    rules. With split_groups=False, only a rule whose WHOLE selector string equals `selector`
+    matches (mirrors test_1601). Rules in a non-default at-rule context are skipped (@media-aware),
+    and !important never loses to a later normal. Returns {prop: value} with `!important` off."""
     out = {}  # prop -> (value, is_important)
-    for sel, body in _rule_blocks(css):
+    for sel, body, at_stack in _iter_rules(css):
+        if not _is_default_render(at_stack):
+            continue
+        sel = sel.strip()
         if split_groups:
             if selector not in [s.strip() for s in sel.split(",")]:
                 continue
@@ -140,6 +192,13 @@ def test_new_chat_label_is_dark_ink():
         f"light sidebar glass; got color={color!r}"
     )
     _no_cool_token(color)
+    # mirror the brand-title check: the old var(--bg)-derived DARK halo must be gone (invisible on
+    # the light glass, and a smudge under dark ink) — the label rides the LIGHT legibility halo.
+    ts = d.get("text-shadow", "")
+    assert "var(--bg" not in ts.lower(), (
+        f"APP-OV-5: the 'New Chat' label text-shadow must not derive from var(--bg) "
+        f"(a dark halo on the light glass); got text-shadow={ts!r}"
+    )
 
 
 def test_sidebar_dark_ink_clears_aa_on_the_light_glass():
@@ -162,6 +221,18 @@ def test_msg_ai_links_follow_bubble_ink_not_cool_fg():
         "APP-OV-4: links inside the received bubble must INHERIT the bubble's adaptive ink "
         "(so they track polarity: dark on the light glass, light over a dark wallpaper), not "
         f"the global var(--fg) remap that is light-cyan on the light bubble; got color={color!r}"
+    )
+    # the dotted underline must follow the (inherited, adaptive) ink too — not a fixed cool
+    # --hl-function syntax-blue stroke — so the whole chat link is one monochrome run.
+    du = _effective_decls(CSS_NC, "body.theme-frosted .msg-ai a.chat-link")
+    underline = (du.get("text-decoration-color") or du.get("border-bottom-color") or "").lower()
+    assert underline, "missing the chat-link underline colour rule (.msg-ai a.chat-link)"
+    assert "currentcolor" in underline or underline == "inherit", (
+        "APP-OV-4: the chat-link underline must derive from currentColor/inherit so it tracks the "
+        f"bubble's adaptive ink, not a fixed cool stroke; got {underline!r}"
+    )
+    assert "--hl-function" not in underline and "var(--accent" not in underline, (
+        f"APP-OV-4: the chat-link underline must not keep a fixed cool accent stroke; got {underline!r}"
     )
 
 
