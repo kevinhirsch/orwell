@@ -1368,14 +1368,14 @@ function syncAdvancedPickers(colors) {
   }
 }
 
-// AXE-1 (WCAG 2.1.1 Keyboard): roving-tabindex/listbox helpers for the theme-swatch grids
+// AXE-1 (WCAG 2.1.1 Keyboard): roving-tabindex/listbox helpers for the .ow-swatch-grid grids
 // (mirrors the same pattern used for the model picker's rows in models.js). Each grid
-// (`#themeGrid`, `#themeUserGrid`) keeps exactly one visible `.theme-swatch` at
+// (`#themeGrid`, `#themeUserGrid`) keeps exactly one visible `.ow-swatch` at
 // tabindex="0"; Arrow keys move the roving tab stop within that same grid, Enter/Space
 // activates the focused swatch.
 function _visibleSwatches(gridEl) {
   return Array.prototype.filter.call(
-    gridEl.querySelectorAll('.theme-swatch'),
+    gridEl.querySelectorAll('.ow-swatch'),
     (el) => el.offsetParent !== null
   );
 }
@@ -1397,7 +1397,7 @@ function _onSwatchKeydown(e) {
   }
   const NAV_KEYS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'];
   if (NAV_KEYS.indexOf(e.key) === -1) return;
-  const gridEl = sw.closest('.theme-grid');
+  const gridEl = sw.closest('.ow-swatch-grid');
   if (!gridEl) return;
   const items = _visibleSwatches(gridEl);
   if (!items.length) return;
@@ -1554,17 +1554,22 @@ export function initThemeUI() {
   // AXE-1 (WCAG 2.1.1 Keyboard): role="option" + roving tabindex so the swatch grid is fully
   // keyboard-operable (Tab reaches the grid once via the one tabindex="0" swatch, Arrow keys move
   // between swatches, Enter/Space picks) — see _ensureSwatchTabindex / _onSwatchKeydown below.
-  const _swatch = ([name, c]) => {
+  // The tile is the .ow-swatch kit primitive (#1638): a role=option selectable tile whose
+  // selected state is driven SOLELY by aria-selected (no bare `.active` co-class). `opts.extra`
+  // marks a non-house tile for the game-build reveal collapse. Note: `_entries.map(_swatch)` is
+  // safe — Array.map passes the index as the 2nd arg, and `(number).extra` is undefined ⇒ falsy.
+  const _swatch = ([name, c], opts) => {
     const label = name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name.replace(/-/g, ' '));
+    const _extra = !!(opts && opts.extra);
     return `
-    <div class="theme-swatch theme-swatch--preview${name === activeName ? ' active' : ''}" data-theme="${name}"
+    <div class="ow-swatch ow-swatch--preview${_extra ? ' ow-swatch--extra' : ''}" data-theme="${name}"
          style="background:${c.bg};color:${c.fg};border-color:${c.panel};"
          role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${label} theme">
-      <div class="theme-swatch-colors">
-        <span style="background:${c.bg}"></span>
-        <span style="background:${c.panel}"></span>
-        <span style="background:${c.fg}"></span>
-        <span style="background:${c.red}"></span>
+      <div class="ow-swatch__dots">
+        <span class="ow-swatch__dot" style="background:${c.bg}"></span>
+        <span class="ow-swatch__dot" style="background:${c.panel}"></span>
+        <span class="ow-swatch__dot" style="background:${c.fg}"></span>
+        <span class="ow-swatch__dot" style="background:${c.red}"></span>
       </div>
       ${label}
     </div>`;
@@ -1586,20 +1591,31 @@ export function initThemeUI() {
     const otherEntries = _curated.filter(([n, c]) => !_isLead(n, c));
     // Keep the active (non-house) theme visible up-front so a power user's current pick isn't hidden.
     const activeIsOther = otherEntries.some(([n]) => n === activeName);
+    // The listbox (`#themeGrid`, role=listbox) owns ONLY role=option swatches — the extra
+    // (non-house) tiles are direct grid children carrying `.ow-swatch--extra`, collapsed via a
+    // class on the grid. The "Show all" BUTTON is a layout sibling OUTSIDE the listbox (a listbox
+    // may own only options), (re)built here on each render so it never duplicates.
+    const _collapsed = otherEntries.length > 0 && !activeIsOther;
+    grid.classList.toggle('is-collapsed', _collapsed);
     grid.innerHTML = houseEntries.map(_swatch).join('')
-      + (otherEntries.length
-          ? `<button type="button" class="theme-show-all" id="theme-show-all" aria-expanded="${activeIsOther ? 'true' : 'false'}">`
-            + (activeIsOther ? 'Hide extra themes' : `Show all themes (${otherEntries.length})`)
-            + `</button><div class="theme-extra${activeIsOther ? '' : ' hidden'}" id="theme-extra">`
-            + otherEntries.map(_swatch).join('') + `</div>`
-          : '');
-    const _showAll = grid.querySelector('#theme-show-all');
-    const _extra = grid.querySelector('#theme-extra');
-    if (_showAll && _extra) {
+      + otherEntries.map((e) => _swatch(e, { extra: true })).join('');
+    const _stale = grid.parentNode && grid.parentNode.querySelector('#theme-show-all');
+    if (_stale) _stale.remove();
+    if (otherEntries.length) {
+      const _showAll = document.createElement('button');
+      _showAll.type = 'button';
+      _showAll.className = 'theme-show-all';
+      _showAll.id = 'theme-show-all';
+      _showAll.setAttribute('aria-controls', 'themeGrid');
+      _showAll.setAttribute('aria-expanded', _collapsed ? 'false' : 'true');
+      _showAll.textContent = _collapsed ? `Show all themes (${otherEntries.length})` : 'Hide extra themes';
+      grid.insertAdjacentElement('afterend', _showAll);
       _showAll.addEventListener('click', () => {
-        const open = _extra.classList.toggle('hidden');
-        _showAll.setAttribute('aria-expanded', open ? 'false' : 'true');
-        _showAll.textContent = open ? `Show all themes (${otherEntries.length})` : 'Hide extra themes';
+        const nowCollapsed = grid.classList.toggle('is-collapsed');
+        _showAll.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+        _showAll.textContent = nowCollapsed ? `Show all themes (${otherEntries.length})` : 'Hide extra themes';
+        // Re-home the roving tab stop among the now-visible swatches.
+        _ensureSwatchTabindex(grid);
       });
     }
   } else {
@@ -1613,15 +1629,15 @@ export function initThemeUI() {
   if (customEntries.length > 0 && userGrid && userCard) {
     userCard.style.display = '';
     userGrid.innerHTML = customEntries.map(([name, c]) => `
-      <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}" data-custom="1"
+      <div class="ow-swatch ow-swatch--custom" data-theme="${name}" data-custom="1"
            role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${name} theme">
-        <div class="theme-swatch-colors">
-          <span style="background:${c.bg}"></span>
-          <span style="background:${c.panel}"></span>
-          <span style="background:${c.fg}"></span>
-          <span style="background:${c.red}"></span>
+        <div class="ow-swatch__dots">
+          <span class="ow-swatch__dot" style="background:${c.bg}"></span>
+          <span class="ow-swatch__dot" style="background:${c.panel}"></span>
+          <span class="ow-swatch__dot" style="background:${c.fg}"></span>
+          <span class="ow-swatch__dot" style="background:${c.red}"></span>
         </div>
-        <span class="theme-swatch-name">${name}</span>
+        <span class="ow-swatch__name">${name}</span>
         <button type="button" class="theme-delete-btn" data-delete="${name}" title="Delete theme"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     `).join('');
@@ -1663,9 +1679,11 @@ export function initThemeUI() {
 
   // Click handlers for all swatches (preset + custom) across both grids
   const allGrids = [grid, userGrid].filter(Boolean);
+  // Selected state is single-sourced on aria-selected (#1638): the .ow-swatch CSS keys the
+  // selected ring off [aria-selected="true"], so there is no separate `.active` class to keep
+  // in sync (removes the visual/AT drift risk).
   function clearAllActive() {
-    allGrids.forEach(g => g.querySelectorAll('.theme-swatch').forEach(s => {
-      s.classList.remove('active');
+    allGrids.forEach(g => g.querySelectorAll('.ow-swatch').forEach(s => {
       s.setAttribute('aria-selected', 'false');
     }));
   }
@@ -1673,7 +1691,7 @@ export function initThemeUI() {
     // AXE-1: land the roving tabindex once per grid so Tab reaches it; keydown below
     // (Arrow/Home/End/Enter/Space) is wired per-swatch alongside the existing click handler.
     _ensureSwatchTabindex(g);
-    g.querySelectorAll('.theme-swatch').forEach(sw => {
+    g.querySelectorAll('.ow-swatch').forEach(sw => {
       sw.addEventListener('keydown', _onSwatchKeydown);
       sw.addEventListener('click', (e) => {
         if (e.target.closest('.theme-delete-btn')) return;
@@ -1682,7 +1700,6 @@ export function initThemeUI() {
         if (!colors) return;
         applyColors(colors);
         clearAllActive();
-        sw.classList.add('active');
         sw.setAttribute('aria-selected', 'true');
         syncPickers(colors);
         const ct = sw.dataset.custom ? customThemes[name] : null;
@@ -1733,7 +1750,7 @@ export function initThemeUI() {
         save(name, colors, { font: f, density: d, bgPattern: (img ? 'none' : p), bgEffectColor: ec, bgEffectIntensity: ei, bgEffectSize: sz, glassTier: tier, tinted: _getOpts().tinted, bgImage: img, _explicit: true });
       });
     });
-    g.querySelectorAll('.theme-delete-btn').forEach(btn => {
+    g.querySelectorAll('.theme-delete-btn').forEach(btn => { // per-tile delete X (kept in-tile; out of primitive scope)
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const name = btn.dataset.delete;
@@ -1877,7 +1894,7 @@ export function initThemeUI() {
         _saveFull('custom', colors);
       }
       _flashAutosaved();
-      grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+      grid.querySelectorAll('.ow-swatch').forEach(s => s.setAttribute('aria-selected', 'false'));
       syncResetButtons();
     });
   });
@@ -1959,9 +1976,9 @@ export function initThemeUI() {
       _syncGlassTierControl(_defTier);
       _syncGlassTintControl('clear');   // #739
       _syncBgSourceControls('');
-      grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+      grid.querySelectorAll('.ow-swatch').forEach(s => s.setAttribute('aria-selected', 'false'));
       const defSwatch = grid.querySelector('[data-theme="' + DEFAULT_THEME + '"]');
-      if (defSwatch) defSwatch.classList.add('active');
+      if (defSwatch) defSwatch.setAttribute('aria-selected', 'true');
     });
   }
 
@@ -2038,7 +2055,7 @@ export function initThemeUI() {
         _saveFull('custom', base);
       }
       _flashAutosaved();
-      grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+      grid.querySelectorAll('.ow-swatch').forEach(s => s.setAttribute('aria-selected', 'false'));
       syncResetButtons();
     });
   }
@@ -2439,7 +2456,7 @@ export function initThemeUI() {
       applyColors(colors);
       syncPickers(colors);
       _saveFull('custom', colors);
-      grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+      grid.querySelectorAll('.ow-swatch').forEach(s => s.setAttribute('aria-selected', 'false'));
       const prev = document.getElementById('harmony-preview');
       if (prev) prev.innerHTML = [colors.bg, colors.panel, colors.fg, colors.border, colors.red].map(c => `<span style="background:${c}"></span>`).join('');
     });

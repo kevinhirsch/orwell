@@ -1394,9 +1394,9 @@ async function _cmdTheme(args, ctx) {
   tm.save(name, colors);
   const grid = document.getElementById('themeGrid');
   if (grid) {
-    grid.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'));
+    grid.querySelectorAll('.ow-swatch').forEach(s => s.setAttribute('aria-selected', 'false'));
     const sw = grid.querySelector(`[data-theme="${name}"]`);
-    if (sw) sw.classList.add('active');
+    if (sw) sw.setAttribute('aria-selected', 'true');
   }
   await typewriterReply(`Theme: ${name}`);
   return true;

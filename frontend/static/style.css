@@ -7118,48 +7118,22 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 
-    .theme-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
-      gap: 6px; margin-bottom: 12px;
-    }
-    /* J1-06: the game-build "Show all themes" reveal — full-width row + a sub-grid for the
-       inherited (non-house) themes tucked behind it. */
+    /* J1-06: the game-build "Show all themes" reveal. The swatch grid + tiles migrated to the
+       .ow-swatch-grid / .ow-swatch kit primitive (#1638, ELEMENT KIT region). This reveal BUTTON
+       stays a layout sibling — it now lives OUTSIDE the role=listbox grid (a listbox may own only
+       role=option children), so the extra (non-house) tiles are direct grid options collapsed via
+       `.ow-swatch-grid.is-collapsed .ow-swatch--extra`. */
     .theme-show-all {
-      grid-column: 1 / -1;
+      display: block; width: 100%; margin: 0 0 12px;
       background: transparent; border: 1px dashed var(--border); color: var(--fg);
       border-radius: 8px; padding: 7px; font: inherit; font-size: 0.7rem; cursor: pointer;
       opacity: 0.75; transition: opacity 0.12s, border-color 0.12s;
     }
     .theme-show-all:hover, .theme-show-all:focus-visible { opacity: 1; border-style: solid; border-color: var(--accent, var(--red)); }
-    .theme-extra {
-      grid-column: 1 / -1;
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px;
-    }
-    /* beat the global .hidden / .theme-extra source-order tie (both 0,1,0) so collapsed = hidden */
-    .theme-extra.hidden { display: none; }
-    .theme-swatch {
-      border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
-      padding: 5px; text-align: center; font-size: 0.65rem; color: var(--fg);
-      transition: border-color 0.15s, transform 0.15s;
-    }
-    .theme-swatch:hover { transform: scale(1.06); }
-    .theme-swatch.active { border-color: var(--red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 33%, transparent); }
-    .theme-swatch-colors {
-      display: flex; justify-content: center; margin-bottom: 3px;
-    }
-    .theme-swatch-colors span {
-      width: 15px; height: 15px; border-radius: 50%;
-      margin-left: -5px;
-      /* J1-24: the preview dots are a theme's OWN colors (its near-black bg dot,
-         etc.), so a border keyed to the page's --fg vanishes when a dark dot sits
-         on a dark tile. Use a background-independent dual ring instead — a light
-         inner edge + a dark outer edge — so every dot reads on any theme. */
-      border: none;
-      box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.45),
-        0 0 0 1px rgba(0, 0, 0, 0.45);
-    }
-    .theme-swatch-colors span:first-child { margin-left: 0; }
+    /* Collapsed = the non-house extras drop out of layout. They stay role=option children of the
+       listbox (keyboard nav + listbox ownership stay correct); the roving-tabindex helper skips
+       them via offsetParent. */
+    .ow-swatch-grid.is-collapsed .ow-swatch--extra { display: none; }
     .theme-custom-label { font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--fg) 50%, transparent); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 6px; }
     .theme-custom { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
     /* The color-row / color-reset-btn swatch styling migrated to the .ow-color-well kit
@@ -7169,10 +7143,11 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       text-transform: uppercase; letter-spacing: 0.04em; margin: 6px 0 2px;
       border-top: 1px solid var(--border); padding-top: 6px;
     }
-    .theme-swatch[data-custom] { position: relative; overflow: visible; }
-    /* Accent-coloured circular X — always visible (mobile-friendly), sits
-       INSIDE the swatch's top-right corner so it never crops into a
-       neighbouring swatch. */
+    /* The custom-tile position anchor migrated to `.ow-swatch--custom` (ELEMENT KIT region).
+       Accent-coloured circular X — always visible (mobile-friendly), sits INSIDE the swatch's
+       top-right corner so it never crops into a neighbouring swatch. The per-tile delete X is a
+       micro-control kept in-tile (out of the .ow-swatch primitive's scope; mirrors #session-list,
+       where each role=option owns its own action button). */
     .theme-delete-btn {
       position: absolute;
       top: -2px;
@@ -22326,6 +22301,53 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
     backdrop-filter: none !important;
   }
 }
+/* ── SWATCH GRID: .ow-swatch-grid / .ow-swatch — a selectable option-in-a-set (#1638) ──
+   The Theme window's preset + custom swatch grids: a role=listbox grid of role=option tiles.
+   Not a button (a swatch is a selectable option, the kit analog of a radio/listbox-option, not a
+   CTA). SELECTION is single-sourced on [aria-selected="true"] (the value the roving-tabindex code
+   already sets) — a NEUTRAL luminous ring, NEVER the accent hue (#726/#773), so the visual can
+   never diverge from the AT state. A tile DISPLAYS colors (its own bg/fg preview + the dot row),
+   so it is never a glass material and takes no blur on any tier (authored tier-agnostic, like the
+   old .theme-swatch). Text inks the adaptive var(--fg) so a custom tile (no inline preview colors)
+   stays legible on any theme. */
+.ow-swatch-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: var(--ow-space-2, 8px);
+}
+.ow-swatch {
+  border: 2px solid var(--ow-control-rim); border-radius: var(--ow-radius-inner, 16px);
+  padding: var(--ow-space-1, 5px); text-align: center; cursor: pointer;
+  font-size: var(--ow-fs-caption, 0.65rem); color: var(--fg);
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.ow-swatch:hover { transform: scale(1.06); }
+/* SELECTED — a NEUTRAL luminous ring (emphasis = luminosity + weight, NOT accent hue), driven by
+   aria-selected. box-shadow + a neutral border layer OVER the --preview tile's inline border. */
+.ow-swatch[aria-selected="true"], .ow-swatch.is-selected {
+  border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
+}
+/* FOCUS — the fixed system-blue ring (new; the roving-tabindex .focus() had none). */
+.ow-swatch:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff); outline-offset: 2px;
+}
+.ow-swatch__dots { display: flex; justify-content: center; margin-bottom: 3px; }
+.ow-swatch__dot {
+  width: 15px; height: 15px; border-radius: 50%; margin-left: -5px; border: none;
+  /* J1-24: a dot IS the theme's OWN color, so a --fg-keyed border vanishes on a same-tone tile.
+     A background-independent dual ring (light inner edge + dark outer edge) reads on any tile. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.ow-swatch__dot:first-child { margin-left: 0; }
+.ow-swatch__name { display: block; }
+.ow-swatch--custom { position: relative; overflow: visible; }   /* anchors the per-tile delete X */
+@media (prefers-reduced-motion: reduce) { .ow-swatch:hover { transform: none; } }
+/* WCAG 2.5.5 — coarse-pointer 44px hit floor. A tile is ≥66px wide but the short axis is
+   borderline; floor it on touch (mirrors the .oc-pin / .ow-color-well floors). */
+@media (any-pointer: coarse) {
+  .ow-swatch { min-height: var(--ow-tap-min, 44px); }
+}
+
 /* ── COLOR WELL: .ow-color-well — kit frame around a native color swatch (#1638) ────
    The Theme → Customize color rows: a label + a native <input type="color"> swatch (which
    colorPicker.js swaps in place to type="text" + .cp-swatch-input, opening the in-house
@@ -22392,6 +22414,7 @@ body.glass-full .ow-color-well input.cp-swatch-input {
   .ow-color-well input.cp-swatch-input { box-sizing: content-box; padding: 10px !important; }
   .ow-color-well__reset { min-width: var(--ow-tap-min, 44px); min-height: var(--ow-tap-min, 44px); }
 }
+
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
 
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */

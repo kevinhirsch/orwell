@@ -92,9 +92,9 @@ export function handleUIControl(uiData) {
           tm.save(themeName, colors);
           var grid = document.getElementById('themeGrid');
           if (grid) {
-            grid.querySelectorAll('.theme-swatch').forEach(function(s) { s.classList.remove('active'); });
+            grid.querySelectorAll('.ow-swatch').forEach(function(s) { s.setAttribute('aria-selected', 'false'); });
             var sw = grid.querySelector('[data-theme="' + themeName + '"]');
-            if (sw) sw.classList.add('active');
+            if (sw) sw.setAttribute('aria-selected', 'true');
           }
         }
       }

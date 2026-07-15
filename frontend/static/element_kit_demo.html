@@ -479,6 +479,51 @@
       </div>
     </section>
 
+    <!-- SWATCH GRID -->
+    <section class="ek-card">
+      <h2>Swatch grid — .ow-swatch-grid / .ow-swatch (#1638)</h2>
+      <p class="ek-note">The Theme window's selectable preset/custom tiles: a <code>role="listbox"</code>
+        grid of <code>role="option"</code> <code>.ow-swatch</code> tiles. Selection is driven SOLELY by
+        <code>aria-selected="true"</code> — a NEUTRAL luminous ring (never the accent hue); focus shows the
+        system-blue ring; each tile previews a theme's own bg/fg with a dual-ring
+        <code>.ow-swatch__dot</code> row that reads on any tile. A tile displays colors, so it is never a
+        glass material on any tier.</p>
+
+      <div class="ek-label">Selectable tiles (one selected) — role=listbox / role=option</div>
+      <div class="ow-swatch-grid" role="listbox" aria-label="Demo themes" style="max-width:320px">
+        <div class="ow-swatch ow-swatch--preview" role="option" tabindex="0" aria-selected="true"
+             style="background:#16191f;color:#e8eef2;border-color:#2b3040;" aria-label="midnight theme">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#16191f"></span>
+            <span class="ow-swatch__dot" style="background:#2b3040"></span>
+            <span class="ow-swatch__dot" style="background:#e8eef2"></span>
+            <span class="ow-swatch__dot" style="background:#e06c75"></span>
+          </div>
+          midnight
+        </div>
+        <div class="ow-swatch ow-swatch--preview" role="option" tabindex="-1" aria-selected="false"
+             style="background:#fdf6e3;color:#3b3228;border-color:#e5dcc3;" aria-label="parchment theme">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#fdf6e3"></span>
+            <span class="ow-swatch__dot" style="background:#e5dcc3"></span>
+            <span class="ow-swatch__dot" style="background:#3b3228"></span>
+            <span class="ow-swatch__dot" style="background:#b58900"></span>
+          </div>
+          parchment
+        </div>
+        <div class="ow-swatch ow-swatch--preview ek-force-focus" role="option" tabindex="-1" aria-selected="false"
+             style="background:#0d1b2a;color:#a9d6e5;border-color:#1b3a52;" aria-label="ocean theme (focus)">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#0d1b2a"></span>
+            <span class="ow-swatch__dot" style="background:#1b3a52"></span>
+            <span class="ow-swatch__dot" style="background:#a9d6e5"></span>
+            <span class="ow-swatch__dot" style="background:#48cae4"></span>
+          </div>
+          ocean
+        </div>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->
