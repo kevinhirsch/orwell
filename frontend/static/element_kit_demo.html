@@ -386,6 +386,51 @@
       </div>
     </section>
 
+    <!-- PW REVEAL (.ow-pw-field / .ow-pw-reveal) -->
+    <section class="ek-card">
+      <h2>Password reveal — .ow-pw-field / .ow-pw-reveal (#1638)</h2>
+      <p class="ek-note">A <b>treatment</b> on an <code>.ow-field</code>/<code>.ow-input</code>, not a
+        standalone control: a relative <code>.ow-pw-field</code> wrapper reserves trailing room and
+        hosts an in-field <code>.ow-pw-reveal</code> eye button that flips the input
+        <code>password</code>↔<code>text</code>. The eye-open / eye-closed glyph pair swaps by the
+        <code>[aria-pressed]</code> CSS state; the toggle is keyboard-reachable (no
+        <code>tabindex="-1"</code>) and carries <code>aria-pressed</code> with the
+        <code>aria-label</code> swapped Show↔Hide in lockstep. Ink is a neutral control token, never
+        an accent. <b>Owner ruling (2026-07-15):</b> this lane standardizes the existing login toggle
+        only — in-app secret fields keep their bare <code>type=password</code>; the kit primitive +
+        <code>OrwellPwReveal.attach</code> exist so a field can adopt it later.</p>
+
+      <div class="ek-label">Masked (aria-pressed=false) · revealed (aria-pressed=true) · keyboard focus</div>
+      <div class="ek-stack">
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="password" value="hunter2secret" aria-label="Masked password">
+          <button type="button" class="ow-pw-reveal" aria-pressed="false" aria-label="Show password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="text" value="hunter2secret" aria-label="Revealed password">
+          <button type="button" class="ow-pw-reveal" aria-pressed="true" aria-label="Hide password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="password" value="hunter2secret" aria-label="Focused password">
+          <button type="button" class="ow-pw-reveal ek-force-focus" aria-pressed="false" aria-label="Show password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="ek-label">Live — wired by <code>OrwellPwReveal.attach()</code> (click the eye)</div>
+      <div class="ek-stack">
+        <input class="ow-field ow-input" type="password" value="paste-your-key" id="ek-pw-live" aria-label="Live wired password">
+      </div>
+    </section>
+
     <!-- CHECK / RADIO -->
     <section class="ek-card">
       <h2>Checkbox &amp; Radio — .ow-check / .ow-radio</h2>
@@ -787,6 +832,7 @@
 
   <!-- The COMPOSITE kits + their deps (same files index.html loads), then the demo driver. -->
   <script type="module" src="/static/js/orwellSlots.js"></script>
+  <script src="/static/js/orwellPwReveal.js"></script>
   <script type="module" src="/static/js/orwellWindow.js"></script>
   <script src="/static/js/orwellGadgetRail.js"></script>
   <script src="/static/js/orwellGadget.js"></script>

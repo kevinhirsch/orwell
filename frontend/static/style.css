@@ -22532,6 +22532,71 @@ body.theme-frosted .ow-portrait {
    The kit reinforces it — a resize grip is a pointer-fine affordance. */
 @media (pointer: coarse) { .ow-resize-handle { display: none; } }
 
+/* ── PW REVEAL: .ow-pw-field / .ow-pw-reveal — the in-field password show/hide toggle (#1638, G3) ──
+   A TREATMENT on an .ow-field/.ow-input, not a standalone control: a relative wrapper that reserves
+   trailing room and hosts an in-field trailing eye button flipping the input password↔text. The
+   geometry (wrapper, inset, trailing anchor, glyph size, focus ring, native-glyph suppression, the
+   coarse-pointer tap floor) is tier-agnostic and authored unscoped; only the muted glyph INK differs
+   per tier (frosted below; the flat sibling in the NORMAL tier region). The a11y contract (fixes the
+   pre-kit login gaps): the toggle is a real <button>, keyboard-reachable by default (NO tabindex=-1),
+   carries aria-pressed (false = masked, true = revealed) with the aria-label swapped in lockstep, and
+   the eye-open / eye-closed glyph pair is swapped by the [aria-pressed] CSS state (so the static demo
+   renders both states without JS). #6/#8: the ink is a NEUTRAL control token, never an accent hue.
+   OWNER RULING 2026-07-15: this lane standardizes the EXISTING login toggle ONLY — in-app secret
+   fields keep their bare type=password (no reveal); the kit primitive + OrwellPwReveal.attach helper
+   exist so a field CAN adopt it later without re-implementing the toggle. */
+.ow-pw-field { position: relative; display: block; }
+.ow-pw-field > .ow-input,
+.ow-pw-field > .ow-field {
+  padding-inline-end: var(--ow-pw-inset, 2.5rem);   /* reserve room for the trailing eye */
+}
+.ow-pw-reveal {
+  position: absolute; inset-inline-end: 6px; top: 50%;
+  transform: translateY(calc(-50% + 1px));
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto; background: none; border: none; padding: 4px; cursor: pointer;
+  border-radius: var(--ow-radius-inner, 12px);
+  transition: color .12s ease;
+}
+.ow-pw-reveal svg { display: block; width: 18px; height: 18px; }
+/* eye glyph pair — masked (aria-pressed=false) shows the slashed eye; revealed shows the open iris */
+.ow-pw-reveal .ow-pw-eye-open { display: none; }
+.ow-pw-reveal .ow-pw-eye-closed { display: block; }
+.ow-pw-reveal[aria-pressed="true"] .ow-pw-eye-open { display: block; }
+.ow-pw-reveal[aria-pressed="true"] .ow-pw-eye-closed { display: none; }
+.ow-pw-reveal:focus-visible {
+  outline: 2px solid var(--ow-focus-ring, var(--ow-ios-blue, #0a84ff));
+  outline-offset: 1px; border-radius: var(--ow-radius-inner, 12px);
+}
+/* kill Edge's duplicate native reveal/clear glyph — the .ow-pw-reveal is the single affordance */
+.ow-pw-field .ow-input::-ms-reveal,
+.ow-pw-field .ow-input::-ms-clear,
+.ow-pw-field .ow-field::-ms-reveal,
+.ow-pw-field .ow-field::-ms-clear { display: none; }
+/* frosted tier: muted neutral DARK control ink over the light glass field */
+body.theme-frosted .ow-pw-reveal {
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
+}
+body.theme-frosted .ow-pw-reveal:hover { color: var(--ow-control-ink, #16191f); }
+/* coarse-pointer 44px tap floor (WCAG 2.5.5) — the button grows its hit area; the glyph stays
+   centered and compact (inline-flex), the field reserves a wider inset for the larger target. */
+@media (pointer: coarse) {
+  .ow-pw-field > .ow-input,
+  .ow-pw-field > .ow-field { padding-inline-end: var(--ow-pw-inset, 3rem); }
+  .ow-pw-reveal { min-width: var(--tap-min, 44px); min-height: var(--tap-min, 44px); }
+}
+/* a11y trio: reduced-motion drops the glyph transition; increased-contrast raises the rest ink
+   (55%→80%) and thickens the focus ring; reduced-transparency makes the ink fully solid. */
+@media (prefers-reduced-motion: reduce) {
+  .ow-pw-reveal { transition: none; }
+}
+@media (prefers-contrast: more) {
+  body.theme-frosted .ow-pw-reveal { color: color-mix(in srgb, var(--ow-control-ink, #16191f) 80%, transparent); }
+  .ow-pw-reveal:focus-visible { outline-width: 3px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-pw-reveal { color: var(--ow-control-ink, #16191f); }
+}
 /* ── COLOR WELL: .ow-color-well — kit frame around a native color swatch (#1638) ────
    The Theme → Customize color rows: a label + a native <input type="color"> swatch (which
    colorPicker.js swaps in place to type="text" + .cp-swatch-input, opening the in-house
@@ -23036,6 +23101,16 @@ body:not(.theme-frosted) .admin-switch input:checked + .admin-slider,
 body:not(.theme-frosted) .toggle-switch input:checked + .toggle-slider,
 body:not(.theme-frosted) .cookbook-checkbox:checked {
   background: var(--ow-ios-blue, #0a84ff) !important;
+}
+/* ── PW REVEAL: .ow-pw-reveal flat-tier ink (#1638, G3) — the geometry is unscoped in the ELEMENT
+   KIT region; only the muted glyph ink is tier-specific. Flat inks the adaptive --fg (dark on the
+   light-glass card, light on the dark app), never an accent hue. ── */
+body:not(.theme-frosted) .ow-pw-reveal {
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+body:not(.theme-frosted) .ow-pw-reveal:hover { color: var(--fg); }
+@media (prefers-contrast: more) {
+  body:not(.theme-frosted) .ow-pw-reveal { color: color-mix(in srgb, var(--fg) 80%, transparent); }
 }
 /* ── END ELEMENT KIT: NORMAL (FLAT) TIER ──────────────────────────────────────── */
 

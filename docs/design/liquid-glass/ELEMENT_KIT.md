@@ -361,6 +361,47 @@ the consumer (the kit never owns width state), mirroring how `.ow-slider` is sty
      aria-valuemax="520" aria-valuetext="300 pixels" tabindex="0"></div>
 ```
 
+### Password reveal — `.ow-pw-field` / `.ow-pw-reveal` (#1638)
+
+The in-field eye toggle that flips a secret `<input>` between `type="password"` and `type="text"`. It
+is a **treatment on an `.ow-field`/`.ow-input`, not a standalone control**: an `.ow-pw-field` wrapper
+that reserves trailing room and hosts an in-field trailing `.ow-pw-reveal` button. It standardizes the
+one eye glyph, the reveal look, and the accessibility contract so a secret field reveals identically
+everywhere instead of one page implementing it.
+
+- **`.ow-pw-field`** — the relative wrapper (`position:relative`); its child `.ow-input`/`.ow-field`
+  reserves `padding-inline-end: var(--ow-pw-inset, 2.5rem)` so the text never runs under the eye.
+- **`.ow-pw-reveal`** — the trailing toggle button: `position:absolute`, `inset-inline-end:6px`,
+  borderless, `cursor:pointer`, an 18px glyph. Ink is a **neutral** control token — the frosted tier
+  the muted `--ow-control-ink`, the flat tier the adaptive `--fg` — **never an accent hue**.
+- **Glyphs** — one eye pair, reused verbatim from the login page: eye-closed (slashed) = **masked**,
+  eye-open (iris) = **revealed**. The pair is swapped by the `[aria-pressed]` CSS state, so the static
+  demo shows both without JS.
+- **a11y (fixes the pre-kit login gaps)** — the toggle is a real `<button>`, **keyboard-reachable by
+  default** (no `tabindex="-1"`), carries **`aria-pressed`** (`false` = masked, `true` = revealed) with
+  the `aria-label` swapped Show↔Hide in lockstep, shows the system-blue `--ow-focus-ring` on
+  `:focus-visible`, and reaches the 44px `var(--tap-min)` floor on `@media (pointer: coarse)`. The
+  native Edge reveal (`::-ms-reveal`/`::-ms-clear`) is suppressed so the kit eye is the single
+  affordance. The a11y trio: reduced-motion drops the glyph transition; increased-contrast raises the
+  rest ink 55%→80% and thickens the ring; reduced-transparency solidifies the ink.
+- **Wiring** — `window.OrwellPwReveal.attach(inputEl)` (a tiny idempotent, fail-open helper) wraps an
+  existing `.ow-input`, inserts the wired button, and binds click → flip `type`, toggle `aria-pressed`,
+  swap `aria-label`, refocus. **Owner ruling (2026-07-15):** this lane standardizes the **existing
+  login toggle only** — the in-app secret fields (search / endpoint API keys, admin env) keep their
+  bare `type=password` with no reveal; the primitive + helper exist so a field **can** adopt it later.
+  Login is a standalone page that **mirrors** the kit inline (it does not link `style.css`) and keeps
+  its own `wireToggle` (now toggling `aria-pressed`).
+
+```html
+<div class="ow-pw-field">
+  <input class="ow-input" type="password" autocomplete="current-password">
+  <button type="button" class="ow-pw-reveal" aria-pressed="false" aria-label="Show password">
+    <svg class="ow-pw-eye ow-pw-eye-open" …><!-- iris eye --></svg>
+    <svg class="ow-pw-eye ow-pw-eye-closed" …><!-- slashed eye --></svg>
+  </button>
+</div>
+```
+
 ## Demo / verification — the full kit reference
 
 `frontend/static/element_kit_demo.html` is a self-contained, sectioned **full kit reference**

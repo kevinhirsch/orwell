@@ -381,10 +381,21 @@
     } catch (e) { console.warn("[kit-demo] decision styles failed", e); }
   }
 
+  // Wire the live `.ow-pw-field` example with the kit's canonical toggle helper (#1638, G3).
+  function buildPwReveal() {
+    try {
+      var el = document.getElementById("ek-pw-live");
+      if (el && window.OrwellPwReveal && window.OrwellPwReveal.attach) {
+        window.OrwellPwReveal.attach(el);
+      }
+    } catch (e) { console.warn("[kit-demo] pw-reveal wire failed", e); }
+  }
+
   whenReady(function () {
     buildWindows();
     buildNotices();
     buildGadgets();
     buildDecision();
+    buildPwReveal();
   });
 })();

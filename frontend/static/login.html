@@ -316,14 +316,17 @@
      reserved for the primary CTA only). */
   .toggle a { color: var(--ink); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   .toggle a:hover { color: #fff; }
-  .pw-wrapper { position: relative; margin-bottom: 1rem; }
-  .pw-wrapper input:not(.remember-check) { padding-right: 2.5rem; margin-bottom: 0; }
+  /* #1638 G3: the password reveal is the .ow-pw-field / .ow-pw-reveal KIT treatment (style.css
+     ELEMENT KIT region). Login is a standalone page that MIRRORS the kit inline (it does not link
+     style.css), so these rules mirror the kit's single source of truth. */
+  .ow-pw-field { position: relative; margin-bottom: 1rem; }
+  .ow-pw-field input:not(.remember-check) { padding-right: 2.5rem; margin-bottom: 0; }
   /* S1-4 (audit): hide the browser-native password reveal/clear glyphs (Edge ::-ms-reveal /
-     ::-ms-clear). The custom .pw-toggle is the single reveal affordance — the native control
+     ::-ms-clear). The custom .ow-pw-reveal is the single reveal affordance — the native control
      was a confusing duplicate (and rendered an ambiguous clear glyph on the empty field). */
-  .pw-wrapper input::-ms-reveal,
-  .pw-wrapper input::-ms-clear { display: none; }
-  .pw-toggle {
+  .ow-pw-field input::-ms-reveal,
+  .ow-pw-field input::-ms-clear { display: none; }
+  .ow-pw-reveal {
     position: absolute; right: 8px; top: 50%;
     /* +1px on the centering offset nudges the eye icon down 1px so it
        lines up visually with the input text baseline. */
@@ -331,9 +334,12 @@
     background: none; border: none; padding: 4px; cursor: pointer;
     color: color-mix(in srgb, var(--ink) 55%, transparent); width: auto;
     display: flex; align-items: center; justify-content: center;
+    border-radius: 12px;
   }
-  .pw-toggle:hover { color: var(--ink); background: none; }
-  .pw-toggle svg { display: block; }
+  .ow-pw-reveal:hover { color: var(--ink); background: none; }
+  /* a11y: the toggle is keyboard-reachable (no tabindex=-1) and shows the system-blue focus ring. */
+  .ow-pw-reveal:focus-visible { outline: 2px solid var(--ow-focus-ring, #0a84ff); outline-offset: 1px; }
+  .ow-pw-reveal svg { display: block; }
   /* S1-A: the "Remember me" choice is a VISIBLE, labelled row. It used to be an
      unlabelled 14×14 dot overlaying the username field (no signifier — read as a
      stray status glyph — and below the 44px coarse-pointer tap floor). The whole
@@ -435,14 +441,14 @@
 
   <form id="authForm" autocomplete="on">
     <label for="username">Username</label>
-    <div class="pw-wrapper">
+    <div class="ow-pw-field">
       <input id="username" name="username" type="text" required autofocus autocomplete="username">
     </div>
 
     <label for="password">Password</label>
-    <div class="pw-wrapper">
+    <div class="ow-pw-field">
       <input id="password" name="password" type="password" required autocomplete="current-password">
-      <button type="button" class="pw-toggle" id="pwToggle" tabindex="-1" aria-label="Show password">
+      <button type="button" class="ow-pw-reveal" id="pwToggle" aria-pressed="false" aria-label="Show password">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
       </button>
     </div>
@@ -454,9 +460,9 @@
 
     <div id="confirmGroup" style="display:none">
       <label for="confirmPassword">Confirm Password</label>
-      <div class="pw-wrapper">
+      <div class="ow-pw-field">
         <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password">
-        <button type="button" class="pw-toggle" id="pwToggleConfirm" tabindex="-1" aria-label="Show password">
+        <button type="button" class="ow-pw-reveal" id="pwToggleConfirm" aria-pressed="false" aria-label="Show password">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
         </button>
       </div>
@@ -741,6 +747,7 @@
       const show = inp.type === 'password';
       inp.type = show ? 'text' : 'password';
       btn.innerHTML = show ? eyeOpen : eyeClosed;
+      btn.setAttribute('aria-pressed', show ? 'true' : 'false');
       btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
       inp.focus();
     });
@@ -750,7 +757,7 @@
 })();
 
 // Prevent login button and eye toggles from stealing focus on mobile (keeps keyboard open)
-document.querySelectorAll('#submitBtn, .pw-toggle').forEach(btn => {
+document.querySelectorAll('#submitBtn, .ow-pw-reveal').forEach(btn => {
   btn.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
   btn.addEventListener('touchend', (e) => {
     e.preventDefault();
