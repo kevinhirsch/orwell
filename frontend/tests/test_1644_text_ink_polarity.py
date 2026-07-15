@@ -493,7 +493,7 @@ KNOWN_RESIDUAL = [
     #    bespoke reds onto standard tokens, so their KNOWN_RESIDUAL entries were removed here to keep
     #    the anti-rot check honest:
     #      • the dashed-add button (index.html:1539) `color:var(--fg)`, the empty-state hint mixes
-    #        (`color-mix(--fg 45%)` ×10 + `--fg 55%` ×1), and the two inline accent links
+    #        (`color-mix(--fg 45%)` x10 + `--fg 55%` x1), and the two inline accent links
     #        (`var(--accent,var(--red))`) all sit in W3-remapped/adaptive containers whose frosted
     #        `!important` rules already force correct polarity — repointed to `color:inherit` so each
     #        follows its surface ink (dark on the light glass, light on the dark app) and classifies
@@ -501,17 +501,26 @@ KNOWN_RESIDUAL = [
     #      • the two Danger-Zone `#e55` heads + the debug-vault-button `#f0a6a6` → the standard
     #        `var(--color-danger)` (Apple system red, polarity-aware), classified by `_standard_danger`. ──
 
-    # ── W6 — style.css bespoke status/accent hexes (dark-or-status hexes; tokenize) ──
-    {"file": "static/style.css", "line": 7807, "find": "color: #e0a050", "sel": ".compare-parallel-toggle", "count": 1,
-     "wave": "W6", "why": "bespoke compare-toggle amber; tokenize to a status token"},
-    {"file": "static/style.css", "line": 7811, "find": "color: #5b8def", "sel": ".compare-parallel-toggle.active", "count": 1,
-     "wave": "W6", "why": "bespoke compare-toggle blue; tokenize to a status/accent token"},
-    {"file": "static/style.css", "line": 18257, "find": "color: #b48a4a", "sel": ".notes-pane-archive", "count": 1,
-     "wave": "W6", "why": "bespoke notes-archive gold; tokenize"},
-    {"file": "static/style.css", "line": 14973, "find": "color: #4ade80", "sel": ".cookbook-gpu-btn.gpu-free", "count": 1,
-     "wave": "W6", "why": "bespoke gpu-free green; tokenize to --color-success"},
-    {"file": "static/style.css", "line": 23966, "find": "color: #000", "sel": "#orwell-status .og-chev", "count": 1,
-     "wave": "W6", "why": "bespoke #000 chevron glyph (dark-on-light OK, but bare #000 outside print); tokenize"},
+    # ── W6 — FIXED (#1638 kit migration W6): three of the five bespoke style.css status/accent/chrome
+    #    hexes were repointed onto standard tokens, so their KNOWN_RESIDUAL entries were removed here to
+    #    keep the anti-rot check honest:
+    #      • `.compare-parallel-toggle` amber `#e0a050` → `var(--color-warning)` and its `.active` blue
+    #        `#5b8def` → `var(--color-accent)` (color + border + tint mix, polarity-aware);
+    #      • `.cookbook-gpu-btn.gpu-free` green `#4ade80` → `var(--color-success)`.
+    #    Two of the five stayed bespoke and are tracked residuals below:
+    #      • `#orwell-status .og-chev` was REVERTED to `#000` — `var(--ow-control-ink)` (rgb(22,25,31))
+    #        failed the a11y-matrix contrast gate on the textured status pill;
+    #      • `.notes-pane-archive` title gold stayed `#b48a4a` (not `var(--color-warning)` #f0ad4e) — the
+    #        badge's fill/border/data-URI SVG-icon stroke all use #b48a4a and a data-URI can't take a CSS
+    #        var, so the label rejoined #b48a4a for ONE coherent accent rather than a two-tone badge. ──
+    {"file": "static/style.css", "line": 23991, "find": "color: #000", "sel": "#orwell-status .og-chev", "count": 1,
+     "wave": "W6", "why": "a11y-matrix contrast requires pure-black max-contrast ink over the textured "
+                          "status-pill backdrop; --ow-control-ink (rgb(22,25,31)) drops to 3.61:1 < 4.5. "
+                          "Intentional bespoke exception."},
+    {"file": "static/style.css", "line": 18265, "find": "color: #b48a4a", "sel": ".notes-pane-archive", "count": 1,
+     "wave": "W6", "why": "archive badge uses ONE accent source: the label, fill, border and data-URI SVG "
+                          "icon stroke all use the muted archive gold #b48a4a. --color-warning (#f0ad4e) is "
+                          "a brighter amber that would visibly shift the badge and can't reach the SVG stroke."},
 ]
 
 # ── ACCEPTED exceptions (contrast holds / semantically correct — audit §5) ──────────
