@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, isSeasonStarted, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, isSeasonStarted, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, gameNarrator, setGameNarrator, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -127,6 +127,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         're-added a chat.js <script> tag alongside the app.js import.');
     }
     window.__orwellChatEvaluated = true;
+    // #1626 increment 2: restore THIS tab's resolved producer byline on load (sessionStorage, per-tab
+    // per the ADR 0008/0012 convention) so a reload keeps the season's producer name before the next
+    // stream re-emits its `orwell_narrator` event. Fail-open: absent/blank ⇒ the "Production" default
+    // stands. sessionStorage clears on tab close, so a stale value can never outlive the browser tab.
+    try {
+      const _pn = sessionStorage.getItem('orwell.gameNarrator');
+      if (_pn) setGameNarrator(_pn);
+    } catch (_) {}
   }
 
   const RESEARCH_TIMEOUT_MS = 360000;
@@ -192,7 +200,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   // placeholder / resume / continuation site so the model machinery stays invisible to the
   // player (mirrors _setRoleModelLabel for the resolved-model path).
   function _senderLabel(modelLabel) {
-    return isGameBuild() ? GAME_NARRATOR : (modelLabel || '');
+    return isGameBuild() ? gameNarrator() : (modelLabel || '');
   }
   // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
   // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
@@ -228,7 +236,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // C14/immersion: the player must never see the raw LLM model name as the sender —
     // in the game build the narrator IS the show. Use a diegetic label unless a specific
     // speaker name was supplied.
-    else if (document.body.hasAttribute('data-game-build')) label = GAME_NARRATOR;
+    else if (document.body.hasAttribute('data-game-build')) label = gameNarrator();
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     // C14/immersion: the raw "alias -> dated-version" model string must never reach the
@@ -2683,6 +2691,16 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 if (_isBg) continue;
                 if (json.id) _adoptCanonicalAfterStream = json.id;
 
+              } else if (json.type === 'orwell_narrator') {
+                // #1626 increment 2: the engine resolved the season's producer (production-voice)
+                // name — set this window's byline so the turn's bubble + its monogram render the
+                // producer instead of the generic "Production". Persist per-tab (sessionStorage) so a
+                // reload keeps it (stable per season). Fail-open: a blank name resets to the default.
+                if (json.name) {
+                  setGameNarrator(json.name);
+                  try { sessionStorage.setItem('orwell.gameNarrator', String(json.name)); } catch (_) {}
+                }
+
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
                 _usedToolsThisTurn = true;   // this turn called a tool → not a no-tool empty completion
@@ -4698,6 +4716,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           } else if (json.type === 'doc_stream_delta') {
             rich = true;
             if (documentModule && json.delta) documentModule.streamDocDelta(json.delta);
+          } else if (json.type === 'orwell_narrator') {
+            // #1626 increment 2: the MIRROR/background stream carries the season's producer name too —
+            // set this window's byline so the mirrored bubble + monogram match the producer. Persist
+            // per-tab (stable per season). Fail-open: a blank name resets to the "Production" default.
+            if (json.name) {
+              setGameNarrator(json.name);
+              try { sessionStorage.setItem('orwell.gameNarrator', String(json.name)); } catch (_) {}
+            }
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
           } else if (json.type === 'message_saved') {

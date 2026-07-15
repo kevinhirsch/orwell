@@ -230,6 +230,10 @@ def test_face_resolver_player_npc_production_portrait_first():
     out.npcNoPortrait = resolve('ai', 'Cole Danner', deps());
     out.production = resolve('ai', 'Production', deps());
     out.productionSuffixed = resolve('ai', 'Production (Research)', deps());
+    // #1626: once the season's producer name is resolved (narratorName === the byline), that byline
+    // resolves through the SAME production-voice branch — a designed monogram seeded by the producer
+    // name, not the unknown-attribution tile — so the monogram reflects the producer, stable per season.
+    out.producerResolved = resolve('ai', 'The Producer', deps({ narrator: () => 'The Producer' }));
     out.unknownVoice = resolve('ai', 'Mystery Guest', deps());
     out.unlabeled = resolve('ai', '', deps());
     process.stdout.write(JSON.stringify(out));
@@ -263,6 +267,11 @@ def test_face_resolver_player_npc_production_portrait_first():
     for key in ("production", "productionSuffixed"):
         p = r[key]
         assert p["forceMono"] is True and p["card"]["name"] == "Production", key
+    # #1626: a RESOLVED producer byline (narratorName() === the label) takes the production-voice
+    # branch too — a designed monogram seeded by the producer name (sig "p|<name>"), never a photo.
+    pr = r["producerResolved"]
+    assert pr["forceMono"] is True and pr["card"]["name"] == "The Producer"
+    assert pr["sig"] == "p|The Producer" and pr["crop"] is False
     # unknown attribution still gets a designed tile; an unlabeled row defers (no face yet)
     assert r["unknownVoice"]["forceMono"] is True
     assert r["unlabeled"] is None

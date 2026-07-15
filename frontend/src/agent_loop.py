@@ -4931,6 +4931,20 @@ async def _stream_agent_loop_impl(
 
     yield f"data: {json.dumps({'type': 'agent_prep', 'data': {k: round(v, 3) for k, v in prep_timings.items()}})}\n\n"
 
+    # #1626 increment 2: hand the client the season's Vault-free PRODUCER (production-voice) name so the
+    # chat byline + monogram render THAT producer instead of the generic "Production". Emitted here —
+    # once, BEFORE the first delta — so the window var is set before this turn's bubble is labeled.
+    # apply_game_framing stashed it this turn (both live-game and casting framing fetch the moment
+    # prompt). Game/casting turns only; fail-open — absent/blank ⇒ the client keeps "Production".
+    if game_mode:
+        try:
+            from routes.chat_helpers import last_framed_producer_name as _lfpn
+            _producer_name = _lfpn(owner)
+            if _producer_name:
+                yield f'data: {json.dumps({"type": "orwell_narrator", "name": _producer_name})}\n\n'
+        except Exception as _pn_err:
+            logger.debug(f"[orwell] producer-byline emit skipped: {_pn_err}")
+
     full_response = ""
     total_start = time.time()
     time_to_first_token = None

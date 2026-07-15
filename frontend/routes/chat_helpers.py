@@ -913,6 +913,33 @@ _LAST_FRAMED_BEAT_KEY: dict = {}
 # stamp (prior behavior). Vault-free by construction (closed-set public status only).
 _LAST_FRAMED_GAME_MOMENT: dict = {}
 
+# #1626 increment 2 — the Vault-free PRODUCER (production-voice) name from the moment prompt, captured
+# from the SAME framing read that fetches the GM prompt (increment 1 exposed `MomentPromptView.
+# producerName` engine-side). The stream hands it to the client (the `orwell_narrator` event) so the
+# chat byline + monogram render the season's producer instead of the generic "Production". Keyed the
+# SAME "default"-fallback way as `_LAST_FRAMED_GAME_MOMENT`. Fail-open + STABLE PER SEASON: a
+# missing/blank name leaves the prior value — a fetch hiccup never clobbers a good name with None, and
+# absent-entirely ⇒ the client keeps its "Production" default. Vault-free (a public seeded name only).
+_LAST_FRAMED_PRODUCER_NAME: dict = {}
+
+
+def _stash_producer_name(user, mp) -> None:
+    """Stash the Vault-free producer/byline name from the moment prompt (#1626). Fail-open: only a
+    non-blank string is stored, so a hiccuped/empty fetch leaves the last good name (stable per
+    season) and never raises."""
+    try:
+        _pn = (mp or {}).get("producerName")
+        if isinstance(_pn, str) and _pn.strip():
+            _LAST_FRAMED_PRODUCER_NAME[user or "default"] = _pn.strip()
+    except Exception:
+        pass
+
+
+def last_framed_producer_name(user):
+    """The Vault-free producer/byline name stashed for `user` (#1626). None ⇒ the client keeps its
+    'Production' default. Read by the agent loop to emit the `orwell_narrator` stream event."""
+    return _LAST_FRAMED_PRODUCER_NAME.get(user or "default")
+
 # #1411 — the engine-SIGNALED required lever for the framed beat (`GameStateView.requiredLever`),
 # captured from the SAME framing state read that builds `_LAST_FRAMED_BEAT_KEY` (zero extra engine
 # read). The agent loop's forced-`tool_choice` gate reads THIS instead of a FE-held beat→lever map
@@ -3297,6 +3324,7 @@ async def apply_game_framing(
         try:
             mp = await orwell_engine.get_moment_prompt(moment, user=user)
             gm_prompt = (mp or {}).get("systemPrompt") or FALLBACK_GM_PROMPT
+            _stash_producer_name(user, mp)  # #1626: the season's producer byline for the client
         except Exception as e:
             # The season IS live (state proved it) — a moment-prompt hiccup must not become a
             # feeds-down message. Stay in character with a generic, non-fabricating frame.
@@ -3452,6 +3480,7 @@ async def apply_game_framing(
             try:
                 mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
                 pre_prompt = (mp or {}).get("systemPrompt") or PRE_GAME_PROMPT
+                _stash_producer_name(user, mp)  # #1626: the casting producer byline for the client
             except Exception as e:
                 logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
                 pre_prompt = PRE_GAME_PROMPT
