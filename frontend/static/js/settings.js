@@ -2769,7 +2769,7 @@ function initAccount() {
             <input id="tfa-disable-pw" type="password" placeholder="Enter password to disable" autocomplete="current-password" style="padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:var(--fs-sm);width:100%;box-sizing:border-box;margin-bottom:6px;">
             <div class="settings-row settings-row--end">
               <span id="tfa-msg" style="font-size:var(--fs-xs);margin-right:auto;"></span>
-              <button class="admin-btn-add" id="tfa-disable-btn" style="opacity:0.7;">Disable 2FA</button>
+              <button class="ow-btn ow-btn-prominent" id="tfa-disable-btn" style="opacity:0.7;">Disable 2FA</button>
             </div>`;
           el('tfa-disable-btn').addEventListener('click', async () => {
             const pw = el('tfa-disable-pw').value;
@@ -2791,7 +2791,7 @@ function initAccount() {
             <div style="font-size:var(--fs-sm);opacity:0.6;margin-bottom:8px;">Add an extra layer of security with an authenticator app (Aegis, Google Authenticator, etc.)</div>
             <div class="settings-row settings-row--end">
               <span id="tfa-msg" style="font-size:var(--fs-xs);margin-right:auto;"></span>
-              <button class="admin-btn-add" id="tfa-setup-btn">Set Up 2FA</button>
+              <button class="ow-btn ow-btn-prominent" id="tfa-setup-btn">Set Up 2FA</button>
             </div>`;
           el('tfa-setup-btn').addEventListener('click', async () => {
             const msg = el('tfa-msg');
@@ -2812,8 +2812,8 @@ function initAccount() {
                 <input id="tfa-verify-code" type="text" placeholder="Enter 6-digit code to verify" autocomplete="one-time-code" inputmode="numeric" maxlength="8" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-family:inherit;font-size:var(--fs-sm);box-sizing:border-box;text-align:center;letter-spacing:3px;margin-bottom:6px;">
                 <div class="settings-row settings-row--end">
                   <span id="tfa-msg" style="font-size:var(--fs-xs);margin-right:auto;"></span>
-                  <button class="admin-btn-add" id="tfa-cancel-btn" style="opacity:0.5;">Cancel</button>
-                  <button class="admin-btn-add" id="tfa-verify-btn">Verify & Enable</button>
+                  <button class="ow-btn ow-btn-prominent" id="tfa-cancel-btn" style="opacity:0.5;">Cancel</button>
+                  <button class="ow-btn ow-btn-prominent" id="tfa-verify-btn">Verify & Enable</button>
                 </div>`;
               el('tfa-verify-code').focus();
               el('tfa-cancel-btn').addEventListener('click', () => render2FA());
@@ -2835,7 +2835,7 @@ function initAccount() {
                     <div style="color:var(--color-save-green, #4caf50);font-size:var(--fs-sm);font-weight:600;margin-bottom:8px;">&#x2713; 2FA Enabled!</div>
                     <div style="font-size:var(--fs-sm);opacity:0.7;margin-bottom:8px;">Save these backup codes somewhere safe. Each can be used once if you lose your authenticator:</div>
                     <div style="font-family:monospace;font-size:var(--fs-sm);padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;columns:2;column-gap:16px;margin-bottom:8px;">${codes.map(c => '<div style="margin-bottom:2px;">' + c + '</div>').join('')}</div>
-                    <button class="admin-btn-add" id="tfa-done-btn">Done</button>`;
+                    <button class="ow-btn ow-btn-prominent" id="tfa-done-btn">Done</button>`;
                   el('tfa-done-btn').addEventListener('click', () => render2FA());
                 } catch (e) { vmsg.textContent = e.message; vmsg.style.color = 'var(--red)'; }
               });
@@ -3387,9 +3387,9 @@ async function initEmailAccountsSettings() {
         <div style="font-size:var(--fs-sm);font-weight:600;display:flex;align-items:center;gap:6px">${esc(a.name)} ${badge}</div>
         <div class="settings-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.imap_user || a.from_address || '')} — ${esc(imap)}</div>
       </div>
-      ${a.is_default ? '' : `<button class="admin-btn-sm email-acc-default-btn" style="font-size:var(--fs-xs)">Make Default</button>`}
-      <button class="admin-btn-sm email-acc-edit-btn" style="font-size:var(--fs-xs)">Edit</button>
-      <button class="admin-btn-sm email-acc-del-btn" style="font-size:var(--fs-xs);opacity:0.6">Delete</button>
+      ${a.is_default ? '' : `<button class="ow-btn ow-btn-compact email-acc-default-btn">Make Default</button>`}
+      <button class="ow-btn ow-btn-compact email-acc-edit-btn">Edit</button>
+      <button class="ow-btn ow-btn-compact ow-btn-destructive email-acc-del-btn">Delete</button>
     </div>`;
   }
 
@@ -3468,12 +3468,12 @@ async function initEmailAccountsSettings() {
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Username${_hint('Usually the same as your IMAP username (your email address).')}</label><input id="eaf-smtp-user" class="settings-input" value="${esc(a.smtp_user || '')}"></div>
         <div class="settings-row eaf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="eaf-smtp-pass" class="settings-input" type="password" placeholder="${isEdit && a.has_smtp_password ? '(unchanged)' : ''}"></div>
         <div class="settings-row" style="margin-top:10px;align-items:center;">
-          <button class="admin-btn-add" id="eaf-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
+          <button class="ow-btn ow-btn-prominent" id="eaf-save">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             ${isEdit ? 'Save' : 'Create'}
           </button>
           <span id="eaf-msg" style="font-size:var(--fs-xs);flex:1;margin-left:8px;"></span>
-          <button class="admin-btn-add" id="eaf-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
+          <button class="ow-btn ow-btn-prominent" id="eaf-cancel" style="opacity:0.7;position:relative;top:1px;margin-left:auto;">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             Cancel
           </button>
@@ -3802,8 +3802,8 @@ async function initIntegrations() {
             <div class="settings-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(i.base_url || '')}</div>
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
-            <button class="admin-btn-sm intg-edit-btn" data-id="${i.id}" style="font-size:var(--fs-xs);">Edit</button>
-            <button class="admin-btn-sm intg-del-btn" data-id="${i.id}" style="font-size:var(--fs-xs);opacity:0.6;">Del</button>
+            <button class="ow-btn ow-btn-compact intg-edit-btn" data-id="${i.id}">Edit</button>
+            <button class="ow-btn ow-btn-compact ow-btn-destructive intg-del-btn" data-id="${i.id}">Del</button>
           </div>
         </div>
       `).join('');
@@ -4101,7 +4101,7 @@ async function initUnifiedIntegrations() {
         <div class="settings-hint" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.detail || ''}</div>
       </div>
       ${statusDot}
-      <button class="admin-btn-sm intg-del-btn" data-intg-id="${item.id}" data-intg-type="${item.type}" data-intg-name="${(item.name || '').replace(/"/g, '&quot;')}" title="Remove" style="background:none;border:none;padding:4px;cursor:pointer;color:var(--red);opacity:0.55;display:inline-flex;align-items:center;justify-content:center;">
+      <button class="ow-btn ow-btn-icon intg-del-btn" data-intg-id="${item.id}" data-intg-type="${item.type}" data-intg-name="${(item.name || '').replace(/"/g, '&quot;')}" title="Remove" style="color:var(--red);opacity:0.55;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
       </button>
     </div>`;
@@ -4112,7 +4112,7 @@ async function initUnifiedIntegrations() {
     const noticeHtml = integrationNotice ? `
       <div class="intg-followup-note" style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:8px;border:1px solid color-mix(in srgb, var(--accent, var(--red)) 35%, transparent);border-left:3px solid var(--accent, var(--red));border-radius:5px;background:color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);font-size:var(--fs-xs);">
         <span style="flex:1;line-height:1.35">${integrationNotice}</span>
-        <button type="button" class="admin-btn-sm intg-open-email-settings" style="white-space:nowrap;">Email settings</button>
+        <button type="button" class="ow-btn ow-btn-compact intg-open-email-settings" style="white-space:nowrap;">Email settings</button>
       </div>` : '';
     if (items.length === 0) {
       listEl.innerHTML = noticeHtml + '<div style="padding:12px;opacity:0.5;font-size:var(--fs-sm);text-align:center">No integrations configured</div>';
@@ -4243,7 +4243,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Auth${_apiHint('How this service expects the credential to be sent. <b>Bearer</b> = sends "Authorization: Bearer YOUR_KEY" (most modern APIs, ntfy, OpenAI-style). <b>Header</b> = sends YOUR_KEY verbatim under a header name you choose (Miniflux uses X-Auth-Token). <b>Basic</b> = HTTP basic auth (user:pass). <b>None</b> = the API is open / no auth.')}</label><select id="uf-api-auth" class="settings-input"><option value="bearer">Bearer (most common)</option><option value="header">Header</option><option value="basic">Basic</option><option value="none">None</option></select></div>
           <div class="settings-row" id="uf-api-header-row"><label class="settings-label">Header${_apiHint('The HTTP header name the key goes under (Miniflux: X-Auth-Token; most others: Authorization). Only used when Auth = Header.')}</label><input id="uf-api-header" class="settings-input" placeholder="X-Auth-Token"></div>
           <div class="settings-row"><label class="settings-label">API Key${_apiHint('The secret token the service issued you (generated in its admin panel / settings). Used to prove your identity on each request. Required for any Auth mode except None.')}</label><input id="uf-api-key" class="settings-input" type="password" placeholder="Token/key"></div>
-          <div class="settings-row settings-gap-top-sm"><button class="admin-btn-sm" id="uf-api-save">Save</button><button class="admin-btn-sm" id="uf-api-test" class="settings-dim">Test</button><button class="admin-btn-sm" id="uf-api-cancel" class="settings-dim">Cancel</button><span id="uf-api-msg" style="font-size:var(--fs-xs)"></span></div>
+          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-api-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-api-test" class="settings-dim">Test</button><button class="ow-btn ow-btn-compact" id="uf-api-cancel" class="settings-dim">Cancel</button><span id="uf-api-msg" style="font-size:var(--fs-xs)"></span></div>
         </div>
       </div>`;
     // Custom preset dropdown wire-up (hidden select stays as data source).
@@ -4379,7 +4379,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Server URL</label><input id="uf-caldav-url" class="settings-input" placeholder="https://www.google.com/calendar/dav/you@gmail.com/user/"></div>
           <div class="settings-row"><label class="settings-label">Username</label><input id="uf-caldav-user" class="settings-input" placeholder="you@example.com"></div>
           <div class="settings-row"><label class="settings-label">Password</label><input id="uf-caldav-pass" class="settings-input" type="password" placeholder="${isNew ? '' : 'Leave blank to keep existing'}"></div>
-          <div class="settings-row settings-gap-top-sm"><button class="admin-btn-sm" id="uf-caldav-save">Save</button><button class="admin-btn-sm" id="uf-caldav-test" class="settings-dim">Test</button><button class="admin-btn-sm" id="uf-caldav-cancel" class="settings-dim">Cancel</button><span id="uf-caldav-msg" style="font-size:var(--fs-xs);margin-left:6px"></span></div>
+          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-caldav-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-caldav-test" class="settings-dim">Test</button><button class="ow-btn ow-btn-compact" id="uf-caldav-cancel" class="settings-dim">Cancel</button><span id="uf-caldav-msg" style="font-size:var(--fs-xs);margin-left:6px"></span></div>
         </div>
       </div>`;
 
@@ -4484,12 +4484,12 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Username</label><input id="uf-carddav-user" class="settings-input"></div>
           <div class="settings-row"><label class="settings-label">Password</label><input id="uf-carddav-pass" class="settings-input" type="password"></div>
           <div class="settings-row" style="margin-top:8px;align-items:center;">
-            <button class="admin-btn-add" id="uf-carddav-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
+            <button class="ow-btn ow-btn-prominent" id="uf-carddav-save">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
               Save
             </button>
             <span id="uf-carddav-msg" style="font-size:var(--fs-xs);flex:1;margin-left:8px"></span>
-            <button class="admin-btn-add" id="uf-carddav-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
+            <button class="ow-btn ow-btn-prominent" id="uf-carddav-cancel" style="opacity:0.7;position:relative;top:1px;margin-left:auto;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               Cancel
             </button>
@@ -4499,16 +4499,16 @@ async function initUnifiedIntegrations() {
       <div class="admin-card contacts-manager settings-gap-top">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <h2 style="font-size:var(--fs-sm);margin:0;display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent, var(--red));flex-shrink:0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Contacts Import <span id="cm-count" style="opacity:0.5;font-weight:normal;font-size:var(--fs-xs);"></span></h2>
-          <button class="admin-btn-sm" id="cm-import-btn" style="margin-left:auto;">Import</button>
-          <button class="admin-btn-sm" id="cm-export-vcf-btn">Export .vcf</button>
-          <button class="admin-btn-sm" id="cm-export-csv-btn">Export .csv</button>
-          <button class="admin-btn-sm" id="cm-add-toggle">+ Add</button>
+          <button class="ow-btn ow-btn-compact" id="cm-import-btn" style="margin-left:auto;">Import</button>
+          <button class="ow-btn ow-btn-compact" id="cm-export-vcf-btn">Export .vcf</button>
+          <button class="ow-btn ow-btn-compact" id="cm-export-csv-btn">Export .csv</button>
+          <button class="ow-btn ow-btn-compact" id="cm-add-toggle">+ Add</button>
           <input type="file" id="cm-import-file" accept=".vcf,.csv,text/vcard,text/csv" multiple style="display:none">
         </div>
         <div id="cm-add-row" class="contacts-add-row" style="display:none;">
           <input id="cm-add-name" class="settings-input" placeholder="Name" style="flex:1;min-width:0;">
           <input id="cm-add-email" class="settings-input" placeholder="email@example.com" style="flex:1;min-width:0;">
-          <button class="admin-btn-sm" id="cm-add-save">Save</button>
+          <button class="ow-btn ow-btn-compact" id="cm-add-save">Save</button>
         </div>
         <div id="cm-list" class="contacts-list"><div style="opacity:0.4;font-size:var(--fs-xs);padding:8px 2px;">Loading…</div></div>
       </div>`;
@@ -4658,11 +4658,11 @@ async function initUnifiedIntegrations() {
             <div class="contact-name" style="font-size:var(--fs-sm);font-weight:600;">${esc(c.name || '(no name)')}</div>
             <div class="contact-sub" style="font-size:var(--fs-xs);opacity:0.55;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(sub)}</div>
           </div>
-          <button class="admin-btn-sm contact-edit" title="Edit" style="display:inline-flex;align-items:center;gap:4px;color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));">
+          <button class="ow-btn ow-btn-compact contact-edit" title="Edit" style="color:var(--accent, var(--red));border-color:color-mix(in srgb, var(--accent, var(--red)) 35%, var(--border));">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             Edit
           </button>
-          <button class="admin-btn-sm contact-del" title="Delete" style="opacity:0.85;display:inline-flex;align-items:center;gap:4px;">
+          <button class="ow-btn ow-btn-compact ow-btn-destructive contact-del" title="Delete">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             Delete
           </button>
@@ -4671,7 +4671,7 @@ async function initUnifiedIntegrations() {
           <input class="settings-input contact-edit-name" value="${esc(c.name || '')}" placeholder="Name">
           <input class="settings-input contact-edit-emails" value="${esc(emails)}" placeholder="email1, email2">
           <input class="settings-input contact-edit-phones" value="${esc(phones)}" placeholder="phone1, phone2">
-          <div style="display:flex;gap:6px;"><button class="admin-btn-sm contact-save">Save</button><button class="admin-btn-sm contact-cancel" style="opacity:0.7;">Cancel</button></div>
+          <div style="display:flex;gap:6px;"><button class="ow-btn ow-btn-compact contact-save">Save</button><button class="ow-btn ow-btn-compact contact-cancel" style="opacity:0.7;">Cancel</button></div>
         </div>
       </div>`;
     }).join('');
@@ -4798,20 +4798,20 @@ async function initUnifiedIntegrations() {
           <div class="settings-row uf-smtp-creds"><label class="settings-label">Password${_hint('Your SMTP password — often the same as your IMAP password.')}</label><input id="uf-smtp-pass" class="settings-input" type="password" placeholder="${placeholderPass}"></div>
           <div class="settings-row settings-gap-top-sm"><label class="settings-label">Default${_hint('Use this account whenever no specific account is chosen.')}</label><label class="ow-switch" style="margin-left:0"><input type="checkbox" id="uf-email-default"><span class="ow-switch-track"></span></label><span style="font-size:var(--fs-xs);opacity:0.5;margin-left:6px">Used when nothing else is selected</span></div>
           <div class="settings-row" style="margin-top:10px;align-items:center;">
-            <button class="admin-btn-add" id="uf-email-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
+            <button class="ow-btn ow-btn-prominent" id="uf-email-save">
               <span class="uf-email-save-ico" style="display:inline-flex;width:11px;height:11px;align-items:center;justify-content:center;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
               </span>
               <span class="uf-email-save-label">${isEdit ? 'Save' : 'Create'}</span>
             </button>
-            <button class="admin-btn-add" id="uf-email-test" style="display:inline-flex;align-items:center;gap:5px;opacity:0.85;">
+            <button class="ow-btn ow-btn-prominent" id="uf-email-test" style="opacity:0.85;">
               <span class="uf-email-test-ico" style="display:inline-flex;width:11px;height:11px;align-items:center;justify-content:center;">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 4 12 14.01 9 11.01"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
               </span>
               Test
             </button>
             <span id="uf-email-msg" style="font-size:var(--fs-xs);flex:1;margin-left:8px"></span>
-            <button class="admin-btn-add" id="uf-email-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
+            <button class="ow-btn ow-btn-prominent" id="uf-email-cancel" style="opacity:0.7;position:relative;top:1px;margin-left:auto;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               Cancel
             </button>
@@ -4895,11 +4895,11 @@ async function initUnifiedIntegrations() {
         <div style="font-weight:600;margin-bottom:3px;">${esc(n.title)}</div>
         <div style="opacity:0.8;margin-bottom:6px;">${esc(n.body)}</div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" class="admin-btn-sm" style="background:var(--red);border-color:var(--red);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
+          <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" class="ow-btn ow-btn-prominent" style="text-decoration:none;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
             Generate App Password
           </a>
-          <button type="button" class="admin-btn-sm uf-prov-copy" data-url="${esc(n.url)}" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;">
+          <button type="button" class="ow-btn ow-btn-compact uf-prov-copy" data-url="${esc(n.url)}" style="opacity:0.7;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Copy link
           </button>
@@ -5182,12 +5182,12 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Email</label><input id="uf-vault-email" class="settings-input" placeholder="you@example.com"></div>
           <div class="settings-row"><label class="settings-label">Master Password</label><input id="uf-vault-pass" class="settings-input" type="password" placeholder="Only required for Login / Unlock"></div>
           <div class="settings-row" style="margin-top:4px;flex-wrap:wrap;gap:4px">
-            <button class="admin-btn-sm" id="uf-vault-save">Save Config</button>
-            <button class="admin-btn-sm" id="uf-vault-login">Login</button>
-            <button class="admin-btn-sm" id="uf-vault-unlock">Unlock</button>
-            <button class="admin-btn-sm" id="uf-vault-lock" class="settings-dim">Lock</button>
-            <button class="admin-btn-sm" id="uf-vault-logout" class="settings-dim">Logout</button>
-            <button class="admin-btn-sm" id="uf-vault-cancel" class="settings-dim">Cancel</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-save">Save Config</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-login">Login</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-unlock">Unlock</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-lock" class="settings-dim">Lock</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-logout" class="settings-dim">Logout</button>
+            <button class="ow-btn ow-btn-compact" id="uf-vault-cancel" class="settings-dim">Cancel</button>
             <span id="uf-vault-msg" style="font-size:var(--fs-xs);margin-left:4px"></span>
           </div>
           <div class="settings-hint" style="margin-top:6px;line-height:1.4">
@@ -5314,7 +5314,7 @@ async function initUnifiedIntegrations() {
       msg.innerHTML =
         'Authorize in the opened tab. If the redirect fails (remote access), paste the resulting URL here: ' +
         '<input id="uf-mcp-pasteback" class="settings-input" placeholder="http://localhost:7000/api/mcp/oauth/callback?code=..." class="settings-gap-top-sm">' +
-        '<button class="admin-btn-sm" id="uf-mcp-paste-go" class="settings-gap-top-sm">Submit</button>';
+        '<button class="ow-btn ow-btn-compact" id="uf-mcp-paste-go" class="settings-gap-top-sm">Submit</button>';
       const pasteGo = el('uf-mcp-paste-go');
       if (pasteGo) pasteGo.addEventListener('click', async () => {
         const cb = el('uf-mcp-pasteback').value.trim();
@@ -5382,10 +5382,10 @@ async function initUnifiedIntegrations() {
               <span style="font-size:var(--fs-xs);opacity:0.7">${statusText}</span>
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-              ${srv.needs_oauth ? `<a href="/api/mcp/oauth/authorize/${srv.id}" target="_blank" class="admin-btn-sm" style="background:var(--red);color:#fff;text-decoration:none">Authorize</a>` : ''}
-              <button class="admin-btn-sm" id="uf-mcp-reconnect">Reconnect</button>
-              <button class="admin-btn-sm" id="uf-mcp-toggle">${srv.is_enabled ? 'Disable' : 'Enable'}</button>
-              <button class="admin-btn-sm" id="uf-mcp-cancel" class="settings-dim">Close</button>
+              ${srv.needs_oauth ? `<a href="/api/mcp/oauth/authorize/${srv.id}" target="_blank" class="ow-btn ow-btn-compact ow-btn-destructive" style="text-decoration:none">Authorize</a>` : ''}
+              <button class="ow-btn ow-btn-compact" id="uf-mcp-reconnect">Reconnect</button>
+              <button class="ow-btn ow-btn-compact" id="uf-mcp-toggle">${srv.is_enabled ? 'Disable' : 'Enable'}</button>
+              <button class="ow-btn ow-btn-compact" id="uf-mcp-cancel" class="settings-dim">Close</button>
               <span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span>
             </div>
             <div id="uf-mcp-tools-panel"></div>
@@ -5448,7 +5448,7 @@ async function initUnifiedIntegrations() {
             <div id="uf-mcp-sse-fields" style="display:none;flex-direction:column;gap:6px;">
               <div class="settings-row"><label class="settings-label">URL</label><input id="uf-mcp-url" class="settings-input" placeholder="http://localhost:3001/sse"></div>
             </div>
-            <div class="settings-row settings-gap-top-sm"><button class="admin-btn-sm" id="uf-mcp-save">Save</button><button class="admin-btn-sm" id="uf-mcp-cancel" class="settings-dim">Cancel</button><span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span></div>
+            <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-mcp-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-mcp-cancel" class="settings-dim">Cancel</button><span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span></div>
           </div>
         </div>`;
       el('uf-mcp-transport').addEventListener('change', () => {
@@ -5564,8 +5564,8 @@ async function initUnifiedIntegrations() {
             <input type="text" class="uf-codex-rename settings-input" data-token-id="${esc(t.id)}" value="${esc(t.name || cfg.defaultName)}" placeholder="${esc(cfg.defaultName)} (e.g. ${esc(cfg.word)} on laptop)" style="font-size:var(--fs-sm);font-weight:600;padding:3px 6px;width:100%;background:transparent;border:1px solid transparent;border-radius:4px;" title="Click to rename this agent">
             <div class="settings-hint" style="margin-top:2px;">${esc(t.token_prefix || 'token')}...${t.last_used_at ? ` · Last used ${new Date(t.last_used_at).toLocaleDateString()}` : ' · Never used'}</div>
           </div>
-          <button class="admin-btn-sm uf-codex-copy-prefix" data-token-prefix="${esc(t.token_prefix || '')}" title="Copy token prefix (full token only shown once, at creation)" class="settings-dim">Copy</button>
-          <button class="admin-btn-delete uf-codex-revoke" data-token-id="${esc(t.id)}">Revoke</button>
+          <button class="ow-btn ow-btn-compact uf-codex-copy-prefix" data-token-prefix="${esc(t.token_prefix || '')}" title="Copy token prefix (full token only shown once, at creation)" class="settings-dim">Copy</button>
+          <button class="ow-btn ow-btn-compact ow-btn-destructive uf-codex-revoke" data-token-id="${esc(t.id)}">Revoke</button>
         </div>
         <div style="font-size:var(--fs-xs);font-weight:600;opacity:0.62;margin-bottom:4px;">Tool access</div>
         ${scopeToggles(t)}
@@ -5586,14 +5586,14 @@ async function initUnifiedIntegrations() {
             <div class="settings-hint" style="margin-bottom:4px;">Copy this token now &mdash; it will not be shown again.</div>
             <code id="uf-codex-token" style="display:block;word-break:break-all;font-size:var(--fs-xs);padding:6px 8px;background:rgba(0,0,0,0.08);border-radius:4px;"></code>
             <div style="margin-top:6px;">
-              <button class="admin-btn-sm" id="uf-codex-copy-token">Copy token</button>
+              <button class="ow-btn ow-btn-compact" id="uf-codex-copy-token">Copy token</button>
             </div>
 
             <div style="margin-top:14px;font-weight:600;font-size:var(--fs-xs);margin-bottom:4px;">Quickstart &mdash; or copy setup directly in your terminal</div>
             <div class="settings-hint" style="margin-bottom:6px;">${cfg.setupDescription}</div>
             <pre style="margin:0;white-space:pre;overflow-x:auto;max-height:220px;overflow-y:auto;font-size:var(--fs-xs);line-height:1.45;padding:8px 10px;background:rgba(0,0,0,0.08);border-radius:4px;width:100%;box-sizing:border-box;"><code id="uf-codex-setup-code"></code></pre>
             <div style="margin-top:6px;">
-              <button class="admin-btn-sm" id="uf-codex-copy-setup">Copy setup</button>
+              <button class="ow-btn ow-btn-compact" id="uf-codex-copy-setup">Copy setup</button>
             </div>
 
             <div style="margin-top:14px;font-weight:600;font-size:var(--fs-xs);margin-bottom:4px;">Configure access</div>
@@ -5603,12 +5603,12 @@ async function initUnifiedIntegrations() {
           <div style="font-size:var(--fs-xs);font-weight:600;opacity:0.62;margin-top:10px;">${agentTokens.length ? 'Existing agents' : 'Agents'}</div>
           <div id="uf-codex-token-list">${tokenRows}</div>
           <div class="settings-row" style="margin-top:10px;align-items:center;">
-            <button class="admin-btn-add" id="uf-codex-save" style="background:var(--red);border-color:var(--red);color:#fff;display:inline-flex;align-items:center;gap:5px;font-weight:600;">
+            <button class="ow-btn ow-btn-prominent" id="uf-codex-save">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
               Save
             </button>
             <span id="uf-codex-msg" style="font-size:var(--fs-xs);flex:1;margin-left:8px"></span>
-            <button class="admin-btn-add" id="uf-codex-cancel" style="opacity:0.7;display:inline-flex;align-items:center;gap:5px;position:relative;top:1px;margin-left:auto;">
+            <button class="ow-btn ow-btn-prominent" id="uf-codex-cancel" style="opacity:0.7;position:relative;top:1px;margin-left:auto;">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               Cancel
             </button>

@@ -2012,7 +2012,7 @@
                   <option value="2">2x</option>
                 </select>
               </div>
-              <button type="button" id="set-ttsPreviewBtn" class="admin-btn-sm" style="margin-top:4px;padding:5px 16px;font-size:var(--fs-sm);">Preview</button>
+              <button type="button" id="set-ttsPreviewBtn" class="ow-btn ow-btn-compact" style="margin-top:4px;">Preview</button>
               <div id="set-ttsSettingsMsg" style="font-size:var(--fs-xs);color:inherit;"></div>
             </div>
           </div>
@@ -2045,7 +2045,7 @@
                   <option value="serper" data-search-logo="serper">Serper.dev</option>
                   <option value="disabled" data-search-logo="disabled">Disabled</option>
                 </select>
-                <button type="button" class="admin-btn-sm" id="set-searchTestBtn" title="Run a test query against the configured provider" style="margin-left:6px;flex-shrink:0;position:relative;top:2px;">Test</button>
+                <button type="button" class="ow-btn ow-btn-compact" id="set-searchTestBtn" title="Run a test query against the configured provider" style="margin-left:6px;flex-shrink:0;position:relative;top:2px;">Test</button>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Results</label>
@@ -2182,8 +2182,8 @@
             </div>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px;">
-            <button type="button" class="admin-btn-sm" id="reset-window-positions-btn" title="Move all floating panels back to their default positions">↩ Reset window positions</button>
-            <button type="button" class="admin-btn-sm" id="set-uiVisResetBtn" style="opacity:0.5;">Reset All</button>
+            <button type="button" class="ow-btn ow-btn-compact" id="reset-window-positions-btn" title="Move all floating panels back to their default positions">↩ Reset window positions</button>
+            <button type="button" class="ow-btn ow-btn-compact" id="set-uiVisResetBtn" style="opacity:0.5;">Reset All</button>
           </div>
         </div>
 
@@ -2416,7 +2416,7 @@
                 </div>
                 <div class="admin-model-form-row">
                   <span style="flex:1"></span>
-                  <button class="admin-btn-sm" id="adm-epLocalTestBtn" style="width:55px;text-align:center;">Test</button>
+                  <button class="ow-btn ow-btn-compact" id="adm-epLocalTestBtn" style="width:55px;text-align:center;">Test</button>
                   <button class="ow-btn ow-btn-prominent" id="adm-epLocalAddBtn" style="width:55px;text-align:center;">Add</button>
                 </div>
                 <div class="adm-quickstart-section collapsed" id="adm-add-local-quickstart">
@@ -2425,10 +2425,10 @@
                     <svg class="adm-section-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                   </div>
                   <div class="adm-quickstart-body">
-                    <button class="admin-btn-sm" id="adm-epDiscoverBtn" title="Scan your network for running model servers">
+                    <button class="ow-btn ow-btn-compact" id="adm-epDiscoverBtn" title="Scan your network for running model servers">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-1px;margin-right:4px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Scan for Servers
                     </button>
-                    <button class="admin-btn-sm" id="adm-epOllamaBtn" title="Fill the default Ollama endpoint">Ollama</button>
+                    <button class="ow-btn ow-btn-compact" id="adm-epOllamaBtn" title="Fill the default Ollama endpoint">Ollama</button>
                   </div>
                 </div>
                 <div id="adm-epLocalMsg" class="adm-ep-inline-msg"></div>
@@ -2482,8 +2482,8 @@
                     <option value="llm">LLM</option>
                     <option value="image">Image</option>
                   </select>
-                  <button class="admin-btn-sm" id="adm-epApiTestBtn" style="width:55px;text-align:center;">Test</button>
-                  <button class="admin-btn-sm hidden" id="adm-epApiCancelTestBtn" style="width:62px;text-align:center;">Cancel</button>
+                  <button class="ow-btn ow-btn-compact" id="adm-epApiTestBtn" style="width:55px;text-align:center;">Test</button>
+                  <button class="ow-btn ow-btn-compact hidden" id="adm-epApiCancelTestBtn" style="width:62px;text-align:center;">Cancel</button>
                   <button class="ow-btn ow-btn-prominent" id="adm-epAddBtn" style="width:55px;text-align:center;">Add</button>
                 </div>
                 <div id="adm-epApiMsg" class="adm-ep-inline-msg"></div>
@@ -2519,7 +2519,7 @@
             <div id="unified-integrations-list"></div>
             <div id="unified-intg-form" style="display:none"></div>
             <div style="text-align:center;padding:8px 0;">
-              <button type="button" class="admin-btn-sm" id="unified-intg-add-btn" style="display:inline-flex;align-items:center;gap:6px;">+ Add Integration<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+              <button type="button" class="ow-btn ow-btn-compact" id="unified-intg-add-btn">+ Add Integration<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.7;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
             </div>
           </div>
         </div>
@@ -2570,7 +2570,7 @@
                  live Producer's Vault section (?vault=1), behind an explicit confirm in admin.js. The plain
                  link above stays Vault-free; this one deliberately includes secret state. -->
             <div class="settings-row settings-row--end settings-gap-top">
-              <button class="admin-btn-add" id="adm-health-bundle-vault" style="border-color:#7a3b3b;color:var(--color-danger)" title="DEBUG — download the debug bundle WITH the live Producer's Vault (off-screen scheming, NPC confessionals, hidden ties, sealed twists, the real eviction votes). SPOILERS — deliberately includes your in-progress game's secrets (owner override of mandate #2).">Download debug bundle + Producer's Vault (SPOILERS)</button>
+              <button class="ow-btn ow-btn-prominent" id="adm-health-bundle-vault" style="border-color:#7a3b3b;color:var(--color-danger)" title="DEBUG — download the debug bundle WITH the live Producer's Vault (off-screen scheming, NPC confessionals, hidden ties, sealed twists, the real eviction votes). SPOILERS — deliberately includes your in-progress game's secrets (owner override of mandate #2).">Download debug bundle + Producer's Vault (SPOILERS)</button>
             </div>
             <div id="adm-health-msg" style="margin-top:6px;"></div>
           </div>
