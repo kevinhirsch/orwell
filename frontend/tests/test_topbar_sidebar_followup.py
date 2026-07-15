@@ -234,11 +234,20 @@ def test_desktop_frosted_topbar_floats_rounded_off_the_top_edge():
         "APP-OV-3: the desktop frosted top bar must have a POSITIVE margin-top so its rounded top "
         "clears the top edge and it doesn't read as clipped / bleeding above the fold."
     )
-    # ALL four corners rounded — NOT the chopped bottom-only `0 0 X X` capsule.
+    # ALL four corners rounded with the inner-control token — NOT the chopped bottom-only
+    # `0 0 X X` capsule. A single-value border-radius applies to every corner, so assert the
+    # value IS a single `var(--ow-radius-inner)` shorthand: strip the var() (whose fallback may
+    # contain a comma+space) and require nothing else remains — no extra per-corner component,
+    # no `/` elliptical split, no zeroed corner.
     br = re.search(r"border-radius:\s*([^;]+);", rule).group(1).strip()
-    assert not br.startswith("0 0"), (
-        "APP-OV-3: the desktop frosted top bar must round ALL corners — a bottom-only `0 0 X X` "
-        "radius on the flush strip is exactly the oversized-capsule-clipped-at-top look."
+    radius = br.replace("!important", "").strip()
+    assert radius.startswith("var(--ow-radius-inner"), (
+        f"APP-OV-3: the desktop frosted top bar border-radius must use var(--ow-radius-inner) (got {br!r})."
+    )
+    remainder = re.sub(r"var\([^)]*\)", "", radius).strip()
+    assert remainder == "" and "/" not in radius, (
+        "APP-OV-3: the radius must be a SINGLE var(--ow-radius-inner) value applied to ALL FOUR "
+        f"corners — not a per-corner shorthand that could zero a corner (got {br!r})."
     )
 
 
@@ -248,4 +257,10 @@ def test_desktop_frosted_topbar_fix_does_not_touch_mobile():
     assert not _mobile_block_with("body.theme-frosted .chat-top-bar", "border-radius: var(--ow-radius-inner"), (
         "APP-OV-3: the floating-bar radius override must stay DESKTOP-only — the narrow bar keeps "
         "its own corner-control geometry."
+    )
+    # ...and the spacing half of the override too: the desktop `margin-top: 6px` lift must NOT leak
+    # into a mobile block, or the narrow bar loses its -31px corner-control pull-up.
+    assert not _mobile_block_with("body.theme-frosted .chat-top-bar", "margin-top: 6px"), (
+        "APP-OV-3: the desktop spacing override (margin-top: 6px) must stay DESKTOP-only — the "
+        "narrow bar keeps its own -31px corner-control pull-up."
     )
