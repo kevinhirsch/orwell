@@ -4243,7 +4243,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Auth${_apiHint('How this service expects the credential to be sent. <b>Bearer</b> = sends "Authorization: Bearer YOUR_KEY" (most modern APIs, ntfy, OpenAI-style). <b>Header</b> = sends YOUR_KEY verbatim under a header name you choose (Miniflux uses X-Auth-Token). <b>Basic</b> = HTTP basic auth (user:pass). <b>None</b> = the API is open / no auth.')}</label><select id="uf-api-auth" class="settings-input"><option value="bearer">Bearer (most common)</option><option value="header">Header</option><option value="basic">Basic</option><option value="none">None</option></select></div>
           <div class="settings-row" id="uf-api-header-row"><label class="settings-label">Header${_apiHint('The HTTP header name the key goes under (Miniflux: X-Auth-Token; most others: Authorization). Only used when Auth = Header.')}</label><input id="uf-api-header" class="settings-input" placeholder="X-Auth-Token"></div>
           <div class="settings-row"><label class="settings-label">API Key${_apiHint('The secret token the service issued you (generated in its admin panel / settings). Used to prove your identity on each request. Required for any Auth mode except None.')}</label><input id="uf-api-key" class="settings-input" type="password" placeholder="Token/key"></div>
-          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-api-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-api-test" class="settings-dim">Test</button><button class="ow-btn ow-btn-compact" id="uf-api-cancel" class="settings-dim">Cancel</button><span id="uf-api-msg" style="font-size:var(--fs-xs)"></span></div>
+          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-api-save">Save</button><button class="ow-btn ow-btn-compact settings-dim" id="uf-api-test">Test</button><button class="ow-btn ow-btn-compact settings-dim" id="uf-api-cancel">Cancel</button><span id="uf-api-msg" style="font-size:var(--fs-xs)"></span></div>
         </div>
       </div>`;
     // Custom preset dropdown wire-up (hidden select stays as data source).
@@ -4379,7 +4379,7 @@ async function initUnifiedIntegrations() {
           <div class="settings-row"><label class="settings-label">Server URL</label><input id="uf-caldav-url" class="settings-input" placeholder="https://www.google.com/calendar/dav/you@gmail.com/user/"></div>
           <div class="settings-row"><label class="settings-label">Username</label><input id="uf-caldav-user" class="settings-input" placeholder="you@example.com"></div>
           <div class="settings-row"><label class="settings-label">Password</label><input id="uf-caldav-pass" class="settings-input" type="password" placeholder="${isNew ? '' : 'Leave blank to keep existing'}"></div>
-          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-caldav-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-caldav-test" class="settings-dim">Test</button><button class="ow-btn ow-btn-compact" id="uf-caldav-cancel" class="settings-dim">Cancel</button><span id="uf-caldav-msg" style="font-size:var(--fs-xs);margin-left:6px"></span></div>
+          <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-caldav-save">Save</button><button class="ow-btn ow-btn-compact settings-dim" id="uf-caldav-test">Test</button><button class="ow-btn ow-btn-compact settings-dim" id="uf-caldav-cancel">Cancel</button><span id="uf-caldav-msg" style="font-size:var(--fs-xs);margin-left:6px"></span></div>
         </div>
       </div>`;
 
@@ -5185,9 +5185,9 @@ async function initUnifiedIntegrations() {
             <button class="ow-btn ow-btn-compact" id="uf-vault-save">Save Config</button>
             <button class="ow-btn ow-btn-compact" id="uf-vault-login">Login</button>
             <button class="ow-btn ow-btn-compact" id="uf-vault-unlock">Unlock</button>
-            <button class="ow-btn ow-btn-compact" id="uf-vault-lock" class="settings-dim">Lock</button>
-            <button class="ow-btn ow-btn-compact" id="uf-vault-logout" class="settings-dim">Logout</button>
-            <button class="ow-btn ow-btn-compact" id="uf-vault-cancel" class="settings-dim">Cancel</button>
+            <button class="ow-btn ow-btn-compact settings-dim" id="uf-vault-lock">Lock</button>
+            <button class="ow-btn ow-btn-compact settings-dim" id="uf-vault-logout">Logout</button>
+            <button class="ow-btn ow-btn-compact settings-dim" id="uf-vault-cancel">Cancel</button>
             <span id="uf-vault-msg" style="font-size:var(--fs-xs);margin-left:4px"></span>
           </div>
           <div class="settings-hint" style="margin-top:6px;line-height:1.4">
@@ -5313,8 +5313,8 @@ async function initUnifiedIntegrations() {
       if (el('uf-mcp-pasteback')) return;  // already shown
       msg.innerHTML =
         'Authorize in the opened tab. If the redirect fails (remote access), paste the resulting URL here: ' +
-        '<input id="uf-mcp-pasteback" class="settings-input" placeholder="http://localhost:7000/api/mcp/oauth/callback?code=..." class="settings-gap-top-sm">' +
-        '<button class="ow-btn ow-btn-compact" id="uf-mcp-paste-go" class="settings-gap-top-sm">Submit</button>';
+        '<input id="uf-mcp-pasteback" class="settings-input settings-gap-top-sm" placeholder="http://localhost:7000/api/mcp/oauth/callback?code=...">' +
+        '<button class="ow-btn ow-btn-compact settings-gap-top-sm" id="uf-mcp-paste-go">Submit</button>';
       const pasteGo = el('uf-mcp-paste-go');
       if (pasteGo) pasteGo.addEventListener('click', async () => {
         const cb = el('uf-mcp-pasteback').value.trim();
@@ -5385,7 +5385,7 @@ async function initUnifiedIntegrations() {
               ${srv.needs_oauth ? `<a href="/api/mcp/oauth/authorize/${srv.id}" target="_blank" class="ow-btn ow-btn-compact ow-btn-destructive" style="text-decoration:none">Authorize</a>` : ''}
               <button class="ow-btn ow-btn-compact" id="uf-mcp-reconnect">Reconnect</button>
               <button class="ow-btn ow-btn-compact" id="uf-mcp-toggle">${srv.is_enabled ? 'Disable' : 'Enable'}</button>
-              <button class="ow-btn ow-btn-compact" id="uf-mcp-cancel" class="settings-dim">Close</button>
+              <button class="ow-btn ow-btn-compact settings-dim" id="uf-mcp-cancel">Close</button>
               <span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span>
             </div>
             <div id="uf-mcp-tools-panel"></div>
@@ -5448,7 +5448,7 @@ async function initUnifiedIntegrations() {
             <div id="uf-mcp-sse-fields" style="display:none;flex-direction:column;gap:6px;">
               <div class="settings-row"><label class="settings-label">URL</label><input id="uf-mcp-url" class="settings-input" placeholder="http://localhost:3001/sse"></div>
             </div>
-            <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-mcp-save">Save</button><button class="ow-btn ow-btn-compact" id="uf-mcp-cancel" class="settings-dim">Cancel</button><span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span></div>
+            <div class="settings-row settings-gap-top-sm"><button class="ow-btn ow-btn-compact" id="uf-mcp-save">Save</button><button class="ow-btn ow-btn-compact settings-dim" id="uf-mcp-cancel">Cancel</button><span id="uf-mcp-msg" style="font-size:var(--fs-xs)"></span></div>
           </div>
         </div>`;
       el('uf-mcp-transport').addEventListener('change', () => {
@@ -5564,7 +5564,7 @@ async function initUnifiedIntegrations() {
             <input type="text" class="uf-codex-rename settings-input" data-token-id="${esc(t.id)}" value="${esc(t.name || cfg.defaultName)}" placeholder="${esc(cfg.defaultName)} (e.g. ${esc(cfg.word)} on laptop)" style="font-size:var(--fs-sm);font-weight:600;padding:3px 6px;width:100%;background:transparent;border:1px solid transparent;border-radius:4px;" title="Click to rename this agent">
             <div class="settings-hint" style="margin-top:2px;">${esc(t.token_prefix || 'token')}...${t.last_used_at ? ` · Last used ${new Date(t.last_used_at).toLocaleDateString()}` : ' · Never used'}</div>
           </div>
-          <button class="ow-btn ow-btn-compact uf-codex-copy-prefix" data-token-prefix="${esc(t.token_prefix || '')}" title="Copy token prefix (full token only shown once, at creation)" class="settings-dim">Copy</button>
+          <button class="ow-btn ow-btn-compact uf-codex-copy-prefix settings-dim" data-token-prefix="${esc(t.token_prefix || '')}" title="Copy token prefix (full token only shown once, at creation)">Copy</button>
           <button class="ow-btn ow-btn-compact ow-btn-destructive uf-codex-revoke" data-token-id="${esc(t.id)}">Revoke</button>
         </div>
         <div style="font-size:var(--fs-xs);font-weight:600;opacity:0.62;margin-bottom:4px;">Tool access</div>

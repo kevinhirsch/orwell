@@ -3173,7 +3173,7 @@ function initializeEventListeners() {
       ['.memory-tabs', '.memory-tab'],
       ['.admin-tabs', '.admin-tab'],
     ];
-    const _IGNORE = 'input, textarea, select, [contenteditable="true"], .preset-range, ' +
+    const _IGNORE = 'input, textarea, select, [contenteditable="true"], .preset-range, .ow-slider, ' +
       '.note-cl-row, .minimized-dock-chip, canvas, .email-card-reader';
     let sx = 0, sy = 0, tracking = false;
 

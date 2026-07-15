@@ -197,10 +197,21 @@ def test_non_accent_white_ctas_are_left_alone():
     # button now composes the kit .ow-btn-destructive, which inks white (--ow-on-danger) on
     # its own semantic red plate (NOT rewritten to dark --on-accent ink). The kit owns the
     # danger-CTA legibility now, so the guard checks the kit primitive.
-    assert "color: var(--ow-on-danger, #fff)" in css, (
-        ".ow-btn-destructive (semantic danger bg) must keep white text (via --ow-on-danger), "
-        "NOT be rewritten to --on-accent."
-    )
+    # Inspect the `.ow-btn-destructive` rule's OWN declarations directly (not a global
+    # substring anywhere in the sheet): every base rule must ink white via --ow-on-danger,
+    # and must NOT ink its label via --on-accent (the dark accent token would be illegible
+    # on the red plate).
+    destructive_rules = re.findall(r"\.ow-btn-destructive\s*\{([^}]*)\}", css)
+    assert destructive_rules, "expected at least one base `.ow-btn-destructive` rule block in the CSS."
+    for body in destructive_rules:
+        assert "color: var(--ow-on-danger, #fff)" in body, (
+            ".ow-btn-destructive (semantic danger bg) must keep white text via --ow-on-danger "
+            "on its own rule, NOT be rewritten to --on-accent."
+        )
+        assert not re.search(r"color\s*:[^;]*--on-accent", body), (
+            ".ow-btn-destructive must NOT ink its label via --on-accent — the dark accent "
+            "token would be illegible on the semantic red plate."
+        )
     assert re.search(r"background:\s*var\(--color-error\);[^}]*\n?\s*color:\s*#fff", css) or \
         "background: var(--color-error)" in css and "color: #fff" in css, (
         "semantic-error backgrounds keep white text."
