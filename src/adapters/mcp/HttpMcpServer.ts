@@ -133,7 +133,11 @@ const SANDBOX_CREATING_TOOLS: ReadonlySet<string> = new Set(["createCharacter", 
   // 0116: the model-authored cast-genesis skeleton write-back runs pre-game (DURING the casting interview,
   // onto the preSeedCast warm), so it is exempt from the known-user gate like the other pre-game tools. It
   // refuses cleanly with no warmed cast, so an early call before preSeedCast is a harmless no-op.
-  "recordCastGenesis"]);
+  "recordCastGenesis",
+  // #1626 (increment 3): the producer-DEEPENING write-back runs pre-game (DURING the casting interview, to
+  // enrich the off-camera casting producer the player is talking to), so it is exempt from the known-user
+  // gate like the other pre-game tools. It establishes the producer seed lazily, so an early call is safe.
+  "recordProducerProfile"]);
 
 function isResolver(d: HttpMcpDeps | HttpMcpResolver): d is HttpMcpResolver {
   return typeof (d as HttpMcpResolver).resolve === "function";
