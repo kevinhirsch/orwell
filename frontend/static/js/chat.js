@@ -127,16 +127,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         're-added a chat.js <script> tag alongside the app.js import.');
     }
     window.__orwellChatEvaluated = true;
-    // #1626 increment 2: restore THIS tab's producer byline on load ONLY when the stored record is
-    // SEASON-SCOPED to the currently-active session — so a reload of the same season keeps its
-    // producer, while a NEW season/session in the same tab has no matching record and the byline
-    // falls back to the "Production" default (never the prior season's producer). Any miss self-
-    // corrects on the first game turn (the stream re-emits + re-persists). Fail-open; sessionStorage
-    // clears on tab close, so a stale value can never outlive the browser tab.
+    // #1626 increment 2: restore THIS tab's producer byline for the active session from the
+    // per-session map. NOTE: at module-eval currentSessionId is usually not assigned yet (selectSession
+    // runs later), so this seeds the default; the AUTHORITATIVE restore is orwellReapplyNarrator(id),
+    // which selectSession invokes once the active sid is known (Greptile P1 timing fix). Fail-open;
+    // sessionStorage clears on tab close, so a stale value can never outlive the browser tab.
     try {
-      const _rec = JSON.parse(sessionStorage.getItem('orwell.gameNarrator') || 'null');
-      const _curSid = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId();
-      if (_rec && _rec.name && _curSid && _rec.sid === _curSid) setGameNarrator(_rec.name);
+      orwellReapplyNarrator(sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
     } catch (_) {}
   }
 
@@ -253,15 +250,36 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     }
     if (tsSpan) roleEl.appendChild(tsSpan);
   }
-  // #1626 increment 2: persist the resolved producer byline SEASON-SCOPED — keyed to the stream's
-  // session id — so a reload of the SAME season keeps it, while a NEW season/session in the same tab
-  // has no matching record and falls back to the "Production" default (never the prior producer).
-  // Per-tab (sessionStorage), matching the ADR 0008/0012 outbox convention. Fail-open.
-  function _persistNarratorForSession(sid, name) {
-    if (!name) return;
+  // #1626 increment 2: the sessionStorage key holding the PER-SESSION producer map { [sid]: name }.
+  // Per-session (not one tab-wide record) so visiting session B never overwrites A's byline, and
+  // reloading A restores A's producer — a NEW season/session simply has no entry ⇒ "Production".
+  // Per-tab (sessionStorage), matching the ADR 0008/0012 outbox convention.
+  const _NARRATOR_STORE_KEY = 'orwell.gameNarrator';
+  function _readNarratorMap() {
     try {
-      sessionStorage.setItem('orwell.gameNarrator', JSON.stringify({ sid: sid || null, name: String(name) }));
+      const m = JSON.parse(sessionStorage.getItem(_NARRATOR_STORE_KEY) || 'null');
+      return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+    } catch (_) { return {}; }
+  }
+  // Persist the resolved producer byline SEASON-SCOPED into the per-session map. Fail-open.
+  function _persistNarratorForSession(sid, name) {
+    if (!name || !sid) return;
+    try {
+      const m = _readNarratorMap();
+      m[sid] = String(name);
+      sessionStorage.setItem(_NARRATOR_STORE_KEY, JSON.stringify(m));
     } catch (_) {}
+  }
+  // #1626 increment 2: re-apply the byline for the NOW-ACTIVE session from the per-session map — the
+  // load-time read runs during module eval, BEFORE selectSession() assigns currentSessionId, so the
+  // real restore happens here, invoked by selectSession once the active sid is known (exposed as
+  // chatModule.orwellReapplyNarrator). Applies the session's producer, or resets to "Production" when
+  // the session has no entry (a new season). Fail-open.
+  function orwellReapplyNarrator(sid) {
+    try {
+      const name = sid ? _readNarratorMap()[sid] : null;
+      setGameNarrator(name || undefined);   // falsy ⇒ the "Production" default (setGameNarrator floor)
+    } catch (_) { setGameNarrator(); }
   }
   // #1626 increment 2: re-apply the byline to an ALREADY-MOUNTED live bubble after the producer name
   // resolves mid-stream (the holder is created BEFORE the SSE is read), so the current bubble updates
@@ -1398,6 +1416,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       holder.innerHTML = `<div class="role">${uiModule.esc(roleLabel)} <span class="role-timestamp">${roleTs}</span></div><div class="body"></div>`;
       holder._requestedModel = modelName;
       holder._actualModel = modelName;
+      // #1626 increment 2: seed the explicit character label at creation (the SAME source model_info
+      // reads) so a mid-stream byline refresh (orwell_narrator arriving BEFORE model_info) preserves a
+      // preset NPC label instead of clobbering it with the producer name. Empty ⇒ producer/default.
+      holder._characterName = _charNameInit;
       _applyModelColor(holder.querySelector('.role'), modelName);
       holder.style.position = 'relative';
       
@@ -2717,15 +2739,18 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 if (json.id) _adoptCanonicalAfterStream = json.id;
 
               } else if (json.type === 'orwell_narrator') {
-                // #1626 increment 2: the engine resolved the season's producer (production-voice)
-                // name — set this window's byline so the turn's bubble + its monogram render the
-                // producer instead of the generic "Production". Refresh the ALREADY-MOUNTED live
-                // bubble now (it was created before this event), persist SEASON-SCOPED to this
-                // stream's session, and fail open on a blank name.
+                // #1626 increment 2: the engine resolved this stream's producer (production-voice)
+                // name. ALWAYS persist it SEASON-SCOPED (keyed to the ORIGINATING session), so a
+                // background stream's producer is remembered for ITS session. But only touch the
+                // tab-global byline + refresh the live bubble when this stream is the ACTIVE session
+                // (`!_isBg`) — otherwise a background session A would hijack the byline of the
+                // session B the user is viewing. Fail open on a blank name.
                 if (json.name) {
-                  setGameNarrator(json.name);
                   _persistNarratorForSession(streamSessionId, json.name);
-                  _refreshLiveByline(holder);
+                  if (!_isBg) {
+                    setGameNarrator(json.name);
+                    _refreshLiveByline(holder);
+                  }
                 }
 
               } else if (json.type === 'tool_start') {
@@ -4627,6 +4652,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       ' <span class="role-timestamp">' + roleTs + '</span></div>' +
       '<div class="body"><div class="stream-content"></div></div>';
     _applyModelColor(holder.querySelector('.role'), meta && meta.model);
+    holder._requestedModel = meta && meta.model;
+    holder._actualModel = meta && meta.model;
+    // #1626 increment 2: seed the explicit character label at creation (same source model_info reads)
+    // so a mid-stream byline refresh preserves a preset NPC label instead of the producer name.
+    holder._characterName = presetsModule.getCharacterName ? presetsModule.getCharacterName() : '';
     const contentDiv = holder.querySelector('.stream-content');
     box.appendChild(holder);
 
@@ -4744,13 +4774,18 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
             rich = true;
             if (documentModule && json.delta) documentModule.streamDocDelta(json.delta);
           } else if (json.type === 'orwell_narrator') {
-            // #1626 increment 2: the MIRROR/resume stream carries the season's producer name too — set
-            // the byline, refresh the already-mounted live bubble, and persist SEASON-SCOPED to this
-            // resumed session so a new season in the same tab never restores this producer. Fail-open.
+            // #1626 increment 2: the MIRROR/resume stream carries this resumed session's producer name.
+            // ALWAYS persist it SEASON-SCOPED (keyed to the resumed sessionId). Only touch the
+            // tab-global byline + refresh the live bubble when this resumed session is the ACTIVE one —
+            // a background resume must not hijack the byline the user is currently viewing. Fail-open.
             if (json.name) {
-              setGameNarrator(json.name);
               _persistNarratorForSession(sessionId, json.name);
-              _refreshLiveByline(holder);
+              const _activeNow = !(sessionModule.getCurrentSessionId
+                && sessionModule.getCurrentSessionId() !== sessionId);
+              if (_activeNow) {
+                setGameNarrator(json.name);
+                _refreshLiveByline(holder);
+              }
             }
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
@@ -5563,6 +5598,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     hideWelcomeScreen: chatRenderer.hideWelcomeScreen,
     showWelcomeScreen: chatRenderer.showWelcomeScreen,
     checkPendingResearch,
+    // #1626 increment 2: selectSession() invokes this once the active sid is known so the byline is
+    // restored from the per-session map (the module-eval read is too early — currentSessionId is unset).
+    orwellReapplyNarrator,
     getImageCost: chatRenderer.getImageCost,
     setDisplayOverride,
     setHideUserBubble,

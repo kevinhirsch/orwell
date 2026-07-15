@@ -79,14 +79,50 @@ def test_the_producer_name_is_plumbed_from_engine_to_client():
     assert "orwell.gameNarrator" in chat  # sessionStorage key — reload keeps it for the same season
 
 
-def test_the_producer_byline_is_season_scoped_server_side():
-    """CONSENSUS must-fix (CodeRabbit Major / Greptile P1): because a blank producer fetch is
-    deliberately not-clobbering (stable per season), the cache is CLEARED at the season-reset
-    boundary — otherwise the SAME user's NEW season emits the PRIOR season's producer. The clear
-    lives in the not-started framing branch and pops the SAME `user or "default"` key the stash uses."""
-    helpers = _read("routes/chat_helpers.py")
-    assert '_LAST_FRAMED_PRODUCER_NAME.pop(user or "default", None)' in helpers, \
-        "season-reset must clear the cached producer so a new season re-resolves its own"
+def test_the_producer_byline_is_cleared_at_the_season_reset_boundary(monkeypatch):
+    """BEHAVIORAL (CodeRabbit Major / Greptile P1): drive the not-started (season-reset) framing entry
+    point and assert the cached producer for `user or "default"` is actually REMOVED — so the test
+    fails if the pop ever moves to a branch that doesn't run at the boundary. A blank/absent fetch then
+    leaves nothing cached (⇒ the client keeps the "Production" default); a resolved one re-stashes."""
+    import asyncio
+    import importlib
+    orwell_engine = importlib.import_module("src.orwell_engine")
+    ch = importlib.import_module("routes.chat_helpers")
+
+    def _run(coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    ch._GAME_WAS_ACTIVE.clear()
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)  # game build defaults ON
+
+    async def not_started(user=None):
+        return {"started": False, "moment": "character-creation"}
+
+    async def mp_no_producer(moment=None, user=None):
+        return {"systemPrompt": "CASTING"}  # a new season's interview — no producer resolved yet
+
+    monkeypatch.setattr(orwell_engine, "get_game_state", not_started)
+    monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_no_producer)
+
+    try:
+        # seed the PRIOR season's producer, then drive the season-reset (not-started) framing entry
+        ch._LAST_FRAMED_PRODUCER_NAME["p"] = "Prev Producer"
+        _run(ch.apply_game_framing([{"role": "system", "content": "base"}], "p"))
+        # the boundary popped it — a new season starts from "Production" (None ⇒ client default)
+        assert "p" not in ch._LAST_FRAMED_PRODUCER_NAME
+        assert ch.last_framed_producer_name("p") is None
+
+        # and when the new season DOES resolve a producer, pop-then-restash yields the NEW one
+        async def mp_new_producer(moment=None, user=None):
+            return {"systemPrompt": "CASTING", "producerName": "New Producer"}
+
+        monkeypatch.setattr(orwell_engine, "get_moment_prompt", mp_new_producer)
+        ch._LAST_FRAMED_PRODUCER_NAME["p"] = "Prev Producer"
+        _run(ch.apply_game_framing([{"role": "system", "content": "base"}], "p"))
+        assert ch.last_framed_producer_name("p") == "New Producer"
+    finally:
+        ch._LAST_FRAMED_PRODUCER_NAME.pop("p", None)
+        ch._GAME_WAS_ACTIVE.clear()
 
 
 def test_stash_producer_name_is_fail_open_but_not_silent():
@@ -128,18 +164,62 @@ def test_client_refreshes_the_already_mounted_live_byline():
     assert chat.count("_refreshLiveByline(holder)") >= 2
 
 
-def test_client_persisted_byline_is_season_scoped():
-    """#1626 review item 1 (client): the persisted narrator is scoped to the stream's SESSION, and
-    restored only when the stored record matches the ACTIVE session — so a new season/session in the
-    same tab falls back to the default instead of restoring the prior producer."""
+def _orwell_narrator_handler_slices(chat):
+    """Return (primary, resume) source slices of the two `orwell_narrator` SSE handlers."""
+    i1 = chat.index("json.type === 'orwell_narrator'")
+    i2 = chat.index("json.type === 'orwell_narrator'", i1 + 1)
+    primary = chat[i1:chat.index("} else if", i1)]
+    resume = chat[i2:chat.index("} else if", i2)]
+    return primary, resume
+
+
+def test_client_persisted_byline_is_a_per_session_map():
+    """#1626 review item 2 (+ Greptile P1 timing): the persisted narrator is a PER-SESSION map
+    ({[sid]: name}), not one tab-wide record, so visiting session B never overwrites A. The restore is
+    keyed by the NOW-ACTIVE session; because the module-eval read runs before currentSessionId is set,
+    the authoritative restore is a hook selectSession invokes once the active sid is known."""
     chat = _read("static/js/chat.js")
-    # persisted as a {sid, name} record keyed to the stream session, not a tab-global bare string
-    assert "function _persistNarratorForSession(" in chat
-    assert "JSON.stringify({ sid: sid || null, name: String(name) })" in chat
+    # a per-session map, not a single {sid,name} record
+    assert "function _readNarratorMap(" in chat
+    assert "m[sid] = String(name)" in chat
     assert "_persistNarratorForSession(streamSessionId, json.name)" in chat  # primary
     assert "_persistNarratorForSession(sessionId, json.name)" in chat        # mirror/resume
-    # restore validates the record against the active session before applying it
-    assert "_rec.sid === _curSid" in chat and "getCurrentSessionId" in chat
+    # the reapply hook restores by the active sid (or defaults) and is exposed for selectSession
+    assert "function orwellReapplyNarrator(" in chat
+    assert "_readNarratorMap()[sid]" in chat
+    assert "orwellReapplyNarrator," in chat  # on the chatModule public API
+    # selectSession invokes the hook once the active sid is known (the Greptile timing fix)
+    sessions = _read("static/js/sessions.js")
+    assert "orwellReapplyNarrator(id)" in sessions
+
+
+def test_client_active_session_guard_on_the_byline():
+    """#1626 review item 1 (Major): a BACKGROUND stream must persist its producer but must NOT hijack
+    the byline of the session the user is viewing. Both handlers persist unconditionally, then gate
+    setGameNarrator + the live refresh on the stream being the ACTIVE session."""
+    chat = _read("static/js/chat.js")
+    primary, resume = _orwell_narrator_handler_slices(chat)
+    # primary: persist FIRST (always), then the byline only when this stream is not background
+    assert "_persistNarratorForSession(streamSessionId, json.name)" in primary
+    assert "if (!_isBg) {" in primary
+    assert primary.index("_persistNarratorForSession") < primary.index("if (!_isBg)")
+    assert primary.index("if (!_isBg)") < primary.index("setGameNarrator")
+    # resume: persist FIRST (always), then the byline only when the resumed session is active
+    assert "_persistNarratorForSession(sessionId, json.name)" in resume
+    assert "getCurrentSessionId() !== sessionId" in resume and "if (_activeNow) {" in resume
+    assert resume.index("_persistNarratorForSession") < resume.index("if (_activeNow)")
+    assert resume.index("if (_activeNow)") < resume.index("setGameNarrator")
+
+
+def test_client_char_label_initialized_at_holder_creation():
+    """#1626 review item 3: holder._characterName must be seeded at holder creation (both the primary
+    and resume paths) from the same source model_info reads, so an orwell_narrator refresh arriving
+    BEFORE model_info preserves a preset NPC label instead of clobbering it with the producer name."""
+    chat = _read("static/js/chat.js")
+    # primary: seeded from _charNameInit (the preset source model_info also falls back to)
+    assert "holder._characterName = _charNameInit;" in chat
+    # resume: seeded from the same presets source at creation
+    assert "holder._characterName = presetsModule.getCharacterName ? presetsModule.getCharacterName() : '';" in chat
 
 
 def test_product_chrome_keeps_orwell():
