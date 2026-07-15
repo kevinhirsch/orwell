@@ -24075,6 +24075,77 @@ body.theme-frosted .cp-popover {
   --fg: #16191f;
 }
 
+/* ── W3 (#1644): remap --fg AT THE SOURCE on EVERY light-glass chrome container ────────
+   The block above redefined --fg on a handful of chrome surfaces; but the audit
+   (docs/audits/2026-07-15-text-standardization-audit.md, GAP B) found the frosted theme
+   never remaps --fg on the REST of the light-glass chrome — sidebar, composer, top bar,
+   the transient pills, the panes/menus — so any inner element inking `color: var(--fg)`
+   (or `color-mix(--fg N%)`, `var(--select-fg)`=var(--fg), `var(--fg-muted, #888)`) at a
+   HIGHER specificity than the blanket `color:#16191f` sweep (the "no-accent-on-text"/dark-ink
+   chrome rules earlier in this file) survived as the dark-theme LIGHT cyan #9cdef2 on the
+   ~white light glass (~1.3:1). The blanket `color:` rule cannot beat those inner rules;
+   redefining the TOKEN does — every `var(--fg)` descendant then resolves to the chrome dark
+   ink regardless of its own selector's specificity. This collapses the audit's ~366
+   --fg-derived polarity risks into the small enumerable exception set below, so a NEW
+   light-glass surface inherits correct-polarity dark ink by default.
+
+   SCOPE = the authoritative light-glass MATERIAL set (the blur-glass list at ~L19464 ∪ the
+   "ONE LIGHT GLASS" white-fill list at ~L20401 ∪ the vetted dark-ink chrome sweep) MINUS the
+   containers already remapped above. Every one of these paints the fixed .60 white glass and
+   is ALREADY forced to dark ink by the blanket sweep / a per-surface #16191f patch — so this
+   token remap cannot introduce a NEW polarity error, it only makes the existing dark-ink
+   intent robust against higher-specificity inner var(--fg) rules.
+
+   DELIBERATELY EXCLUDED (these ink LIGHT on purpose — a root/blanket remap would flip them to
+   invisible dark-on-dark; each is left exactly as #1639 verified-correct):
+     • .gadget-rail-head / .gadget-rail — a TRANSPARENT container floating over the DARK app,
+       so its header keeps light var(--fg) + a dark halo (handled near ~L23874). NOT added.
+     • .msg-ai (+ .msg-user/.msg-ooc) — drives its own `color:` for adaptiveGlass per-wallpaper
+       polarity; NEVER token-forced (its links were fixed to `color:inherit` in #1639). NOT added.
+     • .ow-sheet — a DELIBERATE polarity CROSS-FADE (color-mix(#16191f (1-prog)%, var(--fg)),
+       near ~L24591): dark on the translucent glass, LIGHT on the opaque dark panel at prog=1. A
+       token remap would strand its opaque state dark-on-dark. NOT added.
+     • .welcome-name/-sub/-tip — float over the variable wallpaper (adaptive, theme-polarity
+       var(--fg)). NOT added.
+     • ` option` lists (own dark #1c2127 fill) + the .ow-window ROOT (its var(--fg)-derived glass
+       sheen/border/shadow must stay light — that is why the block above scopes to `.ow-window
+       .ow-body`, the CONTENT layer, not the material root). NOT added.
+   --fg-muted is set to the same floored muted dark as the a11y backstop (near ~L24777) so
+   `var(--fg-muted)` / `var(--fg-muted, #888)` secondary text reads a legible muted dark on the
+   glass too (GAP D), instead of the washed-out #888 / inherited-light. */
+body.theme-frosted #sidebar,
+body.theme-frosted .icon-rail,
+body.theme-frosted .chat-input-bar,
+body.theme-frosted .chat-top-bar,
+body.theme-frosted .chat-meta-overlay,
+/* the kit titlebar is TRANSPARENT (no --fg-derived material fill — paints over the window's
+   own light glass) and is already forced dark by the titlebar dark-ink patch further below;
+   remap its --fg too so any titlebar descendant inking var(--fg) at higher specificity (load
+   hint, accessory chip, subtitle) resolves dark, not the light-cyan straggler. */
+body.theme-frosted .ow-titlebar,
+body.theme-frosted .toast,
+body.theme-frosted .tool-indicator,
+body.theme-frosted .thinking-section,
+body.theme-frosted #orwell-scroll-bottom,
+body.theme-frosted .model-picker-menu,
+body.theme-frosted .model-picker-btn,
+body.theme-frosted .attach-card,
+body.theme-frosted .attach-image-skeleton,
+body.theme-frosted .doclib-modal-content,
+body.theme-frosted .gallery-modal-content,
+body.theme-frosted .gallery-detail-menu,
+body.theme-frosted .doc-tab-dropdown,
+body.theme-frosted .email-reader,
+body.theme-frosted .notes-pane,
+body.theme-frosted .research-pane,
+body.theme-frosted .calendar-pane,
+body.theme-frosted .cookbook-pane,
+body.theme-frosted .doc-pane,
+body.theme-frosted .doc-pane-floating {
+  --fg: #16191f;
+  --fg-muted: #2f323a;
+}
+
 /* ── #738 item 8 — gadget-card ROW legibility (contrast floor) ─────────────────
    The gadget-rail cards carry dense HUD status rows in DARK ink (--fg redefined to
    #16191f above). Under the glass theme adaptiveGlass STANDS DOWN on chrome, so —
