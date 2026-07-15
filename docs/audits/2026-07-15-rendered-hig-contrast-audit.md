@@ -94,8 +94,11 @@ retrospective, new-season studio.
   sheet transitions make each mobile pass slow, and passes 1–7 consumed it. These are the **cleanest**
   tiers (flat follows theme polarity with no glass inversion); flat-dark chrome was fully measured at
   **desktop** (pass 3) and the mobile *glass→frosted* pass (7) completed, so mobile coverage is real —
-  only the two lowest-risk mobile combinations are un-measured. Reported findings therefore span **7 of
-  9 in-app passes + all 6 page passes**; the missing passes would only raise `×N` on existing rows.
+  only the two lowest-risk mobile combinations are un-measured. **The reported findings are therefore a
+  lower bound**: they span **7 of 9 in-app passes + all 6 page passes**. Completing the two flat-mobile
+  passes would *most likely* only raise `×N` on existing rows (flat tiers carry no glass inversion), but
+  they were **not** measured and *could* surface an additional finding or defect family not seen on the
+  other passes — the counts below are a floor, not a ceiling.
 
 ---
 
@@ -104,6 +107,14 @@ retrospective, new-season studio.
 Severity: **blocker** = pixel ratio < 2.0 (effectively illegible) · **major** = 2.0–3.4 (clearly
 sub-AA) · **minor** = 3.5–4.49 normal / large-text 3.0–4.4 / disabled-only. `×N` = distinct
 tier/viewport passes the same element failed in. Ratios pixel-verified unless `~approx`.
+
+**Two documented exceptions keep the totals reproducible** (both filed **minor**, not by their raw
+ratio):
+1. **Hover-only window-control glyphs** (the `.ow-close`/`.ow-min` traffic-light "×"/"–", measured
+   1.49–2.64 but conventionally hover-revealed and **not rendered at rest** — last table row): filed
+   **minor pending at-rest confirmation**, and **excluded** from the blocker/major counts.
+2. **The 3.41 `.ow-btn-destructive` label** sits in the 3.4–3.5 boundary gap and is a bold button
+   label (the large-text minor band is 3.0–4.4): filed **minor** as a borderline / known accent gap.
 
 ### 2.1 Verified FIXED by #1639 (before → after, this run)
 | Surface | Element | Before (`75a6a344`) | After (`c9fd186d`) |
@@ -114,12 +125,12 @@ tier/viewport passes the same element failed in. Ratios pixel-verified unless `~
 
 ### 2.2 Open findings on current `main` (`c9fd186d`)
 
-**Totals (raw pixel-ratio): 9 blocker · 31 major · 2 minor** distinct defects across 248 measured
-sub-AA text nodes, from 7 of 9 in-app passes (all desktop tiers/themes + mobile-glass) + all page
-passes. Reclassifying the two **hover-only** window-control glyphs (last table row) to minor leaves
-**~8 substantive blocker + ~29 major** defect families. Near-identical rows (the same defect on
-several tabs/windows/passes) are **grouped** below; the raw per-row list is in the audit scratch
-`defects.json`.
+**Totals (raw pixel-ratio, a lower bound — see §1): 9 blocker · 31 major · 2 minor** distinct defects
+across 248 measured sub-AA text nodes, from 7 of 9 in-app passes (all desktop tiers/themes +
+mobile-glass) + all page passes. Reclassifying the two **hover-only** window-control glyphs (per the
+rubric exception) to minor leaves **~8 substantive blocker + ~29 major** defect families. Near-identical
+rows (the same defect on several tabs/windows/passes) are **grouped** below; the raw per-row list is in
+the audit scratch `defects.json`.
 
 | Sev | Ratio (thr 4.5) | ×passes | Surface | Element / text | ink → bg | Suggested standard fix |
 |---|---|---|---|---|---|---|
@@ -134,10 +145,10 @@ several tabs/windows/passes) are **grouped** below; the raw per-row list is in t
 | major | 2.72 | 1 | Decision card | "⚠ Irreversible — binding" badge (`.odec-risk-badge`) | red `#ff4444` → light-red fill | dark ink / darker red on the badge |
 | major | 2.43 | 2 (light theme) | Settings ▸ Shortcuts | kbd chips (Ctrl/K…) (`.kbd`) | orange `#c47d5a` → cream | kit chip ink per polarity (the dark/glass chips are fine) |
 | major | 2.55 | 1 | New-season studio | headshot-library delete "×" (`.hs-libdel`, always-visible) | white → grey `#a1a2a4` | darker control fill or dark ink |
-| major | 2.66–3.03 | 1 ea | Chat "Production notes" label · cast-wall "Compact pin" · theme "Themes" active tab · **light-flat** sidebar brand "Orwell" · new-season "Recast from scratch" | orange / dark-on-grey | route through the kit ink (the light-flat brand is a #1639-untouched **non-frosted** case) |
-| minor | 1.49–2.64 *(hover-only)* | many | **Window traffic-light glyphs** "×"/"–" (`.ow-close` close on red, `.ow-min` minimize on amber) | dark/light glyph → red/amber control | the probe measured these (opacity > 0) but the glyphs are conventionally **hover-revealed** (macOS) and are **not visibly rendered at rest** in the shots — confirm at-rest visibility; if shown, raise glyph contrast. *(Excluded from the blocker/major counts for this reason.)* |
-| minor | 3.41 | 1 | Element kit `.ow-btn-destructive` (kit demo) | white → destructive red `#ff453a` | known white-on-red AA gap — darken red or apply `--on-accent` |
-| minor | 3.65 | 4 | **element_kit_demo** tier/backdrop switcher (`.ek-tier-on`) | white → iOS blue | **demo-harness chrome, not shipped app UI** — noted for completeness |
+| major | 2.66–3.03 | 1 ea | Chat · cast wall · theme window · **light-flat** sidebar · new-season | "Production notes" · "Compact pin" · "Themes" active tab · brand "Orwell" · "Recast from scratch" | orange / dark-on-grey | route through the kit ink (the light-flat brand is a #1639-untouched **non-frosted** case) |
+| minor | 1.49–2.64 *(hover-only)* | many | **Window traffic-light** controls | close "×" (`.ow-close`, on red) · minimize "–" (`.ow-min`, on amber) | dark/light glyph → red/amber control | the probe measured these (opacity > 0) but the glyphs are conventionally **hover-revealed** (macOS) and are **not visibly rendered at rest** in the shots — confirm at-rest visibility; if shown, raise glyph contrast. *(Excluded from the blocker/major counts for this reason.)* |
+| minor | 3.41 | 1 | Element kit (kit demo) | destructive button (`.ow-btn-destructive`) | white → destructive red `#ff453a` | known white-on-red AA gap — darken red or apply `--on-accent` |
+| minor | 3.65 | 4 | **element_kit_demo** (demo harness) | tier/backdrop switcher (`.ek-tier-on`) | white → iOS blue | **not shipped app UI** — noted for completeness |
 
 ---
 
@@ -177,7 +188,7 @@ adaptive-glass machinery work where applied:
 
 | Sev | Surface (tier) | HIG principle | Observed | Fix |
 |---|---|---|---|---|
-| major | Settings **inactive nav tab** labels (all tiers, desktop + mobile) | Controls must stay legible on the system material | muted grey ink ≈2.5:1 on the near-white settings nav — the active tab reads, the inactive ones recede below AA | AA-tuned inactive-tab ink (floored `--fg-muted`) |
+| major | Settings **inactive nav tab** labels (**light-nav tiers only** — the glass tiers + light theme; **passes in flat-dark**) | Controls must stay legible on the system material | muted grey ink ≈2.4:1 on the near-white settings nav — the active tab reads, the inactive ones recede below AA | AA-tuned inactive-tab ink (floored `--fg-muted`) |
 | major | Admin **status badges** + danger-red spoiler link (glass, both polarities) | Color/emphasis must clear contrast; *"apply color to the background rather than to symbols or text"* | green "REACHABLE/YES/OK" as green *text* on a light-green fill (≈2.2:1); danger-red link ≈1.9:1 on white | put the status color on the **background**, ink dark; danger token that clears AA on white |
 | minor | House themes (`the-feed`) — sidebar nav icons (glass) | *"Avoid tinting all your elements. When every element is tinted, nothing stands out."* | every sidebar nav icon carries the theme `--red` tint | reserve tint for one emphasis element |
 | minor | Simultaneous glass surfaces — glass windows (Settings/Theme) floating over the glass sidebar + glass gadget cards | *"always avoid glass on glass"* / one floating glass plane, content on standard materials | the app leans on glass across chrome **and** stacked windows/cards at once | consolidate toward one glass plane; content/cards on standard material (tracked under #1638; the glass-on-glass gate #1604/#1605 already covers part) |
