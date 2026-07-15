@@ -421,8 +421,10 @@ COOL_REGISTRY = {
 # by (rel_path, normalized value) → occurrence count. These live where they are mitigated today —
 # status messages inside the settings/admin `.ow-window .ow-body` (--fg remapped dark) and inline
 # accent/red caught by the frosted `[style*="color:var(--accent|--red)"]` remaps. Ratchet: a NEW
-# (file,value) family, or MORE occurrences than registered, fails closed. The two settings.js
-# undefined-token bugs are in KNOWN_RESIDUAL(W4), NOT here; the retired brick may NEVER be here.
+# (file,value) family, or MORE occurrences than registered, fails closed. The former two settings.js
+# undefined-token bugs are FIXED (#1644 W4): the danger one now inks the standard `var(--color-danger)`
+# and is registered here; the warning one inks the defined `var(--color-warning)` (not a cool token, so
+# not tracked). The retired brick may NEVER be here.
 JS_COOL_REGISTRY = {
     ('static/js/admin.js', '#fff'): 1,
     ('static/js/admin.js', 'var(--accent)'): 1,
@@ -447,6 +449,7 @@ JS_COOL_REGISTRY = {
     ('static/js/settings.js', 'var(--accent, var(--red))'): 11,
     ('static/js/settings.js', 'var(--accent,#50fa7b)'): 1,
     ('static/js/settings.js', 'var(--accent,var(--red))'): 2,
+    ('static/js/settings.js', 'var(--color-danger)'): 1,   # #1644 W4: standard danger token, was `var(--danger,#c0392b)`
     ('static/js/settings.js', 'var(--fg)'): 23,
     ('static/js/settings.js', 'var(--fg-muted)'): 1,
     ('static/js/settings.js', 'var(--red)'): 57,
@@ -468,11 +471,10 @@ JS_COOL_REGISTRY = {
 #    still occurs EXACTLY `count` times (a wave that fixes / a copy that adds one fails here).
 # ═══════════════════════════════════════════════════════════════════════════════════
 KNOWN_RESIDUAL = [
-    # ── W4 — JS status inks: two UNDEFINED-token color fallbacks in settings.js ──
-    {"file": "static/js/settings.js", "line": 1084, "find": "var(--danger, #c0392b)", "count": 1,
-     "wave": "W4", "why": "`--danger` is undefined → paints the retired alizarin brick #c0392b (banned #1605)"},
-    {"file": "static/js/settings.js", "line": 997, "find": "var(--amber, var(--fg))", "count": 1,
-     "wave": "W4", "why": "`--amber` is undefined → falls to var(--fg) (light on frosted-light); fix the token"},
+    # ── W4 — FIXED (#1644 W4): the two undefined-token settings.js inks were repointed onto standard
+    #    tokens — `var(--danger, #c0392b)` → `var(--color-danger)` (Apple system red, in JS_COOL_REGISTRY
+    #    now) and `var(--amber, var(--fg))` → `var(--color-warning)` (defined amber, not a cool token).
+    #    Their KNOWN_RESIDUAL entries were removed here so the anti-rot check stays honest. ──
 
     # ── W5 — index.html inline: risky cool-on-`background:none` / bespoke-red inline sites ──
     {"file": "static/index.html", "line": 1539, "find": "1px dashed var(--border);color:var(--fg)", "count": 1,
