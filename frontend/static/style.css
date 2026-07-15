@@ -15515,24 +15515,15 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   color: color-mix(in srgb, var(--fg) 45%, transparent);
 }
 .shortcut-key-unset:hover .shortcut-unset { border-color: var(--accent, var(--red)); color: var(--fg); }
-.shortcut-key kbd {
-  display: inline-block; font-family: inherit; font-size: var(--fs-xs);
-  padding: 2px 6px; min-width: 20px; text-align: center;
-  /* Highlight kbd chips in the theme accent so they stand out from
-     normal text and clearly mark "this is a key you press". */
-  background: color-mix(in srgb, var(--accent, var(--red)) 14%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border));
-  color: var(--accent, var(--red));
-  border-radius: 3px;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
-  line-height: 1.4;
-  font-weight: 600;
-}
+/* The keycap chips migrated to the neutral, accent-free `.ow-kbd` kit primitive (ELEMENT KIT
+   region, #1638). Both the legacy `.shortcut-key kbd` (accent fill/border/glyph) and the
+   `.shortcut-key.listening kbd` accent-border override are RETIRED — settings.js:_formatKeyCaps
+   now emits `<kbd class="ow-kbd">`, and the listening state swaps the chips for a "Press keys…"
+   label anyway, so no accent border can reappear. */
 .shortcut-key.listening {
   background: color-mix(in srgb, var(--accent, #cc6a3a) 10%, transparent);
   animation: shortcut-pulse 1s infinite;
 }
-.shortcut-key.listening kbd { border-color: var(--accent, #cc6a3a); }
 .shortcut-action-btn {
   width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border);
   background: transparent; color: var(--fg); cursor: pointer; font-size: var(--fs-sm);
@@ -22301,6 +22292,43 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
     backdrop-filter: none !important;
   }
 }
+/* ── KEYCAP: .ow-kbd — a physical key-chip (#1638) ──────────────────────────────
+   The Settings → Shortcuts keycaps. Emphasis is the RAISED CHIP SHAPE (a key you press),
+   never an accent hue on the glyph (#726/#773 no-accent-on-text) — the exact contract the
+   legacy `.shortcut-key kbd` violated (it painted the glyph in var(--accent)). Neutral chrome
+   ink on a translucent glass chip; the "keycap" depth is a soft top rim + a 1px bottom lip.
+   Passive glyph: NO tap-floor of its own — the 44px WCAG 2.5.5 floor belongs to the wrapping
+   .shortcut-key button (audit §5e → .ow-btn-plain, a separate lane). */
+.ow-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; padding: 2px 6px;
+  font-family: var(--ow-ui-font, inherit); font-size: var(--ow-fs-caption, 0.75rem);
+  font-weight: var(--ow-fw-semibold, 600); line-height: 1.4;
+  color: var(--ow-control-ink, #16191f);                 /* NEUTRAL ink — the fix */
+  background: var(--ow-control-fill, color-mix(in srgb, #16191f 10%, transparent));
+  border: 1px solid var(--ow-control-rim, color-mix(in srgb, #16191f 22%, transparent));
+  border-radius: 4px;                                    /* small chip radius */
+  /* the "keycap" depth: a soft top rim + a 1px bottom lip (the key's front face) */
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,.5)),
+              0 1px 0 color-mix(in srgb, #16191f 18%, transparent);
+}
+.ow-kbd-group { display: inline-flex; align-items: center; gap: 2px; }
+/* Full Glass: the chip rides the real glass sample like other kit controls */
+body.glass-full .ow-kbd {
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+}
+/* a11y trio */
+@media (prefers-reduced-transparency: reduce) {
+  .ow-kbd { background: var(--panel, var(--bg)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* MUST match the body.glass-full .ow-kbd specificity, or the Full-Glass rule's higher
+     specificity keeps its backdrop-filter active and the user preference is ignored. */
+  body.glass-full .ow-kbd { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .ow-kbd { border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent); }
+}
+
 /* ── SWATCH GRID: .ow-swatch-grid / .ow-swatch — a selectable option-in-a-set (#1638) ──
    The Theme window's preset + custom swatch grids: a role=listbox grid of role=option tiles.
    Not a button (a swatch is a selectable option, the kit analog of a radio/listbox-option, not a

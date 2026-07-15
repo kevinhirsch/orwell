@@ -2386,7 +2386,7 @@ function _formatKeyCaps(combo) {
     else if (p === '/') label = '/';
     else if (p === 'space') label = 'Space';
     else label = p.charAt(0).toUpperCase() + p.slice(1);
-    return `<kbd>${label}</kbd>`;
+    return `<kbd class="ow-kbd">${label}</kbd>`;
   }).join('');
 }
 

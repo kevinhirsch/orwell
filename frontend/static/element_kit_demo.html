@@ -524,6 +524,34 @@
       </div>
     </section>
 
+    <!-- KEYCAP (.ow-kbd) -->
+    <section class="ek-card">
+      <h2>Keycap — .ow-kbd / .ow-kbd-group (#1638)</h2>
+      <p class="ek-note">The Settings → Shortcuts key-chips: a passive <code>&lt;kbd class="ow-kbd"&gt;</code>
+        glyph rendering one key of a combo. Emphasis is the RAISED CHIP SHAPE (a physical key), never an
+        accent hue on the glyph — the exact <code>color: var(--accent)</code> contract the legacy
+        <code>.shortcut-key kbd</code> violated. Neutral chrome ink on a translucent glass chip; the
+        optional <code>.ow-kbd-group</code> wraps a run into a cluster. Non-interactive — the 44px tap
+        floor belongs to the wrapping rebind button, not the chip.</p>
+
+      <div class="ek-label">Single chips</div>
+      <div class="ek-row" style="gap:8px">
+        <kbd class="ow-kbd">Ctrl</kbd>
+        <kbd class="ow-kbd">Shift</kbd>
+        <kbd class="ow-kbd">Cmd</kbd>
+        <kbd class="ow-kbd">Esc</kbd>
+        <kbd class="ow-kbd">Space</kbd>
+        <kbd class="ow-kbd">K</kbd>
+      </div>
+
+      <div class="ek-label">Combo cluster — .ow-kbd-group</div>
+      <div class="ek-row" style="gap:12px">
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Ctrl</kbd><kbd class="ow-kbd">Shift</kbd><kbd class="ow-kbd">K</kbd></span>
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Cmd</kbd><kbd class="ow-kbd">,</kbd></span>
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Alt</kbd><kbd class="ow-kbd">/</kbd></span>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->
