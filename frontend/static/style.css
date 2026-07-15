@@ -13039,7 +13039,6 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   margin: 0 6px;
   flex-shrink: 0;
 }
-.admin-rag-item .admin-btn-delete { font-size: 10px; padding: 2px 6px; }
 .admin-rag-status {
   font-size: 11px;
   color: color-mix(in srgb, var(--fg) 50%, transparent);

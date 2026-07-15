@@ -446,7 +446,6 @@ COOL_REGISTRY = {
 # and is registered here; the warning one inks the defined `var(--color-warning)` (not a cool token, so
 # not tracked). The retired brick may NEVER be here.
 JS_COOL_REGISTRY = {
-    ('static/js/admin.js', '#fff'): 1,
     ('static/js/admin.js', 'var(--accent)'): 1,
     ('static/js/admin.js', 'var(--fg)'): 1,
     ('static/js/admin.js', 'var(--red)'): 9,
