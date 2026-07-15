@@ -21220,11 +21220,52 @@ body.theme-frosted .ow-btn-prominent {
     inset 0 -1px 1px rgba(0,0,0,0.05),
     var(--ow-btn-shadow);
 }
+/* ICON — a SQUARE, FLAT, wallpaper-aware icon button (#1638 compact/icon primitive).
+   Generalized from the old circular glass disc to the compact DESKTOP-CHROME icon button the
+   gadget-rail / composer / hamburger / model-picker need: sub-44px on a fine pointer (the ~30px
+   `--ow-btn-icon-size`, tunable), a SUBTLE square radius (NOT the full pill, NOT a disc), NO text
+   padding, a centered glyph, and ADAPTIVE ink — `color: var(--fg)` inks LIGHT over the dark app
+   wallpaper and, inside a light-glass container (`.ow-window .ow-body` / `.on-card` / `.og-card`),
+   the W3 `--fg` remap re-inks it DARK, so ONE primitive is legible in BOTH contexts (registered
+   "adaptive-wallpaper" in the #1644/W1 COOL_REGISTRY, exactly like `.gadget-rail-head`). It is FLAT
+   chrome (transparent rest + a subtle `--fg` hover tint, no glass float), so it drops cleanly onto
+   the wallpaper AND onto a card. It KEEPS the base `.ow-btn` focus ring / disabled plate /
+   reduced-motion, and SNAPS to 44×44 on a coarse pointer (WCAG 2.5.5) via the
+   `@media (any-pointer: coarse)` floor below. */
 body.theme-frosted .ow-btn-icon {
-  min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
-  /* #709: a LIGHT luminous veil (was a dark wash) so the dark glyph stays legible over a
-     colourful/dark backdrop — matches the secondary fix; subdued, still glass. */
-  background-color: rgba(255,255,255,0.30);
+  min-height: 0; padding: 0;
+  width: var(--ow-btn-icon-size, 30px); height: var(--ow-btn-icon-size, 30px);
+  border-radius: 8px;                 /* subtle square radius — not the full pill, not a disc */
+  background: transparent; border-color: transparent; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;   /* flat chrome, not a floating glass pill */
+  color: var(--fg);                   /* adaptive: light over the wallpaper, dark inside a glass card */
+  font-size: 1rem; line-height: 1;
+}
+/* xs — the ~24px chrome icon (model-picker / sidebar); still snaps to 44 on a coarse pointer. */
+body.theme-frosted .ow-btn-icon.ow-btn-xs { --ow-btn-icon-size: 24px; font-size: 0.8125rem; }
+
+/* COMPACT — a FLAT, reduced-height TEXT button (#1638): the text sibling of `.ow-btn-icon` for
+   dense chrome (section headers, small actions). Shorter than the 44px pill on a fine pointer,
+   the SAME adaptive `--fg` ink, the SAME transparent-rest + subtle-hover flat chrome, the SAME
+   coarse 44px snap. Distinct from the sm/md size ladder (those keep a variant's glass fill);
+   compact is intentionally flat chrome so it can sit as bare over-wallpaper section chrome. */
+body.theme-frosted .ow-btn-compact {
+  min-height: 32px;
+  padding: var(--ow-space-1, 4px) var(--ow-space-3, 12px);
+  font-size: 0.8125rem; line-height: 1.2;
+  border-radius: 8px;
+  background: transparent; border-color: transparent; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  color: var(--fg);
+}
+
+/* WCAG 2.5.5 — the compact icon / text chrome buttons SNAP UP to the 44px touch floor on any
+   touch-capable pointer (mirrors the RESP-4 `any-pointer: coarse` chrome floor). `!important`
+   beats the tiered sub-44px width/height. Pure mouse/desktop keeps the compact size. Un-tiered so
+   it covers BOTH the frosted and flat `.ow-btn-icon` / `.ow-btn-compact`. */
+@media (any-pointer: coarse) {
+  .ow-btn-icon { min-width: 44px !important; min-height: 44px !important; }
+  .ow-btn-compact { min-width: 44px !important; min-height: 44px !important; }
 }
 
 /* ── SECONDARY (default) glass buttons: translucent disc/capsule, light glyph ──*/
@@ -21937,8 +21978,14 @@ body.theme-frosted .ow-btn-prominent:hover {
     var(--ow-btn-shadow-hover);
 }
 body.theme-frosted .ow-btn-plain:hover { box-shadow: none; }
-body.theme-frosted .ow-btn-secondary:hover,
-body.theme-frosted .ow-btn-icon:hover { background-color: var(--ow-control-fill-hover); }
+body.theme-frosted .ow-btn-secondary:hover { background-color: var(--ow-control-fill-hover); }
+/* #1638 flat-chrome hover: a SUBTLE ADAPTIVE `--fg` tint (legible over the wallpaper OR a card)
+   and NO float lift — the compact icon/text chrome buttons are flat, not glass pills. */
+body.theme-frosted .ow-btn-icon:hover,
+body.theme-frosted .ow-btn-compact:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  box-shadow: none; transform: none; filter: none;
+}
 body.theme-frosted .ow-btn-plain:hover {
   background: color-mix(in srgb, #16191f 7%, transparent);
   transform: none;          /* plain stays flat; only fills/buttons lift */
@@ -22451,16 +22498,41 @@ body:not(.theme-frosted) .ow-btn-prominent {
   color: var(--fg);
   font-weight: var(--ow-fw-semibold, 600);
 }
-/* ICON — circular icon-only disc. */
+/* ICON — a SQUARE, FLAT icon button (#1638). Same square / subtle-radius / no-padding /
+   adaptive-ink contract as the frosted tier; on Flat, `--fg` is already the light dark-theme
+   ink, so a transparent rest + a subtle `--fg` hover tint reads over the dark backdrop. The
+   coarse 44px snap comes from the shared `any-pointer: coarse` floor above. */
 body:not(.theme-frosted) .ow-btn-icon {
-  min-height: 0; padding: 0; width: 30px; height: 30px; border-radius: 50%;
-  background-color: var(--own-flat-fill-hover);
+  min-height: 0; padding: 0;
+  width: var(--ow-btn-icon-size, 30px); height: var(--ow-btn-icon-size, 30px);
+  border-radius: 8px;
+  background: transparent; border-color: transparent; box-shadow: none;
+  color: var(--fg); font-size: 1rem; line-height: 1;
+}
+body:not(.theme-frosted) .ow-btn-icon.ow-btn-xs { --ow-btn-icon-size: 24px; font-size: 0.8125rem; }
+/* COMPACT — a FLAT, reduced-height TEXT button (#1638): the text sibling of `.ow-btn-icon`. */
+body:not(.theme-frosted) .ow-btn-compact {
+  min-height: 32px;
+  padding: var(--ow-space-1, 4px) var(--ow-space-3, 12px);
+  font-size: 0.8125rem; line-height: 1.2;
+  border-radius: 8px;
+  background: transparent; border-color: transparent; box-shadow: none;
+  color: var(--fg);
 }
 /* STATES — same contract as frosted: hover lift, iOS press dim+scale, system-blue
    focus ring, a clear (opaque) disabled state. */
 body:not(.theme-frosted) .ow-btn:hover {
   background-color: var(--own-flat-fill-hover);
   transform: translateY(-1px);
+}
+/* #1638 flat-chrome hover: subtle adaptive `--fg` tint, no lift. Declared AFTER the generic
+   `.ow-btn:hover` above (mirrors the frosted tier) so — at EQUAL (0,3,1) specificity — source
+   order makes it WIN for the two compact/icon variants, overriding the generic lift + flat fill;
+   every OTHER `.ow-btn` keeps the generic hover unchanged. */
+body:not(.theme-frosted) .ow-btn-icon:hover,
+body:not(.theme-frosted) .ow-btn-compact:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  transform: none; filter: none;
 }
 body:not(.theme-frosted) .ow-btn-prominent:hover {
   /* single-percentage form so the mix sums to 100% (no alpha-thinning remainder) */
