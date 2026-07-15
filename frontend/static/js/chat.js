@@ -1031,6 +1031,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // ADR 0012 §2.4: set if the server tells this (loser-of-the-bind) window the run lives under a
     // DIFFERENT canonical session id; converged onto in the finally (never mid-stream).
     let _adoptCanonicalAfterStream = null;
+    // #1626: the producer (production-voice) name resolved this stream, remembered so we can ALSO
+    // persist it under the canonical session id when this window is the loser-of-the-bind. The
+    // orwell_narrator + canonical_session events can arrive in either order, so each writes through
+    // to the other's id when both are known (see both handlers below).
+    let _streamNarratorName = null;
     // ADR 0012 (GAP 2 — error-path consistency): set when this turn rendered a LIVE model error (e.g.
     // "Error 503"). The agent loop persists a FRIENDLY fallback ("The model returned an empty
     // response…") instead, so a peer/reload shows that text while the sender shows the raw error — two
@@ -2736,7 +2741,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // would reload history out from under the live bubble); _adoptCanonicalAfterStream is
                 // consumed in the finally.
                 if (_isBg) continue;
-                if (json.id) _adoptCanonicalAfterStream = json.id;
+                if (json.id) {
+                  _adoptCanonicalAfterStream = json.id;
+                  // If orwell_narrator already arrived, mirror the producer onto the canonical id
+                  // too — otherwise the byline resets to "Production" after the finally re-keys this
+                  // window onto canonical (the narrator was only persisted under the pre-bind id).
+                  if (_streamNarratorName && json.id !== streamSessionId) {
+                    _persistNarratorForSession(json.id, _streamNarratorName);
+                  }
+                }
 
               } else if (json.type === 'orwell_narrator') {
                 // #1626 increment 2: the engine resolved this stream's producer (production-voice)
@@ -2746,7 +2759,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // (`!_isBg`) — otherwise a background session A would hijack the byline of the
                 // session B the user is viewing. Fail open on a blank name.
                 if (json.name) {
+                  _streamNarratorName = json.name;
                   _persistNarratorForSession(streamSessionId, json.name);
+                  // Loser-of-the-bind: also persist under the canonical id this run was re-keyed to,
+                  // so the byline survives the post-stream converge (either event order is covered —
+                  // canonical_session mirrors the reverse case when it arrives second).
+                  if (_adoptCanonicalAfterStream && _adoptCanonicalAfterStream !== streamSessionId) {
+                    _persistNarratorForSession(_adoptCanonicalAfterStream, json.name);
+                  }
                   if (!_isBg) {
                     setGameNarrator(json.name);
                     _refreshLiveByline(holder);
