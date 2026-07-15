@@ -6444,9 +6444,6 @@ body.bg-pattern-perlin-flow {
     .vis-row:hover {
       background: color-mix(in srgb, var(--fg) 5%, transparent);
     }
-    .vis-row input[type="checkbox"] {
-      display: none;
-    }
     .vis-icon {
       width: 20px;
       height: 20px;
@@ -6468,34 +6465,11 @@ body.bg-pattern-perlin-flow {
       color: var(--fg);
       user-select: none;
     }
-    .vis-switch {
-      position: relative;
-      width: 30px;
-      height: 16px;
-      background: color-mix(in srgb, var(--fg) 15%, transparent);
-      border-radius: 8px;
-      transition: background 0.2s;
-      flex-shrink: 0;
-    }
-    .vis-switch::after {
-      content: '';
-      position: absolute;
-      top: 2px;
-      left: 2px;
-      width: 12px;
-      height: 12px;
-      background: var(--panel);
-      border-radius: 50%;
-      transition: transform 0.2s;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.25);
-    }
-    .vis-row input:checked + .vis-switch {
-      background: var(--red);
-    }
-    .vis-row input:checked + .vis-switch::after {
-      transform: translateX(14px);
-    }
-    .vis-row input:checked ~ .vis-icon,
+    /* SET-11 (#1606): the hand-rolled .vis-switch toggle (which carried the SET-08
+       var(--red) ON-track accent leak) was replaced by the kit .ow-switch primitive
+       in every .vis-row. The row wrapper + icon/label stay; the switch is now
+       <span class="ow-switch"><input …><span class="ow-switch-track"></span></span>,
+       so the ON track is the sanctioned system blue by construction. */
     .vis-row:has(input:checked) .vis-icon {
       color: var(--fg);
     }
@@ -21592,11 +21566,12 @@ body.theme-frosted .send-btn .send-btn-label {
   --ow-ios-green: #30d158;   /* Apple system green (dark) — iOS slider track        */
 }
 /* SWITCHES / TOGGLES: blue ON state (mirror iOS). Replaces the app-accent fill.    */
-/* Covers every toggle family in the player tier (settings = .admin-switch, plus    */
-/* .toggle/.vis-switch/.toggle-switch/.cookbook-checkbox) so the ON track is the     */
+/* Covers every legacy toggle family in the player tier (settings = .admin-switch,   */
+/* plus .toggle/.toggle-switch/.cookbook-checkbox) so the ON track is the            */
 /* sanctioned system blue everywhere; OFF stays the neutral translucent track.       */
+/* (.vis-switch was retired in SET-11 (#1606) — the Appearance toggles now use the   */
+/* kit .ow-switch, which is system-blue-on by construction.)                          */
 body.theme-frosted .toggle input:checked + .slider,
-body.theme-frosted .vis-row input:checked + .vis-switch,
 body.theme-frosted .admin-switch input:checked + .admin-slider,
 body.theme-frosted .toggle-switch input:checked + .toggle-slider,
 body.theme-frosted .cookbook-checkbox:checked {
@@ -21626,7 +21601,6 @@ body.theme-frosted input[type="range"] {
 body.glass-full .admin-slider::before,
 body.glass-full .toggle .slider:before,
 body.glass-full .toggle-slider:before,
-body.glass-full .vis-switch::after,
 body.glass-full .cookbook-checkbox::after {
   /* white-ish GLASS knob: a high-white translucent fill so the concave refraction
      of the track/backdrop reads through it (kube uses opaque white; we drop the
@@ -21648,7 +21622,6 @@ body.glass-full .cookbook-checkbox::after {
   body.glass-full .admin-slider::before,
   body.glass-full .toggle .slider:before,
   body.glass-full .toggle-slider:before,
-  body.glass-full .vis-switch::after,
   body.glass-full .cookbook-checkbox::after {
     background: #fff !important;
     -webkit-backdrop-filter: none !important;
@@ -22785,12 +22758,13 @@ body:not(.theme-frosted) .settings-nav-item.active {
 body:not(.theme-frosted) .settings-nav-item.active svg { opacity: 1; color: #fff; }
 
 /* ── SET-08: every legacy toggle family's ON track is system blue on Flat too ── */
-/* The frosted fix (~L21571) patched .toggle/.vis-switch/.admin-switch/
-   .toggle-switch/.cookbook-checkbox onto the sanctioned system blue and never
-   extended to Flat — same selector list, same !important (some of these tracks
-   carry their own more-specific hover/checked overrides elsewhere). */
+/* The frosted fix (~L21571) patched .toggle/.admin-switch/.toggle-switch/
+   .cookbook-checkbox onto the sanctioned system blue and never extended to Flat
+   — same selector list, same !important (some of these tracks carry their own
+   more-specific hover/checked overrides elsewhere). The .vis-switch family that
+   was the structural cause of SET-08 is gone (SET-11, #1606: migrated to the kit
+   .ow-switch, which is system-blue-on across both tiers by construction). */
 body:not(.theme-frosted) .toggle input:checked + .slider,
-body:not(.theme-frosted) .vis-row input:checked + .vis-switch,
 body:not(.theme-frosted) .admin-switch input:checked + .admin-slider,
 body:not(.theme-frosted) .toggle-switch input:checked + .toggle-slider,
 body:not(.theme-frosted) .cookbook-checkbox:checked {

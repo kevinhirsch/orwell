@@ -2249,7 +2249,7 @@ function initBeatHapticsToggle() {
       row.innerHTML =
         '<span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>' +
         '<span class="vis-label">Beat Haptics &amp; Audio <span class="vis-hint">Vibrate + chime on crown, noms, veto &amp; eviction</span></span>' +
-        '<input type="checkbox" data-haptics-key="beat-haptics"><span class="vis-switch"></span>';
+        '<span class="ow-switch"><input type="checkbox" data-haptics-key="beat-haptics"><span class="ow-switch-track"></span></span>';
       group.appendChild(row);
       chk = row.querySelector('[data-haptics-key="beat-haptics"]');
     }
@@ -2276,7 +2276,7 @@ function initBeatHapticsToggle() {
       arow.innerHTML =
         '<span class="vis-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></span>' +
         '<span class="vis-label">Beat Chime <span class="vis-hint">Play the audio cue too (vibration stays on)</span></span>' +
-        '<input type="checkbox" data-haptics-key="beat-audio"><span class="vis-switch"></span>';
+        '<span class="ow-switch"><input type="checkbox" data-haptics-key="beat-audio"><span class="ow-switch-track"></span></span>';
       group.appendChild(arow);
       audioChk = arow.querySelector('[data-haptics-key="beat-audio"]');
     }
