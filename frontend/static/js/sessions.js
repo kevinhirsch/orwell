@@ -1579,6 +1579,13 @@ export async function selectSession(id, { keepSidebar = false } = {}) {
       try { window.documentModule.clearSelection(); } catch {}
     }
     currentSessionId = id;
+    // #1626 increment 2: now that the active session id is known, restore its producer byline from the
+    // per-session map BEFORE history renders (the module-eval restore in chat.js runs too early —
+    // currentSessionId is unset then). A session with no entry resets to the "Production" default, so a
+    // new season/session never inherits the prior session's producer. Fail-open (hook may not exist).
+    if (window.chatModule && window.chatModule.orwellReapplyNarrator) {
+      try { window.chatModule.orwellReapplyNarrator(id); } catch (_) {}
+    }
     // Identify Assistant / task-output sessions so we don't "trap" the user
     // there on return. Skipped from both `lastSessionId` persistence and the
     // URL hash — the user complained that coming back to Orwell kept

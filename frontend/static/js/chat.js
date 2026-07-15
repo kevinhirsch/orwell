@@ -10,7 +10,7 @@ import uiModule from './ui.js';
 import sessionModule from './sessions.js';
 import chatRenderer from './chatRenderer.js';
 import chatStream from './chatStream.js';
-import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, isSeasonStarted, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, GAME_NARRATOR, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
+import { ORWELL_TOOL_BEATS as _orwellToolBeats, orwellBeatOutcome, isGameBuild, isSeasonStarted, orwellBeatIsSilent, ORWELL_MAX_VISIBLE_BEATS, gameNarrator, setGameNarrator, orwellCeremonySlate, orwellRenderCeremonySlate, narratorWaitCopy } from './orwellToolBeats.js';
 import { addAITTSButton } from './tts-ai.js';
 import markdownModule from './markdown.js';
 import { svgifyEmoji } from './markdown.js';
@@ -127,6 +127,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         're-added a chat.js <script> tag alongside the app.js import.');
     }
     window.__orwellChatEvaluated = true;
+    // #1626 increment 2: restore THIS tab's producer byline for the active session from the
+    // per-session map. NOTE: at module-eval currentSessionId is usually not assigned yet (selectSession
+    // runs later), so this seeds the default; the AUTHORITATIVE restore is orwellReapplyNarrator(id),
+    // which selectSession invokes once the active sid is known (Greptile P1 timing fix). Fail-open;
+    // sessionStorage clears on tab close, so a stale value can never outlive the browser tab.
+    try {
+      orwellReapplyNarrator(sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId());
+    } catch (_) {}
   }
 
   const RESEARCH_TIMEOUT_MS = 360000;
@@ -192,7 +200,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   // placeholder / resume / continuation site so the model machinery stays invisible to the
   // player (mirrors _setRoleModelLabel for the resolved-model path).
   function _senderLabel(modelLabel) {
-    return isGameBuild() ? GAME_NARRATOR : (modelLabel || '');
+    return isGameBuild() ? gameNarrator() : (modelLabel || '');
   }
   // J1-30 (immersion): the pre-token wait — most visible right after the player's first deliberate
   // action ("Start casting"), where a generic "Processing request…" reads as lag/OOC. In the game
@@ -228,7 +236,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // C14/immersion: the player must never see the raw LLM model name as the sender —
     // in the game build the narrator IS the show. Use a diegetic label unless a specific
     // speaker name was supplied.
-    else if (document.body.hasAttribute('data-game-build')) label = GAME_NARRATOR;
+    else if (document.body.hasAttribute('data-game-build')) label = gameNarrator();
     roleEl.textContent = label + ' ';
     _applyModelColor(roleEl, actual || req);
     // C14/immersion: the raw "alias -> dated-version" model string must never reach the
@@ -241,6 +249,49 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       roleEl.removeAttribute('title');
     }
     if (tsSpan) roleEl.appendChild(tsSpan);
+  }
+  // #1626 increment 2: the sessionStorage key holding the PER-SESSION producer map { [sid]: name }.
+  // Per-session (not one tab-wide record) so visiting session B never overwrites A's byline, and
+  // reloading A restores A's producer — a NEW season/session simply has no entry ⇒ "Production".
+  // Per-tab (sessionStorage), matching the ADR 0008/0012 outbox convention.
+  const _NARRATOR_STORE_KEY = 'orwell.gameNarrator';
+  function _readNarratorMap() {
+    try {
+      const m = JSON.parse(sessionStorage.getItem(_NARRATOR_STORE_KEY) || 'null');
+      return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+    } catch (_) { return {}; }
+  }
+  // Persist the resolved producer byline SEASON-SCOPED into the per-session map. Fail-open.
+  function _persistNarratorForSession(sid, name) {
+    if (!name || !sid) return;
+    try {
+      const m = _readNarratorMap();
+      m[sid] = String(name);
+      sessionStorage.setItem(_NARRATOR_STORE_KEY, JSON.stringify(m));
+    } catch (_) {}
+  }
+  // #1626 increment 2: re-apply the byline for the NOW-ACTIVE session from the per-session map — the
+  // load-time read runs during module eval, BEFORE selectSession() assigns currentSessionId, so the
+  // real restore happens here, invoked by selectSession once the active sid is known (exposed as
+  // chatModule.orwellReapplyNarrator). Applies the session's producer, or resets to "Production" when
+  // the session has no entry (a new season). Fail-open.
+  function orwellReapplyNarrator(sid) {
+    try {
+      const name = sid ? _readNarratorMap()[sid] : null;
+      setGameNarrator(name || undefined);   // falsy ⇒ the "Production" default (setGameNarrator floor)
+    } catch (_) { setGameNarrator(); }
+  }
+  // #1626 increment 2: re-apply the byline to an ALREADY-MOUNTED live bubble after the producer name
+  // resolves mid-stream (the holder is created BEFORE the SSE is read), so the current bubble updates
+  // now instead of only at finalize/reload. Routes through the canonical role-label path, preserving
+  // an explicit character label (an NPC-voiced row keeps its speaker name). Fail-open: no holder/role
+  // ⇒ no-op; touches ONLY the .role element, never the body (reasoning-scrub/OOC state untouched).
+  function _refreshLiveByline(liveHolder) {
+    if (!liveHolder || typeof liveHolder.querySelector !== 'function') return;
+    const roleEl = liveHolder.querySelector('.role');
+    if (!roleEl) return;
+    _setRoleModelLabel(roleEl, liveHolder._requestedModel, liveHolder._actualModel,
+      { characterName: liveHolder._characterName });
   }
   // Per-session research tracking (supports concurrent research across sessions).
   // The id set is chatState._researchingStreamIds (moved to chatState.js, #1414 R3 PR0).
@@ -980,6 +1031,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // ADR 0012 §2.4: set if the server tells this (loser-of-the-bind) window the run lives under a
     // DIFFERENT canonical session id; converged onto in the finally (never mid-stream).
     let _adoptCanonicalAfterStream = null;
+    // #1626: the producer (production-voice) name resolved this stream, remembered so we can ALSO
+    // persist it under the canonical session id when this window is the loser-of-the-bind. The
+    // orwell_narrator + canonical_session events can arrive in either order, so each writes through
+    // to the other's id when both are known (see both handlers below).
+    let _streamNarratorName = null;
     // ADR 0012 (GAP 2 — error-path consistency): set when this turn rendered a LIVE model error (e.g.
     // "Error 503"). The agent loop persists a FRIENDLY fallback ("The model returned an empty
     // response…") instead, so a peer/reload shows that text while the sender shows the raw error — two
@@ -1365,6 +1421,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       holder.innerHTML = `<div class="role">${uiModule.esc(roleLabel)} <span class="role-timestamp">${roleTs}</span></div><div class="body"></div>`;
       holder._requestedModel = modelName;
       holder._actualModel = modelName;
+      // #1626 increment 2: seed the explicit character label at creation (the SAME source model_info
+      // reads) so a mid-stream byline refresh (orwell_narrator arriving BEFORE model_info) preserves a
+      // preset NPC label instead of clobbering it with the producer name. Empty ⇒ producer/default.
+      holder._characterName = _charNameInit;
       _applyModelColor(holder.querySelector('.role'), modelName);
       holder.style.position = 'relative';
       
@@ -2681,7 +2741,37 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // would reload history out from under the live bubble); _adoptCanonicalAfterStream is
                 // consumed in the finally.
                 if (_isBg) continue;
-                if (json.id) _adoptCanonicalAfterStream = json.id;
+                if (json.id) {
+                  _adoptCanonicalAfterStream = json.id;
+                  // If orwell_narrator already arrived, mirror the producer onto the canonical id
+                  // too — otherwise the byline resets to "Production" after the finally re-keys this
+                  // window onto canonical (the narrator was only persisted under the pre-bind id).
+                  if (_streamNarratorName && json.id !== streamSessionId) {
+                    _persistNarratorForSession(json.id, _streamNarratorName);
+                  }
+                }
+
+              } else if (json.type === 'orwell_narrator') {
+                // #1626 increment 2: the engine resolved this stream's producer (production-voice)
+                // name. ALWAYS persist it SEASON-SCOPED (keyed to the ORIGINATING session), so a
+                // background stream's producer is remembered for ITS session. But only touch the
+                // tab-global byline + refresh the live bubble when this stream is the ACTIVE session
+                // (`!_isBg`) — otherwise a background session A would hijack the byline of the
+                // session B the user is viewing. Fail open on a blank name.
+                if (json.name) {
+                  _streamNarratorName = json.name;
+                  _persistNarratorForSession(streamSessionId, json.name);
+                  // Loser-of-the-bind: also persist under the canonical id this run was re-keyed to,
+                  // so the byline survives the post-stream converge (either event order is covered —
+                  // canonical_session mirrors the reverse case when it arrives second).
+                  if (_adoptCanonicalAfterStream && _adoptCanonicalAfterStream !== streamSessionId) {
+                    _persistNarratorForSession(_adoptCanonicalAfterStream, json.name);
+                  }
+                  if (!_isBg) {
+                    setGameNarrator(json.name);
+                    _refreshLiveByline(holder);
+                  }
+                }
 
               } else if (json.type === 'tool_start') {
                 if (_isBg) continue;
@@ -4582,6 +4672,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       ' <span class="role-timestamp">' + roleTs + '</span></div>' +
       '<div class="body"><div class="stream-content"></div></div>';
     _applyModelColor(holder.querySelector('.role'), meta && meta.model);
+    holder._requestedModel = meta && meta.model;
+    holder._actualModel = meta && meta.model;
+    // #1626 increment 2: seed the explicit character label at creation (same source model_info reads)
+    // so a mid-stream byline refresh preserves a preset NPC label instead of the producer name.
+    holder._characterName = presetsModule.getCharacterName ? presetsModule.getCharacterName() : '';
     const contentDiv = holder.querySelector('.stream-content');
     box.appendChild(holder);
 
@@ -4698,6 +4793,20 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           } else if (json.type === 'doc_stream_delta') {
             rich = true;
             if (documentModule && json.delta) documentModule.streamDocDelta(json.delta);
+          } else if (json.type === 'orwell_narrator') {
+            // #1626 increment 2: the MIRROR/resume stream carries this resumed session's producer name.
+            // ALWAYS persist it SEASON-SCOPED (keyed to the resumed sessionId). Only touch the
+            // tab-global byline + refresh the live bubble when this resumed session is the ACTIVE one —
+            // a background resume must not hijack the byline the user is currently viewing. Fail-open.
+            if (json.name) {
+              _persistNarratorForSession(sessionId, json.name);
+              const _activeNow = !(sessionModule.getCurrentSessionId
+                && sessionModule.getCurrentSessionId() !== sessionId);
+              if (_activeNow) {
+                setGameNarrator(json.name);
+                _refreshLiveByline(holder);
+              }
+            }
           } else if (json.type === 'metrics') {
             metricsData = json.data || metricsData;
           } else if (json.type === 'message_saved') {
@@ -5509,6 +5618,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     hideWelcomeScreen: chatRenderer.hideWelcomeScreen,
     showWelcomeScreen: chatRenderer.showWelcomeScreen,
     checkPendingResearch,
+    // #1626 increment 2: selectSession() invokes this once the active sid is known so the byline is
+    // restored from the per-session map (the module-eval read is too early — currentSessionId is unset).
+    orwellReapplyNarrator,
     getImageCost: chatRenderer.getImageCost,
     setDisplayOverride,
     setHideUserBubble,

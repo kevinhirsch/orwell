@@ -7,12 +7,31 @@
 //   • history reload → chatRenderer.js (same treatment when a session is re-opened)
 // Keeping it here prevents the two paths from drifting — a tool added to the live
 // path but not the reload path was leaking raw names + engine JSON on every reload.
-// M2-5 (audit B4; owner pick 2026-07-08): the ONE diegetic transcript author. Narration
-// bubbles are authored by the show's production voice — never the model name, and no longer
-// the product name ("Orwell" stays product chrome: wordmark, tab title, admin). A future
-// rebrand (parked P-1) is this one line.
+// M2-5 (audit B4; owner pick 2026-07-08) + #1626 increment 2: the diegetic transcript author is the
+// show's PRODUCTION VOICE — never the model name, and no longer the product name ("Orwell" stays
+// product chrome: wordmark, tab title, admin). GAME_NARRATOR is the DEFAULT byline ("Production") —
+// the safe pre-resolution value AND the parked P-1 rebrand's one line. Once the engine resolves the
+// season's seeded, Vault-free producer name, the stream hands it to the client (chat.js sets
+// `window.ORWELL_GAME_NARRATOR` from the `orwell_narrator` event) and the byline reflects THAT
+// producer, stable per season. Every game-build sender-label site reads the dynamic `gameNarrator()`
+// getter below — NOT this frozen const — so the byline tracks the producer; fail-open to "Production".
 export const GAME_NARRATOR = 'Production';
 if (typeof window !== 'undefined') window.ORWELL_GAME_NARRATOR = GAME_NARRATOR;
+
+// The DYNAMIC byline: the season's resolved producer name if this window has one, else the
+// "Production" default. Every game-build sender-label site reads THIS so the byline tracks the
+// producer. Fail-open: an unset/blank window value ⇒ GAME_NARRATOR.
+export function gameNarrator() {
+  const n = (typeof window !== 'undefined' && window.ORWELL_GAME_NARRATOR) || '';
+  return (typeof n === 'string' && n.trim()) ? n.trim() : GAME_NARRATOR;
+}
+
+// Set this window's resolved producer byline (from the stream's `orwell_narrator` event). Fail-open:
+// a blank/absent name resets to the "Production" default — never throws, never leaves it empty.
+export function setGameNarrator(name) {
+  if (typeof window === 'undefined') return;
+  window.ORWELL_GAME_NARRATOR = (typeof name === 'string' && name.trim()) ? name.trim() : GAME_NARRATOR;
+}
 
 export const ORWELL_TOOL_BEATS = {
   'createCharacter': '🎬 Casting',
@@ -162,8 +181,9 @@ export function isGameBuild() {
 }
 
 // ── #1325 — PHASE-AWARE narrator WAIT/status chrome copy ─────────────────────────────────
-// GAME_NARRATOR (above) is deliberately PHASE-INVARIANT — "Production" stays the byline in
-// every phase (M2-5 owner pick: the one diegetic transcript author, never the raw model name).
+// The byline (gameNarrator(), above) is the show's production voice — the DEFAULT "Production" until
+// the engine resolves the season's producer name, then that producer, STABLE PER SEASON (not per
+// phase; #1626 relaxed M2-5's phase-invariance to producer-name-invariance — same producer all game).
 // But the WAIT-state copy underneath that byline is a DIFFERENT thing: "the producers are
 // rolling / talking it over" is a pre-game/casting voice, and it stayed on screen unchanged
 // after the season started because the chrome that renders it never asked what phase the

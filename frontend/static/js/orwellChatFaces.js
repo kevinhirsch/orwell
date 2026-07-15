@@ -107,8 +107,10 @@
     if (!label) return null; // not yet labeled (spinner/placeholder) — decorate on relabel
     const narrator = deps.narrator();
     if (label === narrator || label === "Orwell" || label.indexOf(narrator + " ") === 0) {
-      // The show's production voice: the designed kit monogram seeded by the Production name —
-      // a stable neutral mark (M2-5 keeps the byline phase-invariant; a rebrand moves this too).
+      // The show's production voice: the designed kit monogram seeded by the narrator name — the
+      // season's producer once the engine resolves it (#1626), else the "Production" default. The
+      // seed tracks `narratorName()` (window.ORWELL_GAME_NARRATOR), so the mark stays in lock-step
+      // with the byline text and is stable per season.
       return {
         sig: "p|" + narrator,
         card: { id: narrator, name: narrator, portrait: null },

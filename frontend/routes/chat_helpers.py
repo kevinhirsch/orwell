@@ -913,6 +913,42 @@ _LAST_FRAMED_BEAT_KEY: dict = {}
 # stamp (prior behavior). Vault-free by construction (closed-set public status only).
 _LAST_FRAMED_GAME_MOMENT: dict = {}
 
+# #1626 increment 2 — the Vault-free PRODUCER (production-voice) name from the moment prompt, captured
+# from the SAME framing read that fetches the GM prompt (increment 1 exposed `MomentPromptView.
+# producerName` engine-side). The stream hands it to the client (the `orwell_narrator` event) so the
+# chat byline + monogram render the season's producer instead of the generic "Production". Keyed the
+# SAME "default"-fallback way as `_LAST_FRAMED_GAME_MOMENT`. Fail-open + STABLE PER SEASON: a
+# missing/blank name leaves the prior value — a fetch hiccup never clobbers a good name with None, and
+# absent-entirely ⇒ the client keeps its "Production" default. Vault-free (a public seeded name only).
+# CROSS-SEASON: because a blank fetch is deliberately not-clobbering, the value is explicitly CLEARED
+# at the season-reset boundary (the not-started framing branch below) so a NEW season for the SAME
+# user re-resolves its own producer instead of emitting the previous season's (CodeRabbit/Greptile).
+_LAST_FRAMED_PRODUCER_NAME: dict = {}
+
+
+def _stash_producer_name(user, mp) -> None:
+    """Stash the Vault-free producer/byline name from the moment prompt (#1626). Fail-open — but NOT
+    silently (owner ruling #1599: no silent fail-soft): a non-mapping prompt or a blank/missing name
+    leaves the last good name (stable per season) and logs at debug; only a non-blank string is
+    stored, and it is never cleared here (the season-reset boundary does the clearing)."""
+    if not isinstance(mp, dict):
+        logger.debug("[orwell] producer-name stash skipped: moment prompt was %s, not a mapping",
+                     type(mp).__name__)
+        return
+    try:
+        _pn = mp.get("producerName")
+    except (AttributeError, TypeError) as e:
+        logger.debug("[orwell] producer-name stash skipped: %s", e)
+        return
+    if isinstance(_pn, str) and _pn.strip():
+        _LAST_FRAMED_PRODUCER_NAME[user or "default"] = _pn.strip()
+
+
+def last_framed_producer_name(user):
+    """The Vault-free producer/byline name stashed for `user` (#1626). None ⇒ the client keeps its
+    'Production' default. Read by the agent loop to emit the `orwell_narrator` stream event."""
+    return _LAST_FRAMED_PRODUCER_NAME.get(user or "default")
+
 # #1411 — the engine-SIGNALED required lever for the framed beat (`GameStateView.requiredLever`),
 # captured from the SAME framing state read that builds `_LAST_FRAMED_BEAT_KEY` (zero extra engine
 # read). The agent loop's forced-`tool_choice` gate reads THIS instead of a FE-held beat→lever map
@@ -3297,6 +3333,7 @@ async def apply_game_framing(
         try:
             mp = await orwell_engine.get_moment_prompt(moment, user=user)
             gm_prompt = (mp or {}).get("systemPrompt") or FALLBACK_GM_PROMPT
+            _stash_producer_name(user, mp)  # #1626: the season's producer byline for the client
         except Exception as e:
             # The season IS live (state proved it) — a moment-prompt hiccup must not become a
             # feeds-down message. Stay in character with a generic, non-fabricating frame.
@@ -3439,9 +3476,19 @@ async def apply_game_framing(
         else:
             preface.insert(0, {"role": "system", "content": gm_prompt})
     else:
+        _was_active = _gkey in _GAME_WAS_ACTIVE  # capture BEFORE discard: the active→inactive edge
         _GAME_WAS_ACTIVE.discard(_gkey)  # game ended/reset: normal chat is honest again
         clear_social_runway(user)  # no live season — drop any held runway so a new one starts clean
         _DR_INVITED_BEATS.pop(_gkey, None)  # 0013 §5: a fresh season re-invites cleanly
+        # #1626: a new season for the SAME user must re-resolve its own producer byline — clear the
+        # last season's cached name at the season-reset BOUNDARY (active→inactive) so
+        # `last_framed_producer_name` returns None (⇒ client keeps "Production") until this season's
+        # casting/live moment prompt re-stashes it below. Without this the not-clobber-on-blank
+        # fail-open would emit the PRIOR season's producer. Gate on the boundary — NOT every
+        # steady-state casting turn — so a transient get_moment_prompt hiccup mid-casting can't wipe
+        # a validly-stashed producer and drop resumed/new clients back to "Production" (Greptile "P1").
+        if _was_active:
+            _LAST_FRAMED_PRODUCER_NAME.pop(user or "default", None)
         if game_build:
             # The game IS the product but this sandbox has no season: pre-game, the chat IS
             # the producer's casting interview (0050). Fetch the engine's interview moment
@@ -3452,6 +3499,7 @@ async def apply_game_framing(
             try:
                 mp = await orwell_engine.get_moment_prompt(game_state.get("moment"), user=user)
                 pre_prompt = (mp or {}).get("systemPrompt") or PRE_GAME_PROMPT
+                _stash_producer_name(user, mp)  # #1626: the casting producer byline for the client
             except Exception as e:
                 logger.warning("[orwell] interview moment-prompt fetch failed for user=%s: %s", _gkey, e)
                 pre_prompt = PRE_GAME_PROMPT

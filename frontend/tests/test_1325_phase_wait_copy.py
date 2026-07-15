@@ -146,21 +146,24 @@ def test_inprogress_label_still_routes_through_waitlabel():
     assert "_waitLabel('waiting'" in fn
 
 
-def test_byline_constant_and_call_sites_are_unchanged_by_this_fix():
-    """M2-5 (owner pick 2026-07-08): 'Production' is the ONE transcript author in every phase.
-    This fix must not touch the byline — only the wait/status copy beneath it."""
+def test_byline_call_sites_read_the_narrator_and_are_untouched_by_the_wait_copy_fix():
+    """The #1325 wait/status-copy fix is SEPARATE from the byline — it must touch only the copy
+    beneath the byline. The byline sites read the show's production voice; #1626 made that the
+    DYNAMIC gameNarrator() (the season's producer, "Production" until resolved) but added NO phase
+    branch to these sites (the byline is stable per season, not per phase — that is the whole point
+    of #1325's separation)."""
     beats = _read("static", "js", "orwellToolBeats.js")
-    assert "export const GAME_NARRATOR = 'Production';" in beats
+    assert "export const GAME_NARRATOR = 'Production';" in beats  # the default still lives here
     chat = _read("static", "js", "chat.js")
     renderer = _read("static", "js", "chatRenderer.js")
-    # the sender-label sites still read the constant directly — no phase branch was added to them.
-    assert "isGameBuild() ? GAME_NARRATOR : (modelLabel || '')" in chat  # _senderLabel (the one streaming bubble's byline)
-    assert "else if (document.body.hasAttribute('data-game-build')) label = GAME_NARRATOR;" in chat  # _setRoleModelLabel
+    # the sender-label sites read the dynamic narrator directly — no phase branch was added to them.
+    assert "isGameBuild() ? gameNarrator() : (modelLabel || '')" in chat  # _senderLabel (the one streaming bubble's byline)
+    assert "else if (document.body.hasAttribute('data-game-build')) label = gameNarrator();" in chat  # _setRoleModelLabel
     # (#829 turn-coalescing removed the per-round CONTINUATION bubble + its own `newRole` byline
     # site — a turn is now ONE bubble whose byline is set once via _senderLabel above, so there is
     # no separate continuation-round label to keep diegetic.)
-    assert "isGameBuild() ? GAME_NARRATOR : (model || 'image').split('/').pop();" in renderer  # buildImageBubble
-    assert "roleEl.textContent = isGameBuild() ? GAME_NARRATOR : modelRouteLabel(pair.requestedModel, contModel);" in renderer
+    assert "isGameBuild() ? gameNarrator() : (model || 'image').split('/').pop();" in renderer  # buildImageBubble
+    assert "roleEl.textContent = isGameBuild() ? gameNarrator() : modelRouteLabel(pair.requestedModel, contModel);" in renderer
 
 
 def test_the_started_signal_only_listens_never_dispatches_gamechanged():
