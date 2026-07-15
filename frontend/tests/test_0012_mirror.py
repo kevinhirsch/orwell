@@ -391,8 +391,11 @@ def test_chat_client_mirror_does_not_full_repaint_per_delta():
 def test_chat_client_adopts_canonical_session_after_stream():
     """§2.4 client half: a loser window records the server's canonical_session id and converges onto
     it AFTER the stream settles (never a mid-stream history reload that would yank the live bubble)."""
+    import re
     chat = _read("static", "js", "chat.js")
-    assert "_adoptCanonicalAfterStream = json.id;" in chat
+    # the adopt must stay GUARDED by `if (json.id)` — never record an undefined canonical id.
+    assert re.search(r"if \(json\.id\)\s*\{\s*_adoptCanonicalAfterStream = json\.id;", chat), \
+        "the canonical-session adopt must stay inside the if (json.id) guard"
     assert "sessionModule.selectSession(_adoptCanonicalAfterStream" in chat
 
 
