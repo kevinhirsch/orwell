@@ -102,8 +102,14 @@ def _clip(v) -> str:
     return s if len(s) <= _PAYLOAD_CAP else s[:_PAYLOAD_CAP] + f"… [+{len(s) - _PAYLOAD_CAP} chars]"
 
 
-def record_io(tool: str, args, ok: bool, duration_ms: int, payload) -> None:
-    """One Engine I/O entry per tool call — what was written, what came back."""
+def record_io(tool: str, args, ok: bool, duration_ms: int, payload, user=None) -> None:
+    """One Engine I/O entry per tool call — what was written, what came back.
+
+    ``user`` (the sandbox the call was made for) is stamped so the #1599 health rollup can scope
+    the per-tool failure rates PER USER — a failed write in user A's sandbox must never inflate the
+    rollup or raise a write-back-storm RED alarm in user B's /api/admin/health (cross-user isolation,
+    first-class alongside the Vault Wall). A genuinely userless/system call stays None ⇒ maps to the
+    shared ``default`` bucket, which never leaks to a NAMED user."""
     import time as _t
     IO.push({
         "ts": int(_t.time() * 1000),
@@ -115,6 +121,7 @@ def record_io(tool: str, args, ok: bool, duration_ms: int, payload) -> None:
         "durationMs": duration_ms,
         "args": _clip(args),
         "result": _clip(payload),
+        "user": _clip(user) if user is not None else None,
     })
 
 

@@ -1316,13 +1316,15 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
         tools:  {<engineTool>: {total, failed, failureRate, lastFailureAt}},
         guards: {<softFailClass>: {failed, autoCorrected, lastFailureAt}} }
 
-    ``guards`` is USER-SCOPED: the OVERSEER ring is the one ring that carries a per-entry ``user``
-    (``record_overseer`` / ``record_soft_failure`` stamp it), so we filter it to the REQUESTING
-    user exactly as the snapshot's sibling reads (``sync_recent`` / ``belt_totals`` /
-    ``sandbox_health``) are — otherwise user A's soft-failure would inflate the rollup (and raise
-    RED alarms) in user B's /api/admin/health, a cross-user isolation breach. The LLMIO/IO rings
-    carry no ``user`` field (they trace narration + engine tool I/O that is not user-attributed),
-    so ``llm``/``tools`` stay global by construction — they are not part of this per-user leak.
+    ALL THREE buckets are USER-SCOPED — every ring now carries a per-entry ``user`` (``record_llm_call``
+    stamps LLMIO, ``record_io`` stamps IO, ``record_overseer`` stamps OVERSEER), so each is filtered to
+    the REQUESTING user exactly as the snapshot's sibling reads (``sync_recent`` / ``belt_totals`` /
+    ``sandbox_health``) are. Otherwise a failure in user A's sandbox — a narration 5xx, a failed
+    ``recordInteraction``, a soft-failure — would inflate the rollup AND raise a RED alarm
+    (``narration-failure`` / ``write-back storm`` / ``guard-judge-failure``) in user B's
+    /api/admin/health, a cross-user isolation breach (first-class alongside the Vault Wall). A
+    genuinely userless/system call maps to the shared ``default`` bucket, which never matches a NAMED
+    user. (An explicitly operator-global panel, if ever wanted, must be a SEPARATE admin-gated path.)
     """
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
     want_user = _norm_user(user)
@@ -1344,6 +1346,8 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     for e in llm_lines:
         if not isinstance(e, dict) or not _within_window(e.get("ts"), now_ms, window_s):
             continue
+        if _norm_user(e.get("user")) != want_user:
+            continue  # cross-user isolation: this LLM call counts for THIS user only
         _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"))
 
     try:
@@ -1353,6 +1357,8 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     for e in io_lines:
         if not isinstance(e, dict) or not _within_window(e.get("ts"), now_ms, window_s):
             continue
+        if _norm_user(e.get("user")) != want_user:
+            continue  # cross-user isolation: this engine tool call counts for THIS user only
         _bump(tools, str(e.get("tool") or "?"), e.get("ok") is False, e.get("ts"))
 
     try:
@@ -2185,8 +2191,10 @@ function render(d) {
   // #1599 WI3 — the RED alarm banner: each game-breaking signal (or auto-corrected fault) as its
   // own red card. A correction is not a cloak — an auto-corrected alarm is still RED, tagged.
   const alarms = Array.isArray(d.alarms) ? d.alarms : [];
+  // Null-guard the element like renderRollup (`if (!el) return;`) — a missing #alarms must never
+  // throw and wedge the 10s status-page poll on "Loading…".
   const alarmsEl = document.getElementById("alarms");
-  if (alarms.length) {
+  if (alarmsEl && alarms.length) {
     alarmsEl.style.display = "";
     alarmsEl.innerHTML = alarms.map(a =>
       '<div style="border:1px solid #7a3b3b;border-radius:8px;padding:8px 12px;margin:0 0 8px;background:#231414;color:#f0a6a6">' +
@@ -2195,7 +2203,7 @@ function render(d) {
       (a.autoCorrected ? ' <span style="border:1px solid #7a3b3b;border-radius:6px;padding:0 6px;font-size:11px">auto-corrected</span>' : "") +
       (a.detail ? '<div class="sub" style="color:#d79a9a;margin-top:3px">' + esc(a.detail) + "</div>" : "") +
       "</div>").join("");
-  } else {
+  } else if (alarmsEl) {
     alarmsEl.style.display = "none";
     alarmsEl.innerHTML = "";
   }

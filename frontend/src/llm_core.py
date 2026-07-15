@@ -1515,7 +1515,7 @@ async def _llm_call_async_traced(
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=True, duration_ms=int((time.time() - started) * 1000),
-            call_class=call_class,
+            call_class=call_class, user=user,
             response={"text": text, "reasoning": _meta.get("reasoning") or "",
                       "finishReason": _meta.get("finish_reason"), "usage": _usage or None})
         _meter()
@@ -1525,7 +1525,7 @@ async def _llm_call_async_traced(
         llm_trace.record_llm_call(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
-            call_class=call_class,
+            call_class=call_class, user=user,
             # The terminal stop reason still rides on a FAILED call when the impl saw one
             # (e.g. the empty-stop guard below raised after parsing finish_reason=stop).
             response={"error": {"type": type(e).__name__, "message": str(e)[:500]},

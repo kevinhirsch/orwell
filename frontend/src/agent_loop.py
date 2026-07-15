@@ -4481,11 +4481,29 @@ async def stream_agent_loop(*args, **kwargs) -> AsyncGenerator[str, None]:
     _obs_token = _set_turn_observability_context(
         kwargs.get("owner"), kwargs.get("session_id"), kwargs.get("game_mode", False)
     )
+    # #1599 — bind the turn's owning user for LLM-call health attribution, ALWAYS (independent of
+    # the observability gate above, which defaults off). The streaming-narration record point has
+    # no `user` in scope, so without this its LLMIO entries are unattributed and the per-user health
+    # rollup could not scope a narration failure to the user whose sandbox it happened in. Reset in
+    # the finally so a user never bleeds into the next turn. Byte-identical to the request (a
+    # context bind only — nothing on the wire changes).
+    _user_token = None
+    try:
+        from src import llm_trace as _lt
+        _user_token = _lt.set_call_user(kwargs.get("owner"))
+    except Exception as _e:
+        logger.debug("1599: set_call_user failed: %s", _e)
     try:
         async for _evt in _stream_agent_loop_impl(*args, **kwargs):
             yield _evt
     finally:
         _reset_turn_observability_context(_obs_token)
+        if _user_token is not None:
+            try:
+                from src import llm_trace as _lt
+                _lt.reset_call_user(_user_token)
+            except Exception as _e:
+                logger.debug("1599: reset_call_user failed: %s", _e)
 
 
 async def _stream_agent_loop_impl(

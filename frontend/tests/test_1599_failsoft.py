@@ -24,6 +24,7 @@ overseer = importlib.import_module("src.overseer")
 enrichment_policy = importlib.import_module("src.enrichment_policy")
 ahr = importlib.import_module("routes.admin_health_routes")
 orwell_engine = importlib.import_module("src.orwell_engine")
+llm_trace = importlib.import_module("src.llm_trace")
 
 
 def _clear_rings():
@@ -292,3 +293,92 @@ def test_health_payload_does_not_leak_another_users_soft_failure(monkeypatch, _s
     body_a = TestClient(_health_app(), raise_server_exceptions=False).get("/api/admin/health").json()
     assert body_a["healthRollup"]["guards"]["overseer:judge-call-failed"]["failed"] == 3
     assert "guard-judge-failure" in {a["code"] for a in body_a["alarms"]}
+
+
+# ── second cross-user leak (Greptile #1641): the LLMIO/IO rings also drive per-user alarms ──────
+#
+# `healthRollup.llm` (narration-failure) and `healthRollup.tools` (write-back storm) feed RED
+# alarms too. The LLMIO/IO rings used to carry NO user field, so a narration 5xx / a failed
+# recordInteraction from user A raised RED in user B's per-user /api/admin/health — the same
+# isolation breach as the OVERSEER ring. The fix stamps `user` at the record_llm_call / record_io
+# push sites and filters llm/tools by the requesting user in _compute_health_rollup.
+
+def _push_llm_narration_failure(user):
+    """A narration-classed LLMIO failure entry exactly as `llm_trace._push_ring` produces one."""
+    import time as _t
+    log_rings.LLMIO.push({
+        "ts": int(_t.time() * 1000), "level": "ERROR", "logger": "llm-io",
+        "msg": "stream[narration] · m FAILED 1ms", "kind": "stream", "callClass": "narration",
+        "finishReason": None, "ok": False, "user": user, "args": "", "result": "[error] 503",
+    })
+
+
+def test_record_io_stamps_the_user_on_the_ring():
+    _clear_rings()
+    log_rings.record_io("recordInteraction", {"x": 1}, False, 5, "boom", user="user-a")
+    _, io = log_rings.IO.since(0, limit=100000)
+    assert io and io[-1]["tool"] == "recordInteraction" and io[-1]["ok"] is False
+    assert io[-1]["user"] == "user-a"
+
+
+def test_record_llm_call_stamps_the_user_on_the_ring_explicit_and_via_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))  # isolate the durable archive write
+    _clear_rings()
+    # (a) explicit user= wins.
+    llm_trace.record_llm_call(kind="stream", model="m", ok=False, call_class="narration",
+                              user="user-a", response={"error": {"type": "X", "message": "y"}})
+    _, llm = log_rings.LLMIO.since(0, limit=100000)
+    assert llm and llm[-1]["user"] == "user-a" and llm[-1]["callClass"] == "narration"
+    # (b) the always-on call-user context supplies it when no explicit arg is passed (the
+    #     streaming-narration path, where record_llm_call has no `user` in scope).
+    _clear_rings()
+    token = llm_trace.set_call_user("user-b")
+    try:
+        llm_trace.record_llm_call(kind="stream", model="m", ok=False, call_class="narration",
+                                  response={"error": {"type": "X", "message": "y"}})
+    finally:
+        llm_trace.reset_call_user(token)
+    _, llm = log_rings.LLMIO.since(0, limit=100000)
+    assert llm and llm[-1]["user"] == "user-b"
+
+
+def test_llm_and_tool_failures_are_scoped_to_the_emitting_user():
+    _clear_rings()
+    # User A: a narration failure + a burst of failed engine write-backs.
+    _push_llm_narration_failure("user-a")
+    for _ in range(3):
+        log_rings.record_io("recordInteraction", {"x": 1}, False, 5, "boom", user="user-a")
+
+    roll_a = ahr._compute_health_rollup(user="user-a")
+    roll_b = ahr._compute_health_rollup(user="user-b")
+
+    # A sees its own llm + tools failures; B's buckets stay empty (no cross-sandbox bleed).
+    assert roll_a["llm"]["narration"]["failed"] == 1
+    assert roll_a["tools"]["recordInteraction"]["failed"] == 3
+    assert roll_b["llm"] == {} and roll_b["tools"] == {}
+
+    codes_a = {a["code"] for a in ahr._compute_alarms(roll_a)}
+    codes_b = {a["code"] for a in ahr._compute_alarms(roll_b)}
+    assert {"narration-failure", "writeback-storm"} <= codes_a
+    assert {"narration-failure", "writeback-storm"}.isdisjoint(codes_b)
+
+
+def test_health_payload_does_not_leak_another_users_llm_or_tool_failure(monkeypatch, _stubbed_engine):
+    """Greptile repro end-to-end: user A's narration + write-back failures must be ABSENT from user
+    B's /api/admin/health rollup + alarms, yet present in user A's own view."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _clear_rings()
+    _push_llm_narration_failure("user-a")
+    for _ in range(3):
+        log_rings.record_io("recordInteraction", {"x": 1}, False, 5, "boom", user="user-a")
+
+    monkeypatch.setattr(ahr, "effective_user", lambda request: "user-b")
+    body_b = TestClient(_health_app(), raise_server_exceptions=False).get("/api/admin/health").json()
+    assert body_b["healthRollup"].get("llm") == {} and body_b["healthRollup"].get("tools") == {}
+    assert {a["code"] for a in body_b["alarms"]}.isdisjoint({"narration-failure", "writeback-storm"})
+
+    monkeypatch.setattr(ahr, "effective_user", lambda request: "user-a")
+    body_a = TestClient(_health_app(), raise_server_exceptions=False).get("/api/admin/health").json()
+    assert body_a["healthRollup"]["llm"]["narration"]["failed"] == 1
+    assert body_a["healthRollup"]["tools"]["recordInteraction"]["failed"] == 3
+    assert {"narration-failure", "writeback-storm"} <= {a["code"] for a in body_a["alarms"]}

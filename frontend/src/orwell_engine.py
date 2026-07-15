@@ -302,11 +302,11 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
     t0 = _t.monotonic()
     try:
         res = await _call_inner(name, args, user=user, timeout=timeout)
-        _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000), res)
+        _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000), res, user=user)
         return res
     except Exception as e:
         _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
-                         f"{type(e).__name__}: {e}")
+                         f"{type(e).__name__}: {e}", user=user)
         raise
 
 
