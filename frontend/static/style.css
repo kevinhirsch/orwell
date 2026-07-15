@@ -2128,13 +2128,9 @@ body.bg-pattern-perlin-flow {
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .og-card .og-actions { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--ow-space-1, 4px); }
-    .og-card .og-act {
-      flex: 0 0 auto; background: rgba(255,255,255,.06);
-      border: 1px solid var(--border, #355a66); color: inherit; cursor: pointer;
-      border-radius: 6px; font: inherit; font-size: .68rem;
-      min-height: 24px; padding: 0 var(--ow-space-2, 8px); opacity: .8;
-    }
-    .og-card .og-act:hover, .og-card .og-act:focus-visible { opacity: 1; background: rgba(255,255,255,.12); }
+    /* #1638 kit migration: .og-act composes .ow-btn ow-btn-plain (appearance from the kit).
+       Its bespoke fill/border rules were retired; the coarse-pointer 44px floor + the frosted
+       .og-card .og-act glass-coherence rules live below. */
     .og-card .og-chev { flex: 0 0 auto; opacity: .55; margin-left: var(--ow-space-1, 4px); transition: transform .15s; }
     .og-card.og-collapsed .og-chev { transform: rotate(-90deg); }
     .og-card.og-collapsed .og-body { display: none; }
