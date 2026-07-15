@@ -19,8 +19,8 @@ import logging
 import os
 from typing import Optional
 
+import anyio
 from fastapi import APIRouter, Request, UploadFile, File, Form
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, FileResponse, Response
 from pydantic import BaseModel
 
@@ -52,8 +52,19 @@ _LAST_WARN: dict[str, float] = {}
 # releases the slot, and the FE (monogram-first; PR #1613) degrades to the monogram.
 try:
     _PORTRAIT_RESOLVE_TIMEOUT_S = float(os.environ.get("ORWELL_PORTRAIT_TIMEOUT_S", "3.0") or "3.0")
+    # A zero/negative override would make EVERY portrait request instantly fail — reject it and keep
+    # the safe default rather than silently disabling the resolve.
+    if _PORTRAIT_RESOLVE_TIMEOUT_S <= 0:
+        raise ValueError("ORWELL_PORTRAIT_TIMEOUT_S must be positive")
 except (TypeError, ValueError):
     _PORTRAIT_RESOLVE_TIMEOUT_S = 3.0
+
+# A DEDICATED, capacity-limited worker pool for the portrait resolve. On timeout the request returns
+# immediately, but the leaked worker keeps running until portrait_file() finally returns (a Python
+# thread cannot be force-cancelled). Isolating those leaks here means a storm of disk-stalled portrait
+# requests can consume at most this many workers and can NEVER starve AnyIO's shared default threadpool
+# that the rest of the app relies on.
+_PORTRAIT_RESOLVE_LIMITER = anyio.CapacityLimiter(8)
 
 
 def _warn_throttled(key: str, msg: str) -> None:
@@ -1429,7 +1440,13 @@ def setup_orwell_routes() -> APIRouter:
 
         try:
             path = await asyncio.wait_for(
-                run_in_threadpool(orwell_portraits.portrait_file, user, houseguest_id),
+                # abandon_on_cancel=True → the request returns AT the timeout (the awaiter isn't
+                # shielded waiting for the stuck worker); limiter → the leaked worker is confined to
+                # the small dedicated pool, so a stall storm can't exhaust the shared threadpool.
+                anyio.to_thread.run_sync(
+                    orwell_portraits.portrait_file, user, houseguest_id,
+                    abandon_on_cancel=True, limiter=_PORTRAIT_RESOLVE_LIMITER,
+                ),
                 timeout=_PORTRAIT_RESOLVE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1438,7 +1455,7 @@ def setup_orwell_routes() -> APIRouter:
                 _PORTRAIT_RESOLVE_TIMEOUT_S, houseguest_id,
             )
             return _no_portrait()
-        except Exception as e:  # pragma: no cover - defensive: a disk/read blip must fail fast, not hang
+        except Exception as e:  # noqa: BLE001  # pragma: no cover - defensive: a disk/read blip must fail fast, not hang
             logger.info("[orwell] portrait resolve error for %r: %r — failing fast", houseguest_id, e)
             return _no_portrait()
 

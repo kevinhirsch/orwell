@@ -17,6 +17,7 @@ Name-agnostic (roles only); the portrait-file resolver is monkeypatched. Covers:
 """
 
 import importlib
+import threading
 import time
 
 import pytest
@@ -70,16 +71,24 @@ def test_hung_resolve_fails_fast_within_budget(client, monkeypatch):
     monkeypatch.setattr(orwell_routes, "_PORTRAIT_RESOLVE_TIMEOUT_S", 0.25)
 
     BLOCK = 3.0
+    release = threading.Event()
 
     def _hung(user, hid):
-        time.sleep(BLOCK)  # emulates a disk-saturated resolve; runs in the threadpool worker
+        # Emulates a disk-saturated resolve: still blocking when the route's timeout fires (release
+        # is unset during the request). Gated on the Event (capped at BLOCK) so the abandoned worker
+        # exits the instant the test releases it — no full BLOCK-second sleep leaks into the pool
+        # under parallel (xdist) runs.
+        release.wait(BLOCK)
         return "/never/reached.png"
 
     monkeypatch.setattr(orwell_portraits, "portrait_file", _hung)
 
     started = time.monotonic()
-    r = client.get("/api/orwell/portrait/npc:3")
-    elapsed = time.monotonic() - started
+    try:
+        r = client.get("/api/orwell/portrait/npc:3")
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()  # let the abandoned worker thread return immediately
 
     # Fails fast: back well before the block would have completed.
     assert elapsed < BLOCK - 0.5, f"portrait GET hung for {elapsed:.2f}s (block was {BLOCK}s)"
