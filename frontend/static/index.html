@@ -1153,7 +1153,7 @@
         </div>
         <div id="models">
           <div class="models-row">
-            <select id="model-select" aria-label="Select model" style="flex: 1; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--fg);"></select>
+            <select id="model-select" class="ow-select" aria-label="Select model" style="flex: 1;"></select>
             <button type="button" id="btn-model-chat" class="model-chat-btn ow-btn ow-btn-compact" aria-label="Add model chat" style="transition: all 0.2s ease;"><span class="model-chat-btn-label">+ Chat</span></button>
           </div>
         </div>
@@ -1489,7 +1489,7 @@
                 <label>Temperature <span class="preset-hint-icon" title="Controls randomness. Lower values give focused, deterministic answers (good for code). Higher values give more creative, varied responses.">?</span></label>
                 <span class="preset-slider-value" id="temp-value">1.0</span>
               </div>
-              <input type="range" class="preset-range" id="custom-temperature" min="0" max="2" step="0.1" value="1.0">
+              <input type="range" class="ow-slider" id="custom-temperature" min="0" max="2" step="0.1" value="1.0">
               <div class="preset-temp-hints">
                 <span>Precise / Code</span>
                 <span>Balanced</span>
@@ -1499,7 +1499,7 @@
                 <label>Max Tokens <span class="preset-hint-icon" title="Maximum length of the AI response. 'No limit' lets the model decide when to stop.">?</span></label>
                 <span class="preset-slider-value" id="tokens-value">No limit</span>
               </div>
-              <input type="range" class="preset-range" id="custom-max-tokens" min="256" max="8448" step="256" value="8448">
+              <input type="range" class="ow-slider" id="custom-max-tokens" min="256" max="8448" step="256" value="8448">
             </div>
             <!-- Prompt (character/persona) tab -->
             <div class="preset-chartab" data-chartab-panel="character" style="display:none">
@@ -1708,15 +1708,15 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Endpoint</label>
-                <select id="set-defaultEpSelect" class="settings-select"></select>
+                <select id="set-defaultEpSelect" class="ow-select"></select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Model</label>
-                <select id="set-defaultModelSelect" class="settings-select"></select>
+                <select id="set-defaultModelSelect" class="ow-select"></select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Reasoning</label>
-                <select id="set-narratorReasoning" class="settings-select" style="width:120px;">
+                <select id="set-narratorReasoning" class="ow-select" style="width:120px;">
                   <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
                 </select>
               </div>
@@ -1732,11 +1732,11 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Endpoint</label>
-                <select id="set-utilityEpSelect" class="settings-select"><option value="">—</option></select>
+                <select id="set-utilityEpSelect" class="ow-select"><option value="">—</option></select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Model</label>
-                <select id="set-utilityModelSelect" class="settings-select"><option value="">—</option></select>
+                <select id="set-utilityModelSelect" class="ow-select"><option value="">—</option></select>
               </div>
               <div id="set-utilityFallbacks" class="settings-fallbacks"></div>
               <button type="button" class="settings-fallback-add" id="set-utilityAddFallback" title="Add a model to try if the utility model fails">+ Add fallback</button>
@@ -1749,7 +1749,7 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Pacing overseer</label>
-                <select id="set-overseerMode" class="settings-select">
+                <select id="set-overseerMode" class="ow-select">
                   <option value="off">Off</option>
                   <option value="shadow">Shadow</option>
                   <option value="active">Active</option>
@@ -1757,7 +1757,7 @@
               </div>
               <div class="settings-row">
                 <label class="settings-label">Faithfulness gate</label>
-                <select id="set-faithMode" class="settings-select">
+                <select id="set-faithMode" class="ow-select">
                   <option value="off">Off</option>
                   <option value="shadow">Shadow</option>
                   <option value="active">Active</option>
@@ -1772,11 +1772,11 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Endpoint</label>
-                <select id="set-faithEpSelect" class="settings-select"><option value="">—</option></select>
+                <select id="set-faithEpSelect" class="ow-select"><option value="">—</option></select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Model</label>
-                <select id="set-faithModelSelect" class="settings-select"><option value="">—</option></select>
+                <select id="set-faithModelSelect" class="ow-select"><option value="">—</option></select>
               </div>
               <div id="set-faithFallbacks" class="settings-fallbacks"></div>
               <button type="button" class="settings-fallback-add" id="set-faithAddFallback" title="Add a model to try if the faithfulness model fails">+ Add fallback</button>
@@ -1789,7 +1789,7 @@
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Model</label>
-                <select id="set-vlModelSelect" class="settings-select"><option value="">Auto-detect</option></select>
+                <select id="set-vlModelSelect" class="ow-select"><option value="">Auto-detect</option></select>
               </div>
               <div id="set-visionFallbacks" class="settings-fallbacks"></div>
               <button type="button" class="settings-fallback-add" id="set-visionAddFallback" title="Add a vision model to try if the one above fails">+ Add fallback</button>
@@ -1804,19 +1804,19 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Endpoint</label>
-                <select id="set-researchEndpoint" class="settings-select">
+                <select id="set-researchEndpoint" class="ow-select">
                   <option value="">Same as chat</option>
                 </select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Model</label>
-                <select id="set-researchModel" class="settings-select">
+                <select id="set-researchModel" class="ow-select">
                   <option value="">Same as chat</option>
                 </select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Search</label>
-                <select id="set-researchSearch" class="settings-select">
+                <select id="set-researchSearch" class="ow-select">
                   <option value="">Same as web search</option>
                   <option value="searxng">SearXNG</option>
                   <option value="duckduckgo">DuckDuckGo</option>
@@ -1870,25 +1870,25 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Narration reasoning</label>
-                <select id="set-reasoningNarration" class="settings-select" style="width:120px;">
+                <select id="set-reasoningNarration" class="ow-select" style="width:120px;">
                   <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
                 </select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Extraction reasoning</label>
-                <select id="set-reasoningExtract" class="settings-select" style="width:120px;">
+                <select id="set-reasoningExtract" class="ow-select" style="width:120px;">
                   <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
                 </select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Casting reasoning</label>
-                <select id="set-reasoningCasting" class="settings-select" style="width:120px;">
+                <select id="set-reasoningCasting" class="ow-select" style="width:120px;">
                   <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
                 </select>
               </div>
               <div class="settings-row">
                 <label class="settings-label">Authoring reasoning</label>
-                <select id="set-reasoningAuthoring" class="settings-select" style="width:120px;">
+                <select id="set-reasoningAuthoring" class="ow-select" style="width:120px;">
                   <option value="">default</option><option value="off">off</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
                 </select>
               </div>
@@ -1910,7 +1910,7 @@
               </div>
               <div class="settings-row">
                 <label class="settings-label">Cast authoring model</label>
-                <select id="set-castAuthorSource" class="settings-select" style="width:120px;">
+                <select id="set-castAuthorSource" class="ow-select" style="width:120px;">
                   <option value="narration">narration</option><option value="utility">utility</option>
                 </select>
               </div>
@@ -1920,7 +1920,7 @@
               </div>
               <div class="settings-row">
                 <label class="settings-label">Enrichment policy</label>
-                <select id="set-enrichmentPolicy" class="settings-select" style="width:120px;">
+                <select id="set-enrichmentPolicy" class="ow-select" style="width:120px;">
                   <option value="strict">strict (loud)</option><option value="soft">soft (legacy)</option>
                 </select>
               </div>
@@ -1949,11 +1949,11 @@
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Model</label>
-                <select id="set-imgModelSelect" class="settings-select"><option value="">Auto-detect</option></select>
+                <select id="set-imgModelSelect" class="ow-select"><option value="">Auto-detect</option></select>
               </div>
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Quality</label>
-                <select id="set-imgQualitySelect" class="settings-select">
+                <select id="set-imgQualitySelect" class="ow-select">
                   <option value="low">Low (fastest, cheapest)</option>
                   <option value="medium">Medium (default)</option>
                   <option value="high">High (best quality)</option>
@@ -1971,7 +1971,7 @@
             <div style="display:flex;flex-direction:column;gap:0.5rem;">
               <div style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Provider</label>
-                <select id="set-ttsProviderSelect" class="settings-select">
+                <select id="set-ttsProviderSelect" class="ow-select">
                   <option value="disabled">Disabled</option>
                   <option value="browser">Browser (built-in)</option>
                   <option value="local">Local (Kokoro-82M)</option>
@@ -1979,7 +1979,7 @@
               </div>
               <div id="set-ttsModelRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Model</label>
-                <select id="set-ttsModelSelect" class="settings-select">
+                <select id="set-ttsModelSelect" class="ow-select">
                   <option value="tts-1">tts-1 (fast)</option>
                   <option value="tts-1-hd">tts-1-hd (quality)</option>
                   <option value="gpt-4o-mini-tts">gpt-4o-mini-tts (steerable)</option>
@@ -1988,7 +1988,7 @@
               </div>
               <div id="set-ttsVoiceRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Voice</label>
-                <select id="set-ttsVoiceSelect" class="settings-select">
+                <select id="set-ttsVoiceSelect" class="ow-select">
                   <option value="alloy">Alloy</option>
                   <option value="ash">Ash</option>
                   <option value="coral">Coral</option>
@@ -2003,7 +2003,7 @@
               </div>
               <div id="set-ttsSpeedRow" style="display:flex;align-items:center;gap:0.75rem;">
                 <label class="settings-label">Speed</label>
-                <select id="set-ttsSpeedSelect" class="settings-select">
+                <select id="set-ttsSpeedSelect" class="ow-select">
                   <option value="0.5">0.5x</option>
                   <option value="0.75">0.75x</option>
                   <option value="1" selected>1x (normal)</option>
@@ -2304,7 +2304,7 @@
             <div class="settings-col">
               <div class="settings-row">
                 <label class="settings-label">Channel</label>
-                <select id="set-reminder-channel" class="settings-select">
+                <select id="set-reminder-channel" class="ow-select">
                   <option value="browser">Browser notification (default)</option>
                   <option value="email" id="set-reminder-channel-email-opt">Email</option>
                   <option value="ntfy" id="set-reminder-channel-ntfy-opt">ntfy</option>
@@ -2313,7 +2313,7 @@
               </div>
               <div id="set-reminder-email-from-row" class="settings-row" style="display:none">
                 <label class="settings-label">Send from</label>
-                <select id="set-reminder-email-account" class="settings-select"></select>
+                <select id="set-reminder-email-account" class="ow-select"></select>
               </div>
               <div id="set-reminder-email-to-row" class="settings-row" style="display:none">
                 <label class="settings-label">Send to</label>
@@ -2325,7 +2325,7 @@
               </div>
               <div id="set-reminder-webhook-intg-row" class="settings-row" style="display:none">
                 <label class="settings-label">Integration</label>
-                <select id="set-reminder-webhook-intg" class="settings-select"></select>
+                <select id="set-reminder-webhook-intg" class="ow-select"></select>
               </div>
               <div id="set-reminder-webhook-template-row" class="settings-row" style="display:none;align-items:flex-start">
                 <label class="settings-label" style="padding-top:6px">Payload</label>
@@ -2406,7 +2406,7 @@
               <div class="admin-model-form">
                 <div class="admin-model-form-row">
                   <input id="adm-epLocalUrl" type="text" placeholder="Paste endpoint URL, e.g. http://localhost:11434/v1" style="flex:1">
-                  <select id="adm-epLocalType" style="padding:5px;width:72px;flex-shrink:0;">
+                  <select id="adm-epLocalType" class="ow-select" style="width:72px;flex-shrink:0;">
                     <option value="llm">LLM</option>
                     <option value="image">Image</option>
                   </select>
@@ -2454,7 +2454,7 @@
                   </button>
                   <div class="adm-provider-menu hidden" id="adm-provider-menu"></div>
                 </div>
-                <select id="adm-epProvider" style="display:none">
+                <select id="adm-epProvider" class="ow-select" style="display:none">
                   <option value="">Custom URL</option>
                   <option value="https://api.anthropic.com" data-logo="anthropic">Anthropic</option>
                   <option value="https://api.deepseek.com/v1" data-logo="deepseek" selected>DeepSeek</option>
@@ -2474,11 +2474,11 @@
                 </select>
                 <div class="admin-model-form-row">
                   <input id="adm-epApiKey" type="password" placeholder="API key">
-                  <select id="adm-epKind" style="padding:5px;width:82px;">
+                  <select id="adm-epKind" class="ow-select" style="width:82px;">
                     <option value="proxy">Proxy</option>
                     <option value="api">API</option>
                   </select>
-                  <select id="adm-epType" style="padding:5px;width:80px;">
+                  <select id="adm-epType" class="ow-select" style="width:80px;">
                     <option value="llm">LLM</option>
                     <option value="image">Image</option>
                   </select>
