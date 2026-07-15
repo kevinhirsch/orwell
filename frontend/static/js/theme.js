@@ -160,26 +160,35 @@ const THEME_DEFAULT_INTENSITY = {
 //   • 'frosted' → body.theme-frosted only — the CSS blur-glass baseline (the
 //                 documented graceful fallback; identical except the lensing).
 //   • 'normal'  → neither class — flat, solid chrome.
-// Every theme defaults to 'frosted' (glass material ON, refraction OFF) EXCEPT
-// the dedicated 'glass' theme, which ships with the full Apple refraction. An
-// unset preference resolves to this default; a saved tier (or the legacy
-// `frosted` bool, back-compat) short-circuits it. A theme is `glass:true` ⇒ full.
+// COLLAPSED tier (owner ruling): the USER-FACING choice is ONE glass option —
+// Glass ('full') or Flat ('normal'). 'frosted' is NO LONGER user-selectable: it was
+// glass-material-minus-refraction, and the refraction ALREADY auto-downgrades
+// full→frosted on constrained devices (glassTierCeiling / applyGlassTier's clamp), so
+// offering it as a manual pick was redundant/invisible. 'frosted' survives ONLY as
+// that automatic clamp target — the RESOLUTION layer never yields it. So every theme's
+// glass DEFAULT is Glass ('full'); applyGlassTier re-drops it to frosted per device.
 function defaultGlassTierFor(name) {
   const t = THEMES[name];
   if (name === 'glass' || (t && (t.glass || t.glassTier === 'full'))) return 'full';
   if (t && t.glassTier === 'normal') return 'normal';
-  return 'frosted';
+  // Non-glass, non-Flat themes now default to Glass ('full') — the auto-downgrade
+  // ceiling (not a manual 'frosted' choice) decides whether the refraction renders.
+  return 'full';
 }
 
 // Resolve the glass tier for a saved/opts blob (a saved theme record OR a custom
 // theme entry). Back-compat order: an explicit `glassTier` wins; else the legacy
-// `frosted` bool (`true`→'frosted', `false`→'normal'); else the theme default.
-// `name` is the theme name the tier defaults against when nothing is stored.
+// `frosted` bool; else the theme default. COLLAPSED tier (owner ruling): a saved
+// 'frosted' (an explicit `glassTier:'frosted'` OR the legacy `frosted:true` bool)
+// folds to Glass ('full') — applyGlassTier then clamps it back to frosted on a
+// constrained device (its ceiling), so a legacy frosted profile renders IDENTICALLY
+// on mobile and simply gains the refraction on a capable desktop ("treat as Glass,
+// or its ceiling"). 'normal' (Flat) is unchanged. `name` is the theme the tier
+// defaults against when nothing is stored.
 function resolveGlassTier(rec, name) {
-  if (rec && (rec.glassTier === 'full' || rec.glassTier === 'frosted' || rec.glassTier === 'normal')) {
-    return rec.glassTier;
-  }
-  if (rec && rec.frosted !== undefined) return rec.frosted ? 'frosted' : 'normal';
+  if (rec && (rec.glassTier === 'full' || rec.glassTier === 'frosted')) return 'full';
+  if (rec && rec.glassTier === 'normal') return 'normal';
+  if (rec && rec.frosted !== undefined) return rec.frosted ? 'full' : 'normal';
   return defaultGlassTierFor(name);
 }
 
@@ -1296,11 +1305,13 @@ export function save(name, colors, opts) {
     if (opts.bgEffectColor) obj.bgEffectColor = opts.bgEffectColor;
     if (opts.bgEffectIntensity !== undefined && opts.bgEffectIntensity !== 1) obj.bgEffectIntensity = opts.bgEffectIntensity;
     if (opts.bgEffectSize !== undefined && opts.bgEffectSize !== 1) obj.bgEffectSize = opts.bgEffectSize;
-    // Persist the glass TIER as a string ('full'|'frosted'|'normal'). The default
-    // varies per theme (defaultGlassTierFor), so we record whatever the caller
-    // resolved — otherwise the per-theme default would override the user's pick on
-    // the next boot. The legacy `frosted` bool is read on load (back-compat) but
-    // no longer WRITTEN; glassTier supersedes it.
+    // Persist the glass TIER as a string. The user-facing control now produces only
+    // 'full' (Glass) or 'normal' (Flat) — 'frosted' is no longer selectable (owner
+    // ruling), though it is still READ on load (back-compat) and folded to Glass by
+    // resolveGlassTier. The default varies per theme (defaultGlassTierFor), so we
+    // record whatever the caller resolved — otherwise the per-theme default would
+    // override the user's pick on the next boot. The legacy `frosted` bool is read on
+    // load (back-compat) but no longer WRITTEN; glassTier supersedes it.
     if (opts.glassTier !== undefined) obj.glassTier = opts.glassTier;
     // #739 — persist the glass TINT only when opted-in (tinted). Clear is the
     // default, so we OMIT the field for Clear (matching the other default-omit
@@ -2231,19 +2242,23 @@ export function initThemeUI() {
     });
   }
 
-  // ── Glass tier — TWO mirrored controls, BOTH the full 3-way ladder (full | frosted |
+  // ── Glass tier — TWO mirrored controls, BOTH the COLLAPSED 2-way ladder (full |
   // normal): id=theme-glass-tier (Customize -> Font & Layout) and the #1316 picker-level
-  // quick control id=theme-glass-tier-quick (Browse tab, labeled Glass/Frosted/Flat).
-  // The quick control MUST carry all three tiers — a 2-way cut left it unable to render
-  // the active state when Customize picked 'normal' (Greptile P2, PR #1343). Each
-  // container holds one [data-tier] button per value; the active one carries .active +
-  // aria-pressed, and the chosen value is mirrored to the container's dataset.value so
-  // _getOpts can read it (it reads #theme-glass-tier specifically, which this function
-  // always keeps in lockstep with the quick control). (Function declarations below are
-  // hoisted, so the swatch handler can call these helpers.)
+  // quick control id=theme-glass-tier-quick (Browse tab), each labeled Glass / Flat.
+  // COLLAPSED tier (owner ruling): 'frosted' is no longer a user-selectable segment — it
+  // survives only as the applyGlassTier auto-downgrade target — so a 'frosted' value
+  // handed to the sync FOLDS to the Glass (full) segment (never leaves the control blank).
+  // The two representable, mutually-exclusive states are Glass ('full') and Flat
+  // ('normal'). Each container holds one [data-tier] button per value; the active one
+  // carries .active + aria-pressed, and the chosen value is mirrored to the container's
+  // dataset.value so _getOpts can read it (it reads #theme-glass-tier specifically, which
+  // this function always keeps in lockstep with the quick control). (Function
+  // declarations below are hoisted, so the swatch handler can call these helpers.)
   const GLASS_TIER_CONTROL_IDS = ['theme-glass-tier', 'theme-glass-tier-quick'];
   function _syncGlassTierControl(tier) {
-    const t = (tier === 'full' || tier === 'frosted' || tier === 'normal') ? tier : 'frosted';
+    // Flat stays Flat; everything else (Glass, a stray/legacy 'frosted', or an
+    // unrecognized value) shows the Glass segment — frosted is not a user-facing tier.
+    const t = (tier === 'normal') ? 'normal' : 'full';
     for (const id of GLASS_TIER_CONTROL_IDS) {
       const ctrl = document.getElementById(id);
       if (!ctrl) continue;
