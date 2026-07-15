@@ -228,3 +228,67 @@ def test_no_failures_means_no_alarms():
     _clear_rings()
     alarms = ahr._compute_alarms(ahr._compute_health_rollup())
     assert alarms == []
+
+
+# ── cross-user isolation: a soft-failure is scoped to the user that emitted it (#1641 / Greptile P1) ──
+#
+# The OVERSEER ring is GLOBAL (one ring, every sandbox), but every OTHER health read the snapshot
+# assembles (sync_recent / belt_totals / sandbox_health) is already user-scoped. Before the fix the
+# rollup's `guards` bucket counted EVERY user's soft-failures, so user A's fault inflated the rollup
+# AND raised RED alarms in user B's /api/admin/health — a cross-user sandbox-isolation breach (first
+# class alongside the Vault Wall). The fix filters the OVERSEER ring by the per-entry `user` field
+# `record_overseer`/`record_soft_failure` stamp, matching how the sibling reads are already scoped.
+
+def test_soft_failure_rollup_is_scoped_to_the_emitting_user():
+    _clear_rings()
+    # User A hits a genuine (auto-corrected) soft failure; user B's sandbox is clean.
+    for _ in range(3):
+        log_rings.record_soft_failure("overseer:judge-call-failed", RuntimeError("t"),
+                                      corrected="deterministic-floor", user="user-a")
+
+    roll_a = ahr._compute_health_rollup(user="user-a")
+    roll_b = ahr._compute_health_rollup(user="user-b")
+
+    # A sees its own failures; B's guards bucket stays empty — no bleed across sandboxes.
+    assert roll_a["guards"]["overseer:judge-call-failed"]["failed"] == 3
+    assert roll_b["guards"] == {}
+
+    # The RED alarms follow the rollup: A raises the guard/judge + auto-corrected alarms; B neither.
+    codes_a = {a["code"] for a in ahr._compute_alarms(roll_a)}
+    codes_b = {a["code"] for a in ahr._compute_alarms(roll_b)}
+    assert {"guard-judge-failure", "auto-corrected"} <= codes_a
+    assert {"guard-judge-failure", "auto-corrected"}.isdisjoint(codes_b)
+
+
+def test_none_user_soft_failure_maps_to_the_default_bucket_only():
+    """A soft-failure with NO user (user=None) normalizes to the shared `default` bucket (mirroring
+    orwell_sync_ledger._key) — it surfaces for a default/single-user request but never for a named
+    user, so an unattributed fault can't leak into a specific user's view either."""
+    _clear_rings()
+    log_rings.record_soft_failure("faith:gate-error", RuntimeError("x"))  # no user in ctx
+    assert ahr._compute_health_rollup(user=None)["guards"].get("faith:gate-error", {}).get("failed") == 1
+    assert ahr._compute_health_rollup(user="default")["guards"].get("faith:gate-error", {}).get("failed") == 1
+    assert ahr._compute_health_rollup(user="user-a")["guards"] == {}
+
+
+def test_health_payload_does_not_leak_another_users_soft_failure(monkeypatch, _stubbed_engine):
+    """Greptile repro end-to-end: user A's soft-failure must be ABSENT from user B's
+    /api/admin/health rollup + alarms, yet still present in user A's own view (the fix scopes it,
+    it does not drop it)."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    _clear_rings()
+    for _ in range(3):
+        log_rings.record_soft_failure("overseer:judge-call-failed", RuntimeError("t"),
+                                      corrected="deterministic-floor", user="user-a")
+
+    # The requesting admin resolves to user B — their view of the health payload must be clean.
+    monkeypatch.setattr(ahr, "effective_user", lambda request: "user-b")
+    body_b = TestClient(_health_app(), raise_server_exceptions=False).get("/api/admin/health").json()
+    assert body_b["healthRollup"].get("guards") == {}
+    assert {a["code"] for a in body_b["alarms"]}.isdisjoint({"guard-judge-failure", "auto-corrected"})
+
+    # Sanity — the SAME failure DOES surface for user A (scoped, not silenced).
+    monkeypatch.setattr(ahr, "effective_user", lambda request: "user-a")
+    body_a = TestClient(_health_app(), raise_server_exceptions=False).get("/api/admin/health").json()
+    assert body_a["healthRollup"]["guards"]["overseer:judge-call-failed"]["failed"] == 3
+    assert "guard-judge-failure" in {a["code"] for a in body_a["alarms"]}

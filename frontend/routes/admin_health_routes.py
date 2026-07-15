@@ -1266,6 +1266,19 @@ def _within_window(ts_ms, now_ms, window_s) -> bool:
         return True
 
 
+def _norm_user(user) -> str:
+    """Normalize a user key the SAME way the sync ledger (`orwell_sync_ledger._key`) and the rest
+    of the relay do — a missing/blank user maps to the shared ``default`` bucket. Used to match an
+    OVERSEER ring entry's ``user`` field against the REQUESTING user so the per-user rollup/alarms
+    show only that user's soft-failures. Cross-user isolation is first-class alongside the Vault
+    Wall: user A's soft-failure must NEVER light RED (or inflate the rollup) in user B's
+    /api/admin/health."""
+    try:
+        return (user or "default").strip() or "default"
+    except Exception:
+        return "default"
+
+
 def _llm_class_of(entry) -> str:
     """The call class for an LLMIO ring entry — the structured field if present (#1599 WI2 seeded
     it), else parsed from the ``kind[callClass]`` msg prefix, else the bare kind."""
@@ -1293,7 +1306,8 @@ def _is_auto_corrected(entry) -> bool:
     return log_rings.SOFT_FAIL_AUTOCORRECTED in str(entry.get("diagnosis") or "")
 
 
-def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None) -> dict:
+def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
+                           user: str | None = None) -> dict:
     """WI2 — the per-class/-tool rolling failure-rate rollup. Reads the in-process rings only;
     best-effort and Vault-free. Structure::
 
@@ -1301,8 +1315,17 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None) -> dic
         llm:    {<callClass>: {total, failed, failureRate, lastFailureAt}},
         tools:  {<engineTool>: {total, failed, failureRate, lastFailureAt}},
         guards: {<softFailClass>: {failed, autoCorrected, lastFailureAt}} }
+
+    ``guards`` is USER-SCOPED: the OVERSEER ring is the one ring that carries a per-entry ``user``
+    (``record_overseer`` / ``record_soft_failure`` stamp it), so we filter it to the REQUESTING
+    user exactly as the snapshot's sibling reads (``sync_recent`` / ``belt_totals`` /
+    ``sandbox_health``) are — otherwise user A's soft-failure would inflate the rollup (and raise
+    RED alarms) in user B's /api/admin/health, a cross-user isolation breach. The LLMIO/IO rings
+    carry no ``user`` field (they trace narration + engine tool I/O that is not user-attributed),
+    so ``llm``/``tools`` stay global by construction — they are not part of this per-user leak.
     """
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+    want_user = _norm_user(user)
     llm: dict = {}
     tools: dict = {}
     guards: dict = {}
@@ -1338,6 +1361,11 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None) -> dic
         ov_lines = []
     for e in ov_lines:
         if not isinstance(e, dict) or e.get("ok") is not False:
+            continue
+        # Cross-user isolation: this soft-failure counts for THIS user only. The OVERSEER ring is
+        # global (one ring, every sandbox); scope it by the per-entry `user` the recorder stamps,
+        # matching how sync_recent / belt_totals / sandbox_health are already user-scoped.
+        if _norm_user(e.get("user")) != want_user:
             continue
         kind = str(e.get("kind") or "")
         if not kind.startswith(_SOFT_FAIL_PREFIXES):
@@ -1460,7 +1488,7 @@ async def _rollup_and_alarms(user: str | None, engine: dict) -> tuple[dict, list
     """Assemble the WI2 rollup + the WI3 RED alarms for the health snapshot. Best-effort throughout
     (a broken read simply contributes nothing) — the 10s poll must never hard-fail."""
     try:
-        rollup = _compute_health_rollup()
+        rollup = _compute_health_rollup(user=user)
     except Exception:
         rollup = {}
     try:
