@@ -427,6 +427,13 @@ COOL_REGISTRY = {
     'body.theme-frosted .gadget-rail-head *': ("adaptive-wallpaper", "gadget-rail head; adaptive over wallpaper"),
     'body.theme-frosted .gadget-rail-title': ("adaptive-wallpaper", "gadget-rail title; adaptive over wallpaper"),
     'body.theme-frosted .gadget-rail-rearrange[aria-pressed="true"]': ("adaptive-wallpaper", "gadget-rail control; adaptive"),
+
+    # #1638 compact/icon kit primitives — FLAT desktop-chrome buttons that float over the dark
+    # wallpaper (like .gadget-rail-head): var(--fg) inks LIGHT there, and the W3 --fg remap re-inks
+    # them DARK inside a light-glass container (.ow-window .ow-body / .on-card / .og-card). One
+    # adaptive primitive, legible in BOTH contexts — the sanctioned adaptive-wallpaper pattern.
+    'body.theme-frosted .ow-btn-icon': ("adaptive-wallpaper", "compact chrome icon button; adaptive over wallpaper (#1638)"),
+    'body.theme-frosted .ow-btn-compact': ("adaptive-wallpaper", "compact chrome text button; adaptive over wallpaper (#1638)"),
 }
 
 
