@@ -1757,19 +1757,26 @@ export function initThemeUI() {
 
   // Sync reset button visibility based on whether color differs from reference
   function syncResetButtons() {
-    document.querySelectorAll('.color-reset-btn[data-reset]').forEach(btn => {
+    document.querySelectorAll('.ow-color-well__reset[data-reset]').forEach(btn => {
       const key = btn.dataset.reset;
       const picker = document.getElementById(pickerIds[key]);
       if (picker && refColors[key]) {
-        btn.classList.toggle('changed', picker.value.toLowerCase() !== refColors[key].toLowerCase());
+        const changed = picker.value.toLowerCase() !== refColors[key].toLowerCase();
+        btn.classList.toggle('changed', changed);
+        // a11y (#1638 .ow-color-well): a hidden (opacity:0/pointer-events:none) reset is still
+        // keyboard-focusable — keep [disabled] in lockstep with .changed so an unchanged, invisible
+        // reset is inert AND out of the tab order.
+        btn.disabled = !changed;
       }
     });
-    document.querySelectorAll('.color-reset-btn[data-reset-adv]').forEach(btn => {
+    document.querySelectorAll('.ow-color-well__reset[data-reset-adv]').forEach(btn => {
       const key = btn.dataset.resetAdv;
       const picker = document.getElementById('adv-' + key);
       const ref = refDefaults[key] || '';
       if (picker && ref) {
-        btn.classList.toggle('changed', picker.value.toLowerCase() !== ref.toLowerCase());
+        const changed = picker.value.toLowerCase() !== ref.toLowerCase();
+        btn.classList.toggle('changed', changed);
+        btn.disabled = !changed;   // sync keyboard-reachability with .changed (#1638)
       }
     });
   }
@@ -2052,7 +2059,7 @@ export function initThemeUI() {
   }
 
   // Per-picker reset buttons (base colors)
-  document.querySelectorAll('.color-reset-btn[data-reset]').forEach(btn => {
+  document.querySelectorAll('.ow-color-well__reset[data-reset]').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', () => {
@@ -2066,7 +2073,7 @@ export function initThemeUI() {
   });
 
   // Effect color reset button
-  document.querySelectorAll('.color-reset-btn[data-reset-effect]').forEach(btn => {
+  document.querySelectorAll('.ow-color-well__reset[data-reset-effect]').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', () => {
@@ -2081,7 +2088,7 @@ export function initThemeUI() {
   });
 
   // Per-picker reset buttons (advanced colors)
-  document.querySelectorAll('.color-reset-btn[data-reset-adv]').forEach(btn => {
+  document.querySelectorAll('.ow-color-well__reset[data-reset-adv]').forEach(btn => {
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     newBtn.addEventListener('click', () => {
@@ -2633,7 +2640,7 @@ export function initThemeZoneHighlight() {
   const root = document.getElementById('theme-tab-customize');
   if (!root || root.dataset.zoneBound === '1') return;
   root.dataset.zoneBound = '1';
-  root.querySelectorAll('.color-row').forEach(row => {
+  root.querySelectorAll('.ow-color-well').forEach(row => {
     const input = row.querySelector('input[type="color"]');
     if (!input) return;
     const sel = _THEME_ZONE_MAP[input.id];

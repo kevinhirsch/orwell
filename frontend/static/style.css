@@ -7162,35 +7162,8 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     .theme-swatch-colors span:first-child { margin-left: 0; }
     .theme-custom-label { font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--fg) 50%, transparent); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 6px; }
     .theme-custom { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
-    .color-row { display: flex; align-items: center; gap: 4px; }
-    .color-row label { font-size: 13px; font-weight: 500; color: var(--fg); opacity: 0.7; flex: 1; }
-    .color-row input[type="color"],
-    .color-row input.cp-swatch-input {
-      width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%;
-      background: none; cursor: pointer; padding: 0; flex-shrink: 0;
-      overflow: hidden;
-      -webkit-appearance: none;
-      appearance: none;
-    }
-    .color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-    .color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
-    .color-row input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
-    .color-row input.cp-swatch-input {
-      color: transparent;
-      text-shadow: none;
-      caret-color: transparent;
-      font-size: 0;
-      user-select: none;
-    }
-    .color-row input.cp-swatch-input::selection { background: transparent; }
-    .color-row input.cp-swatch-input:focus { outline: 1px solid var(--red); outline-offset: 1px; }
-    .color-reset-btn {
-      width: 24px; height: 24px; border: none; background: none; cursor: pointer;
-      color: var(--fg); opacity: 0; font-size: 1.15rem; padding: 0; line-height: 1;
-      transition: opacity 0.15s, color 0.15s; flex-shrink: 0; pointer-events: none;
-    }
-    .color-reset-btn.changed { opacity: 0.4; pointer-events: auto; }
-    .color-reset-btn.changed:hover { opacity: 1; color: var(--red); }
+    /* The color-row / color-reset-btn swatch styling migrated to the .ow-color-well kit
+       primitive (#1638, in the ELEMENT KIT region). This bespoke block was retired. */
     .theme-custom-divider {
       grid-column: 1 / -1; font-size: 11px; color: var(--fg); opacity: 0.5;
       text-transform: uppercase; letter-spacing: 0.04em; margin: 6px 0 2px;
@@ -12115,11 +12088,11 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
 }
 /* Highlight the color row itself too so the user has a strong visual link
    between the input they're hovering and the zone overlay on the page. */
-#theme-tab-customize .color-row {
+#theme-tab-customize .ow-color-well {
   transition: background 0.15s, border-color 0.15s;
   border-radius: 6px;
 }
-#theme-tab-customize .color-row:hover {
+#theme-tab-customize .ow-color-well:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
 }
 
@@ -22352,6 +22325,72 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
   }
+}
+/* ── COLOR WELL: .ow-color-well — kit frame around a native color swatch (#1638) ────
+   The Theme → Customize color rows: a label + a native <input type="color"> swatch (which
+   colorPicker.js swaps in place to type="text" + .cp-swatch-input, opening the in-house
+   .cp-popover) + an optional trailing reset. The swatch SHOWS its picked value, so — unlike
+   .ow-btn / .ow-field — it is NOT a glass material and takes NO backdrop-filter (that would
+   muddy the color it exists to display); the block is authored tier-agnostic, only the rim
+   upgrades at Full Glass. Focus is the fixed system-blue ring, never the theme accent. The
+   swatch rule targets BOTH the native input AND the post-swap .cp-swatch-input in one rule. */
+.ow-color-well { display: flex; align-items: center; gap: var(--ow-space-1, 4px); }
+.ow-color-well--start { justify-content: flex-start; gap: var(--ow-space-2, 8px); }
+.ow-color-well--compact { margin: 0; padding: 0; }
+.ow-color-well > label,
+.ow-color-well .ow-color-well__label {
+  font-size: var(--ow-fs-body, 0.8125rem); font-weight: var(--ow-fw-medium, 500);
+  color: var(--ow-control-ink, #16191f);      /* neutral chrome ink — NO accent on the label */
+  opacity: 0.72; flex: 1;
+}
+.ow-color-well input[type="color"],
+.ow-color-well input.cp-swatch-input {
+  width: 24px; height: 24px; flex-shrink: 0; padding: 0; overflow: hidden;
+  border-radius: 50%; cursor: pointer; background: none;
+  border: 1px solid var(--ow-control-rim);    /* soft tokenized hairline, not var(--border) */
+  -webkit-appearance: none; appearance: none;
+}
+.ow-color-well input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.ow-color-well input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+.ow-color-well input[type="color"]::-moz-color-swatch     { border: none; border-radius: 50%; }
+.ow-color-well input.cp-swatch-input { color: transparent; text-shadow: none; caret-color: transparent; font-size: 0; user-select: none; }
+.ow-color-well input.cp-swatch-input::selection { background: transparent; }
+/* tokenized system-blue focus ring (replaces the old accent-hued 1px var(--red) outline) */
+.ow-color-well input[type="color"]:focus-visible,
+.ow-color-well input.cp-swatch-input:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+/* trailing action slot (the reset ↺, or a free-form hex readout). Hidden from SIGHT
+   (opacity:0) and POINTER (pointer-events:none) at rest; theme.js ALSO toggles [disabled]
+   in lockstep with .changed so an unchanged, invisible reset is not keyboard-reachable. */
+.ow-color-well__reset {
+  width: 24px; height: 24px; flex-shrink: 0; padding: 0; line-height: 1;
+  border: none; background: none; cursor: pointer; font-size: 1.15rem;
+  color: var(--ow-control-ink, #16191f); opacity: 0;
+  pointer-events: none; transition: opacity .15s, color .15s;
+}
+.ow-color-well__reset:disabled { cursor: default; }
+.ow-color-well__reset.changed { opacity: 0.4; pointer-events: auto; }
+.ow-color-well__reset.changed:hover { opacity: 1; }
+.ow-color-well__reset.changed:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff); outline-offset: 2px;
+}
+/* Full Glass: the swatch is a genuine glass chip → take the specular rim like other kit controls */
+body.glass-full .ow-color-well input[type="color"],
+body.glass-full .ow-color-well input.cp-swatch-input {
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+}
+/* WCAG 2.5.5 — coarse-pointer 44px hit floor. The .ow-color-well WRAPPER owns the tap area as
+   a SINGLE box model (min-height on the row); the swatch's own hit box grows via PADDING (NOT a
+   ::before/::after overlay — pseudo-elements are suppressed/unreliable on the replaced color
+   input), while its visual chip stays a 24px content box. The trailing reset carries the same
+   floor. `!important` beats the 24px fine-pointer sizing. */
+@media (any-pointer: coarse) {
+  .ow-color-well { min-height: var(--ow-tap-min, 44px); }
+  .ow-color-well input[type="color"],
+  .ow-color-well input.cp-swatch-input { box-sizing: content-box; padding: 10px !important; }
+  .ow-color-well__reset { min-width: var(--ow-tap-min, 44px); min-height: var(--ow-tap-min, 44px); }
 }
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
 

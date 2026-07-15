@@ -442,6 +442,43 @@
       </div>
     </section>
 
+    <!-- COLOR WELL -->
+    <section class="ek-card">
+      <h2>Color well — .ow-color-well (#1638)</h2>
+      <p class="ek-note">The Theme → Customize color rows: a label + a native
+        <code>&lt;input type="color"&gt;</code> swatch (24px chip, tokenized rim, system-blue focus)
+        + an optional trailing <code>.ow-color-well__reset</code> ↺ that fades in only when the color
+        differs from its reference. The swatch shows its own value, so it is never a glass material on
+        any tier; the wrapper owns the 44px coarse-pointer hit floor.</p>
+
+      <div class="ek-label">Labelled swatch + reset (rest · changed)</div>
+      <div class="ek-stack" style="max-width:320px">
+        <div class="ow-color-well">
+          <label>Background</label>
+          <input type="color" value="#2b3040">
+          <button class="ow-color-well__reset" title="Reset this color" aria-label="Reset color" disabled>&#x21BA;</button>
+        </div>
+        <div class="ow-color-well">
+          <label>Accent</label>
+          <input type="color" value="#e06c75">
+          <button class="ow-color-well__reset changed" title="Reset this color" aria-label="Reset color">&#x21BA;</button>
+        </div>
+      </div>
+
+      <div class="ek-label">Left-aligned (--start, hex readout) · compact (--compact)</div>
+      <div class="ek-stack" style="max-width:320px">
+        <div class="ow-color-well ow-color-well--start">
+          <input type="color" value="#7c5cff">
+          <span style="font-size:var(--fs-xs);opacity:0.65;font-family:ui-monospace,monospace;">#7c5cff</span>
+        </div>
+        <div class="ow-color-well ow-color-well--compact">
+          <label>Effect</label>
+          <input type="color" value="#9cdef2">
+          <button class="ow-color-well__reset changed" title="Reset" aria-label="Reset color">&#x21BA;</button>
+        </div>
+      </div>
+    </section>
+
     <h2 class="ek-section-h">Composite kits — windows / notices / gadget / decision</h2>
 
     <!-- WINDOWS (OrwellWindow kit) -->
