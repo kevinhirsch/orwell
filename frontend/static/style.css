@@ -23258,6 +23258,33 @@ body.theme-frosted .msg-ai .body {
   color: inherit !important;
   text-shadow: inherit !important;
 }
+/* ── APP-OV-4 (2026-07-15 frosted polarity sweep): links + inline accent/red cues INSIDE the
+   received bubble must FOLLOW the bubble ink, not the global no-accent-on-text remap ───────────
+   The GLOBAL "no accent hue on text" contract (`body.theme-frosted a` and
+   `[style*="color:var(--accent)"]`, further below) repaints links + inline accent/red spans to
+   var(--fg). That is correct on the CHROME (where --fg is redefined to the #16191f chrome ink),
+   but the .msg-ai bubble does NOT redefine --fg — it drives its ink via `color:` DIRECTLY so
+   adaptiveGlass can flip polarity per-wallpaper (the #744 layer). So inside the bubble var(--fg)
+   is still the theme's LIGHT cool ink (#9cdef2 cyan on the default dark theme) → light-on-light on
+   the #1601 light-glass bubble (the owner's "Take your cast photo" cast-photo inline / any chat
+   link, measured ~1.3:1). The bubble's own .body already does `color: inherit` to track the
+   adaptive ink; do the SAME for its links + inline accent/red cues (higher specificity than the
+   global remap: 3 classes vs 2), so they read DARK on the light glass and flip LIGHT with the
+   bubble over a dark wallpaper — never a fixed cool hue. Mirrors the .ooc-producer-aside fix. */
+body.theme-frosted .msg-ai a,
+body.theme-frosted .msg-ai [style*="color: var(--accent)"],
+body.theme-frosted .msg-ai [style*="color:var(--accent)"],
+body.theme-frosted .msg-ai [style*="color: var(--red)"],
+body.theme-frosted .msg-ai [style*="color:var(--red)"] {
+  color: inherit !important;
+  -webkit-text-fill-color: inherit !important;
+  text-shadow: inherit !important;
+}
+/* the chat-link dotted underline keyed off --hl-function (a syntax blue) — an accent stroke on
+   the light glass; route it to the (now adaptive) ink so the link is one monochrome run. */
+body.theme-frosted .msg-ai a.chat-link {
+  border-bottom-color: color-mix(in srgb, currentColor 45%, transparent) !important;
+}
 /* #1601 / OWN-3 (FOLLOW-UP, out of scope here): the pre-game cast-photo headshot dialog
    is the OTHER dark-veil-vs-light-glass surface the owner ruling names — it "follows the
    same ONE-light-glass ruling" as the chat column above. It is deliberately left as-is in
@@ -23892,31 +23919,28 @@ body.theme-frosted .icon-rail a,
 body.theme-frosted .icon-rail button {
   text-shadow: 0 1px 1px rgba(255,255,255,0.4) !important;
 }
-/* ── #1375 a11y contrast: light-glass labels that render DARK over dark game content ──────────
-   The sidebar's brand title, user-name, and New Chat label sit in TRANSPARENT sub-containers
-   (.sidebar-header / .sidebar-user-bar are `background: transparent`), so — exactly like the
-   gadget-rail header just above (a transparent-over-dark container) — they float over the
-   translucent sidebar glass, which composites with the game content behind it and refracts/blurs
-   the raw backdrop through. The engine-staged a11y gate measures them at 2.9–3.5:1 with the
-   blanket #sidebar dark ink (the light-glass tint the ink assumes is not guaranteed there). Flip
-   THESE nodes to the THEME's own ink + a bg-polarity legibility halo (the rail-head treatment) so
-   they clear WCAG AA over the theme's backdrop.
-   THEME-AWARE, never hardcoded (the light-theme footer fix): the first cut pinned `#fff` ink + an
-   rgba(14,16,22,.55) band — calibrated for the DEFAULT dark glass theme's backdrop — which on a
-   LIGHT palette (light/paper/lavender/cute…, all of which keep the frosted material ON by default)
-   rendered a wrong-polarity DARK chip at the sidebar foot around the logged-in username. Deriving
-   the ink from var(--fg) and the band/halo from var(--bg) keeps the dark-theme rendering
-   essentially identical (glass: fg #eef1f4 ≈ the old #fff, bg #15171c ≈ the old rgb(14,16,22))
-   while a light palette resolves a light band + dark ink — the correct polarity on BOTH.
-   Polarity of the rest of the sidebar is unchanged.
-   Scoped to prefers-reduced-transparency:no-preference — under `reduce` the glass chrome falls
-   back to the SOLID dark --panel with its own ink handling, so we leave that a11y mode untouched. */
+/* ── APP-OV-5 (2026-07-15 frosted polarity sweep): the sidebar brand title + New Chat label ──
+   SUPERSEDES the earlier "#1375 label over dark game content" reasoning. The frosted #sidebar is
+   a FIXED LIGHT-GLASS panel (--ow-glass-light-color, the ~.60 white kube fill — L20396/L20420),
+   NOT a transparent-over-DARK container like the gadget-rail head: `.sidebar-header` is
+   `background: transparent`, so the brand title + New Chat float over the SIDEBAR's OWN light
+   glass — a .60 white fill composites ≥ ~0.60 white even over the darkest backdrop, so the dark
+   chrome ink clears AA everywhere (this is exactly the APP-OV-3 user-bar footer fix right below).
+   The old rule pinned the theme's LIGHT cool var(--fg) here — on the DEFAULT dark theme that is
+   #9cdef2 light cyan → light-cyan-on-light-glass (~1.3:1: the owner's unreadable "Orwell" wordmark
+   + "New Chat"). Flip to the chrome dark ink #16191f + the LIGHT legibility halo the rest of the
+   light-glass chrome uses; the old var(--bg)-derived DARK halo did nothing here (a dark shadow on
+   a light surface is invisible, and under dark ink it would read as a smudge — the #725 pattern).
+   THEME-AWARE concern (the old light-palette footer bug) is moot: #16191f is the correct dark ink
+   on the light glass for EVERY palette (they all keep the frosted material on), and a LIGHT palette
+   only makes the sidebar glass lighter, so dark ink still clears AA. Scoped to
+   prefers-reduced-transparency:no-preference — under `reduce` the sidebar falls back to the SOLID
+   dark --panel with its own light-ink handling, so that a11y mode is untouched. */
 @media (prefers-reduced-transparency: no-preference) {
   body.theme-frosted #sidebar .sidebar-brand-title,
   body.theme-frosted #sidebar #sidebar-new-chat-btn .grow {
-    color: var(--fg, #eef1f4) !important;
-    text-shadow: 0 1px 2px color-mix(in srgb, var(--bg, #15171c) 62%, transparent),
-                 0 0 2px color-mix(in srgb, var(--bg, #15171c) 50%, transparent) !important;
+    color: #16191f !important;
+    text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
   }
   /* APP-OV-3 (2026-07-14 theme audit — the §0 polarity class): the user-bar footer used to be a
      var(--bg)-derived band + var(--fg) ink — which on the default DARK theme rendered a DARK
