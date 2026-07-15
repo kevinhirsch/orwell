@@ -994,7 +994,7 @@ async function initImageSettings() {
       await saveSettings();
       if (msg) {
         msg.textContent = "Reset image model — '" + String(settings.image_model).split('/').pop() + "' can't generate images";
-        msg.style.color = 'var(--amber, var(--fg))';
+        msg.style.color = 'var(--color-warning)';
         setTimeout(() => { msg.textContent = ''; }, 6000);
       }
     }
@@ -1081,7 +1081,7 @@ async function initTokenEconomySettings() {
   function setMsg(text, ok) {
     if (!msg) return;
     msg.textContent = text || '';
-    msg.style.color = ok === false ? 'var(--danger, #c0392b)' : 'color-mix(in srgb, var(--fg) 45%, transparent)';
+    msg.style.color = ok === false ? 'var(--color-danger)' : 'color-mix(in srgb, var(--fg) 45%, transparent)';
   }
 
   async function post(patch) {
