@@ -47,9 +47,11 @@ def _rule_blocks(css):
 def _effective_decls(css, selector):
     """All declarations across every rule whose selector EXACTLY equals `selector`
     (so grouped `.msg-ai, .msg-user {…}` and descendant `.msg-ai .body {…}` rules are
-    excluded), later rules overriding earlier — the cascade for one element at equal
-    specificity. `!important` is normalized off. Returns {prop: value}."""
-    out = {}
+    excluded), resolved to the EFFECTIVE cascade for one element at equal specificity:
+    later-wins at equal priority, but an `!important` value is never lost to a later
+    normal one (an earlier important beats a later normal). Returns {prop: value} with
+    `!important` normalized off the returned value."""
+    out = {}  # prop -> (value, is_important)
     for sel, body in _rule_blocks(css):
         if sel != selector:
             continue
@@ -57,8 +59,16 @@ def _effective_decls(css, selector):
             prop, sep, val = decl.partition(":")
             if not sep:
                 continue
-            out[prop.strip()] = val.replace("!important", "").strip()
-    return out
+            prop = prop.strip()
+            important = "!important" in val
+            val = val.replace("!important", "").strip()
+            prev = out.get(prop)
+            # set if: no prior, OR this is important (last important wins), OR the prior
+            # was NOT important (equal-priority last-wins). A later NORMAL never overrides
+            # an earlier IMPORTANT.
+            if prev is None or important or not prev[1]:
+                out[prop] = (val, important)
+    return {k: v[0] for k, v in out.items()}
 
 
 AI = _effective_decls(CSS_NC, MSG_AI_SEL)

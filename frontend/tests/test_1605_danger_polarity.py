@@ -138,7 +138,11 @@ def test_kit_solid_destructive_plate_clears_aa():
     darkened fill and its mix ratio are parsed straight from the kit declaration."""
     decl = re.search(r"--ow-danger-strong:\s*([^;]+);", CSS)
     assert decl, "the kit must define --ow-danger-strong for the AA-safe solid plate"
-    strong = _mix_srgb(DANGER_DARK, "#000", _mix_pct(decl.group(1)))
+    # parse the kit's OWN base token, not the app DANGER_DARK — the kit pins --ow-danger
+    # independently, so a drift there must still be caught by this AA math.
+    base = re.search(r"--ow-danger:\s*(#[0-9a-fA-F]{3,8})\s*;", CSS)
+    assert base, "the kit must define --ow-danger (the solid plate's base hue)"
+    strong = _mix_srgb(base.group(1), "#000", _mix_pct(decl.group(1)))
     r = _ratio("#ffffff", strong)
     assert r >= AA_NORMAL, (
         f"kit --ow-danger-strong ({strong}) with white body text is {r:.2f}:1, must clear AA "
