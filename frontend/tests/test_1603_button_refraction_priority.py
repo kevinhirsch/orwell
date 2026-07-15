@@ -36,10 +36,11 @@ JS = _read("static", "js", "liquidGlass.js")
 
 # The high-emphasis glass button variants that get the SVG refraction, and the
 # content-layer card affordances that must yield the cap to them.
+# (#1653: .ow-btn-icon is intentionally ABSENT — it became a FLAT chrome button and is no
+# longer a glass-refraction target, so it's excluded from the SELECTORS refraction list.)
 BUTTON_SELECTORS = (
     ".ow-btn-prominent",
     ".ow-btn-secondary",
-    ".ow-btn-icon",
     ".ow-btn-group",
     ".ow-btn",
 )

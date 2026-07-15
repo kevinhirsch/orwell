@@ -51,6 +51,26 @@ def _block(css, selector):
     return m.group(1)
 
 
+def _media_blocks(css, header_re):
+    """Every `@media (...) { … }` body whose header matches `header_re`, brace-BALANCED to the
+    block's ACTUAL closing brace. Unlike `_block` (flat rules only), an @media block nests
+    rules, so we count braces to the matching `}` instead of slicing a fixed width."""
+    out = []
+    for m in re.finditer(header_re, css):
+        open_i = css.index("{", m.start())   # the @media block's opening brace
+        depth, j = 0, open_i
+        while j < len(css):
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append(css[open_i + 1:j])
+    return out
+
+
 # ── 1. both primitives exist, in BOTH tiers ──────────────────────────────────────────
 def test_both_primitives_defined_in_both_tiers():
     for sel in (
@@ -93,9 +113,9 @@ def test_icon_is_square_not_a_disc_or_pill():
 # ── 4. coarse-pointer 44px floor (WCAG 2.5.5) for BOTH ───────────────────────────────
 def test_coarse_pointer_44_floor_exists_for_both():
     # the compact/icon floor lives in an `@media (any-pointer: coarse)` block (there are several
-    # such blocks in the file — pick the one that floors BOTH primitives).
-    windows = [CSS[m.start():m.start() + 400]
-               for m in re.finditer(r"@media \(any-pointer: coarse\)\s*\{", CSS)]
+    # such blocks in the file — pick the one that floors BOTH primitives). Scope each candidate
+    # to its ACTUAL closing brace (brace-balanced), not a fragile fixed-width slice.
+    windows = _media_blocks(CSS, r"@media \(any-pointer: coarse\)\s*\{")
     floor = next((w for w in windows if ".ow-btn-icon" in w and ".ow-btn-compact" in w), None)
     assert floor, "no @media (any-pointer: coarse) block floors both compact/icon buttons"
     assert re.search(
@@ -154,9 +174,12 @@ def test_adaptive_ink_registered_in_w1_gate():
     # "adaptive-wallpaper" in the #1644 W1 gate, in THIS change — else the gate would fail closed.
     for sel in ("body.theme-frosted .ow-btn-icon", "body.theme-frosted .ow-btn-compact"):
         assert f"'{sel}'" in W1, f"{sel} must be registered in the #1644 W1 COOL_REGISTRY"
-    # and the registration is the adaptive-wallpaper classification (not some other bucket).
-    reg = re.search(r"'body\.theme-frosted \.ow-btn-icon':\s*\(\s*\"([^\"]+)\"", W1)
-    assert reg and reg.group(1) == "adaptive-wallpaper", "icon must register as adaptive-wallpaper"
+    # and EACH registration is the adaptive-wallpaper classification (not some other bucket) —
+    # BOTH primitives, not just the icon (#1653: the compact button must be covered too).
+    for sel in ("body.theme-frosted .ow-btn-icon", "body.theme-frosted .ow-btn-compact"):
+        reg = re.search(r"'" + re.escape(sel) + r"':\s*\(\s*\"([^\"]+)\"", W1)
+        assert reg and reg.group(1) == "adaptive-wallpaper", \
+            f"{sel} must register as adaptive-wallpaper"
 
 
 # ── 6. the reference demo instantiates both ──────────────────────────────────────────

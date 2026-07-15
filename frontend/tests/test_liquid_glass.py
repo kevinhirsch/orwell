@@ -530,8 +530,10 @@ def test_glass_button_variants_in_refraction_selector_set():
     # The high-emphasis glass button variants are refraction targets — the SAME
     # feImage→feDisplacementMap technique as the chrome surfaces. They live in the JS
     # SELECTORS list (kube.io demos the effect on pill buttons → the authentic look).
+    # (#1653: .ow-btn-icon is NO LONGER here — it became a FLAT chrome button, excluded from
+    # refraction via BTN_NO_REFRACT below, not a glass-refraction target.)
     sel_block = re.search(r"var SELECTORS = \[(.*?)\];", JS, re.S).group(1)
-    for sel in (".ow-btn-prominent", ".ow-btn-secondary", ".ow-btn-icon",
+    for sel in (".ow-btn-prominent", ".ow-btn-secondary",
                 ".ow-btn-group", ".ow-btn"):
         assert '"' + sel + '"' in sel_block, sel
 
@@ -547,6 +549,9 @@ def test_plain_and_solid_and_grouped_buttons_are_excluded_from_refraction():
     assert ".ow-btn-plain" in no_refract
     assert ".ow-btn-destructive-solid" in no_refract
     assert ".ow-btn-group > .ow-btn" in no_refract
+    # #1653: the flat icon chrome button (backdrop-filter:none by design) is ALSO excluded —
+    # it carries the base .ow-btn class the catch-all would otherwise collect + refract.
+    assert ".ow-btn-icon" in no_refract
     # the exclusion guard is enforced on BOTH the collect and the apply paths.
     assert "if (!isRefractableButton(el)) continue;" in JS
     assert "if (!isRefractableButton(el)) { clearFrom(el); return; }" in JS
