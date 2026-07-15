@@ -244,16 +244,20 @@
     // same-size buttons is cheap). The .ow-btn-group is the ONE glass-sampling surface for
     // its members (NSGlassEffectContainerView analogue, style.css) — its members carry no
     // backdrop of their own and are EXCLUDED below. EXCLUSIONS (isRefractableButton):
-    // .ow-btn-plain (borderless, no glass material), the opaque .ow-btn-destructive-solid
-    // plate, and grouped members (they ride the group's single sample) never refract.
+    // .ow-btn-plain (borderless, no glass material), the flat .ow-btn-icon (#1653: chrome
+    // button, backdrop-filter:none by design), the opaque .ow-btn-destructive-solid plate,
+    // and grouped members (they ride the group's single sample) never refract.
     // (The cap-RAISE half of KIT-G-01/02 — whether MAX_LIVE_SURFACES itself should grow —
     // is a separate, not-yet-decided change; this reorder only reprioritizes who wins the
     // EXISTING cap.)
     ".ow-btn-prominent",
     ".ow-btn-secondary",
-    ".ow-btn-icon",
+    // .ow-btn-icon is a FLAT chrome button (#1653: backdrop-filter:none by design) — NOT a
+    // glass-refraction target, so it is deliberately absent here. It still carries the base
+    // .ow-btn class, so the `.ow-btn` catch-all below would otherwise collect + refract it;
+    // it is therefore ALSO listed in BTN_NO_REFRACT to keep it flat.
     ".ow-btn-group",               // the segmented group = ONE shared backdrop sample
-    ".ow-btn",                     // any remaining glass .ow-btn (plain/solid/grouped excluded)
+    ".ow-btn",                     // any remaining glass .ow-btn (plain/solid/grouped/icon excluded)
     // ── CARDS (content-layer affordances) — LOWEST priority, below the buttons (#1603 /
     // KIT-G-01/02): the gadget cards + notice kit. A rail of identical cards shares one
     // size bucket (cheap), so they refract when headroom remains but yield the cap to the
@@ -263,9 +267,11 @@
     ".on-card",                    // the notice kit (functional affordance)
   ];
   // Glass-button variants that must NEVER refract: borderless plain (no glass material),
-  // the opaque solid-destructive plate, and grouped members (they ride the group's single
-  // backdrop sample — refracting a member would be glass-on-glass + a wrong-size filter).
-  var BTN_NO_REFRACT = ".ow-btn-plain, .ow-btn-destructive-solid, .ow-btn-group > .ow-btn";
+  // the flat icon chrome button (#1653: backdrop-filter:none by design — it still carries the
+  // base .ow-btn class, so the catch-all would collect it without this exclusion), the opaque
+  // solid-destructive plate, and grouped members (they ride the group's single backdrop
+  // sample — refracting a member would be glass-on-glass + a wrong-size filter).
+  var BTN_NO_REFRACT = ".ow-btn-plain, .ow-btn-icon, .ow-btn-destructive-solid, .ow-btn-group > .ow-btn";
   function isRefractableButton(el) {
     try {
       if (!el.matches || !el.matches(".ow-btn, .ow-btn-group")) return true; // not a button → no extra gate

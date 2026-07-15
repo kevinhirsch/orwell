@@ -338,6 +338,41 @@
       </div>
     </section>
 
+    <!-- COMPACT & ICON BUTTONS (#1638) -->
+    <section class="ek-card">
+      <h2>Compact &amp; icon buttons — .ow-btn-icon / .ow-btn-compact (#1638)</h2>
+      <p class="ek-note">Compact <em>desktop-chrome</em> primitives for the sub-44px chrome the pill
+        can't serve (gadget-rail / composer / hamburger / model-picker). <code>.ow-btn-icon</code> is
+        a SQUARE, flat icon button (~30px on a fine pointer, subtle radius, no text padding);
+        <code>.ow-btn-compact</code> is a flat, reduced-height text button. Both ink adaptive
+        <code>var(--fg)</code> — LIGHT over the dark wallpaper, DARK inside a light-glass card — and
+        both SNAP to 44×44 on a coarse pointer (WCAG 2.5.5). Sub-44px on desktop is the point.</p>
+
+      <div class="ek-label">Icon — .ow-btn-icon (rest)</div>
+      <div class="ek-row" style="align-items:center">
+        <button class="ow-btn ow-btn-icon" aria-label="Close">✕</button>
+        <button class="ow-btn ow-btn-icon" aria-label="More">⋯</button>
+        <button class="ow-btn ow-btn-icon" aria-label="Edit">✎</button>
+        <button class="ow-btn ow-btn-icon" aria-label="Add">＋</button>
+      </div>
+
+      <div class="ek-label">Icon — hover · focus · disabled · xs (24px)</div>
+      <div class="ek-row" style="align-items:center">
+        <button class="ow-btn ow-btn-icon ek-force-hover" aria-label="More">⋯</button>
+        <button class="ow-btn ow-btn-icon ek-force-focus" aria-label="Edit">✎</button>
+        <button class="ow-btn ow-btn-icon" disabled aria-label="Close">✕</button>
+        <button class="ow-btn ow-btn-icon ow-btn-xs" aria-label="Add">＋</button>
+      </div>
+
+      <div class="ek-label">Compact text — .ow-btn-compact (rest · hover · focus · disabled)</div>
+      <div class="ek-row" style="align-items:center">
+        <button class="ow-btn ow-btn-compact">Section</button>
+        <button class="ow-btn ow-btn-compact ek-force-hover">Hover</button>
+        <button class="ow-btn ow-btn-compact ek-force-focus">Focus</button>
+        <button class="ow-btn ow-btn-compact" disabled>Disabled</button>
+      </div>
+    </section>
+
     <!-- FIELDS -->
     <section class="ek-card">
       <h2>Field — .ow-field</h2>
@@ -509,6 +544,10 @@
   <style>
     /* helpers so a STILL screenshot shows pseudo-class states */
     .ek-force-hover { filter: brightness(1.06); transform: translateY(-1px); }
+    /* #1638: the flat compact/icon chrome buttons DON'T lift on hover — they tint. Show the real
+       adaptive-tint hover in the still instead of the generic lift. */
+    .ow-btn-icon.ek-force-hover, .ow-btn-compact.ek-force-hover {
+      background: color-mix(in srgb, var(--fg) 12%, transparent); filter: none; transform: none; }
     .ek-force-focus { outline: var(--ow-focus-ring-w,3px) solid var(--ow-focus-ring,#0a84ff); outline-offset: 2px; }
     input.ow-field.ek-force-focus { border-color: var(--ow-focus-ring,#0a84ff);
       box-shadow: inset 0 1px 2px rgba(0,0,0,.18), 0 0 0 var(--ow-focus-ring-w,3px) color-mix(in srgb, var(--ow-focus-ring,#0a84ff) 45%, transparent); outline: none; }
