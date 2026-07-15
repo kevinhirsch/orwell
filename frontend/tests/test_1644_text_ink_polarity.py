@@ -335,6 +335,19 @@ def _kit_on_fill_ink(v):
     )
 
 
+# the app's standardized SEMANTIC danger/error tokens — a sanctioned status HUE (HIG Destructive
+# role), NOT the theme accent, so the no-accent-on-text mandate does not forbid it. Polarity-aware
+# (`:root` #ff453a / `.light` #ff3b30) and designed to clear the 3:1 UI/large-bold floor on BOTH
+# the light glass and the dark app (style.css ~L140 note), so it reads as a red status label on
+# either surface — never a light-on-light straggler. This is the INLINE mirror of W4's JS-side
+# JS_COOL_REGISTRY registration for the SAME `var(--color-danger)` token.
+_DANGER_TOKEN = re.compile(r"^var\(\s*--color-(?:danger|error)\s*\)$")
+
+
+def _standard_danger(v):
+    return bool(_DANGER_TOKEN.match(_norm(v)))
+
+
 # ── surface predicates over the SELECTOR — COMPLETE-token match (finding #2) ─────────
 def _has_token(sel, tok):
     """`tok` (a class `.x` / id `#x` / compound token) present as a COMPLETE selector token — the
@@ -476,21 +489,17 @@ KNOWN_RESIDUAL = [
     #    now) and `var(--amber, var(--fg))` → `var(--color-warning)` (defined amber, not a cool token).
     #    Their KNOWN_RESIDUAL entries were removed here so the anti-rot check stays honest. ──
 
-    # ── W5 — index.html inline: risky cool-on-`background:none` / bespoke-red inline sites ──
-    {"file": "static/index.html", "line": 1539, "find": "1px dashed var(--border);color:var(--fg)", "count": 1,
-     "wave": "W5", "why": "dashed-add button: var(--fg) on background:none opacity .6 → light-cyan-on-light-glass"},
-    {"file": "static/index.html", "line": 1280, "find": "color:var(--accent,var(--red))", "count": 1,
-     "wave": "W5", "why": "inline accent link on background:none (the #1639 accent-on-light-glass class)"},
-    {"file": "static/index.html", "line": 2335, "find": "color:var(--accent, var(--red))", "count": 1,
-     "wave": "W5", "why": "inline accent link on background:none (the #1639 accent-on-light-glass class)"},
-    {"file": "static/index.html", "line": 1726, "find": "color:color-mix(in srgb, var(--fg) 45%, transparent)", "count": 10,
-     "wave": "W5", "why": "empty-state hints (×10 at --fg 45%) on background:none → muted light-on-light on frosted"},
-    {"file": "static/index.html", "line": 2350, "find": "color:color-mix(in srgb, var(--fg) 55%, transparent)", "count": 1,
-     "wave": "W5", "why": "empty-state hint (--fg 55%) on background:none → muted light-on-light on frosted"},
-    {"file": "static/index.html", "line": 2255, "find": "color:#e55", "count": 2,
-     "wave": "W5", "why": "bespoke error red #e55 (Danger Zone h2, index.html:2255 & 2660; ~3.4:1 on light)"},
-    {"file": "static/index.html", "line": 2573, "find": "color:#f0a6a6", "count": 1,
-     "wave": "W5", "why": "bespoke error red #f0a6a6 (~3.4:1 on light surfaces); tokenize to the danger standard"},
+    # ── W5 — FIXED (#1644 W5): the ~17 index.html inline sites were migrated off cool tokens /
+    #    bespoke reds onto standard tokens, so their KNOWN_RESIDUAL entries were removed here to keep
+    #    the anti-rot check honest:
+    #      • the dashed-add button (index.html:1539) `color:var(--fg)`, the empty-state hint mixes
+    #        (`color-mix(--fg 45%)` ×10 + `--fg 55%` ×1), and the two inline accent links
+    #        (`var(--accent,var(--red))`) all sit in W3-remapped/adaptive containers whose frosted
+    #        `!important` rules already force correct polarity — repointed to `color:inherit` so each
+    #        follows its surface ink (dark on the light glass, light on the dark app) and classifies
+    #        via `_follows_surface`;
+    #      • the two Danger-Zone `#e55` heads + the debug-vault-button `#f0a6a6` → the standard
+    #        `var(--color-danger)` (Apple system red, polarity-aware), classified by `_standard_danger`. ──
 
     # ── W6 — style.css bespoke status/accent hexes (dark-or-status hexes; tokenize) ──
     {"file": "static/style.css", "line": 7807, "find": "color: #e0a050", "sel": ".compare-parallel-toggle", "count": 1,
@@ -787,10 +796,12 @@ def test_index_html_inline_closed_world():
             continue                                   # theme-consistent pair (co-varying background)
         if _primary_dark(color):
             continue                                   # a dark literal is correct polarity on light glass
+        if _standard_danger(color):
+            continue                                   # standardized semantic danger/error status ink (polarity-aware token; HIG Destructive role)
         if _light_ink(color) and _bg_is_solid_fill(style):
             continue                                   # white / light ink on a colored fill
         if _residual_hit(style, file):
-            continue                                   # tracked residual (W5)
+            continue                                   # tracked residual (W6+ inline, if any)
         risky.append((file, line, color, style[:70]))
     assert not risky, (
         "#1644 INLINE closed-world: %d inline `style=\"color:…\"` site(s) ink a value that does not "
