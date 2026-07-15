@@ -134,12 +134,16 @@
   --color-success: #4caf50;
   --color-warning: #f0ad4e;
   /* KIT-F-06 / #1605 (2026-07-14 audit): repointed from the legacy flat-UI brick
-     `#c0392b` to Apple's system red `#ff453a` (the iOS-dark systemRed the kit already
-     pins in `--ow-danger`). Used app-wide for danger borders, focus rings, tints and
-     badges. NOTE the contrast split below: white body-text on a SOLID `#ff453a` fill
+     `#c0392b` to Apple's system red. POLARITY-AWARE (Apple ships two systemReds): this
+     dark `:root` carries the iOS-dark value `#ff453a` (the systemRed the kit pins in
+     `--ow-danger`); `:root.light` below carries the iOS-light value `#ff3b30`. Used
+     app-wide for danger borders, focus rings, tints and large/bold labels/badges — the
+     3:1 UI/large floor (dark #ff453a on --bg 4.11:1, light #ff3b30 on --bg 3.25:1, both
+     clear 3:1). NOTE the contrast split below: white body-text on a SOLID danger fill
      measures only ~3.4:1 (fails WCAG AA 4.5:1 for normal text — clears the 3:1 large/
      bold floor only), so the ONE solid-danger-fill-behind-white-body-text site
-     (`.confirm-btn-danger`) uses the paired `--color-danger-strong` instead. */
+     (`.confirm-btn-danger`) uses the paired `--color-danger-strong` instead (white
+     ≈5.5:1 dark / ≈5.7:1 light). */
   --color-danger: #ff453a;
   /* A darker shade of the SAME system red (derived, so it tracks any future repoint of
      `--color-danger`) for solid danger fills that carry white BODY text: white on this
@@ -222,6 +226,13 @@
      --panel (#fff) / 3.25:1 against --bg (#f5f5f5) — both fail. #667080 clears
      AA against both light-theme backgrounds (4.59:1 vs --bg, 5.01:1 vs --panel). */
   --color-muted: #667080;
+  /* #1605 — Apple ships a distinct LIGHT systemRed (#ff3b30) vs the dark one (#ff453a in
+     :root). Use the light value in the light theme so danger reads as the correct Apple
+     system red; --color-danger-strong (the AA-safe white-text solid fill) derives from it
+     automatically (white ≈5.7:1). As a UI border / large-bold label #ff3b30 measures
+     3.25:1 on --bg #f5f5f5 and 3.55:1 on --panel #fff — both clear the 3:1 large/UI floor
+     (and beat the previous app-wide #ff453a's 3.12:1 in the light theme). */
+  --color-danger: #ff3b30;
 }
 
 /* ── Reset & Base ── */
@@ -21837,11 +21848,24 @@ body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff
      red color"). A semantic, not a theme hue — legible label rides on top of it.
      KIT-F-06 (2026-07-14 audit): kept pinned literally so the KIT's destructive role is
      the real system red independent of the app token layer. As of #1605 the app-wide
-     `--color-danger` was ALSO repointed to `#ff453a` (style.css ~136) — they now agree,
-     but this literal stays so the kit never silently inherits a future `--color-danger`
-     drift. (Solid-fill-behind-white-body-text uses `--color-danger-strong`; see ~136.) */
+     `--color-danger` is Apple systemRed too — `#ff453a` (dark) / `#ff3b30` (light) — so
+     it agrees with this token in the dark theme; the kit deliberately keeps this pinned
+     `#ff453a` literal in BOTH polarities (its destructive fill is a translucent glass
+     TINT where the light/dark systemRed delta is imperceptible, and the white on-danger
+     label's AA is already tuned to it), so the kit never silently inherits a future
+     `--color-danger` drift. (Solid-fill-behind-white-body-text uses `--color-danger-strong`;
+     see ~136.) */
   --ow-danger: #ff453a;
-  --ow-on-danger: #fff;   /* white clears AA on the iOS-dark system red (#ff453a) */
+  /* white on the RAW system red (#ff453a) is ~3.9:1 — it clears the 3:1 UI/large floor but
+     NOT the 4.5:1 normal-text floor. That is fine for the DEFAULT destructive button because
+     its fill is the translucent RED TINT over glass (--ow-btn-tint-danger), a deeper effective
+     background where white clears AA. The opt-in SOLID plate (.ow-btn-destructive-solid) can't
+     rely on that, so it paints white on the AA-safe DARKENED red (--ow-danger-strong, ~5.5:1),
+     not the raw token. */
+  --ow-on-danger: #fff;
+  /* AA-safe opaque red for the solid destructive plate's white body text (mirrors the app-layer
+     --color-danger-strong; the kit keeps its own so it never inherits --color-danger drift). */
+  --ow-danger-strong: color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000);
 
   /* ── TINT PROMINENCE (WWDC25 310 "Build an AppKit app with the new design") ──────
      310's key button correction: "tint, don't fill" — a prominent button TINTS the
@@ -21901,8 +21925,10 @@ body.theme-frosted .ow-btn-destructive {
 /* Opt-in PRIMARY-prominence destructive: the loud opaque-red plate (a final, irreversible
    confirm). Reserve it like the -xl size — one per context, the point-of-no-return action. */
 body.theme-frosted .ow-btn-destructive.ow-btn-destructive-solid {
-  background: var(--ow-danger, #ff453a);
-  border-color: color-mix(in srgb, #000 14%, var(--ow-danger, #ff453a));
+  /* AA-safe darkened red (--ow-danger-strong ~5.5:1 under white), NOT the raw system red
+     (~3.9:1, below the normal-text floor) — the solid plate carries white BODY text. */
+  background: var(--ow-danger-strong, color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000));
+  border-color: color-mix(in srgb, #000 22%, var(--ow-danger, #ff453a));
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 14px rgba(0,0,0,0.22);
 }
 
@@ -22425,8 +22451,10 @@ body:not(.theme-frosted) .ow-btn-destructive {
   color: var(--ow-on-danger, #fff);
 }
 body:not(.theme-frosted) .ow-btn-destructive.ow-btn-destructive-solid {
-  background-color: var(--ow-danger, #ff453a);
-  border-color: color-mix(in srgb, #000 20%, var(--ow-danger, #ff453a));
+  /* AA-safe darkened red under the white body text (see --ow-danger-strong) — a deeper, more
+     serious red also suits the "final, irreversible" role this opt-in plate is reserved for. */
+  background-color: var(--ow-danger-strong, color-mix(in srgb, var(--ow-danger, #ff453a) 76%, #000));
+  border-color: color-mix(in srgb, #000 26%, var(--ow-danger, #ff453a));
 }
 /* PROMINENT — the single default action: the STRONGEST fill + STRONGEST border in
    the set (mirrors frosted's "primary reads first" hierarchy, KIT-F-02's fix). */
@@ -23248,6 +23276,11 @@ body.theme-frosted .msg-ai .body {
   color: inherit !important;
   text-shadow: inherit !important;
 }
+/* #1601 / OWN-3 (FOLLOW-UP, out of scope here): the pre-game cast-photo headshot dialog
+   is the OTHER dark-veil-vs-light-glass surface the owner ruling names — it "follows the
+   same ONE-light-glass ruling" as the chat column above. It is deliberately left as-is in
+   this change (it is currently a solid gating dialog, F-S2-A) and tracked as its own
+   follow-up item; do not fold it in here. */
 /* the OOC asides keep their quieter dashed backstage identity — a fainter neutral
    frost (not the blue sent fill, not a full received bubble). */
 body.theme-frosted .msg-user.msg-ooc,
