@@ -201,8 +201,10 @@ def test_headshot_disabled_state_is_not_opacity_only():
     transparent/opacity composite whose contrast collapses over an arbitrary backdrop (the
     old transparent-fill treatment read as ambiguous grey-on-grey on the flat tier)."""
     js = _read("static", "js", "orwellHeadshot.js")
-    m = re.search(r"\.ow-headshot-studio \.hs-btn\[disabled\][^{]*\{([^}]*)\}", js)
-    assert m, "the disabled hs-btn rule has moved or been removed"
+    # #1638 kit migration: the studio buttons are now .ow-btn (no legacy .hs-btn), so the
+    # opaque-disabled rule targets .ow-headshot-studio .ow-btn[disabled].
+    m = re.search(r"\.ow-headshot-studio \.ow-btn\[disabled\][^{]*\{([^}]*)\}", js)
+    assert m, "the disabled ow-btn rule has moved or been removed"
     body = m.group(1)
     assert "opacity: 1" in body, "disabled must not rely on a bare opacity dim (INT-6 — the old `opacity: .5` was the SOLE cue)"
     assert "background: #d6d6d9" in body, "disabled must paint the fixed opaque muted fill (the VM-17 pattern, OWN-5)"

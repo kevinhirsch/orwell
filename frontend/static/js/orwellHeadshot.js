@@ -61,14 +61,13 @@
       .ow-headshot-studio { font-size: 13px; }
       .ow-headshot-studio .hs-msg { opacity: .75; font-size: 12px; }
       .ow-headshot-studio .hs-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-      /* OWN-3 / #775 (2026-07-14 theme audit): the studio buttons now ALSO compose the literal
-         kit classes (.ow-btn + .ow-btn-prominent/-secondary — same pattern as the
-         .hs-choose-btn pill below), so under frosted/glass the KIT owns their chrome (glass
-         fills, capsule radius, 44px floor, dark ink — the kit rules out-specify these at
-         (0,2,1) vs (0,2,0)). The .hs-btn rules here are the Normal/flat-tier fallback, where
-         the kit deliberately has no expression — byte-identical look to before on flat. */
-      .ow-headshot-studio .hs-btn { font: inherit; font-size: 12.5px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
-        background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff); border: 1px solid transparent; font-weight: 600; }
+      /* #1638 total kit migration (OWN-3): the studio's action buttons ARE the kit — .ow-btn +
+         the right variant (prominent / secondary / plain / destructive), NO legacy .hs-btn pill
+         remains. The kit is the ONE source of truth for button chrome on ALL three tiers: glass
+         fills + capsule + 44px floor + dark ink under frosted/glass, and a solid token-driven
+         expression on the flat tier (the KIT-N-01..10 rules in style.css). The old .hs-btn /
+         .hs-btn-ghost fallback rules are therefore deleted as dead CSS; the file-picker keeps
+         .hs-filebtn ONLY for its 44px tap-target pin (below). */
       /* OWN-5 (2026-07-14 theme audit) + INT-6 (a11y): disabled actions use the app's
          established OPAQUE disabled treatment — the VM-17 pattern (style.css ~21453): a FIXED
          muted fill (#d6d6d9) + a FIXED darker ink (#57575c, measured 4.95:1) + cursor
@@ -76,14 +75,14 @@
          old transparent-fill + 55%-alpha-ink treatment read as ambiguous grey-on-grey (the
          OWN-5 sighting), and opacity-dimming collapses contrast over glass (the measured VM-17
          failure). Inside kit windows under frosted the shared style.css VM-17 rule already
-         paints these exact values; this rule makes the SAME state hold on flat and any
-         non-window mount. The .ow-btn compound selector out-specifies the kit's 0.42-opacity
-         disabled rule (KIT-OV-2: the opaque treatment is the measured, HIG-correct one) and
-         restores pointer-events so the not-allowed cursor actually shows. NOTE: no backticks
-         in this comment block — it lives inside this file's own template-literal CSS string,
-         and a literal backtick here would terminate it early. */
-      .ow-headshot-studio .hs-btn[disabled],
-      .ow-headshot-studio .hs-btn.ow-btn[disabled] {
+         paints these exact values; this rule makes the SAME state hold on flat, in the Settings
+         modal, and any non-window mount. The .ow-headshot-studio .ow-btn[disabled] selector
+         (0,3,0) out-specifies the kit's 0.42-opacity .ow-btn:disabled rule (0,2,0) on every
+         tier (KIT-OV-2: the opaque treatment is the measured, HIG-correct one) and restores
+         pointer-events so the not-allowed cursor actually shows. NOTE: no backticks in this
+         comment block — it lives inside this file's own template-literal CSS string, and a
+         literal backtick here would terminate it early. */
+      .ow-headshot-studio .ow-btn[disabled] {
         opacity: 1; cursor: not-allowed; pointer-events: auto;
         background: #d6d6d9;
         color: #57575c;
@@ -95,7 +94,6 @@
          problem for decision cards; this reuses the same quiet-caption + aria-describedby pattern. */
       .ow-headshot-studio .hs-hint { opacity: .75; font-size: 11.5px; font-style: italic; flex-basis: 100%; margin-top: 2px; }
       .ow-headshot-studio .hs-hint[hidden] { display: none; }
-      .ow-headshot-studio .hs-btn-ghost { background: transparent; color: var(--fg, #cfd8e3); border-color: var(--border, #355a66); font-weight: 400; }
       .ow-headshot-studio .hs-preview { width: 92px; height: 92px; border-radius: 8px; flex: none;
         border: 1px solid var(--border, #355a66);
         /* 0114: was a hardcoded #0d0f14 — a foreign-polarity dark tile that stayed a near-black
@@ -225,67 +223,21 @@
       /* #725: the studio also embeds in GLASS hosts (Settings modal, the New-Season window),
          where its var(--border) strokes become HARD dark lines on the light glass. Apple glass is
          lensing, not a hard stroke — soften them to the low-opacity WHITE hairline ONLY in a glass
-         context. The OPAQUE casting window (#orwell-headshot — since OWN-3 a solid LIGHT plate,
-         see the block below) is EXCLUDED: on an opaque light surface a dark hairline is the
-         correct stroke (the same reasoning as the #orwell-retro terminal window). */
-      body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-btn-ghost,
+         context. The OPAQUE casting window (#orwell-headshot — a solid LIGHT plate, painted by
+         style.css's F-S2-A/OWN-3 rule) is EXCLUDED: on an opaque light surface a dark hairline is
+         the correct stroke (the same reasoning as the #orwell-retro terminal window). */
       body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-preview,
       body.theme-frosted .ow-window:not(#orwell-headshot) .ow-headshot-studio .hs-lib,
-      body.theme-frosted .modal-content .ow-headshot-studio .hs-btn-ghost,
       body.theme-frosted .modal-content .ow-headshot-studio .hs-preview,
       body.theme-frosted .modal-content .ow-headshot-studio .hs-lib {
         border-color: rgba(255,255,255,0.14);
       }
-      /* ── OWN-3 (2026-07-14 theme audit): the casting dialog joins the ONE light family ──
-         Under frosted, style.css's F-S2-A rule (~19604) painted this window as an OPAQUE DARK
-         --win-bg/--panel slab (plus id-scoped light-ink exceptions at ~23613-23646) — a dark
-         panel floating on the light frosted chrome, the audit's section-0 mixed-polarity class.
-         The OPACITY half of F-S2-A is still right (a gating dialog over live narration must not
-         let text bleed through), so this does NOT go back to translucent glass: it mirrors the
-         SANCTIONED opaque-light treatment the #orwell-retro terminal window already uses
-         (style.css ~23444) — an opaque near-white plate, no backdrop blur, and the kit's dark
-         chrome ink (#16191f), exactly how .ow-window/.on-card carry ink on the light material.
-         These rules are the SAME selectors as the style.css dark exceptions; this injected sheet
-         is appended after style.css, so at equal specificity + !important the later (light)
-         declarations win — the dark-slab rules are neutralized without touching style.css.
-         Frosted-scoped only: the flat/normal tier is untouched by every rule in this block. */
-      body.theme-frosted #orwell-headshot.ow-window,
-      body.theme-frosted #orwell-headshot.ow-window > .ow-titlebar,
-      body.theme-frosted #orwell-headshot.ow-window > .ow-body {
-        background-color: rgba(248, 250, 252, 0.97) !important;
-        background-image: none !important;
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
-      }
-      /* titlebar ink: back to the kit's dark-on-light chrome ink (neutralizes the ~23618
-         light-ink exception; same values as the blanket kit titlebar rule at ~23607). */
-      body.theme-frosted #orwell-headshot .ow-titlebar,
-      body.theme-frosted #orwell-headshot .ow-title,
-      body.theme-frosted #orwell-headshot .ow-title .ow-load-hint {
-        color: #16191f !important;
-        text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
-      }
-      /* body ink: re-join the kit dark-ink redefine (.ow-window .ow-body carries --fg #16191f
-         everywhere else) — neutralizes the ~23628 --fg:#eef1f4 exception... */
-      body.theme-frosted #orwell-headshot .ow-body,
-      body.theme-frosted #orwell-headshot .ow-body * {
-        --fg: #16191f;
-      }
-      /* ...and the ~23636 forced-light color list (same selectors, dark ink + the light
-         legibility halo the light-glass chrome uses). The .hs-btn-ghost entry mirrors the
-         neutralized style.css list — its ink IS the kit-secondary dark chrome ink; the
-         accent/prominent buttons are (still) not in the list and own their label colors. */
-      body.theme-frosted #orwell-headshot .ow-body,
-      body.theme-frosted #orwell-headshot .ow-body .hs-lead,
-      body.theme-frosted #orwell-headshot .ow-body .hs-msg,
-      body.theme-frosted #orwell-headshot .ow-body .hs-btn-ghost,
-      body.theme-frosted #orwell-headshot .ow-body p,
-      body.theme-frosted #orwell-headshot .ow-body span,
-      body.theme-frosted #orwell-headshot .ow-body label,
-      body.theme-frosted #orwell-headshot .ow-body div {
-        color: #16191f !important;
-        text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
-      }`;
+      /* ── OWN-3 (2026-07-14 theme audit, #1638) — the casting dialog's light polarity ──
+         The opaque near-white PLATE + dark chrome ink now live at the ROOT in style.css
+         (the F-S2-A rule near ~19610, mirroring #orwell-retro), NOT here: this file no longer
+         injects an !important counter-fight against a style.css dark-slab rule (that pattern is
+         deleted — style.css paints the window LIGHT directly, and the kit's blanket dark-ink
+         rules then apply with no id-scoped ink exception needed). See style.css §F-S2-A. */`;
     document.head.appendChild(s);
   }
 
@@ -476,8 +428,8 @@
             <div class="hs-preview" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
             <div class="hs-opts"><div>Your headshot is set — it's your houseguest portrait and your profile pic.</div>
               <div class="hs-actions">
-                <button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-redo">Make another</button>
-                <button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-remove">Remove</button>
+                <button type="button" class="ow-btn ow-btn-secondary" id="hs-redo">Make another</button>
+                <button type="button" class="ow-btn ow-btn-destructive" id="hs-remove">Remove</button>
                 <span class="hs-msg">${esc(_msg)}</span>
               </div></div></div>`;
         body.querySelector("#hs-redo").addEventListener("click", () => { status.finalized = false; render(); });
@@ -492,9 +444,9 @@
           <div class="hs-grid">${st.candidates.map((c, _n) =>
             `<button type="button" class="hs-cand hs-loading${st.selected === c.index ? " sel" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
           <div class="hs-actions">
-            <button type="button" class="hs-btn ow-btn ow-btn-prominent" id="hs-use" ${st.selected === null ? "disabled" : ""}>Use this one</button>
-            <button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-more">Generate 3 more</button>
-            <button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-new">Upload a different photo</button>
+            <button type="button" class="ow-btn ow-btn-prominent" id="hs-use" ${st.selected === null ? "disabled" : ""}>Use this one</button>
+            <button type="button" class="ow-btn ow-btn-secondary" id="hs-more">Generate 3 more</button>
+            <button type="button" class="ow-btn ow-btn-secondary" id="hs-new">Upload a different photo</button>
           </div>`;
         wireThumbStates(body);
         body.querySelectorAll(".hs-cand").forEach((d) => d.addEventListener("click", () => { st.selected = parseInt(d.dataset.i, 10); render(); }));
@@ -511,12 +463,12 @@
         <div class="hs-row">
           <div class="hs-preview" ${previewBg}>${st.fileUrl ? "" : "👤"}</div>
           <div class="hs-opts">
-            <label class="hs-btn hs-btn-ghost hs-filebtn ow-btn ow-btn-secondary" for="hs-file">${st.file ? "Choose a different photo" : "Choose a photo of yourself"}</label>
+            <label class="hs-filebtn ow-btn ow-btn-secondary" for="hs-file">${st.file ? "Choose a different photo" : "Choose a photo of yourself"}</label>
             <input type="file" id="hs-file" class="hs-file-native" accept="image/*" aria-label="Choose a photo of yourself">
             <div class="hs-actions">
-              <button type="button" class="hs-btn ow-btn ow-btn-prominent" id="hs-studio" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Make AI studio portraits</button>
-              <button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-exact" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Use photo as-is</button>
-              ${canSkip ? `<button type="button" class="hs-btn hs-btn-ghost ow-btn ow-btn-secondary" id="hs-skip">Skip for now</button>` : ""}
+              <button type="button" class="ow-btn ow-btn-prominent" id="hs-studio" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Make AI studio portraits</button>
+              <button type="button" class="ow-btn ow-btn-secondary" id="hs-exact" ${st.file ? "" : "disabled"} aria-describedby="hs-hint">Use photo as-is</button>
+              ${canSkip ? `<button type="button" class="ow-btn ow-btn-plain" id="hs-skip">Skip for now</button>` : ""}
               <div class="hs-hint" id="hs-hint" ${st.file ? "hidden" : ""}>Choose a photo above to enable these.</div>
             </div>
             <div class="hs-msg" id="hs-msg2">${esc(_msg)}</div>

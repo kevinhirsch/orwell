@@ -19607,16 +19607,24 @@ body.theme-frosted .chat-input-bar {
 body.theme-frosted .chat-input-bar textarea#message {
   background: transparent !important;
 }
-/* F-S2-A (audit 2026-06-21): the pre-game cast-photo dialog (#orwell-headshot) is a GATING window
-   that floats over the LIVE producer interview (the 2026-06-20 re-sequence made the photo optional
-   + non-blocking, so card and narration coexist on screen). Under the frosted theme its 32%-opacity
-   glass let the producer narration BEHIND it bleed through → a text-over-card collision, unreadable
-   on the very first casting beat (worse on mobile). A gating dialog over live content must be OPAQUE
-   — unlike the draggable HUD windows, which frost over content the player WANTS to see. Restore the
-   solid panel fill + drop the backdrop blur for this ONE window (id-specificity beats the rule
-   above); every other .ow-window stays frosted. */
-body.theme-frosted #orwell-headshot.ow-window {
-  background-color: var(--win-bg, var(--panel, #15181f)) !important;
+/* F-S2-A (audit 2026-06-21) + OWN-3 (2026-07-14 theme audit, #1638): the pre-game cast-photo
+   dialog (#orwell-headshot) is a GATING window that floats over the LIVE producer interview (the
+   2026-06-20 re-sequence made the photo optional + non-blocking, so card and narration coexist on
+   screen). Under the frosted theme its 32%-opacity glass let the producer narration BEHIND it bleed
+   through → a text-over-card collision, unreadable on the very first casting beat (worse on mobile).
+   A gating dialog over live content must be OPAQUE — unlike the draggable HUD windows, which frost
+   over content the player WANTS to see. So the OPACITY mandate holds (solid fill, no backdrop blur).
+   OWN-3 flips only the POLARITY: the old fill was the DARK --win-bg/--panel slab — a dark panel on
+   the light frosted chrome (the audit §0 mixed-polarity class). Paint the sanctioned opaque near-
+   white plate instead (the exact treatment #orwell-retro uses below), so the dialog joins the ONE
+   light family; back the titlebar + body children directly (an opaque element bg paints OVER any
+   backdrop-filter that survives a re-mount sweep). The kit's blanket dark-ink rules then carry the
+   ink — no id-scoped light-ink exception is needed (the ones that lived near ~24168 are deleted).
+   id-specificity beats the frosted .ow-window rule above; every other .ow-window stays frosted. */
+body.theme-frosted #orwell-headshot.ow-window,
+body.theme-frosted #orwell-headshot.ow-window > .ow-titlebar,
+body.theme-frosted #orwell-headshot.ow-window > .ow-body {
+  background-color: rgba(248, 250, 252, 0.97) !important;
   background-image: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
@@ -24165,40 +24173,11 @@ body.theme-frosted .ow-titlebar-accessory {
   color: #16191f !important;
   text-shadow: 0 1px 1px rgba(255,255,255,0.5) !important;
 }
-/* EXCEPTION: #orwell-headshot is the ONE deliberately-OPAQUE kit window (it floats over the
-   live casting narration, so it carries a SOLID dark --win-bg fill — see the id-scoped rule
-   above). Its titlebar is therefore LIGHT-on-DARK and must KEEP its light ink; the blanket
-   dark-ink rule above would flip it to dark-on-dark (a new light-on-light inverse). Restore
-   the light fg + the dark legibility halo for this window only. */
-body.theme-frosted #orwell-headshot .ow-titlebar,
-body.theme-frosted #orwell-headshot .ow-title,
-body.theme-frosted #orwell-headshot .ow-title .ow-load-hint {
-  color: var(--fg, #eef1f4) !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.6) !important;
-}
-/* Its BODY is also light-on-DARK: the kit dark-ink redefine (.ow-window .ow-body { --fg:#16191f })
-   applies to every .ow-window, but this ONE window is opaque dark — so dark ink there is dark-on-dark
-   (illegible). Restore the LIGHT --fg inside the headshot body so its copy/studio text stays light on
-   the dark fill. (Every OTHER .ow-window is the light glass, where dark ink is correct.) */
-body.theme-frosted #orwell-headshot .ow-body,
-body.theme-frosted #orwell-headshot .ow-body * {
-  --fg: #eef1f4;
-}
-/* The first dark-ink block forces `.ow-window .ow-body { color:#16191f !important }` directly
-   (not only via --fg), and inner copy inherits it — so restore the LIGHT color on the opaque
-   headshot body + its text nodes too (id-scoped !important beats the class rule). Accent/CTA
-   buttons keep their own colored fills (they set color explicitly). */
-body.theme-frosted #orwell-headshot .ow-body,
-body.theme-frosted #orwell-headshot .ow-body .hs-lead,
-body.theme-frosted #orwell-headshot .ow-body .hs-msg,
-body.theme-frosted #orwell-headshot .ow-body .hs-btn-ghost,
-body.theme-frosted #orwell-headshot .ow-body p,
-body.theme-frosted #orwell-headshot .ow-body span,
-body.theme-frosted #orwell-headshot .ow-body label,
-body.theme-frosted #orwell-headshot .ow-body div {
-  color: #eef1f4 !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important;
-}
+/* OWN-3 (2026-07-14 theme audit, #1638): #orwell-headshot's dark-ink EXCEPTIONS were deleted here.
+   The window used to be an opaque DARK slab (F-S2-A), which forced its titlebar + body ink LIGHT to
+   stay legible. It is now the opaque near-white LIGHT plate (the F-S2-A/OWN-3 rule near ~19610), so
+   the blanket kit dark-ink rules above (.ow-titlebar → #16191f) and the .ow-window .ow-body dark-ink
+   redefine carry the ink correctly with NO id-scoped exception — dark-on-light, the ONE light family. */
 /* The legacy modal-header title rode var(--red) (light gray on the glass theme) — same
    light-on-light. The dark-ink redefine sets --fg on .modal-content, but the h4 uses --red,
    so it survived light. Force it to the chrome dark ink (the plan window + the settings/theme

@@ -159,13 +159,21 @@ def test_css_accent_ctas_use_on_accent_token():
 
 def test_js_injected_accent_ctas_use_on_accent_token():
     """JS-injected accent-backed CTAs must read the token too, not the theme --bg as ink.
-    The J2-17 remainder: the headshot 'Make AI studio portraits' CTA (.hs-btn) and the onboarding
-    primary button (.ob-btn-primary) both painted `color: var(--bg)` on an accent background — not
-    guaranteed AA (the bg<->accent contrast varies per theme; the audit measured ~3.29:1). They now
-    consume the luminance-aware token like every other accent CTA."""
+    The J2-17 remainder: the headshot 'Make AI studio portraits' CTA and the onboarding primary
+    button (.ob-btn-primary) both painted `color: var(--bg)` on an accent background — not
+    guaranteed AA (the bg<->accent contrast varies per theme; the audit measured ~3.29:1).
+    #1638 total kit migration: like onboarding (#709), the headshot studio's CTAs no longer
+    hand-roll an accent fill — they compose the element kit's .ow-btn-prominent (kit-owned,
+    legible glass + flat styling), so there is no bespoke accent-backed headshot CTA to
+    contrast-check here (the deleted .hs-btn accent fallback took the last one with it)."""
     hs = _read("static/js/orwellHeadshot.js")
-    assert "background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent, #fff)" in hs, (
-        ".hs-btn (the 'Make AI studio portraits' CTA, J2-17) must use var(--on-accent) on its accent bg."
+    assert "ow-btn ow-btn-prominent" in hs, (
+        "the headshot studio's primary CTAs ('Make AI studio portraits' / 'Use this one') must "
+        "compose the element kit's .ow-btn-prominent."
+    )
+    assert "background: var(--brand-color, var(--accent, #4a9)); color: var(--on-accent" not in hs, (
+        "the bespoke .hs-btn accent fill was removed in the #1638 kit migration — the kit owns "
+        "the accent-CTA chrome + label legibility now."
     )
     # #709: the onboarding primary CTA no longer hand-rolls an accent fill — it composes the element
     # kit's .ow-btn-prominent (kit-owned, legible glass styling), and the modal is RECREATED on the
