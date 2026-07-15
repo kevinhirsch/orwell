@@ -188,3 +188,64 @@ def test_mobile_sidebars_are_real_slide_in_drawers():
     assert _mobile_block_with(".gadget-rail", "position: fixed", "grail-open"), (
         "#800: the gadget/control-room rail must be a real mobile slide-over drawer."
     )
+
+
+# ── APP-OV-3: the DESKTOP frosted top bar floats (rounded all corners, off the top edge) ─────
+#
+# Owner report (frosted theme, live game, desktop): the centered session-title bar rendered as an
+# OVERSIZED rounded capsule whose SQUARE top edge sat flush against the very top of the viewport —
+# the big bottom-only glass radius (0 0 26px 26px) on the ~30px-tall full-width strip made it look
+# like a pill sliced off at the top / bleeding above the fold. The fix (style.css) is a desktop-only
+# (@media min-width:769px) frosted rule that lifts the bar a few px off the container top (positive
+# margin-top → the rounded top corners clear the overflow-hidden chat container, no longer clipped)
+# and rounds ALL FOUR corners at a moderate, correctly-sized radius so it floats like every other
+# frosted chrome surface. Mobile keeps its own -31px corner-control geometry + flush app-bar radius.
+
+def _desktop_block_with(*needles):
+    """Return the FIRST @media(min-width:769px) block body that contains all needles, else None."""
+    for m in re.finditer(r"@media \(min-width:\s*769px\)\s*\{", CSS):
+        start = m.end()
+        depth, i = 1, start
+        while i < len(CSS) and depth:
+            if CSS[i] == "{":
+                depth += 1
+            elif CSS[i] == "}":
+                depth -= 1
+            i += 1
+        block = CSS[start:i]
+        if all(n in block for n in needles):
+            return block
+    return None
+
+
+def test_desktop_frosted_topbar_floats_rounded_off_the_top_edge():
+    block = _desktop_block_with("body.theme-frosted .chat-top-bar", "margin-top", "border-radius")
+    assert block, (
+        "APP-OV-3: expected a DESKTOP (@media min-width:769px) `body.theme-frosted .chat-top-bar` "
+        "rule setting both margin-top and border-radius (the floating-bar fix)."
+    )
+    rule = re.search(
+        r"body\.theme-frosted \.chat-top-bar\s*\{([^{}]*)\}", block
+    ).group(1)
+    # A positive top gap — the bar sits BELOW the viewport top (never flush / clipped / above-fold),
+    # and never the mobile -31px pull-up.
+    mt = re.search(r"margin-top:\s*([\-\d.]+)px", rule)
+    assert mt and float(mt.group(1)) > 0, (
+        "APP-OV-3: the desktop frosted top bar must have a POSITIVE margin-top so its rounded top "
+        "clears the top edge and it doesn't read as clipped / bleeding above the fold."
+    )
+    # ALL four corners rounded — NOT the chopped bottom-only `0 0 X X` capsule.
+    br = re.search(r"border-radius:\s*([^;]+);", rule).group(1).strip()
+    assert not br.startswith("0 0"), (
+        "APP-OV-3: the desktop frosted top bar must round ALL corners — a bottom-only `0 0 X X` "
+        "radius on the flush strip is exactly the oversized-capsule-clipped-at-top look."
+    )
+
+
+def test_desktop_frosted_topbar_fix_does_not_touch_mobile():
+    # The geometry override is desktop-scoped: the mobile (≤768px) bar keeps its -31px corner-control
+    # pull-up and its own flush app-bar radius — the fix must NOT appear in a max-width:768px block.
+    assert not _mobile_block_with("body.theme-frosted .chat-top-bar", "border-radius: var(--ow-radius-inner"), (
+        "APP-OV-3: the floating-bar radius override must stay DESKTOP-only — the narrow bar keeps "
+        "its own corner-control geometry."
+    )
