@@ -1385,7 +1385,9 @@ function initializeEventListeners() {
     if (autoSortMoreBtn && autoSortNoaiBtn) {
       autoSortMoreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        autoSortNoaiBtn.style.display = autoSortNoaiBtn.style.display === 'none' ? 'block' : 'none';
+        const _show = autoSortNoaiBtn.style.display === 'none';
+        autoSortNoaiBtn.style.display = _show ? 'block' : 'none';
+        autoSortMoreBtn.setAttribute('aria-expanded', _show ? 'true' : 'false');
       });
       autoSortNoaiBtn.addEventListener('click', (e) => { e.stopPropagation(); _runTidy(true); });
     }
@@ -1422,6 +1424,7 @@ function initializeEventListeners() {
       row.style.padding = '0';
       row.style.display = 'block';
       if (autoSortNoaiBtn) autoSortNoaiBtn.style.display = 'none';   // fresh open: sub-row collapsed
+      if (autoSortMoreBtn) autoSortMoreBtn.setAttribute('aria-expanded', 'false');
       tidyControlTpl.style.display = 'block';
       row.appendChild(tidyControlTpl);
     }
