@@ -273,3 +273,73 @@ def test_demo_shows_menu_and_popover():
     assert "OrwellPopoverKit.open" in ELEMENTS, "the demo driver must wire an OrwellPopover"
     for feature in ("danger:", "disabled:", "separator:", "submenu:", "description:", "checked:", "section:"):
         assert feature in ELEMENTS, f"the demo menu must exercise the {feature} item feature"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# 11. review-flagged correctness contracts (#1656): reopen listeners rebind, submenu-ancestry
+#     dismissal, maxHeight honored, attach idempotency + onClose compose.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+def _method_body(js, header):
+    """The body of a `header … {` method up to (but excluding) the matching close brace."""
+    start = js.index(header)
+    depth = 0
+    i = js.index("{", start)
+    j = i
+    while j < len(js):
+        if js[j] == "{":
+            depth += 1
+        elif js[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return js[i:j + 1]
+        j += 1
+    raise AssertionError(f"could not bracket-match method: {header!r}")
+
+
+def test_menu_open_is_idempotent_and_resets_the_abortcontroller():
+    # A reopen after a close (which aborts this.ac) MUST bind row + keyboard listeners on a FRESH
+    # controller, and a second open() while already open must early-return (no orphaned popover).
+    # Scope to the OrwellMenu class (both classes have an `open(opener)`; this is the menu's).
+    menu_class = JS[JS.index("export class OrwellMenu {"):]
+    body = _method_body(menu_class, "open(opener) {")
+    # idempotent early-return before any (re)build.
+    assert re.search(r"if\s*\(this\.isOpen\(\)\)\s*return this;", body), \
+        "OrwellMenu.open must early-return when already open (idempotent reopen)"
+    # fresh AbortController when the prior one was aborted, BEFORE listener wiring (_buildList).
+    assert re.search(r"if\s*\(this\.ac\.signal\.aborted\)\s*this\.ac\s*=\s*new AbortController\(\)", body), \
+        "OrwellMenu.open must recreate this.ac when aborted so reopened listeners actually bind"
+    reset_at = body.index("new AbortController()")
+    build_at = body.index("_buildList()")
+    assert reset_at < build_at, \
+        "the AbortController reset must precede _buildList() (row listeners bind on this.ac.signal)"
+
+
+def test_popover_dismissal_is_submenu_ancestry_aware():
+    # descendant submenu surfaces (body-level siblings) count as INSIDE the parent boundary via the
+    # _owParentPopover chain, so clicking into a submenu never dismisses the ancestor first.
+    assert "_owParentPopover" in JS, "a submenu surface must record its parent surface (_owParentPopover)"
+    assert re.search(r"if\s*\(this\.o\.submenuOf\)\s*el\._owParentPopover\s*=\s*this\.o\.submenuOf",
+                     JS), "the submenu surface must link to its parent surface in _build"
+    assert "isWithinPopoverTree" in JS, "the ancestry-aware 'is inside' predicate is missing"
+    # the outside-click predicate must consult the ancestry walk, not a bare el.contains.
+    assert re.search(r"return\s*!isWithinPopoverTree\(ev\.target\)", JS), \
+        "the dismissal predicate must treat the popover tree (self + descendant submenus) as inside"
+
+
+def test_reposition_honors_the_maxheight_option():
+    body = _method_body(JS, "reposition() {")
+    assert re.search(r"if\s*\(this\.o\.maxHeight\)\s*avail\s*=\s*Math\.min\(avail,\s*this\.o\.maxHeight\)",
+                     body), "reposition() must cap avail at min(avail, maxHeight) when maxHeight is supplied"
+
+
+def test_attach_openmenu_is_idempotent_and_composes_onclose():
+    seam = JS[JS.index("attach: function"):JS.index("closeAll:", JS.index("attach: function"))]
+    # returns the live menu instead of opening a second controller.
+    assert re.search(r"if\s*\(isOpen\(\)\)\s*return current;", seam), \
+        "attach.openMenu must return the existing menu when already open"
+    # the caller's onClose is preserved and composed with the internal current=null cleanup.
+    assert "userOnClose" in seam, "attach must capture the caller's onClose (opts.onClose)"
+    assert re.search(r"if\s*\(current\s*===\s*menu\)\s*current\s*=\s*null;", seam), \
+        "attach's composed onClose must clear current only when it still owns the closing menu"
+    assert re.search(r"userOnClose\(reason\)", seam), \
+        "attach's composed onClose must also invoke the caller's onClose"

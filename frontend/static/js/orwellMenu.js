@@ -168,6 +168,11 @@ export class OrwellPopover {
     var el = document.createElement('div');
     el.className = 'ow-popover' + (this.o.className ? ' ' + this.o.className : '');
     el.setAttribute('data-ow-popover', '');
+    // Ancestry link: a submenu surface is a body-level SIBLING of its parent surface, so the
+    // parent's outside-click predicate must still treat it (and any deeper descendant) as "inside"
+    // the parent boundary — otherwise clicking into a submenu dismisses the ancestor before the
+    // child's selection handler runs. Store the parent surface so the predicate can walk up.
+    if (this.o.submenuOf) el._owParentPopover = this.o.submenuOf;
     el.setAttribute('role', this.o.role);
     if (this.o.ariaLabel) el.setAttribute('aria-label', this.o.ariaLabel);
     // the surface is the spawn/focus target — tabindex=-1 keeps it OUT of the Tab order and
@@ -199,8 +204,20 @@ export class OrwellPopover {
     // removers cooperate. The isOutside predicate treats the ANCHOR as "inside" so the trigger's
     // own click toggles rather than double-fires. NO consumer writes its own document click
     // listener for dismissal again.
+    // "inside" is ancestry-aware: the clicked surface counts as inside when it IS this surface or
+    // descends from it through the _owParentPopover chain (a body-level submenu of this surface, or
+    // a deeper nested submenu). Without this, a click into a descendant submenu satisfies the
+    // ancestor's outside-click predicate and closes it before the child's handler runs.
+    function isWithinPopoverTree(target) {
+      var surface = target && target.closest ? target.closest('[data-ow-popover]') : null;
+      while (surface) {
+        if (surface === el) return true;
+        surface = surface._owParentPopover || null;
+      }
+      return false;
+    }
     this._close = bindMenuDismiss(el, function () { self._teardown('dismiss'); }, function (ev) {
-      return !el.contains(ev.target) && !(self.o.anchor && self.o.anchor.contains(ev.target));
+      return !isWithinPopoverTree(ev.target) && !(self.o.anchor && self.o.anchor.contains(ev.target));
     });
     this.reposition();
     el.style.visibility = '';
@@ -239,6 +256,9 @@ export class OrwellPopover {
     else if (this.o.placement === 'auto') side = (below >= above) ? 'bottom' : 'top';
     else side = (below >= h || below >= above) ? 'bottom' : 'top';
     var avail = side === 'top' ? above : below;
+    // honor the documented maxHeight option: the effective cap is the SMALLER of the available
+    // viewport space and the caller's maxHeight (viewport-fitting otherwise unchanged).
+    if (this.o.maxHeight) avail = Math.min(avail, this.o.maxHeight);
     // 2. fit: cap max-height to the available space; the body scrolls internally (never run off
     //    the bottom — the emoji-picker height-cap generalized).
     if (h > avail) {
@@ -496,6 +516,12 @@ export class OrwellMenu {
   }
 
   open(opener) {
+    // Idempotent: a second open() while already open must not orphan the live popover.
+    if (this.isOpen()) return this;
+    // A prior close() aborted this.ac; the row listeners (_buildList) and the keyboard listener
+    // below both bind on this.ac.signal, so a reopen MUST attach them on a FRESH controller or
+    // they silently never bind. Reset it before any listener wiring.
+    if (this.ac.signal.aborted) this.ac = new AbortController();
     var self = this;
     var anchor = this.o.anchor;
     var list = this._buildList();
@@ -667,14 +693,24 @@ window.OrwellMenuKit = {
     trigger.setAttribute('aria-haspopup', 'menu');
     trigger.setAttribute('aria-expanded', 'false');
     var current = null;
+    var userOnClose = opts && opts.onClose;
     function isOpen() { return !!(current && current.isOpen()); }
     function openMenu() {
-      current = new OrwellMenu(Object.assign({}, opts || {}, {
+      // Idempotent: a repeated open() returns the live menu instead of orphaning it behind a
+      // second controller.
+      if (isOpen()) return current;
+      var menu = new OrwellMenu(Object.assign({}, opts || {}, {
         anchor: trigger,
         items: buildItems,
-        onClose: function () { current = null; },
+        // COMPOSE the internal cleanup with the caller's onClose so BOTH run on close (the merged
+        // object's onClose would otherwise silently replace the caller's callback).
+        onClose: function (reason) {
+          if (current === menu) current = null;
+          if (typeof userOnClose === 'function') userOnClose(reason);
+        },
       }));
-      current.open(trigger);
+      menu.open(trigger);
+      current = menu;
       return current;
     }
     trigger.addEventListener('click', function (e) {
