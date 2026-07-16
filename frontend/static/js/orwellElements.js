@@ -142,9 +142,24 @@
   }
   function dropScrims() {
     document.querySelectorAll("[data-ow-scrim]").forEach(function (s) { s.remove(); });
-    // un-inert anything a modal marked while opening (demo only)
+    // Un-inert anything a modal marked while opening (demo only). The MODAL demo window
+    // (buildWindows' `ek-win-modal`) opens for real, and orwellWindow.js's
+    // _recomputeModalStack() inerts EVERY top-level body child except that window + its
+    // own scrim — that includes the bottom-right #ek-tier / #ek-bg switcher chrome AND
+    // #__wp, which sit as SIBLINGS of .ek-page (not descendants of it — see
+    // element_kit_demo.html's <body> layout). A prior version of this cleanup scoped its
+    // release to nodes nested under the demo's main page wrapper ONLY, so those three
+    // fixed switcher nodes stayed permanently inert (unclickable, off the a11y tree,
+    // invisible to elementFromPoint/click hit-testing) forever after the modal opened —
+    // the root cause of the tier (Frosted/Glass/Flat) and backdrop (Busy/Smooth)
+    // switcher buttons silently doing nothing on click (owner report, #773 follow-up).
+    // Release EVERY node the modal touched, site-wide — the demo immediately relocates
+    // the modal's element into the static flow below and never wants a real modal
+    // focus-trap to persist past this point. (Regression pin:
+    // tests/test_0773_element_kit.py::test_demo_dropscrims_releases_inert_site_wide_not_scoped_to_ek_page —
+    // keep the string this comment used to quote OUT of this file, or the pin can't
+    // catch a reintroduction; pin the behavior, never the literal.)
     document.querySelectorAll("[inert]").forEach(function (n) {
-      if (!n.closest(".ek-page")) return;
       n.removeAttribute("inert");
     });
   }

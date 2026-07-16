@@ -474,3 +474,40 @@ def test_demo_windows_are_forced_focused_for_the_reference():
     assert re.search(r'classList\.add\("ow-focused"\)', DRIVER), (
         "the demo driver must force .ow-focused on the live demo windows"
     )
+
+
+def test_demo_dropscrims_releases_inert_site_wide_not_scoped_to_ek_page():
+    # Owner-reported regression (2026-07-16): the bottom-right tier (Frosted/Glass/Flat)
+    # and backdrop (Busy/Smooth) switcher buttons stopped responding to clicks entirely.
+    #
+    # Root cause: buildWindows() opens a REAL modal demo window (`ek-win-modal`), and the
+    # real orwellWindow.js `_recomputeModalStack()` inerts EVERY top-level `<body>` child
+    # except that modal's own window + scrim while it is open — see element_kit_demo.html's
+    # <body> layout, `#ek-tier` / `#ek-bg` / `#__wp` are SIBLINGS of `.ek-page`, not
+    # descendants of it. `dropScrims()`'s un-inert cleanup used to scope its release to
+    # `n.closest(".ek-page")` only, so those three fixed nodes — including the switcher
+    # buttons themselves — stayed permanently `inert` (unclickable, off the a11y tree, and
+    # invisible to hit-testing) for the rest of the page's life. Verified live via
+    # Playwright: `document.elementFromPoint` on a switcher button resolved to `<body
+    # inert>` intercepting the click.
+    #
+    # The fix releases [inert] SITE-WIDE (not `.ek-page`-scoped) — the demo never wants a
+    # real modal focus-trap to persist past buildWindows(), since the modal's element is
+    # immediately relocated into the static page flow for the reference still. Pin the
+    # fix structurally so a future refactor of dropScrims()/buildWindows() can't
+    # silently reintroduce the `.ek-page` scope and kill the switchers again.
+    m = re.search(r"function dropScrims\(\)\s*\{(.*?)\n  \}", DRIVER, re.S)
+    assert m, "dropScrims() not found in the demo driver (orwellElements.js)"
+    body = m.group(1)
+    assert '.closest(".ek-page")' not in body, (
+        "dropScrims() must not scope its inert-release to .closest('.ek-page') — "
+        "#ek-tier / #ek-bg / #__wp are SIBLINGS of .ek-page and would stay permanently "
+        "inert (unclickable) once the demo's modal window opens, reproducing the "
+        "busy/smooth + tier switcher 'dead click' regression"
+    )
+    assert re.search(r'querySelectorAll\("\[inert\]"\)', body), (
+        "dropScrims() must still sweep every [inert] node in the document"
+    )
+    assert "removeAttribute(\"inert\")" in body, (
+        "dropScrims() must still remove the inert attribute it finds"
+    )
