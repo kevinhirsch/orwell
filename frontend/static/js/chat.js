@@ -4208,6 +4208,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       if (_orwellFinalizingActive) {
         _orwellFinalizingActive = false;
         try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
+        // 2026-07-16 audit item 3 (premiere-opener resilience): reaching here means createCharacter
+        // finalized THIS turn but the stream ended (normally, on error, or dropped) without a single
+        // narration token ever landing to clear the flag above — the exact silent-death shape a live
+        // playthrough hit (llmIo: ok=False, no text). Auto-refire the move-in narration through the
+        // robust cue-backoff kernel #967/#969 already use, rather than leaving the player to speak
+        // first.
+        try { if (window._orwellPremiereContinueIfSilent) window._orwellPremiereContinueIfSilent(); } catch (_) {}
       }
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');

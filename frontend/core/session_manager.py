@@ -896,10 +896,28 @@ class SessionManager:
             persist. Reaping it races a live casting turn → message loss.
           - FRESHLY CREATED: any row created within `fresh_grace_minutes` — defensive belt for
             a game row whose name/mode isn't set yet at creation time (the per-tab orphan is
-            minted name='Casting interview' but a future surface might differ)."""
+            minted name='Casting interview' but a future surface might differ).
+
+        2026-07-16 audit item 2 (ghost-session reaping): the NAME exemption used to be
+        unconditional, so a per-tab "Casting interview" row that lost the canonical-bind race
+        (#1086/#987 — a fresh surface materializes a cue-send BEFORE the convergence check
+        re-points it at the real bound session) lived FOREVER, 0 messages, orphaned. Once a
+        canonical game session is bound for this row's owner, any DIFFERENT empty "Casting
+        interview" row is a CONFIRMED orphan (the canonical row is, by definition, the one the
+        binding points at) and may be reaped; the canonical row itself — or any row while
+        nothing is bound yet for this owner, the original race this exemption guards — still
+        stays exempt. Best-effort: a lookup hiccup falls back to exempt (never more aggressive
+        than before)."""
         try:
             name = (getattr(db_session, "name", "") or "").strip().lower()
             if name in self._GAME_SESSION_NAMES:
+                try:
+                    from src import orwell_game_session
+                    bound = orwell_game_session.get_game_session(getattr(db_session, "owner", None))
+                    if bound and bound != getattr(db_session, "id", None):
+                        return False  # confirmed orphan — fall through to the normal reap path
+                except Exception:
+                    pass
                 return True
             mode = (getattr(db_session, "mode", "") or "").strip().lower()
             if mode in self._GAME_SESSION_MODES:
