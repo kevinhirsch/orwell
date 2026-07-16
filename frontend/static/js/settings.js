@@ -1678,23 +1678,35 @@ async function initSearchSettings() {
   cxInput.addEventListener('change', saveSearch);
 
   // ── Provider picker with logos (mirrors the hidden <select>) ──
+  // #1638 (consumer #9): migrated onto the shared OrwellMenuKit. The button stays the
+  // trigger; the menu is a kit-owned anchored role=menu surface. The kit wires the click
+  // toggle, aria-haspopup/aria-expanded on the trigger, and outside-click + Escape
+  // dismissal — so there is NO ad-hoc document click listener here anymore.
+  //
+  // CRITICAL: the hidden <select id="set-searchProvider"> stays the source of truth. Each
+  // item's onSelect writes provSel.value and DISPATCHES a 'change' event — dropping that
+  // dispatch would silently desync the real search setting (updateVisibility/saveSearch/
+  // _syncSearchPicker all hang off provSel's change listener above).
   var picker = el('search-provider-picker');
   var pickerBtn = el('search-provider-btn');
-  var pickerMenu = el('search-provider-menu');
   var pickerCurrent = picker ? picker.querySelector('.adm-provider-current') : null;
   function _searchProviderLogoSvg(key) {
     return _SEARCH_PROVIDER_LOGOS[key] || '';
   }
-  function _renderSearchPickerMenu() {
-    if (!pickerMenu) return;
-    pickerMenu.innerHTML = Array.from(provSel.options).map(function(o) {
-      var logo = _searchProviderLogoSvg(o.dataset.searchLogo);
-      var active = o.value === provSel.value ? ' active' : '';
-      return '<div class="adm-provider-item' + active + '" role="option" data-value="' + o.value.replace(/"/g, '&quot;') + '">' +
-        '<span class="adm-provider-logo">' + logo + '</span>' +
-        '<span>' + o.textContent + '</span>' +
-      '</div>';
-    }).join('');
+  function _buildSearchProviderItems() {
+    // Re-evaluated on every open, so `checked` always tracks the live selection.
+    return Array.from(provSel.options).map(function(o) {
+      var value = o.value;
+      return {
+        icon: _searchProviderLogoSvg(o.dataset.searchLogo),
+        label: o.textContent,
+        checked: value === provSel.value,
+        onSelect: function() {
+          provSel.value = value;
+          provSel.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+      };
+    });
   }
   function _syncSearchPicker() {
     if (!pickerCurrent) return;
@@ -1703,23 +1715,11 @@ async function initSearchSettings() {
     pickerCurrent.querySelector('.adm-provider-logo').innerHTML = logo;
     pickerCurrent.querySelector('.adm-provider-name').textContent = opt.textContent;
   }
-  if (picker && pickerBtn && pickerMenu && pickerCurrent) {
-    _renderSearchPickerMenu();
+  if (picker && pickerBtn && pickerCurrent && window.OrwellMenuKit) {
     _syncSearchPicker();
-    pickerBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      pickerMenu.classList.toggle('hidden');
-    });
-    pickerMenu.addEventListener('click', function(e) {
-      var item = e.target.closest('.adm-provider-item');
-      if (!item) return;
-      provSel.value = item.dataset.value;
-      provSel.dispatchEvent(new Event('change', { bubbles: true }));
-      pickerMenu.classList.add('hidden');
-      _renderSearchPickerMenu();
-    });
-    document.addEventListener('click', function(e) {
-      if (!picker.contains(e.target)) pickerMenu.classList.add('hidden');
+    window.OrwellMenuKit.attach(pickerBtn, _buildSearchProviderItems, {
+      matchAnchorWidth: true,
+      ariaLabel: 'Search provider',
     });
   }
 

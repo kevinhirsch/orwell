@@ -12589,6 +12589,13 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   border-radius: 50%;
 }
 .adm-provider-caret { flex-shrink: 0; opacity: 0.5; transition: transform 0.15s; }
+/* #1638: a kit-migrated picker (the search provider menu) has no sibling
+   .adm-provider-menu — its caret rotates off the trigger's aria-expanded, which
+   OrwellMenuKit toggles. The :has() rule below still drives the not-yet-migrated
+   admin-endpoint twin (bespoke .adm-provider-menu in admin.js). */
+.adm-provider-btn[aria-expanded="true"] .adm-provider-caret {
+  transform: rotate(180deg);
+}
 .adm-provider-picker:has(.adm-provider-menu:not(.hidden)) .adm-provider-caret {
   transform: rotate(180deg);
 }
