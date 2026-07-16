@@ -3766,7 +3766,8 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     try:
         if (not chat_helpers._sentence_has_closed_set_claim(text)
                 and not chat_helpers._text_mentions_evicted_houseguest(owner, text)
-                and not chat_helpers._sentence_has_nominee_status(text)):
+                and not chat_helpers._sentence_has_nominee_status(text)
+                and not chat_helpers._sentence_has_met_everyone_claim(text)):
             return text
     except Exception:
         return text
@@ -3790,6 +3791,11 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
             # block is engine truth) — DROP it before the player sees it and re-ground next turn.
             if chat_helpers._sentence_has_nominee_status(part):
                 if not await chat_helpers.screen_streamed_nominee(owner, part):
+                    continue
+            # S7 (2026-07-16): "you've met everyone" while houseguests remain unintroduced is a closed-set
+            # overclaim (the meet-set is engine truth) — DROP it before the player sees it (premiere-only).
+            if chat_helpers._sentence_has_met_everyone_claim(part):
+                if not await chat_helpers.screen_streamed_met_everyone(owner, part):
                     continue
         except Exception:
             pass  # any screening hiccup falls through to emit (conservatism)
@@ -7560,6 +7566,29 @@ async def _stream_agent_loop_impl(
             await record_post_turn_presence_check(owner, _turn_narration_full)
         except Exception as _pres_err:
             logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
+
+        # ── S2a / S7 (2026-07-16) — the IN-TURN closed-set overclaim REALIGNMENT belt. ────────────────
+        # The post-turn desync/presence checks above only QUEUE a next-turn re-ground; the owner's ruling
+        # is that a closed-set fabrication (the msg53 "Jasmine wins Head of Household!" in premiere,
+        # toolsCalled:[]) must be corrected IN-BAND, this turn. The mid-stream scene-break now cuts the
+        # premiere-class case before it fully streams; this belt is the round-end net for anything it missed
+        # (an engine blip / absent baseline mid-stream, or the S7 "met everyone" overclaim). When the
+        # finalized narration still asserts an outcome the live board does not back AND no progression tool
+        # fired, it REPLACES the fabrication with a deterministic engine-truth beat that reaches the player
+        # THIS turn (the chat route accumulates every yielded `delta` into the persisted message, so the
+        # correction is durable). Closed-set only — a grounded outcome / a progression-tool turn stands
+        # down (ADR 0005 #1). Fail-open: any hiccup leaves the turn exactly as it is.
+        try:
+            from routes.chat_helpers import enforce_grounded_draft as _enforce_grounded
+            _s2a = await _enforce_grounded(owner, _turn_narration_full, _desync_tool_names)
+            if _s2a.action == "replaced" and _s2a.text and _s2a.text.strip():
+                logger.warning("[orwell] S2a REALIGNED an ungrounded closed-set draft in-turn "
+                                "(engine-truth beat) user=%s", owner)
+                _s2a_delta = "\n\n" + _s2a.text
+                full_response += _s2a_delta
+                yield f'data: {json.dumps({"delta": _s2a_delta})}\n\n'
+        except Exception as _s2a_err:
+            logger.warning(f"[orwell] S2a in-turn realignment belt skipped: {_s2a_err}")
 
         # ── S1c (RC7) + S1b (RC2) — the STALL-UNCONVERTED telemetry + the desync escalation arm. ──────
         # The belt-fire telemetry is success-gated (a belt fire means an APPLIED correction), so an

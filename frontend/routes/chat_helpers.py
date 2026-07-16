@@ -2479,6 +2479,18 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
             logger.warning("[orwell] scene circuit-breaker: engine unreadable while a board change was "
                            "narrated — cutting the scene for user=%s", user)
             return _ENGINE_UNREACHABLE_REGROUND
+        # S2a (2026-07-16) — the pre-ceremony board-ABSENCE cut (the msg53 hole). In a premiere-class
+        # phase NO ceremony outcome can exist, so a closed-set claim while the board is ENTIRELY empty of
+        # it (no HOH, no noms, no veto, no eviction, not finished) is a fabrication by construction —
+        # `_narration_claims_outcome` is phase-gated and never catches this. Needs no BEFORE baseline (the
+        # impossibility is phase + absence, not a delta) so it runs ahead of the baseline early-return.
+        _absent = _unbacked_outcome_absent(text, live)
+        if _absent:
+            _dir = _overclaim_directive(_absent, live)
+            _DESYNC_REGROUND[_dkey] = _dir
+            logger.warning("[orwell] scene circuit-breaker HELD a pre-ceremony board-absence fabrication "
+                           "for user=%s — cutting the whole scene (%s)", user, _absent)
+            return _dir
         if not before:
             # No baseline this turn — we cannot tell phantom from real, so do NOT cut (the sentence
             # guard + post-turn re-ground remain the backstop). Conservatism on the open set.
@@ -2493,6 +2505,251 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
     except Exception as e:
         logger.warning("[orwell] scene circuit-breaker skipped for user=%s: %s", user, _exc_detail(e))
         return None  # fail-OPEN on an internal error — never gag a healthy turn.
+
+
+# ── S2a / S7 (2026-07-16) — the IN-TURN closed-set OVERCLAIM hard-block (block → re-prompt → replace) ─ #
+#
+# The pre-emission guards above (`screen_streamed_outcome` / `screen_streamed_scene_break`) DROP a
+# phantom sentence/scene mid-stream and lean on the NEXT-turn `_DESYNC_REGROUND` as the correction; the
+# S2b fail-closed judge ALSO only QUEUES a next-turn re-ground. So a closed-set fabrication the mid-
+# stream guards miss — the captured **msg53** "Jasmine wins Head of Household!" narrated in `premiere`
+# with `toolsCalled:[]` — still reaches the player THAT turn: `_narration_claims_outcome` is phase-gated
+# (an HOH crown outside an `hoh` phase is treated as flavor), so the scene never broke. The owner's
+# ruling is that the overseer must CORRECT the moment IN-BAND, this turn — not merely re-ground the next.
+#
+# `enforce_grounded_draft` is that mechanism. Given the finalized draft + the tools the turn actually
+# called, when the draft asserts a CLOSED-SET outcome the live board does NOT back AND no PROGRESSION
+# tool fired (`advanceGame`/`submitDecision` — the ONLY way a closed-set outcome commits) it:
+#   1. BLOCKS the draft (the fabrication is never the final word),
+#   2. re-prompts the model ONCE with a corrective wire (via the caller's `regenerate` callback), and
+#   3. if the regenerated draft is STILL ungrounded (or no `regenerate` is available), returns a
+#      DETERMINISTIC engine-truth beat (producer-voice, states the real board) in its place.
+# It ALSO stashes the `_DESYNC_REGROUND` next-turn backstop (belt-and-suspenders).
+#
+# HARD jurisdiction (ADR 0005 #1 — the open set is constitutionally protected): CLOSED-SET board claims
+# ONLY. It reuses the exact `_CLAIM_*` detectors + `_narration_claims_outcome` the mid-stream guards
+# use; the supplementary board-ABSENCE check (`_unbacked_outcome_absent`) fires ONLY in the pre-ceremony
+# (premiere-class) phases where an HOH/nom/veto/eviction/winner is IMPOSSIBLE by construction — so
+# creative/social prose is never touched. When a PROGRESSION tool DID fire (the board may legitimately
+# hold the outcome) the guard STANDS DOWN — a grounded outcome is NEVER re-blocked (the before/after
+# identity guards own that case). Fail-open: any hiccup returns the draft unchanged (`action="pass"`).
+
+# The pre-ceremony phases: no HOH reigns, no one is nominated, no veto is held, no one is evicted, and
+# the season is not won — so ANY such closed-set claim here is a fabrication by construction. `startswith`
+# accepts this tuple directly.
+_PRE_CEREMONY_PHASES = ("premiere", "pre-season", "preseason", "pre_season", "pre-show", "preshow",
+                        "casting", "cast", "intro", "launch", "move-in", "movein", "move_in")
+
+# The progression tools — calling EITHER is the ONLY way a closed-set outcome commits this turn. Kept in
+# lock-step with `agent_loop._PROGRESSION_TOOLS` (a parity test pins it).
+_S2A_PROGRESSION_TOOLS = frozenset({"advanceGame", "submitDecision"})
+
+# S7 — the "you've met everyone / met all the houseguests / met the whole house" closed-set claim. Tight
+# by construction (requires a house/cast/everyone anchor) so ordinary prose ("met all the challenges")
+# never trips it, and it only ever MATTERS in the premiere (outside it `premiereIntros` is None ⇒ pass).
+_MET_EVERYONE_RE = re.compile(
+    r"\bmet\s+everyone\b"
+    r"|\bmet\s+(?:all|every one of|the whole|the entire|the full|the rest of)\s+(?:the\s+)?"
+    r"(?:houseguests?|house(?:mates)?|cast|of\s+(?:the\s+)?houseguests?|of\s+them)\b"
+    r"|\b(?:you'?ve|you have)\s+(?:now\s+|officially\s+|finally\s+)?met\s+(?:the\s+)?"
+    r"(?:whole|entire|full)\s+(?:house|cast|roster)\b",
+    re.IGNORECASE,
+)
+
+
+def _unbacked_outcome_absent(text: str, live: dict) -> Optional[str]:
+    """Supplementary board-ABSENCE check for the pre-ceremony (premiere-class) phases the phase-gated
+    `_narration_claims_outcome` deliberately does NOT police. In those phases NO ceremony outcome can
+    exist, so a closed-set claim while the corresponding board state is ENTIRELY ABSENT is a fabrication
+    by construction. Returns a short outcome LABEL (or None). Scoped to pre-ceremony phases ONLY, so
+    ordinary mid-week HOH/veto FLAVOR (already handled by phase-gating) is never rail-corrected."""
+    if not isinstance(live, dict):
+        return None
+    phase = str(live.get("phase") or "").lower()
+    if not phase.startswith(_PRE_CEREMONY_PHASES):
+        return None
+    t = text or ""
+    if (_CLAIM_NEW_HOH_RE.search(t) or _CLAIM_SELF_HOH_WIN_RE.search(t)) and not live.get("hoh"):
+        return "a HEAD OF HOUSEHOLD win (no Head of Household reigns yet)"
+    if _CLAIM_NOMINATED_RE.search(t) and not (live.get("noms") or []):
+        return "a NOMINATION (no houseguest is on the block yet)"
+    if (_CLAIM_VETO_WINNER_RE.search(t) or _CLAIM_SELF_VETO_WIN_RE.search(t)) and not live.get("vetoHolder"):
+        return "a POWER OF VETO win (no one holds the veto yet)"
+    if (_CLAIM_EVICTED_RE.search(t) or _CLAIM_EVICT_RESULT_RE.search(t) or _CLAIM_TALLY_RE.search(t)) \
+            and not live.get("evicted"):
+        return "an EVICTION / a vote result (no one has been evicted yet)"
+    if _CLAIM_WINNER_RE.search(t) and not live.get("finished"):
+        return "the SEASON WINNER being crowned (the season is not finished)"
+    return None
+
+
+def _overclaim_directive(outcome_label: str, live: dict) -> str:
+    """The corrective wire handed back to the model on the ONE re-prompt: names the real board and the
+    asserted outcome, and forbids inventing board state. Closed-set only."""
+    live = live if isinstance(live, dict) else {}
+    week = live.get("week")
+    phase = live.get("phase") or "?"
+    pending = live.get("pending")
+    return (
+        "RE-GROUND ON THE BOARD — the engine (the source of truth) shows week "
+        f"{week if week is not None else '?'}, phase {phase}, pending:{pending or 'null'}. You asserted "
+        f"{outcome_label}, but the board holds NO such event. Re-narrate this moment grounded in the live "
+        "board: do NOT invent, announce, or build on any board state the engine never committed. Voice "
+        "only what the current state actually supports."
+    )
+
+
+def _engine_truth_beat(live: dict) -> str:
+    """The DETERMINISTIC engine-truth replacement beat — producer-voice, diegetic, states the REAL board
+    (week / phase / pending). Emitted in place of a fabrication the model would not re-ground. Never a
+    raw error, never a number the player shouldn't see (closed-set public status only)."""
+    live = live if isinstance(live, dict) else {}
+    phase = str(live.get("phase") or "").strip() or "the current beat"
+    week = live.get("week")
+    pending = live.get("pending")
+    where = f"week {week}, the {phase} beat" if week is not None else f"the {phase} beat"
+    tail = (f" The control room is waiting on your `{pending}` decision — that is the next real beat."
+            if pending else " Nothing has been decided that the control room hasn't shown you.")
+    return (
+        "The live feeds settle back over the house. Right now the game sits at "
+        f"{where}: no ceremony has been called and nothing has been crowned, nominated, or evicted."
+        + tail + " Pick the scene back up from exactly where the house actually is."
+    )
+
+
+async def _detect_ungrounded_overclaim(user, text: str, tools: set) -> tuple:
+    """Return ``(directive, label)`` when `text` makes a CLOSED-SET overclaim the live board does not
+    back AND no progression tool fired this turn; else ``(None, None)``. The single decision used by
+    both `enforce_grounded_draft` and its post-regenerate re-check. Fail-open (returns no directive)."""
+    try:
+        if tools & _S2A_PROGRESSION_TOOLS:
+            # A progression tool fired — the board MAY legitimately hold the outcome; the before/after
+            # identity guards own that case. Never re-block a grounded outcome (S2a scope, ADR 0005 #1).
+            return (None, None)
+        has_outcome = _sentence_has_closed_set_claim(text)
+        has_met = bool(_MET_EVERYONE_RE.search(text or ""))
+        if not has_outcome and not has_met:
+            return (None, None)  # no closed-set claim at all — open-set prose, never policed
+        live = await _capture_beat_signature(user)
+        if not live:
+            return (None, None)  # board unreadable → cannot PROVE a fabrication → emit (conservatism)
+        if has_outcome:
+            before = _LAST_BEAT_SIG.get(_desync_key(user)) or {}
+            directive = _narration_claims_outcome(text, before, live)  # phase-gated before/after verify
+            label = None
+            if directive:
+                label = "the outcome above"
+            else:
+                label = _unbacked_outcome_absent(text, live)  # premiere-class board-absence
+                directive = _overclaim_directive(label, live) if label else None
+            if directive:
+                return (directive, label)
+        if has_met:
+            try:
+                from src import orwell_engine
+                intros = await orwell_engine.premiere_intros(user=user)
+            except Exception:
+                intros = None
+            remaining = intros.get("remaining") if isinstance(intros, dict) else None
+            if remaining:  # unmet houseguests remain — "you've met everyone" is a closed-set overclaim
+                lbl = "the player having MET EVERYONE (houseguests are still unintroduced)"
+                return (_overclaim_directive(lbl, live), lbl)
+        return (None, None)
+    except Exception as e:
+        logger.warning("[orwell] overclaim detect skipped for user=%s: %s", user, _exc_detail(e))
+        return (None, None)
+
+
+def _stash_overclaim_reground(user, directive: str) -> None:
+    """Stash the corrective directive as the NEXT-turn `_DESYNC_REGROUND` backstop (combine, never
+    clobber an existing one). Fail-open."""
+    try:
+        _dkey = _desync_key(user)
+        existing = _DESYNC_REGROUND.get(_dkey)
+        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+    except Exception:
+        pass
+
+
+@dataclass
+class GroundedDraftResult:
+    """The verdict of `enforce_grounded_draft`. `action` ∈ {"pass","regenerated","replaced"}:
+      • pass        — the draft is grounded (or open-set) — emit it unchanged;
+      • regenerated — the draft was BLOCKED, re-prompted ONCE, and the fresh draft is now grounded;
+      • replaced    — the draft was BLOCKED and (still ungrounded, or no re-prompt) REPLACED with the
+                      deterministic engine-truth beat. Both non-pass verdicts are IN-TURN corrections."""
+    text: str
+    action: str
+    directive: Optional[str] = None
+
+
+async def enforce_grounded_draft(user, draft, tools_called, *, regenerate=None) -> "GroundedDraftResult":
+    """S2a / S7 — the IN-TURN closed-set overclaim hard-block: BLOCK → re-prompt ONCE → REPLACE with a
+    deterministic engine-truth beat. See the block comment above for the full contract + jurisdiction.
+
+    `regenerate` (optional) is an async callable ``regenerate(directive) -> str`` the caller supplies to
+    re-prompt the model in-turn with the corrective wire. When absent, a blocked draft goes straight to
+    the engine-truth replacement. Fail-open: any hiccup returns the draft unchanged (`action="pass"`)."""
+    try:
+        if not draft or not str(draft).strip():
+            return GroundedDraftResult(draft, "pass", None)
+        tools = {str(t) for t in (tools_called or []) if t}
+        directive, _label = await _detect_ungrounded_overclaim(user, str(draft), tools)
+        if not directive:
+            return GroundedDraftResult(draft, "pass", None)
+        # BLOCKED. Stash the next-turn re-ground backstop (belt-and-suspenders — never the only line).
+        _stash_overclaim_reground(user, directive)
+        # Re-prompt the model ONCE, in-turn, with the corrective wire.
+        if regenerate is not None:
+            regen = None
+            try:
+                regen = await regenerate(directive)
+            except Exception as _re:
+                logger.warning("[orwell] overclaim re-prompt failed for user=%s: %s", user, _exc_detail(_re))
+                regen = None
+            if regen and str(regen).strip():
+                redirective, _ = await _detect_ungrounded_overclaim(user, str(regen), tools)
+                if not redirective:
+                    logger.warning("[orwell] overclaim BLOCKED + regenerated grounded IN-TURN for user=%s", user)
+                    return GroundedDraftResult(str(regen), "regenerated", directive)
+        # Still ungrounded (or no re-prompt available) → REPLACE with the deterministic engine-truth beat.
+        live = await _capture_beat_signature(user)
+        logger.warning("[orwell] overclaim BLOCKED + replaced with an engine-truth beat IN-TURN for user=%s", user)
+        return GroundedDraftResult(_engine_truth_beat(live), "replaced", directive)
+    except Exception as e:
+        logger.warning("[orwell] enforce_grounded_draft skipped for user=%s: %s", user, _exc_detail(e))
+        return GroundedDraftResult(draft, "pass", None)
+
+
+async def screen_streamed_met_everyone(user, sentence: str) -> bool:
+    """S7 mid-stream sibling of `screen_streamed_nominee`: HOLD (return False) a sentence that asserts
+    the player has MET EVERYONE while the engine's premiere meet-set still has houseguests to introduce
+    (`premiereIntros.remaining` non-empty); else EMIT (True). Premiere-only by construction (outside it
+    `premiereIntros` is None ⇒ never fires). Fail-open: any hiccup returns True (emit)."""
+    try:
+        if not sentence or not _MET_EVERYONE_RE.search(sentence):
+            return True
+        from src import orwell_engine
+        intros = await orwell_engine.premiere_intros(user=user)
+        remaining = intros.get("remaining") if isinstance(intros, dict) else None
+        if not remaining:
+            return True  # everyone really is met (or not in premiere) — emit
+        live = await _capture_beat_signature(user)
+        _stash_overclaim_reground(
+            user, _overclaim_directive(
+                "the player having MET EVERYONE (houseguests are still unintroduced)", live or {}))
+        logger.warning("[orwell] pre-emission guard HELD a 'met everyone' overclaim for user=%s — "
+                       "%d houseguest(s) still unintroduced", user, len(remaining))
+        return False
+    except Exception as e:
+        logger.warning("[orwell] pre-emission met-everyone guard skipped for user=%s: %s", user, _exc_detail(e))
+        return True  # fail-open: never suppress on an error.
+
+
+def _sentence_has_met_everyone_claim(text: str) -> bool:
+    """Cheap synchronous pre-filter: does `text` assert the player met the whole house? Keeps the S7
+    guard off every sentence that never mentions it (mirrors `_sentence_has_closed_set_claim`)."""
+    return bool(text and _MET_EVERYONE_RE.search(text))
 
 
 # ── ADR 0009 (D3 Part B) — the PRE-EMISSION LOCATION guard (evicted-houseguest-in-a-room) ──────── #
