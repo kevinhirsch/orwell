@@ -375,6 +375,11 @@ export function initSidebarLayout(Storage, opts) {
       if (openDD) openDD.style.display = 'none';
       return;
     }
+    // A kit menu/popover (OrwellMenuKit / OrwellPopoverKit, #1638) is open — a
+    // backdrop tap dismisses the menu through the kit's own outside-click seat,
+    // never the sidebar. The kit surface has no inline display toggle, so match
+    // its live body-level .ow-popover element instead.
+    if (document.querySelector('.ow-popover')) return;
     const sb = document.getElementById('sidebar');
     if (sb && !sb.classList.contains('hidden')) {
       sb.classList.add('hidden');
@@ -429,8 +434,10 @@ export function initSidebarLayout(Storage, opts) {
     // Ignore clicks on session/folder dropdowns and the styled prompt
     // overlay — they're body-level elements logically tied to a sidebar
     // action (e.g. "Move to folder → New Folder…"), so closing the
-    // sidebar when the user clicks one yanks the action mid-flight.
-    if (e.target.closest('.session-dropdown, .folder-submenu, #styled-prompt-overlay, #styled-confirm-overlay')) return;
+    // sidebar when the user clicks one yanks the action mid-flight. The kit
+    // menu/popover surface (.ow-popover, #1638) is body-level too — a tap
+    // inside it must count as "inside" and never close the sidebar.
+    if (e.target.closest('.ow-popover, .session-dropdown, .folder-submenu, #styled-prompt-overlay, #styled-confirm-overlay')) return;
     // Close full sidebar if open (with animation)
     if (sb && !sb.classList.contains('hidden')) {
       const backdrop = document.getElementById('sidebar-backdrop');
