@@ -1205,6 +1205,34 @@ def deferred_fold_count(user) -> int:
     return len(_DEFERRED_FOLDS.get(_beat_seq_key(user), []))
 
 
+# ── S1b (RC2) — the ADVANCE-ESCALATION flag (cross-module, chat_helpers → agent_loop) ────────────── #
+#
+# The L39b forced-advance rung existed but never fired in the captured bundle despite 13 stall flags:
+# it is gated on a LULL, and a narrator that FABRICATES a competition is not lulling, so `_want_advance`
+# stayed False and the beat never advanced. This flag is the lull-INDEPENDENT trigger: it is ARMED when
+# (a) a progression mutation lost to a DOUBLE stale-409 (S1a — the beat is provably un-advanced) or
+# (b) two consecutive advance-stall-family signals accrue in a turn, OR a desync-no-progression
+# escalation fires. When armed, the next round FORCES `tool_choice=advanceGame` (agent_loop reads it at
+# the top of the round) so the model is put back on the rail rather than drifting into invention. It is
+# a one-shot: consumed (cleared) once the force is issued, and cleared on any real progression.
+_ADVANCE_ESCALATION: dict = {}
+
+
+def _arm_advance_escalation(user) -> None:
+    """Arm the lull-independent forced-advance escalation for `user` (S1b). Idempotent."""
+    _ADVANCE_ESCALATION[_beat_seq_key(user)] = True
+
+
+def advance_escalation_armed(user) -> bool:
+    """Is the S1b forced-advance escalation armed for `user`? (agent_loop's per-round force gate.)"""
+    return bool(_ADVANCE_ESCALATION.get(_beat_seq_key(user)))
+
+
+def clear_advance_escalation(user) -> None:
+    """Consume/clear the S1b escalation flag (on force issue, or on any real progression)."""
+    _ADVANCE_ESCALATION.pop(_beat_seq_key(user), None)
+
+
 def _beat_signature(status: dict, state: dict) -> dict:
     """A compact, comparable snapshot of the engine board — the fields whose MOVEMENT (or lack
     of it) tells us whether a narrated outcome actually happened. Built from gameStatus (week/
@@ -3061,17 +3089,48 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
         # swap token and a freshly-minted idempotency key (reused only on a retry of THIS action). A
         # 409 `stale-beat` (the board moved under us) reconciles via the existing desync spine and the
         # turn continues against the moved board — never a crash, never a blind retry into a stomp.
+        # S1a (RC1) — AT-LEAST-ONCE progression. The old path reconciled a stale-409 and RETURNED
+        # without ever re-firing the advance, so a single concurrent bump could leave the beat un-
+        # advanced for the whole turn — the exact detach that let the narrator fabricate an HOH comp
+        # while the engine sat in premiere. The engine refuses a stale write BEFORE any mutation (fail-
+        # closed) and dedupes on `idempotencyKey`, so after reconciling to the fresh beatSeq we RE-FIRE
+        # the SAME advance ONCE with a fresh expectedBeatSeq and the SAME idempotency key (at-most-once
+        # preserved, at-least-once gained). A SECOND consecutive 409 is a genuine sustained-concurrency
+        # loss: record it RED (#1599 — never fail softly) and arm the S1b forced-advance escalation so
+        # the next round forces the model onto advanceGame rather than drifting.
+        _adv_idem = _mint_idempotency_key()
         try:
             adv = await orwell_engine.advance_game(
                 expected_beat_seq=last_beat_seq(user),  # CON-1: keyed read (tracks auth-off)
-                idempotency_key=_mint_idempotency_key(),
+                idempotency_key=_adv_idem,
                 user=user,
             )  # advance ONE beat for real: surface the player's
         except Exception as _adv_e:
-            if _is_stale_beat_error(_adv_e):
-                await _handle_stale_beat(user, _adv_e)
-                return game_state  # reconciled — continue the turn framed against the (moved) board
-            raise
+            if not _is_stale_beat_error(_adv_e):
+                raise
+            await _handle_stale_beat(user, _adv_e)  # refresh last-seen to the fresh beatSeq
+            try:
+                # RE-FIRE once — fresh CAS token, SAME idempotency key (engine dedupes a double-apply).
+                adv = await orwell_engine.advance_game(
+                    expected_beat_seq=last_beat_seq(user),
+                    idempotency_key=_adv_idem,
+                    user=user,
+                )
+            except Exception as _adv_e2:
+                if not _is_stale_beat_error(_adv_e2):
+                    raise
+                await _handle_stale_beat(user, _adv_e2)
+                _arm_advance_escalation(user)  # S1b — the beat is still un-advanced; force next round
+                try:
+                    from src import log_rings as _lr_adv
+                    _lr_adv.record_soft_failure(
+                        "progression:advance-double-stale", _adv_e2,
+                        corrected="forced-advance-armed", user=user)
+                except Exception:
+                    pass
+                logger.warning("[orwell] advanceGame double stale-409 for user=%s — beat un-advanced, "
+                               "armed forced-advance escalation (S1a/S1b)", user)
+                return game_state  # reconciled — the S1b force picks it up next round
         _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
         mark_pre_resolved_advance(user)  # #670: a real beat walked this turn — the backstop must not double-advance
         # comp-intent (player in the field — engine pauses, never auto-decides), or resolve an NPC beat.

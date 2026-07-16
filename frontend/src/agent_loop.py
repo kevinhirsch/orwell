@@ -2891,6 +2891,37 @@ def _faith_queue_reground(owner, directive) -> bool:
         return False
 
 
+# S2b (RC2) — the FAIL-CLOSED handling of a judge-down draft. The faithfulness judge is the LAST line
+# of defense against a fabricated closed-set outcome (the msg53 "Jasmine wins Head of Household!" hole:
+# the judge TIMED OUT, so nothing intercepted it and it soft-PASSED). A judge that cannot run must never
+# soft-pass a CLOSED-SET outcome draft: when the guard is down AND the finalized narration carries
+# closed-set outcome vocabulary, we treat it as an UNJUDGED P0 — queue a VISIBLE next-turn re-ground so
+# the record is set straight against engine truth, and arm the S1b lull-independent forced advance so the
+# next round is put back on the rail. Closed-set only (the cheap `_sentence_has_closed_set_claim` gate) —
+# creative/open-set prose is never touched (ADR 0005). Fail-soft: never raises.
+def _faith_guard_down_p0(owner, narration) -> bool:
+    """When the faithfulness guard is DOWN, fail CLOSED on a closed-set outcome draft (S2b). Returns
+    True iff the draft carried closed-set outcome vocabulary and we queued the corrective re-ground."""
+    try:
+        if not narration or not str(narration).strip():
+            return False
+        from routes import chat_helpers as _ch_p0
+        if not _ch_p0._sentence_has_closed_set_claim(str(narration)):
+            return False  # no closed-set claim — open-set prose, nothing to fail closed on
+        # A closed-set outcome was drafted with the judge DOWN → unjudged P0. Set the record straight
+        # visibly next turn and force the model back onto the rail (never a silent soft-pass).
+        _faith_queue_reground(owner, _FAITH_VISIBLE_DIRECTIVE)
+        try:
+            _ch_p0._arm_advance_escalation(owner)
+        except Exception:
+            pass
+        logger.warning("[orwell] faithfulness guard DOWN on a closed-set outcome draft — failing CLOSED "
+                       "(queued a visible re-ground + armed the forced advance) user=%s", owner)
+        return True
+    except Exception:
+        return False
+
+
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
                        endpoint_url=None, model=None, headers=None, last_user=None,
                        projection=None, context="in-game") -> None:
@@ -2938,6 +2969,8 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:resolve-failed health-event write failed: {_rec_err}")
+            # S2b: the guard is DOWN — a closed-set outcome draft must fail CLOSED, never soft-pass.
+            _faith_guard_down_p0(owner, narration)
             _llm = None
         if _llm is None:
             return
@@ -2964,6 +2997,9 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:call-failed health-event write failed: {_rec_err}")
+            # S2b: the judge could not RUN (timeout / 400) — the exact msg53 hole. A closed-set outcome
+            # draft must fail CLOSED here, never soft-pass on the bare `return`.
+            _faith_guard_down_p0(owner, narration)
             return
         verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
         if verdict is None or not verdict.is_slip:
@@ -5386,6 +5422,50 @@ async def _stream_agent_loop_impl(
                 logger.warning(f"[orwell] casting tool_choice force skipped: {_force_err}")
                 _forced_tool_choice = None
 
+        # ── S1b (RC2) — the LULL-INDEPENDENT forced advanceGame escalation. ────────────────────────
+        # The framed-beat force above fires only when the ENGINE names a lever for the framed closed-set
+        # beat — but the captured game-breaker sat in `premiere` (no required lever), so it never fired
+        # even as the narrator fabricated a whole HOH comp. This escalation is the lull-independent net:
+        # chat_helpers arms the flag when a progression beat is provably lost (a double stale-409, S1a)
+        # or repeated advance-stall signals accrue, and here we FORCE `advanceGame` on the wire the very
+        # next round — a fabricating narrator is not lulling, so the reactive stall belt (gated on a
+        # lull) can never catch it. Only when the framed-beat force did NOT already pick a lever. Gates:
+        # live game, kill-switch on, advanceGame actually on the wire, a non-rejecter model, and NO open
+        # player pending (never override the card, never force submitDecision). One-shot: consumed here
+        # whether or not the force is honored, so it never wedges forcing on.
+        if (_forced_tool_choice is None and _is_live_game and all_tool_schemas
+                and bool(get_setting("force_tool_choice_at_beats", True))):
+            try:
+                from routes import chat_helpers as _ch_esc
+                if _ch_esc.advance_escalation_armed(owner):
+                    if "advanceGame" in _tool_names_sent and _model_honors_forced_tool_choice(model):
+                        from src import orwell_engine as _oe_esc
+                        _esc_status = await _oe_esc.game_status(user=_force_owner)
+                        _esc_pending = bool(
+                            isinstance(_esc_status, dict)
+                            and isinstance(_esc_status.get("pending"), dict)
+                            and (_esc_status["pending"].get("kind") or "").strip())
+                        if not _esc_pending:
+                            _forced_tool_choice = {"type": "function",
+                                                   "function": {"name": "advanceGame"}}
+                            _forced_belt_tool = "advanceGame"
+                            logger.info("[orwell] S1b forcing advanceGame (escalation armed) "
+                                        f"round={round_num} user={_force_owner}")
+                            try:  # 0079: a forced escalation is a notable overseer correction
+                                from src import log_rings as _lr_esc
+                                _lr_esc.record_overseer(
+                                    "anomaly", "advance-escalation",
+                                    "forced advanceGame via escalation after a lost/contested "
+                                    "progression beat (lull-independent)",
+                                    lever="force-advance", ok=True, user=owner)
+                            except Exception:
+                                pass
+                    # One-shot regardless of whether we could force here (a rejecter model, no wire
+                    # advanceGame, or an open pending) — never leave the flag wedged on.
+                    _ch_esc.clear_advance_escalation(owner)
+            except Exception as _esc_err:
+                logger.warning(f"[orwell] S1b escalation force skipped: {_esc_err}")
+
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
         # duplicated; the dead-host cooldown keeps repeat primary attempts cheap.
@@ -6248,17 +6328,41 @@ async def _stream_agent_loop_impl(
                             try:
                                 from src import orwell_engine as _oe3
                                 from routes import chat_helpers as _ch3
+                                # S1a (RC1): at-least-once. On a stale-409 the engine refused BEFORE any
+                                # mutation and dedupes on the idempotency key, so reconcile then RE-FIRE
+                                # ONCE with a fresh CAS token and the SAME key (at-most-once preserved).
+                                # A SECOND consecutive 409 is a real sustained-concurrency loss: reconcile,
+                                # arm the S1b escalation, record RED (#1599), and report False.
+                                _adv_idem3 = _ch3._mint_idempotency_key()
                                 try:
                                     _adv = await _oe3.advance_game(
                                         expected_beat_seq=_ch3.last_beat_seq(owner),
-                                        idempotency_key=_ch3._mint_idempotency_key(),
+                                        idempotency_key=_adv_idem3,
                                         user=owner,
                                     )
                                 except Exception as _stale_e:
-                                    if _ch3._is_stale_beat_error(_stale_e):
-                                        await _ch3._handle_stale_beat(owner, _stale_e)
-                                        return False  # board moved — reconciled, do not blind-retry
-                                    raise
+                                    if not _ch3._is_stale_beat_error(_stale_e):
+                                        raise
+                                    await _ch3._handle_stale_beat(owner, _stale_e)
+                                    try:
+                                        _adv = await _oe3.advance_game(
+                                            expected_beat_seq=_ch3.last_beat_seq(owner),
+                                            idempotency_key=_adv_idem3,  # SAME key — engine dedupes
+                                            user=owner,
+                                        )
+                                    except Exception as _stale_e2:
+                                        if not _ch3._is_stale_beat_error(_stale_e2):
+                                            raise
+                                        await _ch3._handle_stale_beat(owner, _stale_e2)
+                                        _ch3._arm_advance_escalation(owner)  # S1b next-round force
+                                        try:
+                                            from src import log_rings as _lr_adv2
+                                            _lr_adv2.record_soft_failure(
+                                                "progression:advance-double-stale", _stale_e2,
+                                                corrected="forced-advance-armed", user=owner)
+                                        except Exception:
+                                            pass
+                                        return False  # board moved twice — reconciled, S1b picks it up
                                 _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
                                 # The beat moved — reset the staleness clock AND clear the
                                 # persisted escalation so the next stall (if any) starts gentle,
@@ -7456,6 +7560,44 @@ async def _stream_agent_loop_impl(
             await record_post_turn_presence_check(owner, _turn_narration_full)
         except Exception as _pres_err:
             logger.warning(f"[orwell] post-turn presence check failed: {_pres_err}")
+
+        # ── S1c (RC7) + S1b (RC2) — the STALL-UNCONVERTED telemetry + the desync escalation arm. ──────
+        # The belt-fire telemetry is success-gated (a belt fire means an APPLIED correction), so an
+        # advance stall NUDGE that the model then IGNORED left NO trace — 12 unconverted nudges were
+        # invisible in the captured bundle while the game stood still. Here, post-turn, we detect the two
+        # lull-independent stall signals and (a) record them RED and (b) arm the S1b lull-independent
+        # forced-advance for the NEXT round. The beat-moved check keys off the beatSeq delta (an FE
+        # forced advance also bumps it), so a beat that DID progress — by the model OR by a forced FE
+        # commit — never counts as unconverted. Fail-soft; #1599 (a correction is not a cloak).
+        try:
+            from routes import chat_helpers as _ch_esc2
+            _s1_dkey = _ch_esc2._desync_key(owner)
+            _s1_after = _ch_esc2.last_beat_seq(owner)
+            _s1_beat_moved = (isinstance(_ledger_beat_seq_before, int)
+                              and isinstance(_s1_after, int)
+                              and _s1_after > _ledger_beat_seq_before)
+            _s1_desync = _s1_dkey in getattr(_ch_esc2, "_DESYNC_REGROUND", {})
+            if not _s1_beat_moved and _turn_advance_nudges > 0:
+                # S1c — a stall nudge fired but the beat never moved this turn: RED-eligible (auto-
+                # corrected by the next-round force we arm below; per #1599 that correction is not a cloak).
+                try:
+                    from src import log_rings as _lr_su
+                    _lr_su.record_soft_failure(
+                        "progression:stall-unconverted",
+                        f"{_turn_advance_nudges} advance stall nudge(s) issued but the beat never "
+                        f"advanced this turn (model ignored the nudge)",
+                        corrected="forced-advance-armed", user=owner)
+                except Exception:
+                    pass
+                _ch_esc2._arm_advance_escalation(owner)
+            elif not _s1_beat_moved and _s1_desync:
+                # S1b — a desync flagged with no progression is the escalate signal: arm the force.
+                _ch_esc2._arm_advance_escalation(owner)
+            elif _s1_beat_moved:
+                # Real progression this turn — clear any armed escalation so it never wedges forcing on.
+                _ch_esc2.clear_advance_escalation(owner)
+        except Exception as _s1_err:
+            logger.debug(f"[orwell] S1b/S1c escalation-arm skipped: {_s1_err}")
 
     # NAR-1 (product-review, 2026-07): dropped `and owner` — this block guards two CORRECTNESS
     # belts (surface-the-pending / F14, and the NARR-3 invented-houseguest backstop), not

@@ -197,15 +197,20 @@ def test_handle_stale_beat_refreshes_seq_from_message_and_stashes_reground(monke
     assert chat_helpers.stale_beat_rejections() == 1             # counted for the ledger hook
 
 
-def test_pre_resolve_swallows_a_stale_409(monkeypatch):
-    """The pre-resolve advance hitting a stale 409 reconciles (re-ground stashed, counted) and never
-    lets the exception escape — the turn continues, framed against the moved board."""
+def test_pre_resolve_reattempts_then_swallows_a_persistent_stale_409(monkeypatch):
+    """LANE A S1a (at-least-once) updated the old reconcile-and-SWALLOW contract: the pre-resolve advance
+    hitting a stale 409 now RE-FIRES once against the reconciled beatSeq (fresh CAS token, SAME idempotency
+    key). A PERSISTENT 409 is reconciled BOTH times (2 rejections), arms the S1b forced-advance escalation,
+    and STILL never lets the exception escape — the turn continues, framed against the moved board."""
+    chat_helpers._ADVANCE_ESCALATION.clear()
     chat_helpers._LAST_BEAT_SEQ["u"] = 4  # stale token
+    idem_keys = []
 
     async def fake_status(user=None):
         return {"phase": "nominations", "pending": None, "veto": {}, "beatSeq": 9}
 
     async def fake_advance(expected_beat_seq=None, idempotency_key=None, user=None):
+        idem_keys.append(idempotency_key)
         raise orwell_engine.EngineToolError(
             "stale write refused — expected beatSeq is behind the current board (now 9); re-ground and retry",
             status=409)
@@ -222,9 +227,11 @@ def test_pre_resolve_swallows_a_stale_409(monkeypatch):
                                                       retry=False, player_msg="let's go"))
     # No exception escaped; the original state is returned (the turn continues, fail-open).
     assert isinstance(out, dict)
-    assert chat_helpers.stale_beat_rejections() == 1
+    assert len(idem_keys) == 2 and idem_keys[0] == idem_keys[1]  # re-fired once, SAME idempotency key
+    assert chat_helpers.stale_beat_rejections() == 2            # both 409s reconciled/counted
     assert chat_helpers.last_beat_seq("u") == 9                  # refreshed off the stale 409
     assert "u" in chat_helpers._DESYNC_REGROUND                  # next turn reconciles
+    assert chat_helpers.advance_escalation_armed("u")            # S1b escalation armed after the double
 
 
 # ── idempotency-key minting ────────────────────────────────────────────────── #
