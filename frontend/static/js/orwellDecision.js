@@ -341,17 +341,23 @@
         color: #16191f;
         text-shadow: 0 1px 1px rgba(255,255,255,0.45);
       }
-      /* #1375-a (a11y contrast): the disabled-Confirm hint is the card's smallest, lowest text;
-         it sits at the bottom edge over the sheet's heavy blur, where the glass composites DARK
-         over the chat behind — the engine-staged a11y gate measures it at ~1.3:1 with the card's
-         light-glass dark ink (dark-on-dark, effectively invisible). Give this ONE secondary label
-         a LIGHT ink + a DARK legibility halo so it clears WCAG AA over the dark backdrop (the halo
-         also outlines it over any lighter glass frame). Scoped inside the no-preference block so
-         the reduced-transparency opaque fallback keeps the dark ink. */
+      /* #1644 (a11y contrast): the disabled-Confirm hint must FOLLOW its host surface ink, exactly
+         like its sibling text nodes (.odec-title / .odec-note / .odec-prompt) and the chat-bubble
+         body (body.theme-frosted .msg-ai .body sets color:inherit). The card mounts in THREE hosts,
+         each of which pins .odec's ink polarity for us: the OrwellNotice kit card
+         (.on-card.on-decision — LIGHT glass, style.css inks it dark #16191f), the anchored
+         OrwellSheet (.ow-sheet — its own cross-faded ink), and the bare #chat-history fallback
+         (ambient light --fg over the dark-compositing bottom edge). The earlier #1375-a fix
+         hard-coded color:#fff for the bare/sheet dark edge, but the SAME rule also hit the COMMON
+         kit path where the light glass stays LIGHT → white-on-light ≈ 1.3:1 (the #1644 BLOCKER).
+         inherit inks DARK on the light kit glass and LIGHT on the dark fallback edge — the right
+         polarity on every host, no special-casing. text-shadow:inherit carries the host's own
+         legibility halo (a LIGHT halo under the dark kit ink, mirroring .msg-ai .body). Scoped
+         inside the no-preference block so the reduced-transparency opaque fallback keeps its ink. */
       body.theme-frosted .odec .odec-hint {
-        color: #fff;
+        color: inherit;
         opacity: 1;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.62), 0 0 2px rgba(0,0,0,0.5);
+        text-shadow: inherit;
       }
       /* When hosted inside the kit card the inner decision card stays flat (the kit IS the
          glass) — keep it transparent under theme-frosted so it never double-glasses. */
