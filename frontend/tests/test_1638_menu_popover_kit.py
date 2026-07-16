@@ -343,3 +343,51 @@ def test_attach_openmenu_is_idempotent_and_composes_onclose():
         "attach's composed onClose must clear current only when it still owns the closing menu"
     assert re.search(r"userOnClose\(reason\)", seam), \
         "attach's composed onClose must also invoke the caller's onClose"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# 12. review-flagged correctness contracts (#1656, P1): a kept-open checkbox row re-syncs its
+#     DOM after onSelect, and a terminal submenu select collapses the whole ancestor tree.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+_MENU_CLASS = JS[JS.index("export class OrwellMenu {"):]
+
+
+def test_activate_resyncs_kept_open_checkbox_row_dom():
+    # P1-A: when onSelect leaves the menu open (keepOpen / returns false) and mutates it.checked,
+    # _activate must reflect the NEW state onto this row (aria-checked + the ✓ indicator) instead of
+    # leaving the stale value until a close/reopen.
+    body = _method_body(_MENU_CLASS, "_activate(rec, ev) {")
+    # the re-sync fires ONLY on the kept-open branch (a closing select tears the DOM down anyway).
+    assert re.search(r"if\s*\(stayOpen\)\s*\{", body), \
+        "_activate must branch on stayOpen so the re-sync runs for kept-open rows"
+    assert "this._syncCheckState(rec)" in body, \
+        "_activate must re-sync the row's checked state after onSelect for a kept-open item"
+    # the sync reflects the item's CURRENT checked state onto the row: role-gated, aria-checked, ✓.
+    sync = _method_body(_MENU_CLASS, "_syncCheckState(rec) {")
+    assert "menuitemcheckbox" in sync, \
+        "_syncCheckState must be inert on non-checkbox rows (gate on the menuitemcheckbox role)"
+    assert "rec.item.checked" in sync, \
+        "_syncCheckState must read the item's current checked state back"
+    assert re.search(r"setAttribute\('aria-checked',\s*on\s*\?\s*'true'\s*:\s*'false'\)", sync), \
+        "_syncCheckState must reflect the current checked state onto aria-checked"
+    assert ".ow-menu-check" in sync and "'✓'" in sync, \
+        "_syncCheckState must refresh the .ow-menu-check ✓ indicator text"
+
+
+def test_terminal_submenu_select_collapses_the_whole_ancestor_tree():
+    # P1-B: a terminal (non-kept-open) select must close self AND every ancestor via the `parent`
+    # linkage, so the top-level surface and the root trigger's aria-expanded return to false — not
+    # just the child submenu.
+    body = _method_body(_MENU_CLASS, "_activate(rec, ev) {")
+    assert "this._closeTree('select')" in body, \
+        "_activate's terminal-select path must collapse the ancestor tree, not just this.close()"
+    # the walk climbs the `parent` chain that _openSubmenu records (parent: this), closing each level.
+    tree = _method_body(_MENU_CLASS, "_closeTree(reason) {")
+    assert "node.parent" in tree, \
+        "_closeTree must walk up the parent linkage the submenu records"
+    assert re.search(r"node\.close\(reason\)", tree), \
+        "_closeTree must close each menu in the ancestor chain"
+    # a submenu records its parent menu so the chain is walkable (parent: this in _openSubmenu).
+    open_sub = _method_body(_MENU_CLASS, "_openSubmenu(rec) {")
+    assert "parent: this" in open_sub, \
+        "_openSubmenu must pass the owning menu as `parent` so the ancestor chain is walkable"

@@ -603,7 +603,42 @@ export class OrwellMenu {
       try { if (it.onSelect(it, ev) === false) stayOpen = true; } catch (_) {}
     }
     if (typeof this.o.onSelect === 'function') { try { this.o.onSelect(it, ev); } catch (_) {} }
-    if (!stayOpen) this.close('select');
+    if (stayOpen) {
+      // P1-A (#1656): a kept-open checkbox/toggle row whose onSelect just mutated `it.checked` would
+      // otherwise keep its STALE aria-checked + ✓ indicator until the menu is closed and reopened.
+      // Read the item's current checked state BACK and reflect it onto THIS row now. A non-checkbox
+      // kept-open row (no menuitemcheckbox role) is untouched.
+      this._syncCheckState(rec);
+      return;
+    }
+    // P1-B (#1656): a terminal selection inside a submenu must collapse the ENTIRE menu tree, not
+    // just the child surface — otherwise the ancestor menu(s) stay open and the root trigger keeps
+    // aria-expanded="true". Close self, then every ancestor via the `parent` linkage _openSubmenu
+    // records. (A top-level menu has no parent, so this closes only itself — unchanged behavior.)
+    this._closeTree('select');
+  }
+
+  // Re-sync a checkbox row's DOM (aria-checked + the ✓ indicator) to the item's current `checked`.
+  // Inert for a non-checkbox row (built without the menuitemcheckbox role).
+  _syncCheckState(rec) {
+    var row = rec && rec.el;
+    if (!row || row.getAttribute('role') !== 'menuitemcheckbox') return;
+    var on = !!rec.item.checked;
+    row.setAttribute('aria-checked', on ? 'true' : 'false');
+    var ck = row.querySelector('.ow-menu-check');
+    if (ck) ck.textContent = on ? '✓' : '';
+  }
+
+  // Collapse this menu and its whole ancestor chain (child-first, capturing each parent BEFORE the
+  // close so the cascade's _submenu bookkeeping stays consistent). Used only on a terminal select;
+  // kept-open items never reach here, so keepOpen still leaves the tree standing.
+  _closeTree(reason) {
+    var node = this, guard = 0;
+    while (node && guard++ < 64) {
+      var up = node.parent;
+      try { node.close(reason); } catch (_) {}
+      node = up;
+    }
   }
 
   _openSubmenu(rec) {
