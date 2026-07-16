@@ -3986,20 +3986,8 @@ body.bg-pattern-perlin-flow {
       font-weight: 600;
       line-height: 1;
     }
-    /* Context detail popup */
-    .ctx-detail-popup {
-      position: fixed;
-      z-index: 200;
-      background: var(--panel, var(--bg));
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px 14px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-      min-width: 220px;
-      max-width: 280px;
-      font-size: 0.85rem;
-      color: var(--fg);
-    }
+    /* Context detail popup — the frame folds onto the shared .ow-popover surface
+       (orwellMenu.js / OrwellPopoverKit, #1638). Only the inner-content rules survive. */
     .ctx-bar-wrap {
       width: 100%;
       height: 6px;
@@ -4362,19 +4350,8 @@ body.bg-pattern-perlin-flow {
       display:inline-flex; align-items:center; gap:1px;
       font-size:0.75rem;
     }
-    .ctx-popup {
-      position:fixed;
-      z-index:250;
-      background:var(--panel);
-      border:1px solid var(--border);
-      border-radius:8px;
-      padding:10px 14px;
-      font-size:0.8rem;
-      color:var(--fg);
-      box-shadow:0 8px 24px rgba(0,0,0,0.4);
-      min-width:180px;
-      line-height:1.7;
-    }
+    /* .ctx-popup frame folds onto the shared .ow-popover surface (OrwellPopoverKit, #1638);
+       only the inner-content .ctx-label rule survives. */
     .ctx-label {
       display:inline-block;
       width:60px;
