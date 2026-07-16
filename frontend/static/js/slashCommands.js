@@ -1921,15 +1921,6 @@ async function _cmdDemo(args, ctx) {
       .tour-arrow{position:absolute;width:10px;height:10px;background:var(--bg);
         border:1px solid var(--border);transform:rotate(45deg);pointer-events:none}
       .tour-nav{display:flex;align-items:center;justify-content:space-between}
-      .tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);
-        cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}
-      .tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}
-      .tour-nav button:active{background:color-mix(in srgb,var(--fg) 16%,transparent);transform:scale(0.95)}
-      .tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}
-      .tour-btn-arrow:hover{opacity:1}
-      .tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}
-      .tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}
-      .tour-btn-skip:hover{opacity:0.6}
       .tour-btn-arrow-pulse{opacity:1;border-color:var(--accent,var(--red));color:var(--accent,var(--red));
         animation:tour-arrow-pulse 1.2s ease-in-out infinite}
       @keyframes tour-arrow-pulse{
@@ -2081,9 +2072,9 @@ async function _cmdDemo(args, ctx) {
       tooltip.innerHTML = `<div class="tour-text">${text}</div>
         ${breathing ? '<div style="font-size:0.72rem;opacity:0.35;margin-bottom:6px">Click the highlighted element to continue</div>' : ''}
         <div class="tour-nav" style="${breathing ? 'justify-content:center' : ''}">
-          ${breathing ? '' : `<button class="tour-btn-arrow${isFirst ? ' disabled' : ''}" data-act="back">\u2190</button>`}
-          <button class="tour-btn-skip" data-act="skip">${stepOpts.finishLabel ? 'finish tour' : 'skip tour'}</button>
-          ${breathing ? '' : `<button class="tour-btn-arrow${pulseNext ? ' tour-btn-arrow-pulse' : ''}" data-act="next">\u2192</button>`}
+          ${breathing ? '' : `<button class="ow-btn${isFirst ? ' is-disabled' : ''}" data-act="back">\u2190</button>`}
+          <button class="ow-btn ow-btn-plain" data-act="skip">${stepOpts.finishLabel ? 'finish tour' : 'skip tour'}</button>
+          ${breathing ? '' : `<button class="ow-btn ow-btn-prominent${pulseNext ? ' tour-btn-arrow-pulse' : ''}" data-act="next">\u2192</button>`}
         </div>`;
 
       // Position based on the fully-rendered tooltip so it doesn't jump as
@@ -2307,15 +2298,7 @@ async function _cmdTourCompare(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -2425,9 +2408,9 @@ async function _cmdTourCompare(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' + hint +
         '<div class="tour-nav">' +
-          '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-          '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-          '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+          '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
       requestAnimationFrame(() => {
         _positionTooltip(target);
@@ -2498,7 +2481,7 @@ async function _cmdTourCompare(args, ctx) {
   tooltip.innerHTML =
     '<div class="tour-text">Click <b>Start</b> when ready — it will probe the models before beginning.</div>' +
     '<div class="tour-nav">' +
-      '<button class="tour-btn-skip" data-act="skip">skip</button>' +
+      '<button class="ow-btn ow-btn-plain" data-act="skip">skip</button>' +
     '</div>';
   // Anchor the tooltip next to the actual "Start" button so
   // the user's eye is drawn to the next click. Halo on it too so it
@@ -2590,15 +2573,7 @@ async function _cmdTourCookbook(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -2711,9 +2686,9 @@ async function _cmdTourCookbook(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-          '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-          '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+          '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
       requestAnimationFrame(() => {
         _positionTooltip(target, placement);
@@ -2816,15 +2791,7 @@ async function _cmdTourTheme(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -2948,9 +2915,9 @@ async function _cmdTourTheme(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           _positionTooltip(target, placement);
@@ -3062,15 +3029,7 @@ async function _cmdTourSettings(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -3192,9 +3151,9 @@ async function _cmdTourSettings(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           _positionTooltip(target, placement);
@@ -3295,15 +3254,7 @@ async function _cmdTourGallery(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -3424,9 +3375,9 @@ async function _cmdTourGallery(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           _positionTooltip(target, placement);
@@ -3508,15 +3459,7 @@ async function _cmdTourNotes(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -3637,9 +3580,9 @@ async function _cmdTourNotes(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           _positionTooltip(target, placement);
@@ -3710,15 +3653,7 @@ async function _cmdTourBrain(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -3837,9 +3772,9 @@ async function _cmdTourBrain(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           _positionTooltip(target, placement);
@@ -3928,15 +3863,7 @@ async function _runTaskTour(steps, doneText, opts) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -4026,9 +3953,9 @@ async function _runTaskTour(steps, doneText, opts) {
         tooltip.innerHTML =
           '<div class="tour-text">' + step.text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="tour-btn-arrow' + (i === 0 ? ' disabled' : '') + '" data-act="back">←</button>' +
-            '<button class="tour-btn-skip" data-act="skip">' + (i === steps.length - 1 ? 'done' : 'skip tour') + '</button>' +
-            '<button class="tour-btn-arrow" data-act="next">' + (i === steps.length - 1 ? '✓' : '→') + '</button>' +
+            '<button class="ow-btn' + (i === 0 ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn ow-btn-plain" data-act="skip">' + (i === steps.length - 1 ? 'done' : 'skip tour') + '</button>' +
+            '<button class="ow-btn ow-btn-prominent" data-act="next">' + (i === steps.length - 1 ? '✓' : '→') + '</button>' +
           '</div>';
         requestAnimationFrame(() => {
           positionTooltip(target);
@@ -4063,8 +3990,8 @@ async function _runTaskTour(steps, doneText, opts) {
     tooltip.innerHTML =
       '<div class="tour-text">' + (opts.continueText || 'Want to keep going?') + '</div>' +
       '<div class="tour-nav">' +
-        '<button class="tour-btn-skip" data-act="stop">no thanks</button>' +
-        '<button class="tour-btn-arrow" data-act="continue">' + opts.continueLabel + '</button>' +
+        '<button class="ow-btn ow-btn-plain" data-act="stop">no thanks</button>' +
+        '<button class="ow-btn ow-btn-prominent" data-act="continue">' + opts.continueLabel + '</button>' +
       '</div>';
     // Centered in the upper third of the viewport.
     tooltip.style.visibility = 'hidden';
@@ -4154,15 +4081,7 @@ async function _cmdTourResearch(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -4274,9 +4193,9 @@ async function _cmdTourResearch(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-          '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-          '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+          '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
       requestAnimationFrame(() => {
         _positionTooltip(target, placement);
@@ -4368,15 +4287,7 @@ async function _cmdTourLibrary(args, ctx) {
       'opacity:0;transform:translateY(4px);transition:opacity 0.3s ease-out,transform 0.3s ease-out}' +
       '#tour-tooltip.tour-fade-in{opacity:1;transform:translateY(0)}' +
       '#tour-tooltip .tour-text{margin-bottom:8px;opacity:0.8}' +
-      '.tour-nav{display:flex;align-items:center;justify-content:space-between}' +
-      '.tour-nav button{background:none;border:1px solid var(--border);color:var(--fg);' +
-      'cursor:pointer;font-family:inherit;border-radius:4px;transition:all .1s}' +
-      '.tour-nav button:hover{background:color-mix(in srgb,var(--fg) 8%,transparent)}' +
-      '.tour-btn-arrow{font-size:1rem;padding:4px 12px;opacity:0.6}' +
-      '.tour-btn-arrow:hover{opacity:1}' +
-      '.tour-btn-arrow.disabled{opacity:0.15;pointer-events:none}' +
-      '.tour-btn-skip{font-size:0.72rem;padding:3px 10px;opacity:0.35;border-color:transparent!important}' +
-      '.tour-btn-skip:hover{opacity:0.6}';
+      '.tour-nav{display:flex;align-items:center;justify-content:space-between}';
     document.head.appendChild(s);
   }
 
@@ -4490,9 +4401,9 @@ async function _cmdTourLibrary(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="tour-btn-arrow' + (isFirst ? ' disabled' : '') + '" data-act="back">←</button>' +
-          '<button class="tour-btn-skip" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
-          '<button class="tour-btn-arrow" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
+          '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
       requestAnimationFrame(() => {
         _positionTooltip(target, placement);
