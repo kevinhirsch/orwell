@@ -236,6 +236,13 @@ _SYSTEM = (
     "one tie.\n"
     "COHERE every houseguest's name, look, hometown, vocation, and age with each other and with the "
     "season brief. Make the cast reflect a real, diverse American crew. Assign EVERY id in the roster.\n"
+    "IDENTITY COHERENCE (HARD — a contradiction is REJECTED): pin each houseguest's gender presentation "
+    "FIRST, then keep EVERY self-reference consistent with it. Within a SINGLE houseguest, NEVER mix "
+    "masculine and feminine pronouns for that same person across their identity, biography, appearance, "
+    "and secrets (no 'her shyness' beside 'his forearm'). Keep their age consistent with their life story "
+    "(do not write 'spent thirty years' or 'grandmother' for someone in their twenties), and keep their "
+    "stated occupation the same throughout (the biography and secrets must not name a different job than "
+    "the vocation).\n"
     "OUTPUT CONTRACT (HARD): reply with a SINGLE raw JSON object and NOTHING else — no prose, no "
     "markdown, no ```json fences, no preamble. The first character MUST be '{' and the last MUST be '}'."
 )
@@ -359,6 +366,31 @@ def _salvage_truncated_npcs(text: str) -> Optional[dict]:
     if not entries:
         return None
     return {"npcs": entries}
+
+
+def recover_reasoning_channel_json(reasoning: str) -> Optional[str]:
+    """S3b (RC4): recover a genesis/authoring JSON payload the model MISROUTED into the reasoning
+    channel. glm-4.7 (and other reasoners) sometimes emit the whole answer as ``reasoning``/``thinking``
+    deltas and leave the visible body EMPTY — even with ``reasoning:{enabled:false}`` sent (verified in
+    the live bundle: 6 NPCs fell to the floor because the parser read ``''`` while the JSON sat in the
+    reasoning channel). Rather than discard paid-for content, we strict-scan the reasoning text for a
+    parseable JSON object (the balanced-brace extractor, then the truncation salvage) and return the
+    recovered JSON STRING so the normal parser can consume it. Returns ``None`` when the reasoning holds
+    no usable JSON object (then the caller keeps the empty visible body ⇒ the deterministic floor stands).
+
+    The RED-eligible ``reasoning-channel-misroute`` health event is recorded by the CALLER (which holds
+    the owner + call-class context); this helper is a pure detector."""
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return None
+    obj = _extract_json(reasoning)
+    if obj is None:
+        obj = _salvage_truncated_npcs(reasoning)
+    if obj is None:
+        return None
+    try:
+        return json.dumps(obj, ensure_ascii=False)
+    except (ValueError, TypeError):
+        return None
 
 
 def _clean_str(v, max_len: int = 500) -> Optional[str]:
@@ -497,12 +529,104 @@ def _reroll_feedback(violations: list) -> Optional[str]:
 LlmFn = Callable[[list[dict]], Awaitable[str]]
 WriteFn = Callable[[dict], Awaitable[dict]]
 
+#: S3c (RC3): the roster chunk size for the production genesis path. Splitting the 15-NPC sketch into
+#: smaller per-chunk completions (3×5) makes any ONE call far less likely to end finish_reason=length
+#: (each chunk is ~5× smaller than the whole skeleton), and a failing chunk is retried ALONE instead of
+#: re-grinding the whole cast. The per-chunk proposals are combined into ONE atomic write-back so the
+#: engine still validates the whole cast at once (its cross-cast name dedupe + tie sanity stay
+#: authoritative). ``seed_cast_genesis`` defaults to NO chunking (one whole-cast call) so direct-call
+#: unit tests stay byte-identical; the live ``_run_genesis_once`` opts in.
+GENESIS_CHUNK_SIZE = 5
 
-async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: WriteFn) -> dict:
-    """Propose the WHOLE cast skeleton in ONE sketch call → parse → write back (recordCastGenesis) →
-    bounded re-roll (≤GENESIS_MAX_REROLLS), echoing the engine's structured re-roll violations back to the
-    model. Best-effort + fail-soft: any failure leaves the engine's deterministic FLOOR cast in place
+
+async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, valid_ids: set,
+                                   feedback: Optional[str], chunk_size: int) -> dict:
+    """S3c: gather a whole-cast proposal by sketching the roster in CHUNKS (default 5 NPCs each), then
+    COMBINE the per-chunk proposals into one ``{npcs, ties}`` for a single atomic write-back. Each chunk
+    is proposed with ONLY its own ids valid (so a chunk can't hallucinate a sibling slot), a FAILED chunk
+    is retried ONCE alone (strict-JSON), and names are de-duped across chunks (a colliding name field is
+    dropped so the engine floors that slot — its authoritative dedupe still runs). A chunk that fails both
+    tries is skipped (the engine floors its slots). Ties are combined, kept sparse (≤ budget), and no NPC
+    is allowed into two ties. Returns the combined proposal, or ``{}`` when EVERY chunk failed."""
+    ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
+    chunks = [roster[i:i + chunk_size] for i in range(0, len(roster), chunk_size)] if roster else []
+    combined_npcs: list = []
+    combined_ties: list = []
+    used_given: set = set()
+    used_surname: set = set()
+    used_full: set = set()
+    tied: set = set()
+    any_ok = False
+    for ci, chunk in enumerate(chunks):
+        chunk_ids = {str(n.get("id")) for n in chunk if isinstance(n, dict) and n.get("id")}
+        if not chunk_ids:
+            continue
+        messages = build_genesis_messages(chunk, brief, feedback)
+        try:
+            text = await llm_fn(messages)
+        except Exception as e:
+            logger.warning(f"[cast-genesis] chunk {ci} llm failed: {e}")
+            text = ""
+        prop = parse_genesis_proposal(text or "", chunk_ids)
+        if not prop:
+            # Retry ONLY this failed chunk once (strict-JSON) — never re-grind the whole cast.
+            try:
+                text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
+            except Exception as e:
+                logger.warning(f"[cast-genesis] chunk {ci} strict retry failed: {e}")
+                text = ""
+            prop = parse_genesis_proposal(text or "", chunk_ids)
+        if not prop:
+            logger.info(f"[cast-genesis] chunk {ci} produced nothing usable — the engine floors its slots")
+            continue
+        any_ok = True
+        for npc in prop.get("npcs") or []:
+            name = npc.get("name")
+            if isinstance(name, str) and name.strip():
+                toks = name.strip().lower().split()
+                given = toks[0] if toks else ""
+                surname = toks[-1] if toks else ""
+                full = name.strip().lower()
+                if full in used_full or (given and given in used_given) or (surname and surname in used_surname):
+                    npc.pop("name", None)  # cross-chunk collision — drop the name; the engine floors it
+                else:
+                    used_full.add(full)
+                    if given:
+                        used_given.add(given)
+                    if surname:
+                        used_surname.add(surname)
+            combined_npcs.append(npc)
+        for tie in prop.get("ties") or []:
+            if len(combined_ties) >= GENESIS_TIE_BUDGET:
+                break
+            a = tie.get("a")
+            b = tie.get("b")
+            if not a or not b or a == b or a in tied or b in tied:
+                continue  # no NPC in two ties (sparse-by-design)
+            combined_ties.append(tie)
+            tied.add(a)
+            tied.add(b)
+    if not any_ok or not combined_npcs:
+        return {}
+    out: dict = {"npcs": combined_npcs}
+    if combined_ties:
+        out["ties"] = combined_ties[:GENESIS_TIE_BUDGET]
+    logger.info(f"[cast-genesis] chunked gather combined {len(combined_npcs)} of {len(ids)} "
+                f"houseguest proposal(s) across {len(chunks)} chunk(s)")
+    return out
+
+
+async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: WriteFn,
+                            *, chunk_size: Optional[int] = None) -> dict:
+    """Propose the WHOLE cast skeleton → parse → write back (recordCastGenesis) → bounded re-roll
+    (≤GENESIS_MAX_REROLLS), echoing the engine's structured re-roll violations back to the model.
+    Best-effort + fail-soft: any failure leaves the engine's deterministic FLOOR cast in place
     (byte-neutral). Returns ``{committed, accepted, varianceOk, rerolls, reason?}`` — Vault-free counts.
+
+    ``chunk_size`` (S3c/RC3): when set (e.g. 5), the sketch is gathered in CHUNKS — smaller completions
+    that rarely truncate, with a failed chunk retried alone — then combined into ONE atomic write-back.
+    ``None`` (the default) keeps the single whole-cast call (byte-identical to before; the live path opts
+    into chunking, direct-call unit tests do not).
 
     PLAYER-BLIND: the roster is the warmed FLOOR cast's Vault-free cards; only the IDS are used to bind
     proposals — no player field is threaded in, and the model never sees the floor identities."""
@@ -512,28 +636,36 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
     brief = generate_season_brief(seed)
     feedback: Optional[str] = None
     best = {"committed": 0, "accepted": False, "varianceOk": True, "rerolls": 0, "reason": "no-usable-proposal"}
+    _chunked = isinstance(chunk_size, int) and 0 < chunk_size < len(valid_ids)
     for attempt in range(1 + GENESIS_MAX_REROLLS):
-        messages = build_genesis_messages(roster, brief, feedback)
-        try:
-            text = await llm_fn(messages)
-        except Exception as e:  # the model can fail — carry on, the floor stands
-            logger.warning(f"[cast-genesis] llm failed (attempt {attempt}): {e}")
-            best["reason"] = "llm-failed"
-            break
-        proposal = parse_genesis_proposal(text or "", valid_ids)
-        if not proposal:
-            # No parseable/usable proposal — one strict-JSON reparse retry, then fall to the floor.
-            if attempt == 0:
-                try:
-                    text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
-                except Exception as e:
-                    logger.warning(f"[cast-genesis] strict-json retry failed: {e}")
-                    text = ""
-                proposal = parse_genesis_proposal(text or "", valid_ids)
+        if _chunked:
+            proposal = await _gather_chunked_proposal(roster, brief, llm_fn, valid_ids, feedback, chunk_size)
             if not proposal:
-                logger.debug("[cast-genesis] nothing usable proposed — keeping the deterministic floor")
+                logger.debug("[cast-genesis] every chunk failed — keeping the deterministic floor")
                 best["reason"] = "no-usable-proposal"
                 break
+        else:
+            messages = build_genesis_messages(roster, brief, feedback)
+            try:
+                text = await llm_fn(messages)
+            except Exception as e:  # the model can fail — carry on, the floor stands
+                logger.warning(f"[cast-genesis] llm failed (attempt {attempt}): {e}")
+                best["reason"] = "llm-failed"
+                break
+            proposal = parse_genesis_proposal(text or "", valid_ids)
+            if not proposal:
+                # No parseable/usable proposal — one strict-JSON reparse retry, then fall to the floor.
+                if attempt == 0:
+                    try:
+                        text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
+                    except Exception as e:
+                        logger.warning(f"[cast-genesis] strict-json retry failed: {e}")
+                        text = ""
+                    proposal = parse_genesis_proposal(text or "", valid_ids)
+                if not proposal:
+                    logger.debug("[cast-genesis] nothing usable proposed — keeping the deterministic floor")
+                    best["reason"] = "no-usable-proposal"
+                    break
         try:
             res = await write_fn(proposal)
         except Exception as e:
@@ -752,7 +884,10 @@ async def _run_genesis_once(roster: list, seed: int, owner: Optional[str], *,
     async def _write(proposal: dict) -> dict:
         return await orwell_engine.record_cast_genesis(proposal, user=owner)
 
-    result = await seed_cast_genesis(roster, seed, llm_fn, write or _write)
+    # S3c: the LIVE path chunks the roster (3×5) — smaller completions rarely truncate, and a failed
+    # chunk is retried alone instead of re-grinding the whole cast (RC3). The combined proposal is still
+    # written back in one atomic call (the engine's cross-cast dedupe + variance floor stay authoritative).
+    result = await seed_cast_genesis(roster, seed, llm_fn, write or _write, chunk_size=GENESIS_CHUNK_SIZE)
     # STRICT: a run that committed NOTHING (all already logged inside seed_cast_genesis) is ledgered
     # loudly + latches the pre-finalize gate. Soft: byte-identical legacy silent floor.
     if isinstance(result, dict) and result.get("accepted") and int(result.get("committed") or 0) > 0:

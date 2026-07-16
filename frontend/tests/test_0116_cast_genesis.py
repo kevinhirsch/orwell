@@ -349,16 +349,19 @@ def test_run_genesis_is_idempotent_per_seed(monkeypatch):
         return {"accepted": True, "committed": len(proposal["npcs"]), "violations": [], "varianceOk": True}
 
     monkeypatch.setattr(G, "_resolve_llm_fn", _model)
+    # S3c: the LIVE path chunks the 15-NPC roster into ceil(15/GENESIS_CHUNK_SIZE) per-chunk sketch
+    # calls, so one committed run makes that many llm calls (not one whole-cast call).
+    per_run = -(-15 // G.GENESIS_CHUNK_SIZE)  # ceil
     r1 = _run(G.run_genesis(_ROSTER, 7, "u-idem", write=write))
     assert r1["accepted"] is True and r1["committed"] == 15
     assert G.genesis_committed("u-idem", 7) is True
     # A SECOND kick for the SAME warmed seed (the pre-finalize belt after the pre-warm already committed)
-    # is a no-op — no duplicate sketch call.
+    # is a no-op — no duplicate sketch call (the per-run count does NOT grow).
     r2 = _run(G.run_genesis(_ROSTER, 7, "u-idem", write=write))
-    assert r2["reason"] == "already-committed" and calls["llm"] == 1
-    # A DIFFERENT seed (a new season / re-warm) DOES re-run.
+    assert r2["reason"] == "already-committed" and calls["llm"] == per_run
+    # A DIFFERENT seed (a new season / re-warm) DOES re-run — another chunked pass.
     r3 = _run(G.run_genesis(_ROSTER, 99, "u-idem", write=write))
-    assert r3["committed"] == 15 and calls["llm"] == 2
+    assert r3["committed"] == 15 and calls["llm"] == 2 * per_run
     G.reset_state("u-idem")
 
 

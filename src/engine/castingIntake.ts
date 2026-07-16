@@ -280,3 +280,218 @@ export function castingFinalizable(intake: CastingIntake): boolean {
     CASTING_FINALIZE_ANY_OF.some((field) => captured(intake, field))
   );
 }
+
+// ── Dossier coherence validator (feature 0116 / RC5 — the single identity spine) ────────────────────
+//
+// A model-authored cast dossier (`castGenesis` skeleton + the `recordCastIdentity` gender facet + the
+// deep-authored `recordCastProfile` body) is assembled from THREE model calls, so a houseguest can ship
+// INTERNALLY CONTRADICTORY — the live bundle produced 5: `genderPresentation:'man'` alongside `she`/`her`
+// self-references and a `his forearm` mark (Lily Evans npc:13), a "spent thirty years / grandmother"
+// biography on a 22-year-old (Donna), and a public vocation that disagrees with the cover-story vocation
+// (concierge/bar, mortgage/teacher, home-aide/pharma). `portraitPrompts.ts` and the narration framing both
+// read ONLY the pinned `genderPresentation` pair (§S4a) — so a dossier whose PROSE disagrees with that pin
+// renders one sex while the narration voices the other.
+//
+// This validator is the enforcement spine: the pinned `genderPresentation` is authoritative, and every
+// SELF-REFERENTIAL field (appearance / demeanor / distinguishingMark / the structured physical facet) must
+// agree with it. It reject-or-repairs a dossier on a HARD contradiction and returns the fields to
+// RE-AUTHOR (never a full-cast re-roll — §S4b: re-author only the contradicting field once). Name /
+// ethnicity mismatches are SOFT flags only (may be a deliberate diversity choice — the engine allows the
+// name to disagree with the gender). Pure — no I/O, no rng, no Vault handle (it runs engine-side over an
+// already-assembled dossier; the optional `coverVocation` is passed IN by the caller, never read here).
+
+/** The dossier fields the coherence validator inspects. All are the assembled (post-commit) values. */
+export interface DossierForCoherence {
+  /** The PINNED identity spine — authoritative; every other field must agree with it. */
+  genderPresentation?: "man" | "woman" | "nonbinary";
+  /** Self-referential subject-descriptive prose (pronouns here describe THE SUBJECT). */
+  appearance?: string;
+  demeanor?: string;
+  distinguishingMark?: string;
+  /** The structured physical facet — its free-text members are self-referential too. */
+  physicalCharacteristics?: { distinguishingMark?: string; facialFeatures?: string; hair?: string; heightBuild?: string };
+  /** Third-party-prone prose — scanned only for age/year-span coherence, NOT hard pronoun rejection. */
+  biography?: string;
+  background?: string;
+  age?: number;
+  /** The public occupation. */
+  vocation?: string;
+  /** Engine-side only: the cover-story vocation the persona claims (passed in; a mismatch is HARD). */
+  coverVocation?: string;
+}
+
+export type CoherenceSeverity = "hard" | "soft";
+export interface CoherenceContradiction {
+  /** The dossier field that carries the contradiction (the one to re-author). */
+  field: string;
+  /** A short, Vault-free label of the rule it broke. */
+  rule: string;
+  severity: CoherenceSeverity;
+}
+
+export interface DossierCoherenceResult {
+  /** True iff NO hard contradiction exists — a dossier that fails this must be rejected/repaired. */
+  ok: boolean;
+  contradictions: CoherenceContradiction[];
+  /** The DISTINCT fields to re-author (hard contradictions only) — repair clears only these. */
+  repairFields: string[];
+}
+
+const MASC_PRONOUN_RE = /\b(he|him|his|himself)\b/i;
+const FEM_PRONOUN_RE = /\b(she|her|hers|herself)\b/i;
+
+/** Number-word → integer for the low tens the biographies actually use ("thirty years", …). */
+const TENS_WORDS: Readonly<Record<string, number>> = {
+  ten: 10, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+/** Extract every year-span count a biography states ("spent thirty years", "3 years", "a decade"). */
+function statedYearSpans(text: string): number[] {
+  const spans: number[] = [];
+  const lower = text.toLowerCase();
+  const digitRe = /(\d{1,3})[\s-]+years?\b/g;
+  for (let m = digitRe.exec(lower); m; m = digitRe.exec(lower)) spans.push(parseInt(m[1]!, 10));
+  const wordRe = /\b(ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-]+years?\b/g;
+  for (let m = wordRe.exec(lower); m; m = wordRe.exec(lower)) spans.push(TENS_WORDS[m[1]!]!);
+  const decadeRe = /\b(a|one)\s+decade\b/g;
+  for (let m = decadeRe.exec(lower); m; m = decadeRe.exec(lower)) spans.push(10);
+  const decadesRe = /\bdecades\b/g;
+  if (decadesRe.test(lower)) spans.push(20);
+  return spans;
+}
+
+/** A grandparent self-reference implausible for a young houseguest. */
+const GRANDPARENT_RE = /\bgrand(mother|father|ma|pa|parent|kids?|children)\b/i;
+/** Below this age a grandparent self-reference is treated as a hard contradiction. */
+const GRANDPARENT_MIN_AGE = 34;
+
+/** Strip stopwords + punctuation → the significant lowercase word set (for vocation overlap). */
+function significantWords(s: string): Set<string> {
+  const stop = new Set(["a", "an", "the", "of", "and", "at", "in", "for", "to", "on"]);
+  return new Set(
+    s.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length > 2 && !stop.has(w)),
+  );
+}
+
+/**
+ * Validate one assembled dossier for INTERNAL coherence against the pinned `genderPresentation` spine
+ * (§S4a/S4b). HARD contradictions (`ok === false`, the caller rejects/repairs):
+ *   (i)  a SELF-REFERENTIAL field carries a pronoun opposite the pinned gender (man + "her", woman +
+ *        "his"), OR a single field mixes BOTH masculine and feminine self-references (the subject is
+ *        called both he and she) — catches the Lily Evans object ('man' + "her shyness" + "his forearm");
+ *   (ii) a biography states a life/career span ≥ the age, or a grandparent self-reference on a young
+ *        houseguest (Donna: "spent thirty years / grandmother" at 22);
+ *   (iii) the public vocation shares NO significant word with the cover-story vocation (concierge/bar).
+ * SOFT flags (do not fail `ok`): name / ethnicity divergence is deliberate and never rejected here.
+ * Pure. Repair (per §S4b) re-authors ONLY the returned `repairFields`, never the whole cast.
+ */
+export function validateDossierCoherence(d: DossierForCoherence): DossierCoherenceResult {
+  const contradictions: CoherenceContradiction[] = [];
+  const gender = d.genderPresentation;
+
+  // (i) Pronoun coherence — SELF-REFERENTIAL fields only (a mark/appearance/demeanor pronoun is the
+  // subject; a biography can legitimately reference third parties, so it is NOT hard-scanned here).
+  const selfRefFields: Array<[string, string | undefined]> = [
+    ["appearance", d.appearance],
+    ["demeanor", d.demeanor],
+    ["distinguishingMark", d.distinguishingMark ?? d.physicalCharacteristics?.distinguishingMark],
+    ["physicalCharacteristics.facialFeatures", d.physicalCharacteristics?.facialFeatures],
+    ["physicalCharacteristics.hair", d.physicalCharacteristics?.hair],
+    ["physicalCharacteristics.heightBuild", d.physicalCharacteristics?.heightBuild],
+  ];
+  let anyMasc = false;
+  let anyFem = false;
+  const oppositeFields = new Set<string>();
+  const bothInOne = new Set<string>();
+  for (const [field, value] of selfRefFields) {
+    if (typeof value !== "string" || value.trim().length === 0) continue;
+    const masc = MASC_PRONOUN_RE.test(value);
+    const fem = FEM_PRONOUN_RE.test(value);
+    if (masc) anyMasc = true;
+    if (fem) anyFem = true;
+    if (masc && fem) bothInOne.add(field);
+    // Opposite-of-pin pronoun in a self-referential field ⇒ this field must be re-authored.
+    if (gender === "man" && fem) oppositeFields.add(field);
+    if (gender === "woman" && masc) oppositeFields.add(field);
+  }
+  for (const field of oppositeFields) {
+    contradictions.push({ field, rule: `self-referential pronoun contradicts genderPresentation '${gender}'`, severity: "hard" });
+  }
+  // A single self-referential field that names the subject as BOTH he and she is internally broken
+  // regardless of the pin (the mark says 'his', the appearance says 'her').
+  for (const field of bothInOne) {
+    if (oppositeFields.has(field)) continue;
+    contradictions.push({ field, rule: "field mixes masculine and feminine self-references", severity: "hard" });
+  }
+  // Cross-field: BOTH genders self-referenced across the object with NO pin to arbitrate — still a
+  // contradiction (the cast dossier calls one person he in one place and she in another). Only raise it
+  // when the pin didn't already catch it (else it double-reports the same defect).
+  if (anyMasc && anyFem && oppositeFields.size === 0 && bothInOne.size === 0) {
+    // Attribute it to the field(s) carrying the MINORITY pronoun — but with no pin we can't tell which
+    // is wrong, so re-author both the mark and the appearance (the self-referential prose).
+    const carriers = selfRefFields.filter(
+      ([, v]) => typeof v === "string" && (MASC_PRONOUN_RE.test(v) || FEM_PRONOUN_RE.test(v)),
+    ).map(([f]) => f);
+    for (const field of carriers) {
+      contradictions.push({ field, rule: "cast dossier self-references both masculine and feminine", severity: "hard" });
+    }
+  }
+
+  // (ii) Age vs biography year-spans + grandparent self-reference.
+  const bioText = [d.biography, d.background].filter((s): s is string => typeof s === "string" && s.length > 0).join(" ");
+  if (bioText && typeof d.age === "number" && Number.isFinite(d.age)) {
+    for (const span of statedYearSpans(bioText)) {
+      if (span >= d.age) {
+        contradictions.push({ field: "biography", rule: `states a ${span}-year span at age ${d.age}`, severity: "hard" });
+        break;
+      }
+    }
+    if (d.age < GRANDPARENT_MIN_AGE && GRANDPARENT_RE.test(bioText)) {
+      contradictions.push({ field: "biography", rule: `grandparent self-reference at age ${d.age}`, severity: "hard" });
+    }
+  }
+
+  // (iii) Public vocation vs the cover-story vocation (systemic mismatch). Both non-empty AND sharing no
+  // significant word ⇒ the persona claims a different job than the casting sheet (concierge vs bar).
+  if (typeof d.vocation === "string" && d.vocation.trim() && typeof d.coverVocation === "string" && d.coverVocation.trim()) {
+    const a = significantWords(d.vocation);
+    const b = significantWords(d.coverVocation);
+    const overlap = [...a].some((w) => b.has(w));
+    if (a.size > 0 && b.size > 0 && !overlap) {
+      contradictions.push({ field: "vocation", rule: "public vocation disagrees with the cover-story vocation", severity: "hard" });
+    }
+  }
+
+  const hard = contradictions.filter((c) => c.severity === "hard");
+  return {
+    ok: hard.length === 0,
+    contradictions,
+    repairFields: [...new Set(hard.map((c) => c.field))],
+  };
+}
+
+/**
+ * Apply the coherence repair (§S4b): return a COPY of the dossier with only the hard-contradiction
+ * fields cleared (`undefined`), so the caller re-authors exactly those — never the whole cast. The pinned
+ * `genderPresentation` spine is NEVER cleared (it is authoritative; the prose is what must agree with it).
+ * Pure. A dossier with no hard contradiction is returned structurally unchanged.
+ */
+export function repairDossierCoherence<T extends DossierForCoherence>(d: T): { repaired: T; repairedFields: string[] } {
+  const { repairFields } = validateDossierCoherence(d);
+  if (repairFields.length === 0) return { repaired: { ...d }, repairedFields: [] };
+  const out: Record<string, unknown> = { ...(d as Record<string, unknown>) };
+  for (const field of repairFields) {
+    // genderPresentation is the spine — never repaired. Nested facet fields (`a.b`) clear the leaf.
+    if (field === "genderPresentation") continue;
+    if (field.includes(".")) {
+      const [root, leaf] = field.split(".") as [string, string];
+      const nested = out[root];
+      if (nested && typeof nested === "object") {
+        out[root] = { ...(nested as Record<string, unknown>), [leaf]: undefined };
+      }
+    } else {
+      out[field] = undefined;
+    }
+  }
+  return { repaired: out as T, repairedFields: repairFields };
+}

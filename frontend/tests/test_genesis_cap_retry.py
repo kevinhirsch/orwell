@@ -365,7 +365,10 @@ def test_concurrent_genesis_kicks_share_one_in_flight_run(monkeypatch):
         return await asyncio.gather(t1, t2)
 
     r1, r2 = _run(_drive())
-    assert calls["llm"] == 1, "two concurrent kicks must share ONE sketch call"
+    # S3c: the live path chunks the roster, so ONE shared run makes ceil(15/CHUNK) chunk calls (not one);
+    # the point is the two kicks share that SINGLE run (else it'd be double — 2×per_run).
+    per_run = -(-15 // G.GENESIS_CHUNK_SIZE)
+    assert calls["llm"] == per_run, "two concurrent kicks must share ONE chunked run, not start a second"
     assert r1["committed"] == 15 and r2["committed"] == 15
     G.reset_state("u-flight")
 
