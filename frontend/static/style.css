@@ -5891,29 +5891,19 @@ body.bg-pattern-perlin-flow {
       letter-spacing:var(--win-titlebar-ls);
       color:var(--red);
     }
-    .close-btn,
-    .modal-close {
-      background:var(--bg);
-      color:var(--fg);
-      border:1px solid var(--fg);
-      font-size:12px;
-      width:24px;
-      height:24px;
-      padding:0;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      line-height:1;
-      text-indent:0;
-      cursor:pointer;
-      border-radius:4px;
-      line-height:1;
+    /* #1638 R4: modal/panel close × now composes the `.ow-btn .ow-btn-icon` kit
+       primitive (#1653) — flat transparent square, subtle radius, adaptive
+       `var(--fg)` ink, hover tint, focus ring and the coarse-pointer 44px floor
+       all come from the kit. `.close-btn` stays FIRST in the class list as the JS
+       hook (modalManager / keyboard-shortcuts / colorPicker / ui.js all
+       `querySelector('.close-btn')`). Only the modal-header-specific 24px size
+       residue stays here (the kit default is 30px; a close × docks beside the 24px
+       `.minimize-btn`, so it holds that scale via the kit's `--ow-btn-icon-size`
+       token). The bespoke bordered-box appearance + `.modal-close` (which no
+       element ever carried) are retired. */
+    .close-btn {
+      --ow-btn-icon-size: 24px;
       flex-shrink:0;
-    }
-    .close-btn:hover,
-    .modal-close:hover {
-      background:var(--fg);
-      color:var(--bg);
     }
     /* Minimize button — sits beside the close button on every modal */
     .minimize-btn {
