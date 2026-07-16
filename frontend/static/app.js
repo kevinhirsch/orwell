@@ -1390,6 +1390,16 @@ function initializeEventListeners() {
       autoSortNoaiBtn.addEventListener('click', (e) => { e.stopPropagation(); _runTidy(true); });
     }
 
+    // Keyboard a11y: these three Tidy controls are role="button" spans/divs (they live INSIDE the
+    // kit's menu-item <button>, so they cannot be native buttons — nested buttons are invalid).
+    // Enter/Space fires their click, mirroring native button activation.
+    ['auto-sort-sessions-btn', 'auto-sort-sessions-more', 'auto-sort-sessions-noai-btn'].forEach((id) => {
+      const _kb = el(id);
+      if (_kb) _kb.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _kb.click(); }
+      });
+    });
+
     // Apply a session sort mode (toggle the active one back to manual order).
     function _applySort(mode, label) {
       const current = sessionModule.getSortMode();
@@ -1423,9 +1433,12 @@ function initializeEventListeners() {
         { label: 'By Folder', onSelect: () => _applySort('group', 'By Folder') },
         { separator: true },
         { render: (row) => _renderTidyControl(row), keepOpen: true },
-        { separator: true },
       ];
       if (!_isNarrow()) {
+        // The Rearrange row + its leading separator only render on non-narrow viewports, so the
+        // separator lives INSIDE this block — otherwise a narrow menu shows a dangling separator
+        // between Tidy and Select.
+        items.push({ separator: true });
         items.push({
           label: 'Rearrange',
           checked: loadUIVis()['section-drag-reorder'] === true,
@@ -1477,6 +1490,7 @@ function initializeEventListeners() {
         return;
       }
       if (_sortKitTries++ < 50) setTimeout(_wireSortKits, 0);
+      else console.warn('[orwell] OrwellMenuKit never registered — sort menus are inert (check orwellMenu.js).');
     })();
   }
 
