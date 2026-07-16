@@ -365,6 +365,84 @@ def _biography_meets_floor(bio: str) -> bool:
     return len(bio) >= _BIO_MIN_CHARS and len(_SENTENCE_TERMINATORS.findall(bio)) >= _BIO_MIN_SENTENCES
 
 
+# ── F2 (#1660): the author-time WRITE-BACK coherence lint ──────────────────────────────────────
+#
+# The engine's RC5 belt (`enforceCastCoherence`/`validateDossierCoherence` in GameSessionAdapter +
+# castingIntake.ts) is the airtight net — it validates every committed dossier against its pinned
+# `genderPresentation` at SEASON START and strips/floors any contradicting field. This lint is the
+# EARLIER, per-NPC complement, at the ONE seam the issue names (the deep-authoring `recordCastProfile`
+# write-back): the moment a profile is parsed, BEFORE it commits, drop any self-referential field whose
+# prose contradicts the houseguest's PINNED identity (the `genderPresentation` set upstream by identity
+# seeding, and the pinned age — both authoritative here) and record a RED-eligible `identity-incoherence`
+# health event (#1599 — a real fault is surfaced even when auto-corrected). The dropped field then falls
+# to the engine's coherent seeded floor. This catches the bundle's gender-flip six (Lily/Jasmine/Veronica/
+# Bradley/Liam) + the age-flip (Donna) at authoring time instead of at game start. It is FE-only — it
+# touches no narrator prompt / tool schema / casting-finalize flow, so it does NOT stale the golden
+# fixture, and it fires ONLY on a genuine contradiction (a coherent cast ⇒ byte-identical no-op).
+#
+# Vault-free by construction: the recorded event names only the houseguest id + the dropped FIELD names,
+# never the prose or any hidden value.
+#
+# Pronoun scan (whole-word, case-insensitive). A biography legitimately names OTHER people (a spouse,
+# a parent), so the flip signal is deliberately conservative — a field is a "flip" only when the OPPOSITE
+# gender's pronouns appear AND the pinned gender's are ABSENT (the houseguest's own pronoun missing
+# entirely). A bio that merely mentions an opposite-gender relative still carries the subject's own
+# pronoun, so it never trips. `nonbinary` is skipped (they/them yields no clean binary signal).
+_MASC_PRONOUN = re.compile(r"\b(he|him|his|himself)\b", re.I)
+_FEM_PRONOUN = re.compile(r"\b(she|her|hers|herself)\b", re.I)
+# A young pinned age beside an elder self-descriptor in the biography (Donna: age 22 vs "retired
+# principal" / "thirty years"). Conservative markers: `retired`/`retiree` (rarely about others in a
+# self-bio) and a multi-decade career span (spelled thirty+ or a numeric 30+ years).
+_YOUNG_AGE_CEILING = 35
+_ELDER_LIFE_STAGE = re.compile(r"\b(retired|retiree)\b", re.I)
+_LONG_CAREER = re.compile(
+    r"\b(thirty|forty|fifty|sixty|seventy)\b[\s-]+years?\b|\b([3-9]\d)\s*[\s-]*years?\b", re.I)
+
+
+def _gender_flip(text: str, pin: str) -> bool:
+    """True iff `text` self-refers ONLY in the OPPOSITE gender to the pinned `genderPresentation`
+    (the opposite pronoun present AND the pinned-gender pronoun absent). Conservative to avoid a
+    false positive on a bio that merely mentions an opposite-gender relative."""
+    if not text:
+        return False
+    masc = bool(_MASC_PRONOUN.search(text))
+    fem = bool(_FEM_PRONOUN.search(text))
+    if pin == "man":
+        return fem and not masc
+    if pin == "woman":
+        return masc and not fem
+    return False
+
+
+def coherence_conflicts(profile: dict, npc: dict) -> list[str]:
+    """Return the TOP-LEVEL profile keys whose authored prose contradicts the houseguest's PINNED
+    identity in `npc` (`genderPresentation` + `age`, authoritative here) — the set the caller drops
+    before the `recordCastProfile` write-back so they fall to the coherent seeded floor. Empty list ⇒
+    coherent (the common case; a byte-identical no-op). Vault-free: returns field NAMES only.
+
+    Checks (cheap, in-object):
+      • biography — a self-referential gender flip, OR a young pinned age beside an elder self-descriptor;
+      • physicalCharacteristics — a distinguishingMark gender flip (the facet folds whole, so the WHOLE
+        facet is dropped to keep the engine's whole-or-nothing contract)."""
+    drop: set[str] = set()
+    pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
+    bio = profile.get("biography") if isinstance(profile.get("biography"), str) else ""
+    phys = profile.get("physicalCharacteristics")
+    mark = str(phys.get("distinguishingMark") or "") if isinstance(phys, dict) else ""
+
+    if pin in ("man", "woman"):
+        if _gender_flip(bio, pin):
+            drop.add("biography")
+        if _gender_flip(mark, pin):
+            drop.add("physicalCharacteristics")
+
+    age = (npc or {}).get("age")
+    if isinstance(age, (int, float)) and not isinstance(age, bool) and int(age) < _YOUNG_AGE_CEILING:
+        if bio and (_ELDER_LIFE_STAGE.search(bio) or _LONG_CAREER.search(bio)):
+            drop.add("biography")
+    return sorted(drop)
+
+
 def build_authoring_messages(npc: dict) -> list[dict]:
     """The producer prompt for ONE houseguest. Seeds the LLM with the houseguest's PUBLIC skeleton
     (name + whatever public facets the engine already exposes) and NOTHING about the player — the
@@ -698,6 +776,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
     floor_gaveup = 0      # M1-10: the per-season attempt cap is spent — give up loudly, stop calling
     floor_call_failed = 0  # RC6 S6c: the provider call RAISED (timeout/HTTP/network) — no completion body
+    coherence_stripped = 0  # F2 (#1660): NPCs whose authored dossier contradicted the pinned identity
     ukey = _safe_user(user)  # M1-10: the give-up ledger scope
 
     async def _call_with_retries(npc: dict, hid: str):
@@ -829,7 +908,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     async def _author_one(npc: dict) -> int:
         nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below, \
-            floor_gaveup, floor_call_failed
+            floor_gaveup, floor_call_failed, coherence_stripped
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
@@ -891,6 +970,33 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                         f"[cast-authoring] JSON parsed but all fields below the quality floor for {hid} "
                         "— keeping the seeded floor")
                 return 0
+            # F2 (#1660): author-time COHERENCE LINT — drop any field whose self-referential prose
+            # contradicts the pinned identity BEFORE the write-back, so the contradiction never
+            # commits (it falls to the engine's coherent seeded floor, which the RC5 belt then
+            # guarantees at game start). Record a RED-eligible `identity-incoherence` health event —
+            # a genuine fault surfaced even though auto-corrected (#1599). Vault-free: the id + the
+            # dropped FIELD names only, never the prose. A coherent dossier ⇒ no-op (byte-identical).
+            dropped = coherence_conflicts(profile, npc)
+            if dropped:
+                for k in dropped:
+                    profile.pop(k, None)
+                coherence_stripped += 1
+                logger.warning(
+                    f"[cast-authoring] authored dossier for {hid} contradicts the pinned identity "
+                    f"(dropped {', '.join(dropped)} to the coherent floor) — identity-incoherence")
+                try:
+                    from src import enrichment_policy
+                    enrichment_policy.record_runtime_failure(
+                        user, "identity-incoherence",
+                        f"authored dossier for {hid} contradicts the pinned identity — dropped "
+                        f"{', '.join(dropped)} to the coherent seeded floor before write-back")
+                except Exception:  # pragma: no cover - the health record must never break authoring
+                    pass
+                # Only the houseguestId survived the strip — nothing coherent left to write; the whole
+                # NPC falls to the seeded floor (already RED-recorded above).
+                if len(profile) <= 1:
+                    floor_below += 1
+                    return 0
             # #1057: the write-back is SERIALIZED + degradation-retried (it must not run concurrently
             # against the orchestrator integrity checkpoint).
             res = await _write_with_retries(profile, hid)
@@ -922,7 +1028,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
         f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
         f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor, "
-        f"{floor_gaveup} given-up, {floor_call_failed} call-failed)")
+        f"{floor_gaveup} given-up, {floor_call_failed} call-failed; "
+        f"{coherence_stripped} identity-incoherent field-strip(s))")
     # STRICT enrichment policy (owner directive 2026-07-11): any houseguest left on the deterministic
     # floor after the bounded retry ladder is a LOUD failure — an ERROR + an admin-visible ledger
     # entry (the #1313 house-entry gate is what blocks the flow itself). Under `soft` the tally above
