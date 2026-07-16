@@ -1101,6 +1101,10 @@ function _enterSelectMode() {
   _updateBulkCount();
 }
 
+// Public entry for the OrwellMenuKit session-sort "Select" item (#1638) — the kit item's
+// onSelect calls this to enter bulk-select mode.
+export function enterSelectMode() { if (!_selectMode) _enterSelectMode(); }
+
 function _exitSelectMode() {
   _selectMode = false;
   _selectedIds.clear();
@@ -1134,15 +1138,9 @@ function _initBulkSelect() {
   const cancelBtn = document.getElementById('session-bulk-cancel');
   if (cancelBtn) cancelBtn.addEventListener('click', () => _exitSelectMode());
 
-  // Select from funnel dropdown
-  const selectFromDropdown = document.getElementById('session-select-from-dropdown');
-  if (selectFromDropdown) {
-    selectFromDropdown.addEventListener('click', () => {
-      const dd = document.getElementById('session-sort-dropdown');
-      if (dd) dd.style.display = 'none';
-      _enterSelectMode();
-    });
-  }
+  // #1638: the "Select" affordance moved into the OrwellMenuKit session-sort menu (app.js
+  // buildSortItems -> sessionModule.enterSelectMode); the kit closes itself on select, so the
+  // old #session-select-from-dropdown row + its manual dropdown-hide is gone.
 
   // Escape exits select mode
   document.addEventListener('keydown', (e) => {
@@ -3077,7 +3075,8 @@ const sessionModule = {
   closeArchive,
   setSessionHasDocs,
   getSortMode,
-  setSortMode
+  setSortMode,
+  enterSelectMode
 };
 
 export { updateModelPicker };

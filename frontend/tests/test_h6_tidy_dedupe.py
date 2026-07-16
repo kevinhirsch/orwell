@@ -3,7 +3,7 @@
 Product-owner report, verbatim:
   "Under Chats > Tidy, there is another tidy that needs to be removed."
 
-The control is a split button inside the session-sort dropdown:
+The control is a split button inside the session-sort menu:
 
   [ * Tidy        | v ]   #auto-sort-sessions-btn  — the AI tidy (_runTidy(false))
   [ Clean up (no AI)  ]   #auto-sort-sessions-noai-btn — Phase-1 cleanup only
@@ -16,9 +16,16 @@ ONE coherent control: the main "Tidy" keeps its name; the sub-row is relabeled
 to what it actually does (the backend's skip_llm path deletes empty/throwaway
 sessions and never calls the LLM). Both paths stay wired through _runTidy(skipLlm).
 
-The runtime half (exactly one VISIBLE "Tidy" affordance in the rendered control,
-sub-row collapsed and expanded) lives in frontend/scripts/browser_smoke.py (the
-H6 block, anchored after the F3 sheets check).
+#1638 (2026-07-16): the session-sort dropdown migrated onto OrwellMenuKit. The bespoke
+`.dropdown.sort-dropdown` tray is gone; the plain sorts / Rearrange / Select are declarative
+kit items, and the Tidy split-control keeps its exact split-button + spinner layout as a
+DETACHED template (#session-sort-tidy-control) that the kit's render() escape hatch re-parents
+into a menu row on each open. The inner ids (#auto-sort-sessions-btn / -more / -noai-btn) are
+preserved, so the H6 dedupe intent is unchanged — only the markup ANCHOR moved from the tray
+to the template. The runtime half (exactly one VISIBLE "Tidy" affordance in the rendered
+control, sub-row collapsed and expanded, now asserted inside the kit `.ow-popover[role=menu]`
+surface) lives in frontend/scripts/browser_smoke.py (the H6 block, anchored after the F3
+sheets check).
 
 NOT in scope: #memory-tidy-btn — the memory-modal's own Tidy is a different
 feature and keeps its label.
@@ -37,10 +44,11 @@ def _read(path):
         return fh.read()
 
 
-def _sort_dropdown_block():
-    """The session-sort dropdown markup (the region that owns the control)."""
+def _tidy_control_block():
+    """The Tidy split-control template markup (#1638: the region that owns the control,
+    re-parented into the kit menu row at runtime via the render escape hatch)."""
     html = _read(INDEX)
-    start = html.index('id="session-sort-dropdown"')
+    start = html.index('id="session-sort-tidy-control"')
     end = html.index('id="session-bulk-bar"')
     return html[start:end]
 
@@ -52,17 +60,17 @@ def _visible_text(markup):
 
 # ── 1. the duplicate markup is gone ────────────────────────────────────────
 
-def test_sort_dropdown_reads_tidy_exactly_once():
-    text = _visible_text(_sort_dropdown_block())
+def test_sort_control_reads_tidy_exactly_once():
+    text = _visible_text(_tidy_control_block())
     hits = re.findall(r"\bTidy\b", text)
     assert len(hits) == 1, (
-        f"The session-sort dropdown must read 'Tidy' exactly once (found "
+        f"The session-sort Tidy control must read 'Tidy' exactly once (found "
         f"{len(hits)}) — the no-AI sub-row was a second bare 'Tidy' (H6)."
     )
 
 
 def test_noai_subrow_carries_its_own_distinct_label():
-    block = _sort_dropdown_block()
+    block = _tidy_control_block()
     m = re.search(
         r'id="auto-sort-sessions-noai-btn"[^>]*>(.*?)</div>', block, re.S
     )
@@ -79,13 +87,30 @@ def test_noai_subrow_carries_its_own_distinct_label():
 
 
 def test_main_tidy_and_its_options_chevron_remain():
-    block = _sort_dropdown_block()
+    block = _tidy_control_block()
     assert 'id="auto-sort-sessions-btn"' in block, "the main Tidy button must remain"
     assert re.search(r'class="auto-sort-icon">.*?\bTidy\b', block, re.S), (
         "the main control keeps its '★ Tidy' label (the one Tidy)"
     )
     assert 'id="auto-sort-sessions-more"' in block, (
         "the options chevron must remain — one coherent split control"
+    )
+
+
+def test_tidy_control_is_a_detached_kit_render_template():
+    # #1638: the control lives as a display:none template that the kit render() hatch
+    # re-parents into the menu row — NOT inside a bespoke .sort-dropdown tray anymore.
+    html = _read(INDEX)
+    assert 'id="session-sort-dropdown"' not in html, (
+        "the bespoke #session-sort-dropdown tray must be retired (kit owns the surface)"
+    )
+    js = _read(APP_JS)
+    assert re.search(r"function _renderTidyControl\(row\)", js), (
+        "the Tidy split-control must be re-parented into the kit row via _renderTidyControl"
+    )
+    assert re.search(r"render:\s*\(row\)\s*=>\s*_renderTidyControl\(row\),\s*keepOpen:\s*true", js), (
+        "buildSortItems must place the Tidy control through the kit's render() escape hatch "
+        "(keepOpen so the menu stays up while tidying)"
     )
 
 
@@ -107,10 +132,10 @@ def test_run_tidy_drives_both_paths():
         "_runTidy(skipLlm) is the single driver for both tidy paths"
     )
     assert re.search(
-        r"el\('auto-sort-sessions-btn'\)[\s\S]{0,120}_runTidy\(false\)", js
+        r"el\('auto-sort-sessions-btn'\)[\s\S]{0,200}_runTidy\(false\)", js
     ), "the main Tidy button must still run the AI path (_runTidy(false))"
     assert re.search(
-        r"autoSortNoaiBtn\.addEventListener\('click', \(\) => _runTidy\(true\)\)", js
+        r"autoSortNoaiBtn\.addEventListener\('click',[\s\S]{0,80}_runTidy\(true\)", js
     ), "the no-AI sub-row must still run the cleanup path (_runTidy(true))"
     assert re.search(r"\$\{API_BASE\}/api/sessions/auto-sort\$\{skipLlm \? '\?skip_llm=true' : ''\}", js), (
         "_runTidy still targets /api/sessions/auto-sort with the skip_llm flag"
@@ -131,6 +156,10 @@ def test_browser_smoke_carries_the_h6_runtime_gate():
     assert "H6: ONE visible Tidy affordance with the options sub-row closed" in smoke
     assert "H6: STILL exactly one visible 'Tidy' with the sub-row expanded" in smoke
     assert "H6: the revealed sub-row is the distinctly-labeled no-AI cleanup" in smoke
+    # #1638: the runtime gate now anchors on the kit surface, not the retired tray.
+    assert '.ow-popover[role="menu"] #auto-sort-sessions-noai-btn' in smoke, (
+        "the H6 runtime gate must read the Tidy sub-row inside the kit .ow-popover surface"
+    )
     # Anchored after the last pre-H6 check (the F3 sheet block), per the lane brief.
     # (H5 folded the social window into the sidebar, so the F3 block is finale-only
     # now and its label changed with it.)

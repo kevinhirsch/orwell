@@ -1286,74 +1286,57 @@ function initializeEventListeners() {
     })
     .catch(() => {});
 
-  // Session sort dropdown
+  // Session + model sort menus (#1638 — migrated onto OrwellMenuKit, consumers #3 + #5).
+  // The bespoke `.dropdown.sort-dropdown` trays are retired: the kit body-appends a
+  // `.ow-popover[role=menu]` surface and owns anchoring, escMenuStack dismissal (no more
+  // ad-hoc document-click/Escape handlers), and role=menu roving-keyboard a11y. The item
+  // sets are BUILD-DEPENDENT (active sort, rearrange state), so both wire through
+  // OrwellMenuKit.attach with the `() => items[]` builder form (re-evaluated on each open).
   const sortBtn = el('session-sort-btn');
-  const sortDropdown = el('session-sort-dropdown');
-  if (sortBtn && sortDropdown) {
-    sortBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      sortDropdown.style.display = sortDropdown.style.display === 'block' ? 'none' : 'block';
-    });
-    document.addEventListener('click', () => { sortDropdown.style.display = 'none'; });
-    sortDropdown.addEventListener('click', (e) => e.stopPropagation());
+  const modelSortBtn = el('model-sort-btn');
 
-    // Sort mode options (newest, oldest, last active) — toggleable
-    sortDropdown.querySelectorAll('.sort-option').forEach(opt => {
-      opt.addEventListener('click', () => {
-        const mode = opt.dataset.sort;
-        const current = sessionModule.getSortMode();
-        // Toggle: clicking the active sort reverts to manual
-        if (current === mode) {
-          sessionModule.setSortMode(null);
-          sortDropdown.style.display = 'none';
-          uiModule.showToast('Manual order');
-        } else {
-          sessionModule.setSortMode(mode);
-          sortDropdown.style.display = 'none';
-          uiModule.showToast(`Sorted: ${opt.textContent.trim().toLowerCase()}`);
-        }
-        _syncSortChecks();
-      });
-    });
+  // Narrow-viewport parity with the retired CSS: the session Rearrange row was hidden
+  // on mobile (touch-finicky), so the builder omits it there.
+  const _isNarrow = () => !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
 
-    // Sync checkmarks on sort options
-    function _syncSortChecks() {
-      const current = sessionModule.getSortMode();
-      sortDropdown.querySelectorAll('.sort-option').forEach(o => {
-        const check = o.querySelector('.sort-check') || document.createElement('span');
-        check.className = 'sort-check';
-        check.style.cssText = 'float:right;font-size:20px;line-height:1;position:relative;top:3px;color:var(--accent, var(--red));opacity:' + (o.dataset.sort === current ? '1' : '0');
-        check.textContent = '\u2022';
-        if (!o.querySelector('.sort-check')) o.appendChild(check);
-      });
-      // Highlight filter icon when a sort is active
-      if (sortBtn) sortBtn.classList.toggle('active', !!current);
-    }
-    // Sync on dropdown open + initial load
-    sortBtn.addEventListener('click', _syncSortChecks);
-    _syncSortChecks();
+  // Rearrange toggle behavior — shared by both sort menus' checkbox items.
+  function _toggleRearrange() {
+    const state = loadUIVis();
+    const wasOn = state['section-drag-reorder'] === true;
+    state['section-drag-reorder'] = !wasOn;
+    saveUIVis(state);
+    applyUIVis(state);
+    uiModule.showToast(!wasOn ? 'Rearrange enabled' : 'Rearrange disabled');
+  }
 
-    // AI auto-sort — spinner on the sort button itself. Used by both
-    // the main "★ Tidy" button (AI) and the sub-row "Clean up (no AI)"
-    // button (H6: Phase 1 cleanup only — never a second bare "Tidy"
-    // label) via the skipLlm flag.
+  if (sortBtn) {
+    // AI auto-sort — spinner on the sort button itself. Used by both the main "Tidy"
+    // (AI) and the sub-row "Clean up (no AI)" (H6: Phase 1 cleanup only — never a second
+    // bare "Tidy" label) via the skipLlm flag. Closes the kit menu on run.
+    // Guard against a double-click firing two destructive auto-sort POSTs (the no-AI
+    // skipLlm path DELETES chats). Set at entry, cleared in the finally on EVERY path
+    // (including a throw during spinner setup), so the flag can never wedge.
+    let _tidyInFlight = false;
     async function _runTidy(skipLlm) {
+      if (_tidyInFlight) return;
+      _tidyInFlight = true;
       const btnIcon = sortBtn.querySelector('.sort-icon');
-      if (btnIcon) btnIcon.style.display = 'none';
-      const wp = spinnerModule.create('', 'clean', 'whirlpool');
-      const wpEl = wp.createElement();
-      wpEl.style.cssText = 'width:13px;height:13px;display:inline-block;vertical-align:middle;margin-top:-5px;';
-      sortBtn.appendChild(wpEl);
-      wp.start();
-      sortDropdown.style.display = 'none';
+      let wp = null, wpEl = null;
       try {
+        if (btnIcon) btnIcon.style.display = 'none';
+        wp = spinnerModule.create('', 'clean', 'whirlpool');
+        wpEl = wp.createElement();
+        wpEl.style.cssText = 'width:13px;height:13px;display:inline-block;vertical-align:middle;margin-top:-5px;';
+        sortBtn.appendChild(wpEl);
+        wp.start();
+        try { if (window.OrwellMenuKit) window.OrwellMenuKit.closeAll(); } catch (_) {}
         const url = `${API_BASE}/api/sessions/auto-sort${skipLlm ? '?skip_llm=true' : ''}`;
         const res = await fetch(url, { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Auto-sort failed');
         if (data.status === 'ok') {
           sessionModule.setSortMode(null); // clear sort — tidy creates manual folder order
-          _syncSortChecks();
+          if (sortBtn) sortBtn.classList.remove('active');
           if (skipLlm) {
             // No-AI path: just report what got cleaned. No "unfiled
             // remaining" prompt because we never tried to file anything.
@@ -1382,46 +1365,136 @@ function initializeEventListeners() {
       } catch (e) {
         uiModule.showError('Auto-sort: ' + e.message);
       } finally {
-        wp.destroy();
-        if (wpEl.parentNode) wpEl.parentNode.removeChild(wpEl);
+        if (wp) wp.destroy();
+        if (wpEl && wpEl.parentNode) wpEl.parentNode.removeChild(wpEl);
         if (btnIcon) btnIcon.style.display = '';
+        _tidyInFlight = false;
       }
     }
 
+    // Wire the Tidy split-control's own listeners ONCE. The control is a detached template
+    // (#session-sort-tidy-control in index.html) that the kit render() hatch re-parents into
+    // the menu row on each open; the node — and these listeners — persist across opens. Cache
+    // the node refs here (while still attached) — after the first close the template is
+    // detached, so getElementById can no longer find it; the persistent refs still work.
+    const tidyControlTpl = el('session-sort-tidy-control');
     const autoSortBtn = el('auto-sort-sessions-btn');
-    if (autoSortBtn) autoSortBtn.addEventListener('click', () => _runTidy(false));
-
-    // Chevron next to the Tidy row toggles the no-AI sub-item.
-    const autoSortMoreBtn = el('auto-sort-sessions-more');
+    if (autoSortBtn) autoSortBtn.addEventListener('click', (e) => { e.stopPropagation(); _runTidy(false); });
+    const autoSortMoreBtn = el('auto-sort-sessions-more');   // the chevron reveals the no-AI sub-row
     const autoSortNoaiBtn = el('auto-sort-sessions-noai-btn');
     if (autoSortMoreBtn && autoSortNoaiBtn) {
       autoSortMoreBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        autoSortNoaiBtn.style.display = autoSortNoaiBtn.style.display === 'none' ? 'block' : 'none';
+        const _show = autoSortNoaiBtn.style.display === 'none';
+        autoSortNoaiBtn.style.display = _show ? 'block' : 'none';
+        autoSortMoreBtn.setAttribute('aria-expanded', _show ? 'true' : 'false');
       });
-      autoSortNoaiBtn.addEventListener('click', () => _runTidy(true));
+      autoSortNoaiBtn.addEventListener('click', (e) => { e.stopPropagation(); _runTidy(true); });
     }
+
+    // Keyboard a11y: these three Tidy controls are role="button" spans/divs (they live INSIDE the
+    // kit's menu-item <button>, so they cannot be native buttons — nested buttons are invalid).
+    // Enter/Space fires their click, mirroring native button activation.
+    ['auto-sort-sessions-btn', 'auto-sort-sessions-more', 'auto-sort-sessions-noai-btn'].forEach((id) => {
+      const _kb = el(id);
+      if (_kb) _kb.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _kb.click(); }
+      });
+    });
+
+    // Apply a session sort mode (toggle the active one back to manual order).
+    function _applySort(mode, label) {
+      const current = sessionModule.getSortMode();
+      if (current === mode) {
+        sessionModule.setSortMode(null);
+        uiModule.showToast('Manual order');
+      } else {
+        sessionModule.setSortMode(mode);
+        uiModule.showToast(`Sorted: ${label.toLowerCase()}`);
+      }
+      sortBtn.classList.toggle('active', !!sessionModule.getSortMode());
+    }
+    // Reflect any persisted active sort on the trigger at load.
+    sortBtn.classList.toggle('active', !!sessionModule.getSortMode());
+
+    // render() escape hatch: re-parent the persistent Tidy split-control into the kit row,
+    // re-collapsing the no-AI sub-row so every fresh open starts tidy.
+    function _renderTidyControl(row) {
+      if (!tidyControlTpl) return;
+      row.style.padding = '0';
+      row.style.display = 'block';
+      if (autoSortNoaiBtn) autoSortNoaiBtn.style.display = 'none';   // fresh open: sub-row collapsed
+      if (autoSortMoreBtn) autoSortMoreBtn.setAttribute('aria-expanded', 'false');
+      tidyControlTpl.style.display = 'block';
+      row.appendChild(tidyControlTpl);
+    }
+
+    function buildSortItems() {
+      const items = [
+        { label: 'Last Active', onSelect: () => _applySort('active', 'Last Active') },
+        { label: 'Newest First', onSelect: () => _applySort('newest', 'Newest First') },
+        { label: 'By Folder', onSelect: () => _applySort('group', 'By Folder') },
+        { separator: true },
+        { render: (row) => _renderTidyControl(row), keepOpen: true },
+      ];
+      if (!_isNarrow()) {
+        // The Rearrange row + its leading separator only render on non-narrow viewports, so the
+        // separator lives INSIDE this block — otherwise a narrow menu shows a dangling separator
+        // between Tidy and Select.
+        items.push({ separator: true });
+        items.push({
+          label: 'Rearrange',
+          checked: loadUIVis()['section-drag-reorder'] === true,
+          keepOpen: true,
+          onSelect: (it) => { _toggleRearrange(); it.checked = loadUIVis()['section-drag-reorder'] === true; },
+        });
+      }
+      items.push({ label: 'Select', onSelect: () => sessionModule.enterSelectMode() });
+      return items;
+    }
+    window._buildSortItems = buildSortItems;   // exposed for the #1638 browser gate
   }
 
-  // Model sort dropdown
-  const modelSortBtn = el('model-sort-btn');
-  const modelSortDropdown = el('model-sort-dropdown');
-  if (modelSortBtn && modelSortDropdown) {
-    modelSortBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      modelSortDropdown.style.display = modelSortDropdown.style.display === 'block' ? 'none' : 'block';
-    });
-    document.addEventListener('click', () => { modelSortDropdown.style.display = 'none'; });
-    modelSortDropdown.addEventListener('click', (e) => e.stopPropagation());
-    modelSortDropdown.querySelectorAll('.sort-option').forEach(opt => {
-      opt.addEventListener('click', () => {
-        const mode = opt.dataset.sort;
-        Storage.set('orwell-model-sort', mode);
-        if (modelsModule) modelsModule.refreshModels();
-        modelSortDropdown.style.display = 'none';
-        uiModule.showToast('Models sorted: ' + opt.textContent.trim().toLowerCase());
-      });
-    });
+  if (modelSortBtn) {
+    function _applyModelSort(mode, label) {
+      Storage.set('orwell-model-sort', mode);
+      if (modelsModule) modelsModule.refreshModels();
+      uiModule.showToast('Models sorted: ' + label.toLowerCase());
+    }
+    function buildModelSortItems() {
+      return [
+        { label: 'A-Z', onSelect: () => _applyModelSort('alpha', 'A-Z') },
+        { label: 'Last used', onSelect: () => _applyModelSort('last-used', 'Last used') },
+        { label: 'Most used', onSelect: () => _applyModelSort('most-used', 'Most used') },
+        { separator: true },
+        {
+          label: 'Rearrange',
+          checked: loadUIVis()['section-drag-reorder'] === true,
+          keepOpen: true,
+          onSelect: (it) => { _toggleRearrange(); it.checked = loadUIVis()['section-drag-reorder'] === true; },
+        },
+      ];
+    }
+    window._buildModelSortItems = buildModelSortItems;   // exposed for the #1638 browser gate
+  }
+
+  // Attach both triggers to OrwellMenuKit once the kit registers. orwellMenu.js is a sibling
+  // <script type="module"> that evaluates AFTER app.js, so retry until its global exists.
+  {
+    let _sortKitTries = 0;
+    (function _wireSortKits() {
+      if (window.OrwellMenuKit && typeof window.OrwellMenuKit.attach === 'function') {
+        if (sortBtn && window._buildSortItems) {
+          window.OrwellMenuKit.attach(sortBtn, window._buildSortItems, { ariaLabel: 'Sort chats', align: 'end' });
+        }
+        if (modelSortBtn && window._buildModelSortItems) {
+          window.OrwellMenuKit.attach(modelSortBtn, window._buildModelSortItems, { ariaLabel: 'Sort models', align: 'end' });
+        }
+        return;
+      }
+      if (_sortKitTries++ < 50) setTimeout(_wireSortKits, 0);
+      else console.warn('[orwell] OrwellMenuKit never registered — sort menus are inert (check orwellMenu.js).');
+    })();
   }
 
 
@@ -2659,32 +2732,11 @@ function initializeEventListeners() {
     document.body.classList.toggle('hide-thinking', state['show-thinking'] === false);
   }
 
-  // Rearrange toggles in session/model sort dropdowns
-  function syncRearrangeChecks() {
-    const on = loadUIVis()['section-drag-reorder'] === true;
-    document.querySelectorAll('.rearrange-toggle .rearrange-check').forEach(ch => {
-      ch.style.opacity = on ? '1' : '0';
-    });
-  }
-  document.querySelectorAll('.rearrange-toggle').forEach(toggle => {
-    toggle.addEventListener('click', () => {
-      const state = loadUIVis();
-      const wasOn = state['section-drag-reorder'] === true;
-      state['section-drag-reorder'] = !wasOn;
-      saveUIVis(state);
-      applyUIVis(state);
-      syncRearrangeChecks();
-      uiModule.showToast(!wasOn ? 'Rearrange enabled' : 'Rearrange disabled');
-      // Close the dropdown the toggle lives in — the sort dropdown's own
-      // click-stopPropagation means it won't close on its own.
-      const dd = toggle.closest('[id$="-sort-dropdown"]');
-      if (dd) dd.style.display = 'none';
-    });
-  });
-
-  // Esc exits rearrange mode (no matter where focus/mouse is) — matches the
-  // global Esc-cancels-select pattern. Capture phase so a sort dropdown that
-  // happens to be open doesn't swallow it first.
+  // Rearrange mode (section drag-reorder). #1638: the toggle now lives as a checkbox item
+  // inside each sort menu (buildSortItems / buildModelSortItems -> _toggleRearrange); the kit
+  // rebuilds that item's `checked` state on every open, so there is no bespoke DOM checkmark
+  // sync anymore. Esc still exits rearrange mode from anywhere (matches the global
+  // Esc-cancels-select pattern). Capture phase so an open sort menu never swallows it first.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!document.body.classList.contains('rearrange-mode')) return;
@@ -2694,15 +2746,8 @@ function initializeEventListeners() {
     state['section-drag-reorder'] = false;
     saveUIVis(state);
     applyUIVis(state);
-    syncRearrangeChecks();
     uiModule.showToast('Rearrange disabled');
   }, true);
-  // Sync checkmarks when dropdowns open
-  const _sessionSortBtn = el('session-sort-btn');
-  const _modelSortBtn = el('model-sort-btn');
-  if (_sessionSortBtn) _sessionSortBtn.addEventListener('click', syncRearrangeChecks);
-  if (_modelSortBtn) _modelSortBtn.addEventListener('click', syncRearrangeChecks);
-  syncRearrangeChecks();
 
   // ── Text-only emoji conversion ──
   // Regex matching most emoji codepoints (Emoji_Presentation + common sequences)
