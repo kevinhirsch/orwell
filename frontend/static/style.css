@@ -6791,11 +6791,6 @@ body.bg-pattern-perlin-flow {
       opacity: 0.35;
       font-weight: 400;
     }
-    /* Keyboard shortcut hints (⌘+Alt+D etc.) are meaningless on touch —
-       hide them in the per-chat actions menu on mobile. */
-    @media (max-width: 768px) {
-      .session-dropdown .dropdown-shortcut { display: none; }
-    }
     .dropdown-item-danger {
       color: var(--red) !important;
     }
@@ -6817,26 +6812,8 @@ body.bg-pattern-perlin-flow {
       outline: none;
     }
 
-    /* Session dropdown container */
-    .session-dropdown-menu {
-      position: fixed;
-      z-index: 1000;
-      display: none;
-      min-width: auto;
-      width: max-content;
-      padding: 4px;
-      animation: dropdown-in 0.15s ease-out;
-    }
-
-    /* Folder move submenu */
-    .session-folder-submenu {
-      position: fixed;
-      z-index: 1001;
-      display: none;
-      min-width: auto;
-      width: max-content;
-      padding: 4px;
-    }
+    /* .session-dropdown-menu / .session-folder-submenu retired — the session-row
+       action menu + folder submenu are OrwellMenuKit surfaces now (#1638 KM-W10). */
 
     .dropdown-divider {
       height: 1px;
@@ -17722,20 +17699,10 @@ button .spinner-whirlpool {
     transform: translateX(-50%);
   }
 }
-/* Mobile-only Cancel item appended to dropdowns (kebab/More menus). On
-   desktop outside-click closes them cleanly; on touch that's fiddly, so
-   give an explicit Cancel row. Visually separated from the action items
-   above by a top divider + slight muted color. */
-.dropdown-cancel-mobile { display: none; }
-@media (max-width: 768px) {
-  .dropdown-cancel-mobile {
-    display: flex;
-    border-top: 1px solid var(--border);
-    margin-top: 4px;
-    padding-top: 8px;
-    opacity: 0.85;
-  }
-}#email-lib-modal.email-lib-unread-active .doclib-modal-content {
+/* .dropdown-cancel-mobile retired — the session-row action menu is an
+   OrwellMenuKit surface (#1638 KM-W10); the kit anchors on every viewport and
+   owns outside-tap/Escape dismissal, so no bespoke mobile Cancel row. */
+#email-lib-modal.email-lib-unread-active .doclib-modal-content {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent, var(--red)) 22%, transparent),
     0 0 18px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent),

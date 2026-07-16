@@ -391,3 +391,46 @@ def test_terminal_submenu_select_collapses_the_whole_ancestor_tree():
     open_sub = _method_body(_MENU_CLASS, "_openSubmenu(rec) {")
     assert "parent: this" in open_sub, \
         "_openSubmenu must pass the owning menu as `parent` so the ancestor chain is walkable"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# 13. Batch-B consumer migration (KM-W10): sessions.js session-row + folder submenu +
+#     archive-row menus ride OrwellMenuKit; the shared _initDropdownDismiss is retired.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+SESSIONS = _read("static", "js", "sessions.js")
+
+
+def test_sessions_menus_use_the_kit():
+    # the session-row action menu wires the hamburger trigger through the kit …
+    assert "OrwellMenuKit.attach" in SESSIONS, \
+        "the session-row action menu must wire its trigger via OrwellMenuKit.attach"
+    # … the mobile long-press opener + the archive-row _showDropdown open through the kit …
+    assert "OrwellMenuKit.open" in SESSIONS, \
+        "the long-press + archive-row menus must open via OrwellMenuKit.open"
+    # … and the folder options are a kit SUBMENU of the session-row menu, not a bespoke
+    #   body-appended panel with its own toggle/position/listeners.
+    assert re.search(r"submenu:\s*\(\)\s*=>\s*_buildFolderSubmenuItems", SESSIONS), \
+        "the folder options must be an OrwellMenuKit submenu (_buildFolderSubmenuItems)"
+
+
+def test_initdropdowndismiss_is_retired_with_zero_callers():
+    # the shared display-toggle dismiss helper is GONE — the kit's escMenuStack seat owns
+    # outside-click + Escape now; neither the definition nor the call site survive.
+    assert "function _initDropdownDismiss" not in SESSIONS, \
+        "_initDropdownDismiss must be deleted (the kit owns dismissal)"
+    assert "_initDropdownDismiss()" not in SESSIONS, \
+        "the _initDropdownDismiss() call site must be removed (zero callers)"
+
+
+def test_sessions_retires_the_bespoke_dropdown_markup():
+    # the retired per-consumer classes are no longer emitted from sessions.js …
+    for cls in ("session-dropdown-menu", "session-folder-submenu", "dropdown-cancel-mobile"):
+        assert cls not in SESSIONS, f"sessions.js still emits the retired .{cls} markup"
+    # … the bespoke folder-submenu factory + the per-row body-appended dropdown handle are gone …
+    assert "buildFolderSubmenu(" not in SESSIONS, \
+        "the bespoke buildFolderSubmenu factory must be replaced by _buildFolderSubmenuItems"
+    assert "_sessionDropdown" not in SESSIONS, \
+        "the per-row body-appended dropdown handle (div._sessionDropdown) must be gone"
+    # … and the retired .session-dropdown-menu display-sweep dismissal is removed.
+    assert "querySelectorAll('.session-dropdown-menu" not in SESSIONS, \
+        "the .session-dropdown-menu display-sweep dismissal must be gone (kit owns dismissal)"

@@ -192,117 +192,54 @@ async function moveToFolder(sessionId, folderName) {
   renderSessionList();
 }
 
-/** Build the "Move to folder" submenu for a session dropdown. */
-function buildFolderSubmenu(sessionId, currentFolder, dropdown) {
-  const folders = getFolderNames();
+/**
+ * Build the "Move to folder" submenu ITEMS for a session's action menu.
+ * #1638 KM-W10: returns a flat OrwellMenuKit item array (used as the
+ * `submenu: () => …` of the "Move to folder" row). The kit owns the
+ * anchored side-placement, →/← nav, and outside-click dismissal — no bespoke
+ * body-appended submenu / position / listeners. The current folder carries a ✓.
+ */
+function _buildFolderSubmenuItems(sessionId, currentFolder) {
+  const items = [];
 
-  const moveItem = document.createElement('div');
-  moveItem.className = 'dropdown-item-compact';
-  moveItem.style.position = 'relative';
-  const _folderIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
-  moveItem.innerHTML = '<span class="dropdown-icon">' + _folderIcon + '</span><span>Move to folder</span>';
-
-  const sub = document.createElement('div');
-  sub.className = 'dropdown session-folder-submenu';
-
-  // "No folder" option
-  const noneOpt = document.createElement('div');
-  noneOpt.className = 'dropdown-item-compact';
-  if (!currentFolder) noneOpt.style.opacity = '0.5';
-  noneOpt.textContent = '(No folder)';
-  noneOpt.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await moveToFolder(sessionId, '');
-    dropdown.style.display = 'none';
-    sub.style.display = 'none';
+  // "(No folder)" — checked when the session currently has no folder.
+  items.push({
+    label: '(No folder)',
+    checked: !currentFolder,
+    onSelect: async () => { await moveToFolder(sessionId, ''); },
   });
-  sub.appendChild(noneOpt);
 
-  // Existing folders
-  folders.forEach(f => {
-    const opt = document.createElement('div');
-    opt.className = 'dropdown-item-compact';
-    if (f === currentFolder) opt.style.opacity = '0.5';
-    opt.textContent = f;
-    opt.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await moveToFolder(sessionId, f);
-      // Auto-flip to By Folder view so the user can see where the
-      // chat went, same as when creating a new folder.
+  // Existing folders — the current one is marked with the ✓ check.
+  getFolderNames().forEach(f => {
+    items.push({
+      label: f,
+      checked: f === currentFolder,
+      onSelect: async () => {
+        await moveToFolder(sessionId, f);
+        // Auto-flip to By Folder view so the user can see where the chat went.
+        setSortMode('group');
+      },
+    });
+  });
+
+  // "+ New Folder" — prompt for a name, then move + flip to By Folder.
+  items.push({
+    label: '+ New Folder',
+    onSelect: async () => {
+      const name = await styledPrompt('Name this folder:', {
+        title: 'New folder',
+        placeholder: 'e.g. Work, Research, Drafts',
+        confirmText: 'Create',
+      });
+      if (!name || !name.trim()) return;
+      await moveToFolder(sessionId, name.trim());
+      // Auto-flip to By Folder view so the user immediately sees the folder
+      // they just created — otherwise it disappears into the flat list.
       setSortMode('group');
-      dropdown.style.display = 'none';
-      sub.style.display = 'none';
-    });
-    sub.appendChild(opt);
+    },
   });
 
-  // "New folder" option
-  const newOpt = document.createElement('div');
-  newOpt.className = 'dropdown-item-compact';
-  newOpt.style.color = 'var(--accent-primary)';
-  newOpt.textContent = '+ New Folder';
-  newOpt.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const name = await styledPrompt('Name this folder:', {
-      title: 'New folder',
-      placeholder: 'e.g. Work, Research, Drafts',
-      confirmText: 'Create',
-    });
-    if (!name || !name.trim()) return;
-    await moveToFolder(sessionId, name.trim());
-    // Auto-flip to By Folder view so the user immediately sees the
-    // folder they just created — otherwise the new folder disappears
-    // into the flat list and looks like the action did nothing.
-    setSortMode('group');
-    dropdown.style.display = 'none';
-    sub.style.display = 'none';
-  });
-  sub.appendChild(newOpt);
-
-  moveItem.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (sub.style.display === 'block') {
-      sub.style.display = 'none';
-    } else {
-      const rect = moveItem.getBoundingClientRect();
-      const isMobile = isNarrow();
-      sub.style.top = '-9999px';
-      sub.style.display = 'block';
-      const subRect = sub.getBoundingClientRect();
-
-      if (isMobile) {
-        // On mobile: position below the dropdown, centered
-        const ddRect = dropdown.getBoundingClientRect();
-        sub.style.left = Math.max(8, ddRect.left) + 'px';
-        sub.style.width = Math.min(ddRect.width, window.innerWidth - 16) + 'px';
-        const topBelow = ddRect.bottom + 4;
-        if (topBelow + subRect.height > window.innerHeight) {
-          sub.style.top = Math.max(8, ddRect.top - subRect.height - 4) + 'px';
-        } else {
-          sub.style.top = topBelow + 'px';
-        }
-      } else {
-        // Desktop: to the right
-        sub.style.left = rect.right + 2 + 'px';
-        sub.style.width = '';
-        if (rect.top + subRect.height > window.innerHeight) {
-          sub.style.top = Math.max(2, window.innerHeight - subRect.height - 4) + 'px';
-        } else {
-          sub.style.top = rect.top + 'px';
-        }
-        // Clamp right edge
-        if (rect.right + 2 + subRect.width > window.innerWidth - 8) {
-          sub.style.left = Math.max(8, rect.left - subRect.width - 2) + 'px';
-        }
-      }
-    }
-  });
-
-  sub.addEventListener('click', (e) => e.stopPropagation());
-  document.addEventListener('click', () => { sub.style.display = 'none'; });
-  document.body.appendChild(sub);
-
-  return moveItem;
+  return items;
 }
 
 /** Create a single session list-item element. */
@@ -442,27 +379,14 @@ function createSessionItem(s) {
       _longPressed = true;
       // Haptic feedback if available
       if (navigator.vibrate) navigator.vibrate(30);
-      // Show the session dropdown directly (menu button is hidden on mobile)
-      const dd = div._sessionDropdown;
-      if (dd) {
-        // Close any other open dropdowns
-        document.querySelectorAll('.dropdown').forEach(d => { if (d !== dd) d.style.display = 'none'; });
-        const rect = div.getBoundingClientRect();
-        dd.style.position = 'fixed';
-        dd.style.left = rect.left + 'px';
-        dd.style.top = (rect.bottom + 4) + 'px';
-        dd.style.right = 'auto';
-        dd.style.display = 'block';
-        dd.style.zIndex = '1000';
-        // Clamp to viewport
-        requestAnimationFrame(() => {
-          const mr = dd.getBoundingClientRect();
-          if (mr.bottom > window.innerHeight - 8) dd.style.top = (rect.top - mr.height - 4) + 'px';
-          if (mr.right > window.innerWidth - 8) { dd.style.left = 'auto'; dd.style.right = '8px'; }
+      // Open the session actions menu anchored to the row (the menu button is
+      // hidden on mobile). #1638 KM-W10: the kit owns anchoring + dismissal.
+      if (window.OrwellMenuKit && window.OrwellMenuKit.open) {
+        window.OrwellMenuKit.closeAll();
+        window.OrwellMenuKit.open({
+          anchor: div, align: 'start', ariaLabel: 'Session actions',
+          items: _buildSessionMenuItems,
         });
-        // Close on tap outside
-        const close = (ev) => { if (!dd.contains(ev.target)) { dd.style.display = 'none'; document.removeEventListener('click', close, true); } };
-        setTimeout(() => document.addEventListener('click', close, true), 100);
       }
     }, 500);
   }, { passive: true });
@@ -485,66 +409,72 @@ function createSessionItem(s) {
     selectSession(s.id);
   });
 
-  // Create a dropdown menu button
+  // Session actions menu button — opened via the OrwellMenuKit action menu
+  // (#1638 KM-W10). The kit owns anchoring, dismissal (escMenuStack / Escape),
+  // roving keyboard nav, and aria; this row just supplies the declarative item
+  // list + action handlers. Replaces the bespoke body-appended dropdown and the
+  // hand-rolled position / flip / sweep block + _initDropdownDismiss.
   const menuBtn = document.createElement('button');
   menuBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
   menuBtn.title = 'Session actions';
   menuBtn.className = 'hamburger session-menu-btn';
 
-  // Create dropdown menu
-  const dropdown = document.createElement('div');
-  dropdown.className = 'dropdown session-dropdown session-dropdown-menu';
-
-  // Create menu items
-  const _icon = (svg) => `<span class="dropdown-icon">${svg}</span>`;
   const _renameIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
   const _archiveIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>';
   const _deleteIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
   const _copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const _folderIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
+  const _selectIcon = '<span style="font-size:16px;line-height:1;">●</span>';
 
-  const renameItem = document.createElement('div');
-  renameItem.className = 'dropdown-item-compact';
-  renameItem.innerHTML = _icon(_renameIcon) + '<span>Rename</span>';
+  // ── action handlers (the kit closes the menu on select — no manual dismiss) ──
 
-  const archiveItem = document.createElement('div');
-  archiveItem.className = 'dropdown-item-compact';
-  archiveItem.innerHTML = _icon(_archiveIcon) + '<span>Archive</span>';
-
-  const deleteItem = document.createElement('div');
-  deleteItem.className = 'dropdown-item-compact dropdown-item-danger';
-  deleteItem.innerHTML = _icon(_deleteIcon) + '<span>Delete</span><span class="dropdown-shortcut">' + _mod + '+Alt+D</span>';
-
-
-
-  dropdown.appendChild(renameItem);
-
-  // Star/Unstar item
-  if (!isOpenClaw) {
-    const _favIcon = s.is_important
-      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
-      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
-    const starItem = document.createElement('div');
-    starItem.className = 'dropdown-item-compact';
-    starItem.innerHTML = _icon(_favIcon) + '<span>' + (s.is_important ? 'Unfavorite' : 'Favorite') + '</span><span class="dropdown-shortcut">' + _mod + '+Alt+F</span>';
-    starItem.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const newVal = !s.is_important;
-      const fd = new FormData();
-      fd.append('important', newVal);
-      await fetch(`${API_BASE}/api/session/${s.id}/important`, { method: 'POST', body: fd });
-      s.is_important = newVal;
-      dropdown.style.display = 'none';
+  // Rename — inline-edit the session name in the sidebar row.
+  function _doRename() {
+    _forceSidebarOpen();
+    const sessionEl = document.querySelector(`.list-item[data-session-id="${s.id}"]`);
+    if (!sessionEl) return;
+    const nameSpan = sessionEl.querySelector('.grow');
+    if (!nameSpan || sessionEl.querySelector('.session-rename-input')) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = s.name || '';
+    input.className = 'session-rename-input';
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+    const _stopGuard = _guardSidebarDuringRename();
+    const commit = async () => {
+      const newName = input.value.trim();
+      if (newName && newName !== s.name) {
+        const fd = new FormData();
+        fd.append('name', newName);
+        await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'PATCH', body: fd });
+        s.name = newName;
+        uiModule.showToast('Renamed');
+      }
+      _forceSidebarOpen();
       renderSessionList();
+      _stopGuard();
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.removeEventListener('blur', commit); _forceSidebarOpen(); renderSessionList(); _stopGuard(); }
     });
-    dropdown.appendChild(starItem);
   }
 
-  const copyItem = document.createElement('div');
-  copyItem.className = 'dropdown-item-compact';
-  copyItem.innerHTML = _icon(_copyIcon) + '<span>Copy Chat</span>';
-  copyItem.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    dropdown.style.display = 'none';
+  // Favorite / Unfavorite.
+  async function _doFavorite() {
+    const newVal = !s.is_important;
+    const fd = new FormData();
+    fd.append('important', newVal);
+    await fetch(`${API_BASE}/api/session/${s.id}/important`, { method: 'POST', body: fd });
+    s.is_important = newVal;
+    renderSessionList();
+  }
+
+  // Copy the whole chat transcript to the clipboard.
+  async function _doCopy() {
     try {
       const res = await fetch(`${API_BASE}/api/history/${s.id}`);
       const data = await res.json();
@@ -571,131 +501,46 @@ function createSessionItem(s) {
         ta.remove();
       }
       uiModule.showToast('Chat copied to clipboard');
-    } catch (e) {
-      console.error('Copy chat failed:', e);
+    } catch (err) {
+      console.error('Copy chat failed:', err);
       uiModule.showError('Failed to copy chat');
-    }
-  });
-
-  // Rename is already appended above (line 393)
-
-  // "Select" — enter bulk select mode with this session pre-selected
-  if (!isOpenClaw) {
-    const selectMoreItem = document.createElement('div');
-    selectMoreItem.className = 'dropdown-item-compact';
-    selectMoreItem.innerHTML = _icon('<span style="font-size:16px;line-height:1;">●</span>') + '<span>Select</span>';
-    selectMoreItem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      dropdown.style.display = 'none';
-      _enterSelectMode();
-      const dot = div.querySelector('.session-select-cb');
-      if (dot) { dot._checked = true; dot.innerHTML = '●'; dot.style.opacity = '1'; dot.style.color = 'var(--accent, var(--red))'; _selectedIds.add(s.id); _updateBulkCount(); }
-    });
-    // On mobile, "Select" is the primary multi-pick action — put it at the top
-    // of the menu. On desktop keep its original position.
-    if (isNarrow()) {
-      dropdown.insertBefore(selectMoreItem, dropdown.firstChild);
-    } else {
-      dropdown.appendChild(selectMoreItem);
     }
   }
 
-  // Copy & Move to folder
-  const folderItem = buildFolderSubmenu(s.id, s.folder, dropdown);
-  dropdown.appendChild(copyItem);
-  dropdown.appendChild(folderItem);
+  // Enter bulk-select mode with this session pre-selected.
+  function _doSelect() {
+    _enterSelectMode();
+    const dot = div.querySelector('.session-select-cb');
+    if (dot) { dot._checked = true; dot.innerHTML = '●'; dot.style.opacity = '1'; dot.style.color = 'var(--accent, var(--red))'; _selectedIds.add(s.id); _updateBulkCount(); }
+  }
 
-  // Separator before destructive actions
-  const _sep = document.createElement('div');
-  _sep.style.cssText = 'height:1px;margin:3px 0;background:color-mix(in srgb,var(--border) 40%,transparent)';
-  dropdown.appendChild(_sep);
-
-  dropdown.appendChild(archiveItem);
-  dropdown.appendChild(deleteItem);
-
-  // Mobile-only Cancel — explicit close for touch users. CSS hides it on
-  // desktop (outside-click already dismisses cleanly there).
-  const _cancelIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-  const cancelItem = document.createElement('div');
-  cancelItem.className = 'dropdown-item-compact dropdown-cancel-mobile';
-  cancelItem.innerHTML = _icon(_cancelIcon) + '<span>Cancel</span>';
-  cancelItem.addEventListener('click', (e) => {
-    e.stopPropagation();
-    dropdown.style.display = 'none';
-  });
-  dropdown.appendChild(cancelItem);
-
-  // Add event listeners
-  menuBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Close any other open dropdowns
-    document.querySelectorAll('.dropdown').forEach(d => {
-      if (d !== dropdown) d.style.display = 'none';
-    });
-    // Toggle this dropdown
-    if (dropdown.style.display === 'block') {
-      dropdown.style.display = 'none';
-    } else {
-      // Position the dropdown using viewport coords
-      const rect = menuBtn.getBoundingClientRect();
-      dropdown.style.left = '';
-      dropdown.style.right = (window.innerWidth - rect.right) + 'px';
-      // Show off-screen first to measure height
-      dropdown.style.top = '-9999px';
-      dropdown.style.display = 'block';
-      const ddRect = dropdown.getBoundingClientRect();
-      // Flip above if not enough room below
-      if (rect.bottom + 2 + ddRect.height > window.innerHeight) {
-        dropdown.style.top = Math.max(2, rect.top - ddRect.height - 2) + 'px';
-      } else {
-        dropdown.style.top = rect.bottom + 2 + 'px';
-      }
-    }
-  });
-
-  renameItem.addEventListener('click', () => {
-    dropdown.style.display = 'none';
+  // Archive.
+  async function _doArchive() {
     _forceSidebarOpen();
-    // Find the session row's name span and start inline editing
-    const sessionEl = document.querySelector(`.list-item[data-session-id="${s.id}"]`);
-    if (!sessionEl) return;
-    const span = sessionEl.querySelector('.grow');
-    if (!span || sessionEl.querySelector('.session-rename-input')) return;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = s.name || '';
-    input.className = 'session-rename-input';
-    span.replaceWith(input);
-    input.focus();
-    input.select();
-    const _stopGuard = _guardSidebarDuringRename();
-    const commit = async () => {
-      const newName = input.value.trim();
-      if (newName && newName !== s.name) {
-        const fd = new FormData();
-        fd.append('name', newName);
-        await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'PATCH', body: fd });
-        s.name = newName;
-        uiModule.showToast('Renamed');
+    try {
+      const response = await fetch(`${API_BASE}/api/session/${s.id}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (response.ok) {
+        _forceSidebarOpen();
+        await loadSessions();
+        uiModule.showToast('Session archived');
+      } else {
+        throw new Error('Failed to archive session');
       }
-      _forceSidebarOpen();
-      renderSessionList();
-      _stopGuard();
-    };
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-      if (ev.key === 'Escape') { input.removeEventListener('blur', commit); _forceSidebarOpen(); renderSessionList(); _stopGuard(); }
-    });
-  });
+    } catch (error) {
+      console.error('Error archiving session:', error);
+      uiModule.showError('Failed to archive session');
+    }
+  }
 
-  deleteItem.addEventListener('click', async () => {
+  // Delete (destructive → the kit's danger row).
+  async function _doDelete() {
     if (s.is_important) {
       uiModule.showToast('Unfavorite before deleting');
-      dropdown.style.display = 'none';
       return;
     }
-    dropdown.style.display = 'none';
     if (!await uiModule.styledConfirm('Delete this session?', { confirmText: 'Delete', danger: true })) {
       _forceSidebarOpen();
       return;
@@ -727,36 +572,38 @@ function createSessionItem(s) {
       await fetch(`${API_BASE}/api/session/${s.id}`, { method: 'DELETE' });
     } catch (e) { /* network error — session may still exist server-side */ }
     await loadSessions();
-  });
+  }
 
-  archiveItem.addEventListener('click', async () => {
-    dropdown.style.display = 'none';
-    _forceSidebarOpen();
-    try {
-      const response = await fetch(`${API_BASE}/api/session/${s.id}/archive`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (response.ok) {
-        _forceSidebarOpen();
-        await loadSessions();
-        dropdown.style.display = 'none';
-        uiModule.showToast('Session archived');
-      } else {
-        throw new Error('Failed to archive session');
-      }
-    } catch (error) {
-      console.error('Error archiving session:', error);
-      uiModule.showError('Failed to archive session');
+  // Build the item list fresh each open (favorite label flips; folder list is live).
+  function _buildSessionMenuItems() {
+    const items = [];
+    items.push({ label: 'Rename', icon: _renameIcon, onSelect: _doRename });
+    let selectItem = null;
+    if (!isOpenClaw) {
+      const _favIcon = s.is_important
+        ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>'
+        : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+      items.push({ label: s.is_important ? 'Unfavorite' : 'Favorite', icon: _favIcon, shortcut: _mod + '+Alt+F', onSelect: _doFavorite });
+      selectItem = { label: 'Select', icon: _selectIcon, onSelect: _doSelect };
+      items.push(selectItem);
     }
-  });
+    items.push({ label: 'Copy Chat', icon: _copyIcon, onSelect: _doCopy });
+    items.push({ label: 'Move to folder', icon: _folderIcon, submenu: () => _buildFolderSubmenuItems(s.id, s.folder) });
+    items.push({ separator: true });
+    items.push({ label: 'Archive', icon: _archiveIcon, onSelect: _doArchive });
+    items.push({ label: 'Delete', icon: _deleteIcon, danger: true, shortcut: _mod + '+Alt+D', onSelect: _doDelete });
+    // On mobile, "Select" is the primary multi-pick action — hoist it to the top.
+    if (selectItem && isNarrow()) {
+      const idx = items.indexOf(selectItem);
+      if (idx > 0) { items.splice(idx, 1); items.unshift(selectItem); }
+    }
+    return items;
+  }
 
-  // Dropdowns are closed by the shared global listener (_initDropdownDismiss)
-
-  // Prevent dropdown from closing when clicking inside it
-  dropdown.addEventListener('click', (e) => {
-    e.stopPropagation();
-  });
+  // Wire the trigger — the kit toggles open/close and keeps aria-expanded in sync.
+  if (window.OrwellMenuKit && window.OrwellMenuKit.attach) {
+    window.OrwellMenuKit.attach(menuBtn, _buildSessionMenuItems, { align: 'end', ariaLabel: 'Session actions' });
+  }
 
   div.appendChild(span);
 
@@ -779,9 +626,6 @@ function createSessionItem(s) {
   }
 
   div.appendChild(menuBtn);
-  dropdown.addEventListener('click', (e) => e.stopPropagation());
-  document.body.appendChild(dropdown);
-  div._sessionDropdown = dropdown;
 
   return div;
 }
@@ -821,8 +665,9 @@ function _renderSessionListImpl() {
     }
   }
 
-  // Clean up any previous session dropdowns and folder submenus from body
-  document.querySelectorAll('.session-dropdown, .folder-submenu').forEach(d => d.remove());
+  // Close any open session action menu before re-rendering (the kit owns the
+  // body-level surface now — #1638 KM-W10; no per-row dropdowns to sweep).
+  if (window.OrwellMenuKit && window.OrwellMenuKit.closeAll) window.OrwellMenuKit.closeAll();
 
   const _frag = document.createDocumentFragment();
 
@@ -2393,7 +2238,6 @@ function _initAllDropdowns() {
     setPendingChat: (v) => { _pendingChat = v; },
     createDirectChat,
   });
-  _initDropdownDismiss();
   _initBulkSelect();
 }
 if (document.readyState === 'loading') {
@@ -2402,74 +2246,27 @@ if (document.readyState === 'loading') {
   _initAllDropdowns();
 }
 
-// Shared global listener to close all session dropdowns on click-away or Escape
-function _initDropdownDismiss() {
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('.session-dropdown-menu')) return;
-    document.querySelectorAll('.session-dropdown-menu').forEach(d => d.style.display = 'none');
-  });
-  // Watch the sidebar — when it's hidden (any path: hamburger, swipe, mobile
-  // collapse), close any open session dropdowns so they don't orphan over
-  // the page.
-  const _sb = document.getElementById('sidebar');
-  if (_sb) {
-    new MutationObserver(() => {
-      if (_sb.classList.contains('hidden')) {
-        document.querySelectorAll('.session-dropdown-menu, .folder-submenu').forEach(d => d.style.display = 'none');
-      }
-    }).observe(_sb, { attributes: true, attributeFilter: ['class'] });
-  }
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      document.querySelectorAll('.session-dropdown-menu').forEach(d => d.style.display = 'none');
-    }
-  });
-}
-
 // ──────────────────────────────────────────────
 // Shared: positioned dropdown menu
 // ──────────────────────────────────────────────
 
 /**
- * Show a dropdown menu anchored to a button, using the existing
- * .dropdown / .dropdown-item-compact / .session-dropdown-menu CSS.
- * Items: [{ label, action, danger? }]
+ * Show an action menu anchored to a button via OrwellMenuKit (#1638 KM-W10).
+ * The kit owns anchoring, dismissal (escMenuStack / Escape / outside-click),
+ * roving keyboard nav, and aria. Items: [{ label, action, danger? }].
  * Returns a close() function.
  */
 function _showDropdown(anchorEl, items) {
-  // Close any open archive dropdown
-  document.querySelectorAll('.session-dropdown-menu.archive-dd').forEach(d => d.remove());
-
-  const dd = document.createElement('div');
-  dd.className = 'dropdown session-dropdown-menu archive-dd';
-  for (const item of items) {
-    const row = document.createElement('div');
-    row.className = 'dropdown-item-compact' + (item.danger ? ' dropdown-item-danger' : '');
-    row.innerHTML = '<span>' + item.label + '</span>';
-    row.addEventListener('click', (e) => {
-      e.stopPropagation();
-      close();
-      item.action();
-    });
-    dd.appendChild(row);
-  }
-  document.body.appendChild(dd);
-
-  // Position using viewport coords (same pattern as session menus)
-  const rect = anchorEl.getBoundingClientRect();
-  dd.style.right = (window.innerWidth - rect.right) + 'px';
-  dd.style.top = '-9999px';
-  dd.style.display = 'block';
-  const ddRect = dd.getBoundingClientRect();
-  if (rect.bottom + 2 + ddRect.height > window.innerHeight) {
-    dd.style.top = Math.max(2, rect.top - ddRect.height - 2) + 'px';
-  } else {
-    dd.style.top = (rect.bottom + 2) + 'px';
-  }
-
-  function close() { dd.remove(); }
-  // Existing _initDropdownDismiss handles click-away + Escape for .session-dropdown-menu
-  return close;
+  if (!(window.OrwellMenuKit && window.OrwellMenuKit.open)) return () => {};
+  // Only one action menu at a time (mirrors the old single-archive-dropdown rule).
+  window.OrwellMenuKit.closeAll();
+  const menu = window.OrwellMenuKit.open({
+    anchor: anchorEl,
+    align: 'end',
+    ariaLabel: 'Actions',
+    items: items.map(i => ({ label: i.label, danger: !!i.danger, onSelect: i.action })),
+  });
+  return () => { try { menu.close('api'); } catch (_) {} };
 }
 
 
