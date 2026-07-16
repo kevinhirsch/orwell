@@ -2602,30 +2602,79 @@ def _overclaim_directive(outcome_label: str, live: dict) -> str:
 def _engine_truth_beat(live: dict) -> str:
     """The DETERMINISTIC engine-truth replacement beat — producer-voice, diegetic, states the REAL board
     (week / phase / pending). Emitted in place of a fabrication the model would not re-ground. Never a
-    raw error, never a number the player shouldn't see (closed-set public status only)."""
+    raw error, never a number the player shouldn't see (closed-set public status only).
+
+    Board-AWARE (finding 2): rather than a blanket "nothing has been crowned, nominated, or evicted"
+    — which is ITSELF false during a nominations/eviction phase — it names the POSITIVE closed-set
+    facts the live board actually holds (HOH, nominees, veto holder, evicted count, finished) and only
+    falls back to the generic no-ceremony line when the board holds none (premiere/empty). Public
+    projection only (the same {id,name} the House Status gadget renders); never a hidden field."""
     live = live if isinstance(live, dict) else {}
     phase = str(live.get("phase") or "").strip() or "the current beat"
     week = live.get("week")
     pending = live.get("pending")
     where = f"week {week}, the {phase} beat" if week is not None else f"the {phase} beat"
+    known = []
+    if live.get("hohName"):
+        known.append(f"{live['hohName']} is Head of Household")
+    if live.get("nomNames"):
+        known.append("on the block: " + ", ".join(live["nomNames"]))
+    if live.get("vetoHolderName"):
+        known.append(f"{live['vetoHolderName']} holds the Power of Veto")
+    _evicted = live.get("evicted")
+    if isinstance(_evicted, int) and _evicted > 0:
+        known.append(f"{_evicted} houseguest{'s' if _evicted != 1 else ''} evicted so far")
+    if live.get("finished"):
+        known.append("the season has already crowned its winner")
+    board = ("; ".join(known) if known
+             else "no ceremony has been called and nothing has been crowned, nominated, or evicted")
     tail = (f" The control room is waiting on your `{pending}` decision — that is the next real beat."
             if pending else " Nothing has been decided that the control room hasn't shown you.")
     return (
         "The live feeds settle back over the house. Right now the game sits at "
-        f"{where}: no ceremony has been called and nothing has been crowned, nominated, or evicted."
+        f"{where}: {board}."
         + tail + " Pick the scene back up from exactly where the house actually is."
     )
 
 
+# The CLOSED-SET outcome fields of a beat signature (phase / ceremony state / evicted / finished) —
+# the ones whose MOVEMENT proves a progression actually committed. Deliberately EXCLUDES room/present
+# (the once-per-turn off-screen presence tick shifts those every turn without any closed-set commit),
+# so "the board's outcome state did not move" is judged only on the fields a progression would change.
+_OUTCOME_SIG_FIELDS = ("phase", "hoh", "noms", "vetoHolder", "vetoUsed", "evicted", "finished")
+
+
+def _outcome_board_unmoved(before, live) -> bool:
+    """True iff we can PROVE the closed-set outcome state did NOT move this turn (a real turn-start
+    baseline exists and every outcome field is byte-identical to it). Absent a usable baseline it
+    returns False — we cannot prove non-movement, so the caller keeps the conservative stand-down."""
+    if not isinstance(before, dict) or not isinstance(live, dict) or not before:
+        return False
+    return all(before.get(k) == live.get(k) for k in _OUTCOME_SIG_FIELDS)
+
+
 async def _detect_ungrounded_overclaim(user, text: str, tools: set) -> tuple:
     """Return ``(directive, label)`` when `text` makes a CLOSED-SET overclaim the live board does not
-    back AND no progression tool fired this turn; else ``(None, None)``. The single decision used by
+    back AND no progression tool COMMITTED this turn; else ``(None, None)``. The single decision used by
     both `enforce_grounded_draft` and its post-regenerate re-check. Fail-open (returns no directive)."""
     try:
         if tools & _S2A_PROGRESSION_TOOLS:
-            # A progression tool fired — the board MAY legitimately hold the outcome; the before/after
-            # identity guards own that case. Never re-block a grounded outcome (S2a scope, ADR 0005 #1).
-            return (None, None)
+            # A progression tool fired — it is the ONLY way a closed-set outcome commits, so the board
+            # MAY legitimately hold the outcome and the before/after identity guards own that case.
+            # But the mere tool NAME is not proof it SUCCEEDED (finding 4): a failed/refused advance
+            # still appears in tool_events while the board never moved. So STAND DOWN only unless we can
+            # PROVE the outcome state did NOT move — a real turn-start baseline that is byte-identical to
+            # the live board. When it provably did not move, the progression did not commit ⇒ fall through
+            # and verify the claim. Absent a baseline we cannot prove non-movement ⇒ keep the historical
+            # stand-down (conservative, ADR 0005 #1 — never re-block a grounded outcome on uncertainty).
+            try:
+                _before_p = _LAST_BEAT_SIG.get(_desync_key(user))
+                _live_p = await _capture_beat_signature(user)
+            except Exception:
+                return (None, None)  # cannot read the board → cannot prove non-movement → stand down
+            if not _outcome_board_unmoved(_before_p, _live_p):
+                return (None, None)
+            # else: a progression tool fired but the outcome board is provably unmoved — verify below.
         has_outcome = _sentence_has_closed_set_claim(text)
         has_met = bool(_MET_EVERYONE_RE.search(text or ""))
         if not has_outcome and not has_met:
@@ -2645,15 +2694,32 @@ async def _detect_ungrounded_overclaim(user, text: str, tools: set) -> tuple:
             if directive:
                 return (directive, label)
         if has_met:
+            from src import orwell_engine
+            intros = None
+            _lookup_failed = False
             try:
-                from src import orwell_engine
                 intros = await orwell_engine.premiere_intros(user=user)
-            except Exception:
-                intros = None
-            remaining = intros.get("remaining") if isinstance(intros, dict) else None
-            if remaining:  # unmet houseguests remain — "you've met everyone" is a closed-set overclaim
-                lbl = "the player having MET EVERYONE (houseguests are still unintroduced)"
-                return (_overclaim_directive(lbl, live), lbl)
+            except Exception as _ie:
+                _lookup_failed = True
+                logger.debug("[orwell] met-everyone premiere_intros lookup failed user=%s: %s",
+                             user, _exc_detail(_ie))
+            # A CLEAN None means premiere_intros is not applicable (NOT premiere) — emit the claim.
+            if not _lookup_failed and intros is None:
+                return (None, None)
+            # A VERIFIED result explicitly carrying `remaining` — emit ONLY when it confirms zero left.
+            if not _lookup_failed and isinstance(intros, dict) and "remaining" in intros:
+                if intros.get("remaining"):
+                    lbl = "the player having MET EVERYONE (houseguests are still unintroduced)"
+                    return (_overclaim_directive(lbl, live), lbl)
+                # remaining explicitly empty ⇒ grounded ⇒ fall through / emit
+            else:
+                # Finding 3: an exception, a non-dict, or a dict MISSING `remaining` is UNVERIFIABLE —
+                # never conflate that with "everyone met". FAIL CLOSED (hold the claim) inside a
+                # premiere-class phase where an unproven meet-set must not stand; outside premiere the
+                # claim is harmless flavor, so emit.
+                if str((live or {}).get("phase") or "").lower().startswith(_PRE_CEREMONY_PHASES):
+                    lbl = "the player having MET EVERYONE (the meet-set could not be verified)"
+                    return (_overclaim_directive(lbl, live), lbl)
         return (None, None)
     except Exception as e:
         logger.warning("[orwell] overclaim detect skipped for user=%s: %s", user, _exc_detail(e))
@@ -2721,6 +2787,43 @@ async def enforce_grounded_draft(user, draft, tools_called, *, regenerate=None) 
         return GroundedDraftResult(draft, "pass", None)
 
 
+async def strip_ungrounded_closed_set(user, body, tools=None) -> str:
+    """Round-end EXCISION sibling of the mid-stream `screen_streamed_outcome` guard and the S2a
+    realignment (finding 1 / RC2 #1664): split `body` into sentences and DROP each that INDIVIDUALLY
+    makes a closed-set overclaim the live board does not back (the SAME `_detect_ungrounded_overclaim`
+    verdict that fires S2a), preserving delimiters so creative/social prose is byte-identical. This is
+    what lets the round-end realignment REMOVE the fabricated closed-set claim from the persisted body
+    rather than merely appending a correction AFTER the lie. Closed-set ONLY (ADR 0005 #1). Fail-open:
+    returns `body` unchanged on any hiccup or when nothing is excised.
+
+    The `tools` set is threaded to `_detect_ungrounded_overclaim` unchanged, so a progression-tool turn
+    that actually committed the outcome excises nothing (that early-return owns the grounded case)."""
+    try:
+        if not body or not str(body).strip():
+            return body
+        _tools = {str(t) for t in (tools or []) if t}
+        # Cheap synchronous pre-filter over the WHOLE body — no closed-set / met-everyone language
+        # anywhere ⇒ pure open-set prose ⇒ nothing to excise, never read the board (ADR 0005 #1).
+        if not (_sentence_has_closed_set_claim(body) or _MET_EVERYONE_RE.search(body)):
+            return body
+        parts = re.split(r"(?<=[.!?\n])", body)  # keeps each delimiter attached to its sentence
+        kept = []
+        excised = False
+        for part in parts:
+            if _sentence_has_closed_set_claim(part) or _MET_EVERYONE_RE.search(part):
+                directive, _ = await _detect_ungrounded_overclaim(user, part, _tools)
+                if directive:
+                    excised = True
+                    continue  # DROP this phantom closed-set sentence from the persisted body
+            kept.append(part)
+        if not excised:
+            return body
+        return "".join(kept)
+    except Exception as e:
+        logger.warning("[orwell] strip_ungrounded_closed_set skipped for user=%s: %s", user, _exc_detail(e))
+        return body
+
+
 async def screen_streamed_met_everyone(user, sentence: str) -> bool:
     """S7 mid-stream sibling of `screen_streamed_nominee`: HOLD (return False) a sentence that asserts
     the player has MET EVERYONE while the engine's premiere meet-set still has houseguests to introduce
@@ -2730,16 +2833,34 @@ async def screen_streamed_met_everyone(user, sentence: str) -> bool:
         if not sentence or not _MET_EVERYONE_RE.search(sentence):
             return True
         from src import orwell_engine
-        intros = await orwell_engine.premiere_intros(user=user)
-        remaining = intros.get("remaining") if isinstance(intros, dict) else None
-        if not remaining:
-            return True  # everyone really is met (or not in premiere) — emit
+        intros = None
+        _lookup_failed = False
+        try:
+            intros = await orwell_engine.premiere_intros(user=user)
+        except Exception as _ie:
+            _lookup_failed = True
+            logger.debug("[orwell] met-everyone premiere_intros lookup failed user=%s: %s",
+                         user, _exc_detail(_ie))
+        # A CLEAN None ⇒ NOT premiere (the guard does not apply) ⇒ EMIT.
+        if not _lookup_failed and intros is None:
+            return True
+        _verified = (not _lookup_failed and isinstance(intros, dict) and "remaining" in intros)
+        remaining = intros.get("remaining") if _verified else None
+        if _verified and not remaining:
+            return True  # the meet-set genuinely is complete — emit
+        if not _verified:
+            # Finding 3: exception / malformed / missing `remaining` is UNVERIFIABLE. FAIL CLOSED only
+            # in a premiere-class phase — never assert "met everyone" without proof; outside it, emit.
+            _live0 = await _capture_beat_signature(user)
+            if not str((_live0 or {}).get("phase") or "").lower().startswith(_PRE_CEREMONY_PHASES):
+                return True
         live = await _capture_beat_signature(user)
         _stash_overclaim_reground(
             user, _overclaim_directive(
                 "the player having MET EVERYONE (houseguests are still unintroduced)", live or {}))
+        _n = len(remaining) if isinstance(remaining, list) else "an unverified number of"
         logger.warning("[orwell] pre-emission guard HELD a 'met everyone' overclaim for user=%s — "
-                       "%d houseguest(s) still unintroduced", user, len(remaining))
+                       "%s houseguest(s) still unintroduced/unverified", user, _n)
         return False
     except Exception as e:
         logger.warning("[orwell] pre-emission met-everyone guard skipped for user=%s: %s", user, _exc_detail(e))
@@ -3383,10 +3504,21 @@ async def _pre_resolve_npc_ceremony(user, game_state: dict, *, retry: bool, play
                     _lr_adv.record_soft_failure(
                         "progression:advance-double-stale", _adv_e2,
                         corrected="forced-advance-armed", user=user)
-                except Exception:
-                    pass
+                except Exception as _lr_err:
+                    logger.debug("[orwell] advance double-stale soft-failure log skipped: %s", _lr_err)
                 logger.warning("[orwell] advanceGame double stale-409 for user=%s — beat un-advanced, "
                                "armed forced-advance escalation (S1a/S1b)", user)
+                # Finding 8: the board moved TWICE under us — return the reconciled LIVE state so the
+                # turn continues framed against where the game ACTUALLY is, never the stale input
+                # snapshot (which would re-narrate against a board two commits behind). Fail-open: a
+                # refresh hiccup falls back to the input snapshot.
+                try:
+                    _reconciled = await _fetch_game_state(user, retry=retry)
+                    if isinstance(_reconciled, dict):
+                        _refresh_beat_seq(user, _reconciled)
+                        return _reconciled
+                except Exception as _refetch_err:
+                    logger.debug("[orwell] double-stale live-state refetch skipped: %s", _refetch_err)
                 return game_state  # reconciled — the S1b force picks it up next round
         _refresh_beat_seq(user, adv)  # 0065: the advance response carries the new beatSeq — track it
         mark_pre_resolved_advance(user)  # #670: a real beat walked this turn — the backstop must not double-advance

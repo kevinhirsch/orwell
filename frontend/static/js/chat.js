@@ -3225,6 +3225,41 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _p } }));
                 } catch (_) {}
 
+              } else if (json.type === 'realign_body') {
+                // S2a in-turn realignment (#1664): the server EXCISED an ungrounded closed-set claim
+                // from the accumulated (persisted) body and appended a deterministic engine-truth beat.
+                // Re-render THIS turn's bubble from the corrected `text` so the sender window matches the
+                // persisted (reload/peer) view — never a fabrication followed by a correction. Closed-set
+                // only; the corrected body is reply text (no reasoning), so the F8 reply/reasoning channel
+                // split is preserved. Skip background streams.
+                if (_isBg) continue;
+                try {
+                  const _rbText = (typeof json.text === 'string') ? json.text : '';
+                  const _rbHolder = roundHolder || currentHolder;
+                  if (_rbText && _rbHolder) {
+                    // Reset the stream buffers to the corrected body so the final render + persistence
+                    // (dataset.raw ← accumulated; final body ← roundReplyText) both use the corrected text.
+                    roundReplyText = _rbText;
+                    roundText = _rbText;
+                    accumulated = _rbText;
+                    currentAccumulated = _rbText;
+                    // The corrected body is the WHOLE turn: collapse any coalesced segments and re-render
+                    // the one bubble body from it, then route the trailing final render down the legacy
+                    // full-re-render path so it never re-clobbers with stale segment text.
+                    _turnCoalesced = false;
+                    const _rbBody = _rbHolder.querySelector('.body');
+                    if (_rbBody) {
+                      _rbHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(_rbText);
+                      _rbBody.innerHTML = markdownModule.processWithThinking(
+                        markdownModule.squashOutsideCode(_rbText));
+                      if (window.hljs) {
+                        _rbBody.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+                      }
+                    }
+                    uiModule.scrollHistory();
+                  }
+                } catch (_) {}
+
               } else if (json.type === 'ask_user') {
                 if (_isBg) continue;
                 _producedVisibleOutput = true;  // BUG 2: an ask_user prompt IS a real turn artifact

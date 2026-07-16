@@ -260,12 +260,67 @@ def test_progression_tools_parity_with_agent_loop():
 
 def test_agent_loop_wires_the_in_turn_realignment_belt():
     src = _read("src/agent_loop.py")
-    # The round-end belt calls the mechanism and REPLACES the ungrounded draft in-turn (yields a delta).
+    # The round-end belt calls the mechanism and, on a replaced draft, emits a `realign_body` CONTROL
+    # event carrying only the engine-truth beat (finding 1 / #1664) — the route EXCISES the phantom
+    # from the persisted body, never appends a correction after the fabrication.
     assert "enforce_grounded_draft as _enforce_grounded" in src
     assert '_s2a.action == "replaced"' in src
-    assert 'json.dumps({"delta": _s2a_delta})' in src
+    assert 'json.dumps({"type": "realign_body", "beat": _s2a.text})' in src
     # The mid-stream S7 guard is wired into the pre-emission sentence loop.
     assert "screen_streamed_met_everyone" in src
+
+
+def test_chat_route_excises_the_phantom_from_the_persisted_body():
+    """Finding 1 (#1664): the agent-mode route branch runs `strip_ungrounded_closed_set` on its OWN
+    accumulated `full_response` (the persisted buffer), appends the engine-truth beat, and re-streams the
+    corrected text — it does NOT merely append a correction after the fabrication."""
+    src = _read("routes/chat_routes.py")
+    assert 'data.get("type") == "realign_body"' in src
+    assert "strip_ungrounded_closed_set" in src
+    # The excision runs on the route's persisted buffer (full_response), then the corrected body is
+    # re-streamed to the client as a `text` field.
+    assert "strip_ungrounded_closed_set(" in src
+    assert '"type": "realign_body", "text": full_response' in src
+
+
+def test_strip_ungrounded_closed_set_removes_only_the_phantom_sentence(monkeypatch):
+    """The excision DROPS the fabricated closed-set sentence(s) and KEEPS creative/social prose
+    byte-identical (ADR 0005 #1). On a premiere board an HOH-win sentence is a fabrication by
+    construction; the surrounding open-set prose survives unchanged."""
+    _premiere_board(monkeypatch)
+    body = ("The houseguests trade nervous jokes by the pool. "
+            "A houseguest wins the Head of Household competition! "
+            "The player drifts toward the kitchen to scheme.")
+    out = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, []))
+    assert "Head of Household" not in out            # the phantom closed-set sentence was excised
+    assert "trade nervous jokes by the pool" in out  # open-set prose survives byte-identical
+    assert "drifts toward the kitchen to scheme" in out
+
+
+def test_strip_ungrounded_closed_set_stands_down_on_progression_tool(monkeypatch):
+    """When a progression tool committed the outcome (board moved off the turn-start baseline) the
+    excision removes nothing — a grounded outcome is never stripped."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None, "hohName": None,
+        "noms": [], "nomNames": [], "activeNames": ["Player", "Alpha"],
+        "vetoHolder": None, "vetoHolderName": None, "vetoUsed": False,
+        "playerIsHoh": None, "playerHasVeto": None, "evicted": 0, "finished": False,
+    }
+    _hoh_committed_board(monkeypatch)  # phase moved premiere→hoh, a holder is now set
+    body = "The competition ends and a houseguest wins the Head of Household!"
+    out = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, ["advanceGame"]))
+    assert out == body  # progression tool + moved board ⇒ grounded ⇒ nothing excised
+
+
+def test_strip_ungrounded_closed_set_is_fail_open_on_pure_prose(monkeypatch):
+    """Pure open-set prose never reaches the board read and is returned byte-identical."""
+    async def boom(user=None):
+        raise AssertionError("read the board for pure creative prose (ADR 0005 #1)")
+
+    monkeypatch.setattr(orwell_engine, "game_status", boom)
+    monkeypatch.setattr(orwell_engine, "get_game_state", boom)
+    prose = "The player narrates the house as a doomed ocean liner and everyone laughs too hard."
+    assert _run(chat_helpers.strip_ungrounded_closed_set(_USER, prose, [])) == prose
 
 
 def test_chat_helpers_holds_the_mechanism():

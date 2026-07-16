@@ -215,8 +215,10 @@ def test_pre_resolve_reattempts_then_swallows_a_persistent_stale_409(monkeypatch
             "stale write refused — expected beatSeq is behind the current board (now 9); re-ground and retry",
             status=409)
 
+    # Finding 8: the reconciled LIVE state is DISTINCT from the stale input snapshot the caller passed —
+    # after the double stale-409 the function must return THIS live board, not the input.
     async def fake_state(user=None, **kw):
-        return {"phase": "nominations", "week": 1, "finished": False, "house": [], "beatSeq": 9}
+        return {"phase": "veto", "week": 2, "finished": False, "house": [], "beatSeq": 11}
 
     monkeypatch.setattr(orwell_engine, "game_status", fake_status)
     monkeypatch.setattr(orwell_engine, "advance_game", fake_advance)
@@ -225,11 +227,13 @@ def test_pre_resolve_reattempts_then_swallows_a_persistent_stale_409(monkeypatch
 
     out = _run(chat_helpers._pre_resolve_npc_ceremony("u", {"phase": "nominations", "week": 1},
                                                       retry=False, player_msg="let's go"))
-    # No exception escaped; the original state is returned (the turn continues, fail-open).
+    # No exception escaped; the RECONCILED LIVE state is returned (never the stale input), so the turn
+    # continues framed against where the board actually is (finding 8).
     assert isinstance(out, dict)
+    assert out.get("phase") == "veto" and out.get("week") == 2   # the live board, not the input snapshot
     assert len(idem_keys) == 2 and idem_keys[0] == idem_keys[1]  # re-fired once, SAME idempotency key
     assert chat_helpers.stale_beat_rejections() == 2            # both 409s reconciled/counted
-    assert chat_helpers.last_beat_seq("u") == 9                  # refreshed off the stale 409
+    assert chat_helpers.last_beat_seq("u") == 11                 # refreshed off the reconciled live read
     assert "u" in chat_helpers._DESYNC_REGROUND                  # next turn reconciles
     assert chat_helpers.advance_escalation_armed("u")            # S1b escalation armed after the double
 

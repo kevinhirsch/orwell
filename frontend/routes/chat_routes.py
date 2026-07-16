@@ -1777,6 +1777,27 @@ def setup_chat_routes(
                                     last_metrics["requested_model"] = last_metrics.get("requested_model") or _requested_model
                                     last_metrics["model"] = _reported_model or _actual_model or _answered_by or _requested_model
                                     yield f'data: {json.dumps({"type": "metrics", "data": last_metrics})}\n\n'
+                                elif data.get("type") == "realign_body":
+                                    # S2a in-turn realignment (RC2 / #1664): the mid-stream guard missed
+                                    # an ungrounded closed-set claim — EXCISE the phantom sentence(s) from
+                                    # the accumulated (persisted) body, never just append a correction
+                                    # after the fabrication, then append the deterministic engine-truth
+                                    # beat. Closed-set only (ADR 0005 #1); creative prose untouched.
+                                    # Fail-open. Note: the raw agent event carries only `beat` and is NOT
+                                    # forwarded verbatim — the client gets the corrected `text` below.
+                                    _beat = (data.get("beat") or "").strip()
+                                    try:
+                                        from routes.chat_helpers import strip_ungrounded_closed_set
+                                        _excised = await strip_ungrounded_closed_set(
+                                            _user, full_response, _agent_tools_called)
+                                    except Exception:
+                                        _excised = full_response
+                                    _realigned = ((_excised.rstrip() + "\n\n" + _beat).strip()
+                                                  if _beat else _excised.strip())
+                                    if _realigned and _realigned != full_response:
+                                        full_response = _realigned
+                                        _stream_set(session, partial=full_response)
+                                        yield f'data: {json.dumps({"type": "realign_body", "text": full_response})}\n\n'
                             except json.JSONDecodeError:
                                 yield chunk
                         elif chunk.startswith("event: "):
