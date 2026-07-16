@@ -12455,32 +12455,16 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
   border-radius: 50%;
 }
 .adm-provider-caret { flex-shrink: 0; opacity: 0.5; transition: transform 0.15s; }
-/* #1638: a kit-migrated picker (the search provider menu) has no sibling
-   .adm-provider-menu — its caret rotates off the trigger's aria-expanded, which
-   OrwellMenuKit toggles. The :has() rule below still drives the not-yet-migrated
-   admin-endpoint twin (bespoke .adm-provider-menu in admin.js). */
+/* #1638: BOTH provider pickers (the search-provider twin in settings.js and the
+   admin-endpoint twin in admin.js) are now OrwellMenuKit consumers — the anchored
+   role=menu surface, its rows, and its dismissal all live in the kit's `.ow-menu`
+   family. Neither has a sibling bespoke dropdown container anymore, so the caret
+   rotates off the trigger's aria-expanded, which OrwellMenuKit toggles. The old
+   bespoke floating-menu / menu-item rules (and their :has() caret variant) were
+   retired with the admin migration (consumer #9b). */
 .adm-provider-btn[aria-expanded="true"] .adm-provider-caret {
   transform: rotate(180deg);
 }
-.adm-provider-picker:has(.adm-provider-menu:not(.hidden)) .adm-provider-caret {
-  transform: rotate(180deg);
-}
-.adm-provider-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 100;
-  max-height: 280px; overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border); border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  padding: 4px;
-}
-.adm-provider-menu.hidden { display: none; }
-.adm-provider-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 8px; border-radius: 4px;
-  font-size: 12px; cursor: pointer;
-}
-.adm-provider-item:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
-.adm-provider-item.active { background: color-mix(in srgb, var(--accent, var(--red)) 14%, transparent); }
 
 /* When the Appearance tab is open, the #settings-modal-opacity slider (in
    the header) fades the modal so the user can see the rest of the UI react

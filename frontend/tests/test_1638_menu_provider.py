@@ -9,12 +9,9 @@ The load-bearing correctness invariant: the picker mirrors a hidden native
 event — every downstream reaction (updateVisibility / saveSearch / _syncSearchPicker) hangs off
 that change listener, so a dropped dispatch silently desyncs the real search setting.
 
-NOTE on the admin twin (#adm-provider-menu, admin.js:825): its wiring lives in admin.js (outside
-this consumer's settings.js/index.html/style.css file ownership) and differs materially from the
-search twin (a .adm-provider-combo layout with an embedded #adm-epUrl input and bidirectional
-URL<->provider syncing). It is DEFERRED here pending an ownership/scoping decision, so the shared
-.adm-provider-menu/.adm-provider-item CSS is intentionally KEPT (the admin twin still depends on
-it). The pin for the admin twin's migration + the CSS retirement lands with that follow-up.
+NOTE on the admin twin (admin.js initEndpointForm): it migrated onto OrwellMenuKit in the
+follow-up (#1638 consumer #9b) — its own pin lives in test_1638_admin_provider.py. With both
+twins migrated, the shared .adm-provider-menu / .adm-provider-item CSS has been retired.
 """
 import os
 
