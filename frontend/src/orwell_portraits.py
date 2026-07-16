@@ -121,6 +121,47 @@ _GEN_PROGRESS: dict = {}
 # of starving them. Small — it only has to interleave one poll, not pace the whole run.
 IMAGE_BEAT_SPACING_S = 0.25
 
+# ── S8 (RC8): FE-side per-turn image-beat budget PRE-CHECK ──────────────────────────────────
+# The engine METERS a RE-generation of an already-portrayed houseguest against a per-turn cap
+# (`IMAGE_BUDGET.perTurnCap` in src/engine/imageConstants.ts) and REFUSES a `recordImageBeat` past
+# it with a typed `EngineRefusal`. The season-start MOVE-IN portrait (the FIRST image per
+# houseguest) is EXEMPT. Before this pre-check a re-shoot burst (a facet-change re-shoot + the L17
+# dedupe regens) fired every beat BLIND, so each metered beat past the cap came straight back as an
+# EngineRefusal (the RC8 bundle: 3 extra straight into the cap, twice → 6 refusals). This pre-check
+# bounds the METERED beats a single burst records to the remaining per-turn budget and SKIPS the
+# rest (a RED-eligible 'image-budget-skip', #1599) instead of firing a call the engine will refuse.
+# Exempt (move-in) beats are never budgeted. Mirrors the engine constant — do NOT change the cap;
+# the fix only stops the front-end over-firing INTO it.
+IMAGE_BEAT_PER_TURN_CAP = 3  # == IMAGE_BUDGET.perTurnCap (src/engine/imageConstants.ts)
+
+
+def _image_beat_budget_remaining(user: Optional[str]) -> int:
+    """The remaining METERED image-beat budget for a fresh generation burst — the engine's per-turn
+    cap. A single burst may safely record up to this many RE-generation beats before the engine's
+    per-turn cap starts refusing; move-in (first-image) beats are exempt and never counted. Kept a
+    plain int (and a seam of its own) so the value stays trivially overridable in a unit test."""
+    return IMAGE_BEAT_PER_TURN_CAP
+
+
+def _note_image_budget_skip(user: Optional[str], houseguest_id: str) -> None:
+    """#1599: record a RED-eligible 'image-budget-skip' — a metered image beat we deliberately did
+    NOT fire because the per-turn budget was already spent (a PREVENTED `EngineRefusal`). It is
+    auto-corrected (we stopped the over-fire) but still RED per the #1599 no-silent-fail-soft
+    ruling — never a silent swallow. Best-effort: health logging must never break the run."""
+    logger.info("[portraits] image-budget-skip: %s (per-turn cap %d reached) — skipping recordImageBeat",
+                _safe_id(houseguest_id), IMAGE_BEAT_PER_TURN_CAP)
+    try:
+        from src import log_rings
+        log_rings.record_soft_failure(
+            "portraits:image-budget-skip",
+            f"per-turn image budget ({IMAGE_BEAT_PER_TURN_CAP}) exhausted; skipped recordImageBeat "
+            f"for {_safe_id(houseguest_id)} to avoid an EngineRefusal",
+            corrected="image-budget-precheck",
+            user=user,
+        )
+    except Exception:  # pragma: no cover - defensive: health logging must never break the run
+        pass
+
 # ── L17 distinctness: detect look-alike faces and regenerate the offenders ─────────────────
 # After the full cast generates, an automated pass scores how SIMILAR each houseguest's portrait
 # PROMPT is to every other (the deterministic, Vault-free signal the engine already exposes —
@@ -1581,6 +1622,10 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     generated = 0
     skipped = 0
     newly_shown = []  # (houseguestId, ref) for beat recording
+    # S8: safe-ids the engine will METER at beat time (a re-generation of an already-portrayed
+    # houseguest — a facet-change re-shoot or an L17 dedupe regen). Move-in first-shoots stay OUT
+    # of this set (the engine exempts them), so only the metered beats are budget-gated below.
+    reshoot_ids: set = set()
     # Ids the pre-pass already APPLIED + counted in `generated` (only ever the player). The main
     # loop below must not re-count these: the player rides a PROMPT-LESS entry, so it would fall
     # into the `not prompt` skip branch and double-count the one slot (generated=1 AND skipped=1
@@ -1696,7 +1741,10 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             stored = load_manifest(user).get(_safe_id(str(hid)))
             stored_fp = stored.get("fingerprint") if isinstance(stored, dict) else None
             if stored_fp and fp and stored_fp != fp:
-                pass  # facet changed → stale face → fall through and re-shoot from the new prompt
+                # Facet changed → stale face → fall through and re-shoot from the new prompt. This
+                # is a RE-generation, so the engine will METER its beat — mark it for the budget
+                # pre-check (S8) so a re-shoot burst can never over-fire into the per-turn cap.
+                reshoot_ids.add(_safe_id(str(hid)))
             else:
                 if (not stored_fp) and fp and isinstance(stored, dict):
                     # Backfill quietly (no regeneration) so this self-heals and the NEXT genuine
@@ -1785,9 +1833,12 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
             dedup = await dedupe_lookalikes(prompts, user)
             if dedup.get("regenerated"):
                 logger.info("[portraits] L17 distinctness pass for %s: %s", _safe_user(user), dedup)
-                # The regenerated faces are new shows too — record them as beats below.
+                # The regenerated faces are new shows too — record them as beats below. A dedupe
+                # regen is a RE-generation, so its beat is engine-METERED (S8): mark it so the
+                # burst's budget pre-check gates it and never over-fires into the per-turn cap.
                 for hid in dedup.get("regeneratedIds", []):
                     newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
+                    reshoot_ids.add(_safe_id(str(hid)))
         except Exception as e:
             logger.info("[portraits] L17 distinctness pass failed: %s", e)
 
@@ -1798,7 +1849,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
     _note_last_run(user, generated=generated, skipped=skipped, total=len(prompts))
 
     if record_beats and newly_shown:
-        await _record_image_beats(newly_shown, user)
+        await _record_image_beats(newly_shown, user, metered_ids=reshoot_ids)
 
     logger.info("[portraits] cast set for %s: generated=%d skipped=%d", _safe_user(user), generated, skipped)
     return {"generated": generated, "skipped": skipped, "total": len(prompts)}
@@ -1942,21 +1993,41 @@ async def dedupe_lookalikes(prompts: list, user: Optional[str],
     return {"regenerated": len(regenerated_ids), "regeneratedIds": regenerated_ids, "offenders": offenders}
 
 
-async def _record_image_beats(shown: list, user: Optional[str]) -> None:
+async def _record_image_beats(shown: list, user: Optional[str],
+                              metered_ids: Optional[set] = None) -> None:
     """Record each shown portrait as a player-witnessed beat (best-effort).
 
     L15: the beats are SPACED by IMAGE_BEAT_SPACING_S, not fired back-to-back. Each
     record_image_beat is an engine WRITE that enqueues into the per-user serial queue and pays
     the O(events) commit; firing ~16 in a tight loop starved the cast panel's getGameState polls
     (the panel blanked, the connection looked dropped). A small inter-beat yield lets the queue
-    answer a poll between beats — the run stays responsive."""
+    answer a poll between beats — the run stays responsive.
+
+    S8 (RC8): a RE-generation of an already-portrayed houseguest is METERED by the engine against
+    the per-turn image budget and REFUSED past the cap (`EngineRefusal`). `metered_ids` names the
+    beats the engine will meter (facet-change re-shoots + L17 dedupe regens); a move-in first-shoot
+    is exempt and always fires. Before firing a metered beat we consult the remaining per-turn
+    budget and SKIP it — logging a RED-eligible 'image-budget-skip' (#1599) — rather than fire a
+    call the engine will refuse. This stops the over-fire the RC8 bundle showed (3 extra straight
+    into the cap, twice)."""
     from src import orwell_engine
+
+    metered = {_safe_id(str(h)) for h in (metered_ids or set())}
+    # A fresh burst gets the full per-turn metered budget; recomputed only when it's needed.
+    remaining = _image_beat_budget_remaining(user) if metered else 0
 
     # De-dupe by id (the L17 pass can append an already-shown id) so a face is recorded once.
     seen: set = set()
     ordered = [(h, r) for h, r in shown if not (h in seen or seen.add(h))]
-    for i, (hid, ref) in enumerate(ordered):
-        if i and IMAGE_BEAT_SPACING_S > 0:
+    fired = 0
+    for hid, ref in ordered:
+        is_metered = _safe_id(str(hid)) in metered
+        if is_metered and remaining <= 0:
+            # Budget spent for this burst — do NOT fire a metered beat the engine will refuse.
+            # #1599: a prevented `EngineRefusal` is still a RED-eligible fault, never silent.
+            _note_image_budget_skip(user, str(hid))
+            continue
+        if fired and IMAGE_BEAT_SPACING_S > 0:
             try:
                 await asyncio.sleep(IMAGE_BEAT_SPACING_S)
             except Exception:  # pragma: no cover - defensive
@@ -1965,6 +2036,12 @@ async def _record_image_beats(shown: list, user: Optional[str]) -> None:
             await orwell_engine.record_image_beat(hid, ref, user=user)
         except Exception as e:
             logger.info("[portraits] record_image_beat(%s) failed: %s", hid, e)
+        else:
+            if is_metered:
+                # Only a beat the engine ACCEPTED consumes the metered budget (matches the engine,
+                # which increments its per-turn tally only on an accepted recordImageBeat).
+                remaining -= 1
+        fired += 1
 
 
 def kickoff_generation(prompts: list, user: Optional[str]) -> None:
