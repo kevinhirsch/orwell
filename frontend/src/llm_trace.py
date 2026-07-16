@@ -252,8 +252,10 @@ def _derive_fail_class(*, ok: bool, error: Any, text: str, tool_calls: Any,
         else:
             msg = str(error)
         low = msg.lower()
-        if any(m in low for m in _TIMEOUT_MARKERS):
-            return "timeout"
+        # HTTP status is the MORE authoritative signal than a reason-phrase word — classify it FIRST so
+        # a "504 Gateway Timeout" (or any 5xx/4xx whose phrase happens to contain "timeout") reads as its
+        # HTTP class, not the blunt "timeout" (Greptile P1). Only when NO HTTP status is present anywhere
+        # (explicit field or in the message) does a transport/read-timeout word decide the class.
         try:
             s = int(status)
             if 400 <= s < 500:
@@ -265,6 +267,8 @@ def _derive_fail_class(*, ok: bool, error: Any, text: str, tool_calls: Any,
         m = _STATUS_RE.search(low)
         if m:
             return "4xx" if m.group(1)[0] == "4" else "5xx"
+        if any(marker in low for marker in _TIMEOUT_MARKERS):
+            return "timeout"
         return "error"
     # No error payload — but a vanished completion is NOT a success (the S6a core fix). This runs
     # BEFORE the generic ok=False fallback so a vanished completion classes as the more specific

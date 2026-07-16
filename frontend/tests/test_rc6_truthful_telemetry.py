@@ -95,6 +95,30 @@ def test_http_502_error_is_classed_5xx(_trace_dir):
     assert rec["failClass"] == "5xx"
 
 
+def test_http_504_gateway_timeout_is_classed_5xx_not_timeout(_trace_dir):
+    # Greptile P1: the reason phrase contains "Timeout", but the HTTP status is the authoritative
+    # signal — a 504 must read as its 5xx HTTP class, never the blunt "timeout" (which would hide a
+    # provider outage from the 5xx alarm). Both the explicit status field and the in-message form.
+    llm_trace.record_llm_call(
+        kind="stream", model="m", messages=[{"role": "user", "content": "x"}],
+        response={"text": "", "error": {"status": 504, "message": "Gateway Timeout"}},
+        ok=False, duration_ms=50)
+    assert _last_record(_trace_dir)["failClass"] == "5xx"
+    llm_trace.record_llm_call(
+        kind="stream", model="m", messages=[{"role": "user", "content": "x"}],
+        response={"text": "", "error": {"message": "OpenRouter returned HTTP 504 Gateway Timeout"}},
+        ok=False, duration_ms=50)
+    assert _last_record(_trace_dir)["failClass"] == "5xx"
+
+
+def test_pure_transport_timeout_without_status_still_timeout(_trace_dir):
+    # No HTTP status anywhere ⇒ a transport/read-timeout word is the next-best signal (unchanged).
+    llm_trace.record_llm_call(
+        kind="call", model="m", messages=[{"role": "user", "content": "x"}],
+        response={"error": {"message": "Read timed out"}}, ok=False, duration_ms=9000)
+    assert _last_record(_trace_dir)["failClass"] == "timeout"
+
+
 def test_explicit_timeout_failclass_wins(_trace_dir):
     llm_trace.record_llm_call(
         kind="call", model="m", messages=[{"role": "user", "content": "x"}],
