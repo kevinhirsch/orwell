@@ -12,7 +12,7 @@ import json
 import re
 import time
 import logging
-from typing import AsyncGenerator, List, Dict, Optional, Set
+from typing import Any, AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
 from src.llm_core import stream_llm, stream_llm_with_fallback, _is_ollama_native_url
@@ -40,6 +40,40 @@ from src.agent_tools import (
 )
 
 logger = logging.getLogger(__name__)
+
+# RC6 S6c: classify a mid-stream narrator provider error truthfully. Only an error carrying an
+# actual HTTP status is `narrator-http`; a timeout / connection failure is `narrator-timeout`;
+# any other non-HTTP stream fault is `narrator-runtime` — a transport failure must never be
+# mislabeled as an HTTP fault (they alarm and triage differently).
+_NARRATOR_STATUS_RE = re.compile(r"\b([45]\d\d)\b")
+_NARRATOR_TIMEOUT_MARKERS = (
+    "timed out", "timeout", "connection refused", "econnrefused", "connection reset",
+    "connection aborted", "read timed out", "network is unreachable", "no route to host",
+    "temporarily unavailable", "name resolution", "failed to establish a new connection",
+)
+
+
+def _classify_narrator_stream_error(err_msg: Any, data: Any = None) -> str:
+    """Return the truthful narrator failure class for a mid-stream `data.error` frame. An explicit
+    numeric HTTP status on the frame (or an HTTP status in the message) is `narrator-http`; a
+    timeout/connection signature is `narrator-timeout`; otherwise `narrator-runtime`."""
+    status = None
+    if isinstance(data, dict):
+        status = data.get("status") or data.get("status_code") or data.get("code")
+    try:
+        s = int(status)
+        if 400 <= s < 600:
+            return "narrator-http"
+    except (TypeError, ValueError):
+        pass
+    low = str(err_msg or "").lower()
+    # An explicit HTTP status in the message is an HTTP fault even if it also reads like a timeout
+    # (e.g. "HTTP 504 Gateway Timeout" carries a real status).
+    if _NARRATOR_STATUS_RE.search(low):
+        return "narrator-http"
+    if any(m in low for m in _NARRATOR_TIMEOUT_MARKERS):
+        return "narrator-timeout"
+    return "narrator-runtime"
 
 
 def _load_mcp_disabled_map() -> Dict[str, set]:
@@ -5781,16 +5815,20 @@ async def _stream_agent_loop_impl(
                         # Provider returned error") ended the round with 0 chars and was SWALLOWED from
                         # the failure ledger — only this typed error SSE + the ERROR log carried it, so it
                         # alarmed nowhere. On a game/casting (narration) turn, land it in the admin-visible
-                        # LOUD ledger + a RED-eligible health event (class `enrichment:narrator-http`, also
-                        # caught at the LLMIO tier by S6a — recording here makes it alarm-eligible on the
-                        # enrichment surface too). Fail-soft; the narrator path is out-of-scope of the
-                        # enrichment soft-floor contract (always loud), so it is not policy-gated.
+                        # LOUD ledger + a RED-eligible health event. Classify TRUTHFULLY: only an error
+                        # carrying an actual HTTP status is `narrator-http`; a timeout/connection failure
+                        # is `narrator-timeout`, any other non-HTTP stream fault `narrator-runtime` — a
+                        # transport failure must not masquerade as an HTTP fault. Fail-soft; the narrator
+                        # path is out-of-scope of the enrichment soft-floor contract (always loud), so it
+                        # is not policy-gated.
                         if game_mode:
                             try:
                                 from src import enrichment_policy as _ep
+                                _cls = _classify_narrator_stream_error(err_msg, data)
                                 _ep.record_runtime_failure(
-                                    owner, "narrator-http",
-                                    f"narrator provider error on a {('casting' if game_mode == 'casting' else 'game')} "
+                                    owner, _cls,
+                                    f"narrator provider {_cls.split('-', 1)[1]} error on a "
+                                    f"{('casting' if game_mode == 'casting' else 'game')} "
                                     f"turn (round ended with no visible reply): {err_msg}")
                             except Exception:  # pragma: no cover - defensive: telemetry never breaks a turn
                                 pass

@@ -181,6 +181,29 @@ def test_reasoning_misroute_reached_via_author_cast(_clean_ledger, monkeypatch):
     assert "enrichment:reasoning-misroute" in _overseer_kinds_failed()
 
 
+def test_authoring_call_exception_is_not_a_reasoning_misroute(_clean_ledger):
+    # RC6 review (finding 3): `_call_with_retries` returned an empty-string sentinel on BOTH a genuine
+    # empty-visible completion AND a raised timeout/HTTP/network error. A RAISED provider call is NOT a
+    # reasoning-channel misroute — it must record the truthful provider-call class, never `reasoning-misroute`.
+    ca = importlib.import_module("src.orwell_cast_authoring")
+
+    async def _raising_llm(_messages):
+        raise TimeoutError("upstream provider timed out")  # the call never returned a completion body
+
+    async def _write(_profile):
+        return {"accepted": True}
+
+    cast = [{"id": "player"}, {"id": "npc:1"}, {"id": "npc:2"}]
+    written = _run(ca.author_cast(cast, _raising_llm, _write, user="probe-user"))
+    assert written == 0, "a raised provider call authors nothing — the seeded floor stands"
+
+    classes = {r["callClass"] for r in enrichment_policy.failures("probe-user")}
+    assert "cast-authoring-call" in classes, (
+        "a raised authoring provider call (timeout/HTTP/network) must record its OWN provider-call class")
+    assert "reasoning-misroute" not in classes, (
+        "the exception path must NOT be mislabeled a reasoning-channel misroute (that is empty-body only)")
+
+
 # ══ S6b reached — a dropped consequence fold via the deferred-fold drop sites ════════════════════
 
 

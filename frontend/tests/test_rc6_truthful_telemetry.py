@@ -18,11 +18,16 @@ fixes:
 Roles only — every string is a generic probe.
 """
 
+import asyncio
 import importlib
 import json
 import os
 
 import pytest
+
+
+def _run_async(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 llm_trace = importlib.import_module("src.llm_trace")
 log_rings = importlib.import_module("src.log_rings")
@@ -129,7 +134,7 @@ def test_failclass_shows_in_ring_summary(_trace_dir):
         kind="call", model="m7", messages=[{"role": "user", "content": "x"}],
         response={"text": ""}, ok=True, duration_ms=12001)
     _, lines = log_rings.LLMIO.since(0)
-    last = [l for l in lines if "m7" in l["msg"]][-1]
+    last = [entry for entry in lines if "m7" in entry["msg"]][-1]
     assert "fail=timeout" in last["msg"]
     assert last["failClass"] == "timeout" and last["ok"] is False
 
@@ -279,3 +284,95 @@ def test_is_guard_down_classifier():
     assert not ahr._is_guard_down_class("faith:persona")
     assert not ahr._is_guard_down_class("faith:leak")
     assert not ahr._is_guard_down_class("faith:omission")
+
+
+# ══ RC6 review — a failure carries its TRUTHFUL machine-readable class (never a mislabel) ═════════
+
+# Finding 1 — a search fault is `search-provider` ONLY when it is a confirmed transport/provider
+# error; a local parsing/programming bug is `search-runtime` and must not raise a false provider alarm.
+def test_search_transport_error_is_search_provider():
+    zeit = importlib.import_module("src.orwell_zeitgeist")
+    assert zeit._classify_search_error(ConnectionError("[Errno 111] Connection refused")) == "search-provider"
+    assert zeit._classify_search_error(TimeoutError("read timed out")) == "search-provider"
+    # A transport signature inside a generic exception still reads as a provider outage.
+    assert zeit._classify_search_error(RuntimeError("SearXNG search failed: connection refused")) == "search-provider"
+
+
+def test_search_local_bug_is_search_runtime_not_provider():
+    zeit = importlib.import_module("src.orwell_zeitgeist")
+    # A KeyError / ValueError / TypeError is a local parsing/programming bug — NOT a provider outage.
+    assert zeit._classify_search_error(KeyError("results")) == "search-runtime"
+    assert zeit._classify_search_error(ValueError("could not parse provider payload")) == "search-runtime"
+    assert zeit._classify_search_error(TypeError("NoneType is not subscriptable")) == "search-runtime"
+
+
+def test_zeitgeist_local_bug_records_search_runtime(_clean_failures, monkeypatch):
+    zeit = importlib.import_module("src.orwell_zeitgeist")
+    import src.search as _search
+
+    def _bug(query, max_pages=2):
+        raise ValueError("provider payload had no 'results' key")  # a local parse bug, not an outage
+
+    monkeypatch.setattr(_search, "comprehensive_web_search", _bug, raising=False)
+    monkeypatch.setattr("src.settings.get_setting", lambda k, d=None: "searxng")
+    research_fn = _run_async(zeit._live_research_fn("probe-user"))
+    _run_async(research_fn())
+    rows = enrichment_policy.failures("probe-user")
+    classes = [r["callClass"] for r in rows]
+    assert "search-runtime" in classes, "a local search bug must record search-runtime"
+    assert "search-provider" not in classes, "a local bug must NOT raise the false provider-outage class"
+
+
+# Finding 2 — a narrator error is `narrator-http` ONLY with an actual HTTP status; a timeout /
+# connection failure is `narrator-timeout`, any other non-HTTP stream fault `narrator-runtime`.
+def test_narrator_error_classifier():
+    al = importlib.import_module("src.agent_loop")
+    # explicit HTTP status on the frame
+    assert al._classify_narrator_stream_error("Provider returned error", {"status": 400}) == "narrator-http"
+    # HTTP status embedded in the message
+    assert al._classify_narrator_stream_error("OpenRouter returned HTTP 502") == "narrator-http"
+    # timeout / connection failure carries NO http status
+    assert al._classify_narrator_stream_error("upstream connection timed out") == "narrator-timeout"
+    assert al._classify_narrator_stream_error("[Errno 111] Connection refused") == "narrator-timeout"
+    # anything else non-HTTP
+    assert al._classify_narrator_stream_error("stream decoder produced garbage") == "narrator-runtime"
+
+
+# Finding 4 — note_stale_rejection threads a caller-supplied cause into the dropped-fold forensic
+# (the hardcoded stale-409 cause was misleading at the non-stale drop sites); default stays back-compat.
+def test_dropped_fold_cause_is_threaded(_tmp_ledger):
+    ledger.note_stale_rejection("player", dropped_fold=True,
+                                cause="deferred-fold queue overflow (retry capacity outrun)")
+    events = _dropped_fold_events()
+    assert events and "queue overflow" in events[-1]["diagnosis"]
+    assert "stale-beat 409" not in events[-1]["diagnosis"], "the misleading default must be overridden"
+
+
+def test_dropped_fold_default_cause_back_compat(_tmp_ledger):
+    ledger.note_stale_rejection("player", dropped_fold=True)
+    events = _dropped_fold_events()
+    assert events and "stale-beat 409" in events[-1]["diagnosis"]
+
+
+# Finding 5 — a durable-write failure must NOT lose the drained belts/stale nor corrupt the baseline.
+def test_write_failure_restores_drained_counts_and_baseline(_tmp_ledger, monkeypatch):
+    ledger.note_stale_rejection("player")           # buffer 1 stale
+    ledger.note_belt_fire("player", "trust-belt")   # buffer 1 belt
+
+    def _boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ledger, "atomic_write_json", _boom)
+    ledger.record_turn("player", session="s", turn_id="t1", beat_seq_before=5, beat_seq_after=6)
+    # The write failed and was swallowed — but the drained counts went BACK into the buffers, and the
+    # baseline was NOT advanced (a failed turn must not corrupt the next turn's gap comparison).
+    assert ledger._PENDING_STALE.get("player") == 1, "a failed write must restore the drained stale count"
+    assert ledger._PENDING_BELTS.get("player", {}).get("trust-belt") == 1, "and the drained belts"
+    assert ledger._LAST_BEAT_AFTER.get("player") is None, "a failed write must not advance the beat baseline"
+
+    # Now the write succeeds — the restored counts fold into THIS turn instead of vanishing.
+    monkeypatch.undo()
+    ledger.record_turn("player", session="s", turn_id="t2", beat_seq_before=6, beat_seq_after=7)
+    entry = ledger.get_recent("player")[-1]
+    assert entry["staleRejections"] == 1, "the restored stale count must survive to the next turn"
+    assert entry["beltsFired"].get("trust-belt") == 1, "the restored belt must survive too"

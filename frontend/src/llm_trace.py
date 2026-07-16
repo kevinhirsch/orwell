@@ -266,17 +266,19 @@ def _derive_fail_class(*, ok: bool, error: Any, text: str, tool_calls: Any,
         if m:
             return "4xx" if m.group(1)[0] == "4" else "5xx"
         return "error"
-    # No error payload, but the caller still reported failure (ok=False) — a failed call must
-    # always carry a machine-readable triage class, even with a non-empty / length-limited body.
-    if not ok:
-        return "error"
-    # No error payload — but a vanished completion is NOT a success (the S6a core fix).
+    # No error payload — but a vanished completion is NOT a success (the S6a core fix). This runs
+    # BEFORE the generic ok=False fallback so a vanished completion classes as the more specific
+    # `empty` / `timeout`, even when the caller also flagged ok=False — never the blunt `error`.
     if not (text or "").strip() and not tool_calls and str(finish_reason or "") != "length":
         try:
             slow = int(duration_ms) >= _SLOW_EMPTY_TIMEOUT_MS
         except (TypeError, ValueError):
             slow = False
         return "timeout" if slow else "empty"
+    # No error payload and the body IS usable-ish, but the caller still reported failure (ok=False) —
+    # a failed call must always carry a machine-readable triage class (last-resort generic `error`).
+    if not ok:
+        return "error"
     return None
 
 

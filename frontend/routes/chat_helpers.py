@@ -1169,7 +1169,9 @@ def _defer_fold(user, fn, args: tuple, kwargs: dict, desc: str) -> None:
         # invisible. Fail-soft — telemetry never breaks the reconcile machinery.
         try:
             from src import orwell_sync_ledger as _sl
-            _sl.note_stale_rejection(user, dropped_fold=True)
+            _sl.note_stale_rejection(
+                user, dropped_fold=True,
+                cause="deferred-fold queue overflow (retry capacity outrun)")
         except Exception:
             pass
     else:
@@ -1205,7 +1207,9 @@ async def _drain_deferred_folds(user) -> None:
             # the RED-eligible `sync:dropped-fold` so the loss surfaces instead of a bare WARN. Fail-soft.
             try:
                 from src import orwell_sync_ledger as _sl
-                _sl.note_stale_rejection(user, dropped_fold=True)
+                _sl.note_stale_rejection(
+                    user, dropped_fold=True,
+                    cause="deferred-fold non-stale terminal drop (unretryable)")
             except Exception:
                 pass
             continue

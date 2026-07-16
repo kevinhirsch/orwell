@@ -697,6 +697,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     floor_degradation = 0  # #1057: the write-back was refused as a transient degradation (after retries)
     floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
     floor_gaveup = 0      # M1-10: the per-season attempt cap is spent — give up loudly, stop calling
+    floor_call_failed = 0  # RC6 S6c: the provider call RAISED (timeout/HTTP/network) — no completion body
     ukey = _safe_user(user)  # M1-10: the give-up ledger scope
 
     async def _call_with_retries(npc: dict, hid: str):
@@ -707,14 +708,24 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
           2. #1057 — EMPTY or TRUNCATED visible body ⇒ re-issue (up to `_EMPTY_TRUNCATED_RETRIES`,
              small backoff) asking for the COMPLETE object (the dominant burst-truncation failure);
           3. #1002 — a NON-empty body with NO parseable JSON (genuine prose) ⇒ ONE strict-JSON reparse.
-        Returns (profile_or_None, last_text) so the caller can classify the final no-op cause."""
+
+        Returns ``(profile_or_None, last_text, call_error)`` where ``call_error`` is the message of a
+        provider EXCEPTION when the call NEVER produced a completion body (RC6 S6c: `_call_with_retries`
+        used to return an empty-string sentinel on BOTH a genuine empty-visible completion AND a
+        raised timeout/HTTP/network error, so the exception path was mislabeled a reasoning-channel
+        misroute). ``call_error`` is None whenever any completion body WAS obtained — even an empty
+        one — so the caller records `reasoning-misroute` only for a genuine successful-but-empty
+        completion, and a provider-call failure class for the exception path."""
         messages = build_authoring_messages(npc)
         _spend_attempt(ukey, hid)  # M1-10: every real provider call spends from the season budget
+        saw_completion = False  # RC6 S6c: did any llm_fn call return (vs only raise)?
+        call_error = None
         try:
             text = await llm_fn(messages)
+            saw_completion = True
         except Exception as e:  # the model can fail for one houseguest; carry on
             logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
-            return None, ""
+            return None, "", str(e)  # a raised call with NO completion body — never a misroute
         profile = parse_authored_profile(text or "", hid)
         # #1057: retry on EMPTY / TRUNCATED visible body — the provider returned nothing usable because the
         # body was empty or the object was clipped mid-stream (burst truncation), NOT because it emitted
@@ -735,6 +746,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
             _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _TRUNCATION_RETRY}])
+                saw_completion = True
             except Exception as e:
                 logger.warning(f"[cast-authoring] llm empty/truncated retry failed for {hid}: {e}")
                 break
@@ -749,11 +761,15 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
             _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
+                saw_completion = True
             except Exception as e:
                 logger.warning(f"[cast-authoring] llm retry failed for {hid}: {e}")
             else:
                 profile = parse_authored_profile(text or "", hid)
-        return profile, (text or "")
+        # A completion body WAS obtained on at least one attempt ⇒ not a pure call failure (an empty
+        # body is a genuine misroute, classified by the caller); report the exception only when the
+        # provider never once returned.
+        return profile, (text or ""), (None if saw_completion else call_error)
 
     async def _write_with_retries(profile: dict, hid: str):
         """#1057: commit one profile through the SERIALIZED single-flight write-back, retrying a transient
@@ -813,7 +829,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     async def _author_one(npc: dict) -> int:
         nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below, \
-            floor_gaveup
+            floor_gaveup, floor_call_failed
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
@@ -840,8 +856,17 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                     pass
             return 0
         async with sem:
-            profile, text = await _call_with_retries(npc, hid)
+            profile, text, call_error = await _call_with_retries(npc, hid)
             if not profile:
+                # RC6 S6c: a provider EXCEPTION with no completion body is NOT an empty-visible
+                # reasoning misroute — it's a timeout/HTTP/network fault. Count it apart so it is
+                # never mislabeled `reasoning-misroute` (the empty-body class below).
+                if call_error:
+                    floor_call_failed += 1
+                    logger.warning(
+                        f"[cast-authoring] authoring provider call raised for {hid} (no completion "
+                        f"reached — timeout / HTTP / network) — keeping the seeded floor: {call_error}")
+                    return 0
                 # #1002 / #1057: close the silent-None gap — distinguish the no-op causes so a whole-cast
                 # floor-fallback is diagnosable, not silent. Classify the FINAL reply body.
                 shape = _classify_visible_body(text or "")
@@ -897,7 +922,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
         f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
         f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor, "
-        f"{floor_gaveup} given-up)")
+        f"{floor_gaveup} given-up, {floor_call_failed} call-failed)")
     # STRICT enrichment policy (owner directive 2026-07-11): any houseguest left on the deterministic
     # floor after the bounded retry ladder is a LOUD failure — an ERROR + an admin-visible ledger
     # entry (the #1313 house-entry gate is what blocks the flow itself). Under `soft` the tally above
@@ -911,7 +936,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                     f"{floor}/{total} houseguest(s) fell back to the deterministic floor after retries",
                     detail=(f"{floor_no_json} no-JSON, {floor_empty} empty, {floor_truncated} truncated, "
                             f"{floor_degradation} degradation, {floor_below} below-floor, "
-                            f"{floor_gaveup} given-up"))
+                            f"{floor_gaveup} given-up, {floor_call_failed} call-failed"))
         except Exception:
             pass
     # RC6 S6c (#1599): an EMPTY visible body after the retry ladder is the reasoning-channel misroute —
@@ -928,6 +953,19 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                 user, "reasoning-misroute",
                 f"model routed the whole turn to the reasoning channel (empty visible body) for "
                 f"{floor_empty} houseguest(s) — nothing authored, seeded floor stands")
+        except Exception:
+            pass
+    # RC6 S6c: a provider CALL that RAISED (timeout / HTTP / network) is a genuine provider/transport
+    # fault, NOT a reasoning-channel misroute — record it under its own truthful runtime class so the
+    # exception path is never mislabeled the misroute above. Unconditional (a raised provider call is
+    # always a real fault, never the deliberate no-model floor); fail-soft, never blocks start.
+    if floor_call_failed > 0:
+        try:
+            from src import enrichment_policy
+            enrichment_policy.record_runtime_failure(
+                user, "cast-authoring-call",
+                f"the authoring provider call raised (timeout / HTTP / network) for "
+                f"{floor_call_failed} houseguest(s) — no completion reached, seeded floor stands")
         except Exception:
             pass
     return written

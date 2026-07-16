@@ -70,7 +70,15 @@ CALL_CLASSES = ("cast-authoring", "cast-identity", "cast-prewarm", "cast-genesis
 # /admin/status instead of a swallowed WARN. (The narrator-http / reasoning-misroute classes are also
 # caught at the LLMIO tier by the S6a failClass derivation; recording here makes them alarm-eligible on
 # the enrichment surface too, and is the ONLY capture point for the non-LLM search-provider outage.)
-RUNTIME_CLASSES = ("search-provider", "narrator-http", "reasoning-misroute")
+#   RC6 truthful-telemetry split: the provider-confirmed classes (search-provider / narrator-http /
+#   reasoning-misroute) fire the threshold-1 provider RED alarm; the runtime/transport siblings are
+#   classed apart so a local bug or a transport blip is not mislabeled as a provider outage — a
+#   search-side parsing/programming bug is `search-runtime`, a narrator timeout/connection failure is
+#   `narrator-timeout` / other non-HTTP stream fault `narrator-runtime`, and a cast-authoring provider
+#   call that RAISED (vs a genuine empty-visible completion, which stays `reasoning-misroute`) is
+#   `cast-authoring-call`.
+RUNTIME_CLASSES = ("search-provider", "narrator-http", "reasoning-misroute",
+                   "search-runtime", "narrator-timeout", "narrator-runtime", "cast-authoring-call")
 
 # ── the loud failure ledger (admin-visible; in-process, bounded) ───────────────────────────
 _MAX_FAILURES_PER_USER = 50
