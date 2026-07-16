@@ -687,16 +687,16 @@ export function applyModelColor(roleEl, modelName) {
     roleEl.style.cursor = 'pointer';
     roleEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      document.querySelectorAll('.ctx-popup').forEach(p => { if (typeof p._dismiss === 'function') p._dismiss(); else p.remove(); });
+      // Toggle: a second click on the role label closes the open popover.
+      if (roleEl._owInfoPop && roleEl._owInfoPop.isOpen()) { roleEl._owInfoPop.close('toggle'); roleEl._owInfoPop = null; return; }
+      if (!window.OrwellPopoverKit) return;
       const info = getModelInfo(modelName);
       const short = shortModel(modelName);
       const logoHtml = providerLogo(modelName);
-      const popup = document.createElement('div');
-      popup.className = 'ctx-popup';
       let html = '<div style="font-weight:600;margin-bottom:6px;color:var(--fg);display:flex;align-items:center;gap:6px;">';
       if (logoHtml) html += '<span class="role-provider-logo" style="opacity:0.7">' + logoHtml + '</span>';
-      html += short + '</div>';
-      html += '<div><span class="ctx-label">Model</span> ' + modelName.split('/').pop() + '</div>';
+      html += uiModule.esc(short) + '</div>';
+      html += '<div><span class="ctx-label">Model</span> ' + uiModule.esc(modelName.split('/').pop()) + '</div>';
       // Provider = the serving endpoint, distinct from the model vendor/logo
       // (e.g. the same model via OpenRouter vs Copilot vs Anthropic direct).
       const _epUrl = (window.sessionModule && window.sessionModule.getCurrentEndpointUrl)
@@ -743,15 +743,21 @@ export function applyModelColor(roleEl, modelName) {
       if (info && info.input != null) html += '<div><span class="ctx-label">Input</span> $' + info.input.toFixed(2) + ' / 1M</div>';
       if (info && info.output != null) html += '<div><span class="ctx-label">Output</span> $' + info.output.toFixed(2) + ' / 1M</div>';
       if (!info) html += '<div style="opacity:0.4;font-size:0.85em;margin-top:4px;">No pricing data available</div>';
-      popup.innerHTML = html;
-      const rect = roleEl.getBoundingClientRect();
-      popup.style.top = (rect.bottom + 4) + 'px';
-      popup.style.left = rect.left + 'px';
-      document.body.appendChild(popup);
-      const pr = popup.getBoundingClientRect();
-      if (pr.bottom > window.innerHeight - 8) popup.style.top = (rect.top - pr.height - 4) + 'px';
-      if (pr.right > window.innerWidth - 8) popup.style.left = (window.innerWidth - pr.width - 8) + 'px';
-      bindMenuDismiss(popup, () => popup.remove());
+      // Mount on the shared OrwellPopover kit — the kit owns anchoring (flip/shift) + the
+      // dismiss seat (outside-click + Escape). role='dialog' (informational), NOT a menu.
+      const content = document.createElement('div');
+      content.style.padding = '10px 14px';
+      content.style.lineHeight = '1.7';
+      content.innerHTML = html;
+      roleEl._owInfoPop = window.OrwellPopoverKit.open({
+        anchor: roleEl,
+        role: 'dialog',
+        ariaLabel: 'Model details',
+        content,
+        placement: 'bottom',
+        align: 'start',
+        onClose: () => { roleEl._owInfoPop = null; },
+      });
     });
   }
 }
@@ -1765,7 +1771,9 @@ export function displayMetrics(messageElement, metrics) {
   metricsDivider.style.pointerEvents = 'none';
   metricsContainer.addEventListener('click', (e) => {
     e.stopPropagation();
-    document.querySelectorAll('.ctx-popup').forEach(p => { if (typeof p._dismiss === 'function') p._dismiss(); else p.remove(); });
+    // Toggle: a second click on the metrics text closes the open popover.
+    if (metricsContainer._owStatsPop && metricsContainer._owStatsPop.isOpen()) { metricsContainer._owStatsPop.close('toggle'); metricsContainer._owStatsPop = null; return; }
+    if (!window.OrwellPopoverKit) return;
 
     const costStr = cost !== null ? `$${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}` : 'n/a';
     const speedStr = tps != null && tps !== 'undefined' ? `${tps} tok/s` : 'n/a';
@@ -1786,10 +1794,11 @@ export function displayMetrics(messageElement, metrics) {
     }
 
     const popup = document.createElement('div');
-    popup.className = 'ctx-popup';
+    popup.style.padding = '10px 14px';
+    popup.style.lineHeight = '1.7';
     popup.innerHTML = `
       <div style="font-weight:600;margin-bottom:6px;color:var(--fg);">Message Stats</div>
-      <div><span class="ctx-label">Model</span> ${model.split('/').pop()}</div>
+      <div><span class="ctx-label">Model</span> ${uiModule.esc(model.split('/').pop())}</div>
       <div><span class="ctx-label">Input</span> ${inputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</div>
       <div><span class="ctx-label">Output</span> ${outputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</div>
       <div><span class="ctx-label">Total</span> ${totalTok.toLocaleString()} tokens</div>
@@ -1809,23 +1818,17 @@ export function displayMetrics(messageElement, metrics) {
       ${isReal ? '' : '<div style="margin-top:4px;font-size:0.8em;opacity:0.4;">~ estimated token count</div>'}
     `;
 
-    const rect = metricsContainer.getBoundingClientRect();
-    popup.style.left = rect.left + 'px';
-    popup.style.visibility = 'hidden';
-    document.body.appendChild(popup);
-    const pr = popup.getBoundingClientRect();
-    const spaceAbove = rect.top;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    if (spaceAbove >= pr.height + 8 || spaceAbove > spaceBelow) {
-      popup.style.top = (rect.top - pr.height - 8) + 'px';
-    } else {
-      popup.style.top = (rect.bottom + 8) + 'px';
-    }
-    if (pr.right > window.innerWidth - 8) popup.style.left = (window.innerWidth - pr.width - 8) + 'px';
-    if (parseFloat(popup.style.left) < 8) popup.style.left = '8px';
-    popup.style.visibility = '';
-
-    bindMenuDismiss(popup, () => popup.remove());
+    // Mount on the shared OrwellPopover kit — it owns anchoring (prefer above, flip on
+    // overflow) + the dismiss seat. role='dialog' (informational stats), NOT a menu.
+    metricsContainer._owStatsPop = window.OrwellPopoverKit.open({
+      anchor: metricsContainer,
+      role: 'dialog',
+      ariaLabel: 'Message stats',
+      content: popup,
+      placement: 'top',
+      align: 'start',
+      onClose: () => { metricsContainer._owStatsPop = null; },
+    });
   });
 
   // Store real context length for model info popup
@@ -1856,15 +1859,17 @@ export function displayMetrics(messageElement, metrics) {
 
     ctxRing.addEventListener('click', (e) => {
       e.stopPropagation();
-      document.querySelectorAll('.ctx-detail-popup').forEach(p => { if (typeof p._dismiss === 'function') p._dismiss(); else p.remove(); });
+      // Toggle: a second click on the ring closes the open popover.
+      if (ctxRing._owCtxPop && ctxRing._owCtxPop.isOpen()) { ctxRing._owCtxPop.close('toggle'); ctxRing._owCtxPop = null; return; }
+      if (!window.OrwellPopoverKit) return;
 
       const usedTokens = inputTokens || 0;
       const totalCtx = ctxLen || 0;
-      const modelShort = model.split('/').pop();
+      const modelShort = uiModule.esc(model.split('/').pop());
       const fmtNum = n => n ? n.toLocaleString() : '?';
 
       const popup = document.createElement('div');
-      popup.className = 'ctx-detail-popup';
+      popup.style.padding = '12px 14px';
       popup.innerHTML = `
         <div style="font-weight:600;margin-bottom:8px;color:var(--fg);">Context Window</div>
         <div class="ctx-bar-wrap">
@@ -1888,7 +1893,7 @@ export function displayMetrics(messageElement, metrics) {
           e.stopPropagation();
           const sid = window.sessionModule && window.sessionModule.getCurrentSessionId();
           if (!sid) return;
-          popup.remove();
+          if (ctxRing._owCtxPop) ctxRing._owCtxPop.close('compact'); else popup.remove();
 
           // Add a spinner bubble at the bottom of chat
           const chatBox = document.getElementById('chat-history');
@@ -1952,21 +1957,19 @@ export function displayMetrics(messageElement, metrics) {
         });
       }
 
-      const rect = ctxRing.getBoundingClientRect();
-      popup.style.visibility = 'hidden';
-      document.body.appendChild(popup);
-      const pr = popup.getBoundingClientRect();
-      // Position above the ring, right-aligned
-      popup.style.left = Math.max(8, rect.right - pr.width) + 'px';
-      const spaceAbove = rect.top;
-      if (spaceAbove >= pr.height + 8) {
-        popup.style.top = (rect.top - pr.height - 8) + 'px';
-      } else {
-        popup.style.top = (rect.bottom + 8) + 'px';
-      }
-      popup.style.visibility = '';
-
-      bindMenuDismiss(popup, () => popup.remove(), (ev) => !popup.contains(ev.target) && ev.target !== ctxRing && !ctxRing.contains(ev.target));
+      // Mount on the shared OrwellPopover kit — above the ring, right-aligned (align:'end'),
+      // flip on overflow. role='dialog'; the kit owns anchoring + the dismiss seat.
+      ctxRing._owCtxPop = window.OrwellPopoverKit.open({
+        anchor: ctxRing,
+        role: 'dialog',
+        ariaLabel: 'Context window',
+        content: popup,
+        placement: 'top',
+        align: 'end',
+        minWidth: 220,
+        maxWidth: 280,
+        onClose: () => { ctxRing._owCtxPop = null; },
+      });
     });
   }
 
