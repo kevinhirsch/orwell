@@ -191,6 +191,12 @@
   --win-border: var(--border);
   --win-radius: 10px;
   --win-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  /* #1638 menu/popover band — ONE band ABOVE the modal tier (window band 500–980 < modal
+     scrim/modal 1000/1001 < menus 1100), so a provider menu opened INSIDE the Settings modal
+     floats above it and the Escape arbiter still drains menus first. Replaces the old z zoo
+     (adm-provider 100 / msg-overflow 100 / ctx 250 / model-picker 300 / dropdown 1000 / emoji
+     10000). Consumed by the .ow-popover kit surface (orwellMenu.js). */
+  --ow-z-menu: 1100;
   /* Window/modal titlebar type — composed from the shared title PRESET (#709) so a
      kit window title, a modal header and a card title all read identically. */
   --win-titlebar-fs: var(--ow-fs-title);
@@ -22354,6 +22360,95 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
   }
 }
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
+
+/* ╔══════════════════════════════════════════════════════════════════════════╗ */
+/* ║  ── MENU / POPOVER KIT ──  (#1638 / KM-W10 — the anchored-surface kit)     ║ */
+/* ║  The linked-stylesheet COPY of the .ow-menu / .ow-popover family that      ║ */
+/* ║  orwellMenu.js's ensureCss() also injects as a pre-stylesheet fallback     ║ */
+/* ║  (kept in lock-step, string-concatenation there, never a backtick). The    ║ */
+/* ║  surface reuses the shared --win-* / --ow-* tokens the window + sheet kits  ║ */
+/* ║  consume, so menus paint the same glass and the 0052 house themes + the     ║ */
+/* ║  #738 light-glass fold hit them for free. Deliberately OUTSIDE the ELEMENT  ║ */
+/* ║  KIT region (danger rows ink the sanctioned var(--red), which the kit's     ║ */
+/* ║  no-accent-on-text scan forbids) — it is a base, non-frosted-scoped rule.   ║ */
+/* ╚══════════════════════════════════════════════════════════════════════════╝ */
+/* the base anchored surface (position:fixed frame + shadow + glass) */
+.ow-popover {
+  position: fixed; z-index: var(--ow-z-menu, 1100);
+  box-sizing: border-box; min-width: 180px; max-width: min(92vw, 360px);
+  background: var(--win-bg, var(--panel, #111)); color: var(--fg, #9cdef2);
+  border: 1px solid var(--win-border, var(--border, #355a66));
+  border-radius: var(--ow-menu-radius, 10px);
+  box-shadow: var(--win-shadow, 0 8px 32px rgba(0, 0, 0, 0.45));
+  font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, 0.875rem); line-height: 1.4;
+  overflow: auto; overscroll-behavior: contain;
+  animation: ow-menu-in 0.13s ease-out;
+}
+.ow-popover:focus { outline: none; }
+.ow-popover:focus-visible { outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px; }
+@keyframes ow-menu-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+/* .ow-popover specialized for a role=menu list (padding, item flow) */
+.ow-menu { padding: 6px; display: flex; flex-direction: column; }
+.ow-menu-item {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+  padding: 7px 10px; border-radius: 7px; box-sizing: border-box;
+  background: none; border: none; color: inherit; font: inherit; text-align: left;
+  cursor: pointer; white-space: nowrap; -webkit-user-select: none; user-select: none;
+}
+.ow-menu-item:hover, .ow-menu-item.ow-active {
+  background: color-mix(in srgb, var(--fg, #fff) 8%, transparent);
+}
+/* the focus ring is the NEUTRAL iOS-blue — NEVER the theme red/accent (#729: glass chrome
+   carries no accent HUE). */
+.ow-menu-item.ow-active:focus-visible, .ow-menu-item:focus-visible {
+  outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: -2px;
+}
+/* disabled: dimmed + inert on EVERY path (never focusable, never selectable). */
+.ow-menu-item[aria-disabled="true"] { opacity: 0.4; cursor: default; pointer-events: none; }
+/* destructive rows keep the sanctioned danger red (spec §3.2). */
+.ow-menu-item-danger { color: var(--red, #e06c75); }
+.ow-menu-icon {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 1.15em; height: 1.15em;
+}
+.ow-menu-icon svg { width: 100%; height: 100%; }
+.ow-menu-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ow-menu-item-sub { display: block; margin-top: 1px; font-size: 0.82em; opacity: 0.7; white-space: normal; }
+.ow-menu-shortcut {
+  flex: 0 0 auto; margin-left: 1.25rem; opacity: 0.55; font-size: 0.85em; font-variant-numeric: tabular-nums;
+}
+.ow-menu-check { flex: 0 0 auto; width: 1.1em; text-align: center; }
+.ow-menu-submenu-caret { flex: 0 0 auto; margin-left: auto; opacity: 0.6; }
+.ow-menu-sep { height: 1px; margin: 5px 6px; background: color-mix(in srgb, var(--fg, #fff) 14%, transparent); }
+.ow-menu-section {
+  padding: 6px 10px 3px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.55;
+}
+/* coarse-pointer floor: 44px rows (WCAG 2.5.5 / HIG); shortcut hints hide on coarse. Desktop
+   density (~30px rows) is unchanged on fine pointers. */
+@media (pointer: coarse) {
+  .ow-menu-item { min-height: 44px; }
+  .ow-menu-shortcut { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ow-popover { animation: none; } }
+/* frosted: the surface rides the shared light-glass material so it is not a dark opaque box in
+   the light theme; the ink flips to the neutral chrome dark ink (the #738 item-5 fold). */
+@media (prefers-reduced-transparency: no-preference) {
+  body.theme-frosted .ow-popover {
+    background-color: var(--ow-glass-light-color, rgba(255, 255, 255, 0.6));
+    -webkit-backdrop-filter: blur(18px) saturate(180%); backdrop-filter: blur(18px) saturate(180%);
+    color: #16191f;
+  }
+}
+/* a11y: reduced-transparency → opaque fill (no blur); prefers-contrast/forced-colors → hard rim. */
+@media (prefers-reduced-transparency: reduce) {
+  .ow-popover {
+    -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    background: var(--win-bg, var(--panel, #111)) !important;
+  }
+}
+@media (prefers-contrast: more), (forced-colors: active) {
+  .ow-popover { border-color: var(--fg) !important; border-width: 2px; }
+}
 
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */
 /* ║  ── ELEMENT KIT: NORMAL (FLAT) TIER ──  (2026-07-14 theme audit, §3,      ║ */

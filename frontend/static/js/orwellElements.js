@@ -126,7 +126,8 @@
   function whenReady(cb) {
     var tries = 0;
     (function poll() {
-      var ok = window.OrwellWindowKit && window.OrwellNoticeKit && window.OrwellGadgetKit;
+      var ok = window.OrwellWindowKit && window.OrwellNoticeKit && window.OrwellGadgetKit
+        && window.OrwellMenuKit && window.OrwellPopoverKit;
       if (ok) { try { cb(); } catch (e) { console.error("[kit-demo]", e); } return; }
       if (tries++ > 100) { console.warn("[kit-demo] kit globals never arrived"); return; }
       setTimeout(poll, 50);
@@ -381,10 +382,65 @@
     } catch (e) { console.warn("[kit-demo] decision styles failed", e); }
   }
 
+  // ── MENUS & POPOVERS (#1638) — wire the live triggers ────────────────────────
+  // OrwellMenuKit.attach binds the trigger's click to open/close an anchored role=menu built from
+  // the declarative item model (icons / danger / disabled / checkbox / shortcut / separator /
+  // section header / a nested submenu / a two-line description). OrwellPopoverKit.open mounts rich
+  // custom content beside a trigger. Menus stay ANCHORED on every viewport (owner ruling).
+  function buildMenus() {
+    var menuTrigger = document.getElementById("ek-menu-trigger");
+    if (menuTrigger && window.OrwellMenuKit) {
+      var favorited = true;
+      window.OrwellMenuKit.attach(menuTrigger, function () {
+        return [
+          { label: "Rename", icon: "✎", shortcut: "R", onSelect: function () {} },
+          { label: "Favorite", checked: favorited, keepOpen: true,
+            onSelect: function (it) { favorited = !favorited; it.checked = favorited; return false; } },
+          { label: "Duplicate", icon: "⧉", description: "Copy this session and its whole history",
+            onSelect: function () {} },
+          { separator: true },
+          { label: "Organize", section: true },
+          { label: "Move to folder", icon: "🗂", submenu: function () {
+              return [
+                { label: "Work", onSelect: function () {} },
+                { label: "Personal", onSelect: function () {} },
+                { separator: true },
+                { label: "Archive", onSelect: function () {} },
+              ];
+            } },
+          { label: "Coming soon", disabled: true },
+          { separator: true },
+          { label: "Delete", icon: "🗑", danger: true, onSelect: function () {} },
+        ];
+      }, { ariaLabel: "Session actions" });
+    }
+    var popTrigger = document.getElementById("ek-popover-trigger");
+    if (popTrigger && window.OrwellPopoverKit) {
+      var popover = null;
+      popTrigger.addEventListener("click", function () {
+        if (popover && popover.isOpen()) { popover.close("toggle"); popover = null; return; }
+        var body = document.createElement("div");
+        body.style.padding = "10px 12px";
+        body.style.maxWidth = "260px";
+        body.innerHTML =
+          '<div style="font-weight:600;margin-bottom:4px">Rich popover</div>' +
+          '<p style="margin:0;opacity:.8;line-height:1.4">OrwellPopover serves arbitrary content ' +
+          'beside a trigger — the emoji grid, the HSV colour plane, the model list. It owns the ' +
+          'positioning, dismissal, focus-trap and mobile behaviour; the content is yours.</p>';
+        popover = window.OrwellPopoverKit.open({
+          anchor: popTrigger, content: body, placement: "bottom", align: "start",
+          ariaLabel: "Example popover", focusTrap: true,
+          onClose: function () { popover = null; },
+        });
+      });
+    }
+  }
+
   whenReady(function () {
     buildWindows();
     buildNotices();
     buildGadgets();
     buildDecision();
+    buildMenus();
   });
 })();

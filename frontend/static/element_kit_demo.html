@@ -539,6 +539,23 @@
         </div>
       </div>
     </section>
+
+    <!-- MENUS & POPOVERS (OrwellMenuKit / OrwellPopoverKit — #1638) -->
+    <section class="ek-card">
+      <h2>Menus &amp; popovers (#1638) — OrwellMenuKit.attach / OrwellPopoverKit.open</h2>
+      <p class="ek-note">The anchored-surface kit: one flip/shift positioning engine, one
+        <code>escMenuStack</code> dismiss seat (Escape drains menus first), a roving-tabindex
+        <code>role="menu"</code> contract, and the <code>.ow-menu</code> / <code>.ow-popover</code>
+        glass family. <strong>OrwellMenu</strong> renders a declarative item model (icons, danger,
+        disabled, checkbox, shortcut, separator, section header, a nested submenu, a two-line
+        description); <strong>OrwellPopover</strong> serves rich custom content. Menus stay
+        <strong>anchored on every viewport</strong> (owner ruling 2026-07-15 — no sheet reflow).
+        Click a trigger, then arrow-key / type-ahead through it and press Escape.</p>
+      <div class="ek-row" style="align-items:center">
+        <button id="ek-menu-trigger" class="ow-btn ow-btn-secondary" type="button">Session actions ▾</button>
+        <button id="ek-popover-trigger" class="ow-btn ow-btn-secondary" type="button">Open a popover ▾</button>
+      </div>
+    </section>
   </div>
 
   <style>
@@ -572,6 +589,9 @@
   <!-- The COMPOSITE kits + their deps (same files index.html loads), then the demo driver. -->
   <script type="module" src="/static/js/orwellSlots.js"></script>
   <script type="module" src="/static/js/orwellWindow.js"></script>
+  <!-- #1638: THE menu/popover kit — OrwellMenuKit + OrwellPopoverKit (window globals). Loads with
+       the other composite kits so the demo driver can wire the live menu/popover triggers. -->
+  <script type="module" src="/static/js/orwellMenu.js"></script>
   <script src="/static/js/orwellGadgetRail.js"></script>
   <script src="/static/js/orwellGadget.js"></script>
   <script src="/static/js/orwellNotice.js"></script>
