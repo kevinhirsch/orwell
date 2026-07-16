@@ -226,7 +226,7 @@
     // share size buckets (one map per size). watchMounts() schedules a pass when they mount.
     ".dropdown",
     ".overflow-menu",
-    ".cp-popover",
+    ".ow-popover",                 // the OrwellPopover kit surface (#1638) — hosts the color picker (folded from .cp-popover) + kit menus
     // ── GLASS BUTTONS (kube.io demos the refraction on PILL BUTTONS — the authentic
     // look). The high-emphasis glass variants get the SAME feImage→feDisplacementMap
     // refraction + specular rim as the chrome, applied via backdrop-filter (refracts the

@@ -17546,10 +17546,12 @@ button .spinner-whirlpool {
   transition: opacity 0.1s;
 }
 .emoji-picker-btn:hover { opacity: 1; }
+/* The frame (background / border / radius / shadow / fixed-position) FOLDS to the
+   OrwellPopover kit surface (.ow-popover, #1638) — the kit mounts this node inside
+   it. Only the emoji-specific INNER layout stays: the flex column + the internal
+   scroll cap that keeps the search input pinned while the groups scroll. */
 .emoji-picker {
   width: min(300px, 92vw); max-height: min(300px, 55vh);
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .emoji-picker-search {
@@ -19168,16 +19170,14 @@ input.cp-swatch-input {
   user-select: none;
 }
 input.cp-swatch-input::selection { background: transparent; }
+/* The frame (fixed-position / background / border / radius / shadow) FOLDS to the
+   OrwellPopover kit surface (.ow-popover, #1638) — the kit mounts this content node
+   inside it and owns positioning + dismissal + the glass material. Only the color
+   picker's own box metrics + drag-safe user-select stay here. */
 .cp-popover {
-  position: fixed; z-index: 10000;
-  display: none;
   width: 240px;
-  background: var(--panel, #1a1a1a);
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
   padding: 10px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
-  font-family: inherit; color: var(--fg, #eee); font-size: 12px;
+  font-size: 12px;
   user-select: none;
 }
 .cp-sl {
@@ -19296,7 +19296,6 @@ body.theme-frosted .calendar-pane,
 body.theme-frosted .cookbook-pane,
 body.theme-frosted .doc-pane,
 body.theme-frosted .doc-pane-floating,
-body.theme-frosted .cp-popover,
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
 body.theme-frosted .doc-tab-dropdown,
@@ -24331,8 +24330,7 @@ body.theme-frosted .msg-overflow-menu,
    foggier/darker odd-one-out vs every other surface). The dock-specific layout — the
    generous Control-Center radius + padding — stays in its own rule above; only the
    MATERIAL is unified here. */
-body.theme-frosted #minimized-dock.ow-has-rows,
-body.theme-frosted .cp-popover {
+body.theme-frosted #minimized-dock.ow-has-rows {
   /* GLASS BACKGROUND OPACITY ≈ 0.60 (the kube preset) — a LIGHT, white-ish translucent
      fill. Set BOTH the background-color AND a top-down background-image lift so no dark
      veil can ever show underneath (item 2: retire the dark veil for the glass theme). */
@@ -24365,7 +24363,7 @@ body.theme-frosted .cp-popover {
    gadget cards (owned elsewhere) are untouched. */
 body.theme-frosted .dropdown,
 body.theme-frosted .overflow-menu,
-body.theme-frosted .cp-popover,
+body.theme-frosted .ow-popover,
 body.theme-frosted .model-picker-menu {
   overflow: hidden;
 }

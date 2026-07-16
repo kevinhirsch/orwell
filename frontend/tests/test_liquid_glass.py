@@ -132,7 +132,7 @@ def test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect():
     block = re.search(
         r"body\.theme-frosted \.dropdown,\s*"
         r"body\.theme-frosted \.overflow-menu,\s*"
-        r"body\.theme-frosted \.cp-popover,\s*"
+        r"body\.theme-frosted \.ow-popover,\s*"
         r"body\.theme-frosted \.model-picker-menu \{([^}]*)\}",
         CSS, re.S)
     assert block, "the four transient popovers must share a frosted clip rule"
