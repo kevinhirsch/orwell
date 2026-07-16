@@ -111,6 +111,32 @@
       "css_source": "../css/orwellSettingsCard.css",
       "gate": "test_658_settings_card_kit.py",
       "note": "The #658 kit (part of the #660 epic). Sibling to OrwellWindow/OrwellGadget/OrwellNotice. Every Settings section composes it — create() a fresh card, or upgrade() an existing .admin-card in place (keeping .admin-card so peek / empty-tab / .closest still work). First adoption: the Appearance tab (initAppearance -> upgradePanel)."
+    },
+    {
+      "id": "anchored-popovers",
+      "family": "Anchored surfaces (rich pickers / info popovers — emoji, colour, model, provider)",
+      "kit": "OrwellPopover",
+      "kind": "kit",
+      "seam": "window.OrwellPopoverKit",
+      "seam_check": "window.OrwellPopoverKit = {",
+      "file": "orwellMenu.js",
+      "css_family": ".ow-popover",
+      "css_source": "orwellMenu.js",
+      "gate": "test_1638_menu_popover_kit.py",
+      "note": "The #1638 / KM-W10 base anchored-surface primitive: ONE flip/shift positioning engine (viewport-clamped, position:fixed), dismissal through the shared escMenuStack seat (Escape arbiter drains menus first), focus-trap/return, and the --ow-z-menu band above the modal tier. Serves the rich pickers + info popovers; OrwellMenu is built on it. Anchored on EVERY viewport (owner ruling 2026-07-15 — NO sheet reflow). The ~14 bespoke dropdown/menu/popover consumers migrate onto it in a later lane."
+    },
+    {
+      "id": "action-menus",
+      "family": "Action menus (dropdowns / overflow / session-row / provider menus)",
+      "kit": "OrwellMenu",
+      "kind": "kit",
+      "seam": "window.OrwellMenuKit",
+      "seam_check": "window.OrwellMenuKit = {",
+      "file": "orwellMenu.js",
+      "css_family": ".ow-menu",
+      "css_source": "orwellMenu.js",
+      "gate": "test_1638_menu_popover_kit.py",
+      "note": "The #1638 / KM-W10 action-menu layer, built ON OrwellPopover: the declarative item model (icon/danger/disabled/checkbox/shortcut/separator/section/submenu/description + a render escape hatch), real role=menu/menuitem roving-tabindex nav (Up/Down/Home/End/typeahead/Enter/Arrow-for-submenus/Esc), and aria-haspopup/aria-expanded toggled on the trigger. Anchored on every viewport (owner ruling)."
     }
   ]
 }
