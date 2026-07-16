@@ -268,7 +268,8 @@ import { onNarrowChange } from './platform.js';
           border-radius: 7px; overflow: hidden; background: transparent; position: relative;
           transition: opacity .28s ease, transform .14s ease, filter .28s ease;
         }
-        #orwell-status .os-tile .ow-mono-face { border-radius: 7px; }
+        /* #1638: the face inherits the tile's 7px radius via the .ow-portrait kit frame
+           (.ow-portrait > .ow-mono-face { border-radius: inherit }) — the local override is gone. */
         #orwell-status .os-tile:hover { transform: translateY(-1px); }
         #orwell-status .os-tile:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ow-ios-blue, #0a84ff); }
         /* the ONLY state a tile carries: met (lit) vs. not-yet-met (unlit) — the gate the strip visualizes. */
@@ -643,7 +644,7 @@ import { onNarrowChange } from './platform.js';
       if (!tile) {
         tile = document.createElement("button");
         tile.type = "button";
-        tile.className = "os-tile";
+        tile.className = "os-tile ow-portrait ow-portrait-tile"; // #1638: kit frame + interactive tile
         tile.dataset.hgId = key;
         tile.addEventListener("click", focusChat); // ADR 0003: focus chat, never replace it
         _stripTiles.set(key, tile);
@@ -663,7 +664,8 @@ import { onNarrowChange } from './platform.js';
         tile.appendChild(window.OrwellMonogram.face(
           { id: card.id, name: card.name, status: card.status, portrait: cached && cached.portrait },
           { alt: card.name }));
-        tile.classList.toggle("os-tile-unmet", !met);
+        tile.classList.toggle("os-tile-unmet", !met); // the unlit gate (CSS pin)
+        tile.classList.toggle("ow-portrait--muted-grey", !met); // #1638: the shared dim+desaturate modifier
         const you = card.isPlayer ? " (you)" : "";
         tile.setAttribute("aria-label", card.name + you + (met ? " — met" : " — not yet met") + ". Tap to talk in chat.");
         tile.title = card.name + (met ? "" : " — not yet met");

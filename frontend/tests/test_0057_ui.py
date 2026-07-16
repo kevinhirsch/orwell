@@ -13,6 +13,7 @@ import pathlib
 FRONTEND_DIR = pathlib.Path(__file__).parent.parent
 HTML_SRC = (FRONTEND_DIR / "static" / "index.html").read_text(encoding="utf-8")
 JS_PROGRESS = (FRONTEND_DIR / "static" / "js" / "orwellSeasonProgress.js").read_text(encoding="utf-8")
+CSS_SRC = (FRONTEND_DIR / "static" / "style.css").read_text(encoding="utf-8")
 JS_NEWSEASON = (FRONTEND_DIR / "static" / "js" / "orwellNewSeason.js").read_text(encoding="utf-8")
 JS_SETTINGS = (FRONTEND_DIR / "static" / "js" / "settings.js").read_text(encoding="utf-8")
 
@@ -27,24 +28,38 @@ class TestSeasonProgressBar:
         assert "orwell-season-progress" in JS_PROGRESS
         assert "orwell-season-chip" in JS_PROGRESS
 
+    def test_bar_adopts_the_progress_primitive(self):
+        # #1638 (G8): the bar now composes the .ow-progress / .ow-progress--edge kit primitive;
+        # the fill is dual-classed so paint()'s `.osp-fill` selector survives.
+        assert 'bar.className = "ow-progress ow-progress--edge"' in JS_PROGRESS
+        assert 'fill.className = "ow-progress-fill osp-fill"' in JS_PROGRESS
+
     def test_bar_is_at_most_5px_tall(self):
-        # The spec requires a thin bar (<= 5px). We pin 4px.
-        assert "height: 4px" in JS_PROGRESS
+        # The spec requires a thin bar (<= 5px). The edge variant pins 4px via --ow-progress-edge-h.
+        assert "--ow-progress-edge-h, 4px" in CSS_SRC
 
     def test_bar_pinned_to_bottom_of_viewport(self):
-        # fixed, bottom:0, spanning the width — BELOW the composer.
-        assert "position: fixed" in JS_PROGRESS
-        assert "bottom: 0" in JS_PROGRESS
+        # fixed, bottom:0, spanning the width — BELOW the composer (in the .ow-progress--edge kit rule).
+        edge = CSS_SRC[CSS_SRC.index(".ow-progress--edge {"):]
+        edge = edge[:edge.index("}")]
+        assert "position: fixed" in edge
+        assert "bottom: 0" in edge
 
     def test_bar_spans_width_without_scrollbar_overflow(self):
-        # left:0/right:0 (NOT 100vw) so the bar never adds a horizontal scrollbar.
-        assert "left: 0; right: 0" in JS_PROGRESS
-        # The bar's CSS rule uses left/right, not a 100vw width that would overflow the gutter.
-        assert "width: 100vw" not in JS_PROGRESS
+        # left:0/right:0 (NOT 100vw) so the bar never adds a horizontal scrollbar (kit .ow-progress--edge).
+        edge = CSS_SRC[CSS_SRC.index(".ow-progress--edge {"):]
+        edge = edge[:edge.index("}")]
+        assert "left: 0; right: 0" in edge
+        # The bar never uses a 100vw width that would overflow the scrollbar gutter.
+        assert "width: 100vw" not in JS_PROGRESS and "width: 100vw" not in edge
 
     def test_bar_uses_theme_accent(self):
-        assert "var(--accent" in JS_PROGRESS
-        assert "--accent-primary" in JS_PROGRESS
+        # The progress FILL keeps the theme-accent chain (a fill is a legit accent use) — now in the
+        # .ow-progress-fill kit token chain, retaining the #6d4aff final fallback.
+        fill = CSS_SRC[CSS_SRC.index(".ow-progress-fill {"):]
+        fill = fill[:fill.index("}")]
+        assert "var(--accent" in fill
+        assert "--accent-primary" in fill
 
     def test_progress_is_cadence_driven_not_lingering(self):
         # The fill is derived from evictions + the ceremony phase — never a turn count or social play.

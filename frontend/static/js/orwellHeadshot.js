@@ -167,15 +167,17 @@
         .ow-headshot-studio .hs-cand.hs-loading,
         .ow-headshot-studio .hs-libitem.hs-loading { animation: none;
           background: color-mix(in srgb, var(--panel, #11151c) 88%, var(--border, #355a66)); } }
+      /* #1638: focus is the fixed kit system-blue (was a --brand-color drift) — the same accessibility
+         blue .hs-cand.sel and the .ow-portrait-tile focus ring use. */
       .ow-headshot-studio .hs-cand:focus-visible, .ow-headshot-studio .hs-libpick:focus-visible {
-        outline: 2px solid var(--brand-color, var(--accent, #4a9)); outline-offset: 2px; }
+        outline: 2px solid var(--ow-ios-blue, #0a84ff); outline-offset: 2px; }
       .ow-headshot-studio .hs-lib { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border, #355a66); }
       .ow-headshot-studio .hs-libstrip { display: flex; gap: 8px; flex-wrap: wrap; }
       .ow-headshot-studio .hs-libitem { position: relative; width: 56px; height: 56px; border-radius: 8px; overflow: hidden;
         border: 2px solid transparent;
         /* 0114: token-driven idle tile (was a hardcoded #0d0f14 — see .hs-preview above). */
         background: var(--panel, #11151c) center/cover no-repeat; flex: none; }
-      .ow-headshot-studio .hs-libitem.cur { border-color: var(--brand-color, var(--accent, #4a9)); }
+      .ow-headshot-studio .hs-libitem.cur { border-color: var(--ow-ios-blue, #0a84ff); }
       .ow-headshot-studio .hs-libpick { position: absolute; inset: 0; padding: 0; margin: 0; border: none;
         background: none; cursor: pointer; -webkit-appearance: none; appearance: none; }
       .ow-headshot-studio .hs-libitem img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -383,7 +385,7 @@
       if (!st.library.length) return "";
       return `<div class="hs-lib"><div class="hs-msg" style="margin-bottom:6px">Your headshots — tap one to use it</div>
         <div class="hs-libstrip">${st.library.map((h) =>
-          `<div class="hs-libitem hs-loading${h.current ? " cur" : ""}">
+          `<div class="hs-libitem hs-loading is-loading ow-portrait${h.current ? " cur" : ""}">
              <button type="button" class="hs-libpick" data-pick="${esc(h.id)}" aria-pressed="${h.current ? "true" : "false"}" aria-label="${h.current ? "Current headshot" : "Use this saved headshot"}"><img src="${esc(h.ref)}" alt=""></button><button type="button" class="hs-libdel" data-del="${esc(h.id)}" title="Remove" aria-label="Remove headshot">×</button></div>`).join("")}</div></div>`;
     }
     // J3-15: drive each thumbnail's skeleton/broken state off its <img>'s real load result, so a
@@ -393,10 +395,15 @@
       (root || document).querySelectorAll(".hs-cand.hs-loading img, .hs-libitem.hs-loading img").forEach((img) => {
         const tile = img.closest(".hs-cand, .hs-libitem");
         if (!tile) return;
-        const done = () => { tile.classList.remove("hs-loading"); };
-        if (img.complete && img.naturalWidth > 0) { done(); return; }
+        // #1638: toggle BOTH the legacy hs-* classes AND the shared kit .is-loading/.is-broken so the
+        // .ow-portrait state chrome activates alongside the (test-pinned) J3-15 skeleton.
+        const done = () => { tile.classList.remove("hs-loading", "is-loading"); };
+        const failed = () => { tile.classList.remove("hs-loading", "is-loading"); tile.classList.add("hs-broken", "is-broken"); };
+        // An already-decoded image never fires load/error again — including a CACHED FAILURE
+        // (complete but naturalWidth===0), which must resolve to broken, not stay is-loading.
+        if (img.complete) { (img.naturalWidth > 0 ? done : failed)(); return; }
         img.addEventListener("load", done, { once: true });
-        img.addEventListener("error", () => { tile.classList.remove("hs-loading"); tile.classList.add("hs-broken"); }, { once: true });
+        img.addEventListener("error", failed, { once: true });
       });
     }
     function wireLibrary() {
@@ -425,7 +432,7 @@
         if (handoff()) return;
         body.innerHTML = lib + `
           <div class="hs-row">
-            <div class="hs-preview" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
+            <div class="hs-preview ow-portrait" style="background-image:url('/api/orwell/avatar?t=${Date.now()}')"></div>
             <div class="hs-opts"><div>Your headshot is set — it's your houseguest portrait and your profile pic.</div>
               <div class="hs-actions">
                 <button type="button" class="ow-btn ow-btn-secondary" id="hs-redo">Make another</button>
@@ -442,7 +449,7 @@
         body.innerHTML = lib + `
           <div>${esc(_msg || "Pick your favorite — or generate 3 more.")}</div>
           <div class="hs-grid">${st.candidates.map((c, _n) =>
-            `<button type="button" class="hs-cand hs-loading${st.selected === c.index ? " sel" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
+            `<button type="button" class="hs-cand hs-loading is-loading ow-portrait ow-portrait-tile${st.selected === c.index ? " sel is-selected" : ""}" data-i="${c.index}" aria-pressed="${st.selected === c.index ? "true" : "false"}" aria-label="Portrait option ${_n + 1}"><img src="${esc(c.ref)}" alt=""></button>`).join("")}</div>
           <div class="hs-actions">
             <button type="button" class="ow-btn ow-btn-prominent" id="hs-use" ${st.selected === null ? "disabled" : ""}>Use this one</button>
             <button type="button" class="ow-btn ow-btn-secondary" id="hs-more">Generate 3 more</button>
@@ -461,7 +468,7 @@
       body.innerHTML = lib + `
         <div class="hs-msg" style="margin-bottom:8px">${st.library.length ? "…or make a new one from a photo of yourself." : "Make your houseguest's portrait — and your profile pic — from a photo of yourself."}</div>
         <div class="hs-row">
-          <div class="hs-preview" ${previewBg}>${st.fileUrl ? "" : "👤"}</div>
+          <div class="hs-preview ow-portrait" ${previewBg}>${st.fileUrl ? "" : "👤"}</div>
           <div class="hs-opts">
             <label class="hs-filebtn ow-btn ow-btn-secondary" for="hs-file">${st.file ? "Choose a different photo" : "Choose a photo of yourself"}</label>
             <input type="file" id="hs-file" class="hs-file-native" accept="image/*" aria-label="Choose a photo of yourself">

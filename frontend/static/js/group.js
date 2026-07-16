@@ -337,7 +337,7 @@ export async function showModelPicker() {
     header.className = 'modal-header';
     header.innerHTML = '<h4>Group Chat — Select Models</h4>';
     const closeBtn = document.createElement('button');
-    closeBtn.className = 'close-btn';
+    closeBtn.className = 'close-btn ow-btn ow-btn-icon';
     closeBtn.innerHTML = '&#x2716;';
     closeBtn.addEventListener('click', () => { overlay.remove(); resolve(null); });
     header.appendChild(closeBtn);

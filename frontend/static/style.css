@@ -939,21 +939,16 @@ body.bg-pattern-perlin-flow {
       background: var(--border);
       margin: 4px 0;
     }
+    /* Migrated onto the .ow-btn .ow-btn-icon kit primitive (#1638 R3): the flat
+       transparent square icon-button, adaptive var(--fg) ink, subtle radius, hover
+       tint, focus ring, coarse-pointer 44px floor and a11y trio all now come from the
+       kit. Only the rail-specific residue stays here — the 34px rail size (via the kit's
+       `--ow-btn-icon-size` token), the idle 0.5 dim, and `position: relative` for the
+       absolutely-positioned notify/notes/minimized badges. */
     .icon-rail-btn {
       position: relative;
-      width: 34px;
-      height: 34px;
-      border: none;
-      background: transparent;
-      color: var(--accent, var(--red));
-      font-size: 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      --ow-btn-icon-size: 34px;
       opacity: 0.5;
-      transition: opacity 0.08s, background 0.08s;
     }
     /* H4: every rail icon is a CLONE of its expanded row's svg (single icon
        source — see sidebar-layout.js syncRailIcons). The source rows draw at
@@ -1963,34 +1958,16 @@ body.bg-pattern-perlin-flow {
       transition: width 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
     }
     .gadget-rail[hidden] { display: none; }
-    /* width drag-resize: a thin grab-handle on the rail's INNER edge (the edge facing
-       the chat). Default the rail sits on the right, so the handle is on its LEFT edge;
-       under side-swap the rail is on the left, so the handle moves to its RIGHT edge.
-       Disabled (hidden) when collapsed and on the mobile drawer. */
-    .gadget-rail-resize-handle {
-      position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; z-index: 4;
-      cursor: ew-resize; touch-action: none; background: transparent;
-      border: none; padding: 0; margin: 0;
-    }
-    .gadget-rail-resize-handle::before {
-      content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px;
-      background: transparent; transition: background .12s ease;
-    }
-    /* #8/#9: the resize affordance was a RED glow (var(--accent)/--red) — colorless glass chrome
-       carries NO accent hue. Hover + active-drag show a NEUTRAL luminous white bar (the glass
-       rim language); keyboard focus shows the ONE sanctioned system-blue (matching the kit's
-       focus-ring contract). NO red on the gadget-sidebar resize/hover state. */
-    .gadget-rail-resize-handle:hover::before,
-    .gadget-rail.grail-resizing .gadget-rail-resize-handle::before {
-      background: rgba(255,255,255,0.55);
-    }
-    .gadget-rail-resize-handle:focus-visible::before {
-      background: var(--ow-ios-blue, #0a84ff);
-    }
-    .gadget-rail-resize-handle:focus-visible { outline: none; }
-    body[data-gadget-side="left"] .gadget-rail-resize-handle {
-      left: auto; right: -3px;
-    }
+    /* width drag-resize: a thin grab-handle on the rail's INNER edge (the edge facing the chat).
+       The grip LOOK (hit strip, 2px NEUTRAL glass-rim bar on hover/drag, system-blue focus — the
+       #8/#9 "no accent/red on the resize affordance" contract) is now the `.ow-resize-handle` KIT
+       primitive (ELEMENT KIT region). The consumer keeps ONLY what it owns: the horizontal EDGE
+       anchor and the hide-when-collapsed. Default the rail sits on the right, so the handle is on
+       its LEFT edge; under side-swap the rail is on the left, so the handle moves to its RIGHT
+       edge. Hidden when collapsed and on the mobile drawer (below). */
+    .gadget-rail-resize-handle { left: -3px; right: auto; }
+    .gadget-rail-resize-handle::before { left: 3px; right: auto; }
+    body[data-gadget-side="left"] .gadget-rail-resize-handle { left: auto; right: -3px; }
     body[data-gadget-side="left"] .gadget-rail-resize-handle::before { left: auto; right: 3px; }
     /* while actively dragging, kill the width transition so the rail tracks the pointer */
     .gadget-rail.grail-resizing { transition: none; }
@@ -5920,29 +5897,19 @@ body.bg-pattern-perlin-flow {
       letter-spacing:var(--win-titlebar-ls);
       color:var(--red);
     }
-    .close-btn,
-    .modal-close {
-      background:var(--bg);
-      color:var(--fg);
-      border:1px solid var(--fg);
-      font-size:12px;
-      width:24px;
-      height:24px;
-      padding:0;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      line-height:1;
-      text-indent:0;
-      cursor:pointer;
-      border-radius:4px;
-      line-height:1;
+    /* #1638 R4: modal/panel close × now composes the `.ow-btn .ow-btn-icon` kit
+       primitive (#1653) — flat transparent square, subtle radius, adaptive
+       `var(--fg)` ink, hover tint, focus ring and the coarse-pointer 44px floor
+       all come from the kit. `.close-btn` stays FIRST in the class list as the JS
+       hook (modalManager / keyboard-shortcuts / colorPicker / ui.js all
+       `querySelector('.close-btn')`). Only the modal-header-specific 24px size
+       residue stays here (the kit default is 30px; a close × docks beside the 24px
+       `.minimize-btn`, so it holds that scale via the kit's `--ow-btn-icon-size`
+       token). The bespoke bordered-box appearance + `.modal-close` (which no
+       element ever carried) are retired. */
+    .close-btn {
+      --ow-btn-icon-size: 24px;
       flex-shrink:0;
-    }
-    .close-btn:hover,
-    .modal-close:hover {
-      background:var(--fg);
-      color:var(--bg);
     }
     /* Minimize button — sits beside the close button on every modal */
     .minimize-btn {
@@ -7124,88 +7091,39 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     #theme-popup .admin-tabs { margin: 0 -10px 8px; padding: 0 10px; flex-shrink: 0; }
     .theme-tab-panel { overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 10px; }
 
-    .theme-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
-      gap: 6px; margin-bottom: 12px;
-    }
-    /* J1-06: the game-build "Show all themes" reveal — full-width row + a sub-grid for the
-       inherited (non-house) themes tucked behind it. */
+    /* J1-06: the game-build "Show all themes" reveal. The swatch grid + tiles migrated to the
+       .ow-swatch-grid / .ow-swatch kit primitive (#1638, ELEMENT KIT region). This reveal BUTTON
+       stays a layout sibling — it now lives OUTSIDE the role=listbox grid (a listbox may own only
+       role=option children), so the extra (non-house) tiles are direct grid options collapsed via
+       `.ow-swatch-grid.is-collapsed .ow-swatch--extra`. */
     .theme-show-all {
-      grid-column: 1 / -1;
+      display: block; width: 100%; margin: 0 0 12px;
       background: transparent; border: 1px dashed var(--border); color: var(--fg);
       border-radius: 8px; padding: 7px; font: inherit; font-size: 0.7rem; cursor: pointer;
       opacity: 0.75; transition: opacity 0.12s, border-color 0.12s;
     }
     .theme-show-all:hover, .theme-show-all:focus-visible { opacity: 1; border-style: solid; border-color: var(--accent, var(--red)); }
-    .theme-extra {
-      grid-column: 1 / -1;
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 6px;
-    }
-    /* beat the global .hidden / .theme-extra source-order tie (both 0,1,0) so collapsed = hidden */
-    .theme-extra.hidden { display: none; }
-    .theme-swatch {
-      border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
-      padding: 5px; text-align: center; font-size: 0.65rem; color: var(--fg);
-      transition: border-color 0.15s, transform 0.15s;
-    }
-    .theme-swatch:hover { transform: scale(1.06); }
-    .theme-swatch.active { border-color: var(--red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 33%, transparent); }
-    .theme-swatch-colors {
-      display: flex; justify-content: center; margin-bottom: 3px;
-    }
-    .theme-swatch-colors span {
-      width: 15px; height: 15px; border-radius: 50%;
-      margin-left: -5px;
-      /* J1-24: the preview dots are a theme's OWN colors (its near-black bg dot,
-         etc.), so a border keyed to the page's --fg vanishes when a dark dot sits
-         on a dark tile. Use a background-independent dual ring instead — a light
-         inner edge + a dark outer edge — so every dot reads on any theme. */
-      border: none;
-      box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.45),
-        0 0 0 1px rgba(0, 0, 0, 0.45);
-    }
-    .theme-swatch-colors span:first-child { margin-left: 0; }
+    /* Collapsed = the non-house extras drop out of layout. They stay role=option children of the
+       listbox (keyboard nav + listbox ownership stay correct); the roving-tabindex helper skips
+       them via offsetParent. */
+    .ow-swatch-grid.is-collapsed .ow-swatch--extra { display: none; }
     .theme-custom-label { font-size: 11px; font-weight: 600; color: color-mix(in srgb, var(--fg) 50%, transparent); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 6px; }
     .theme-custom { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
-    .color-row { display: flex; align-items: center; gap: 4px; }
-    .color-row label { font-size: 13px; font-weight: 500; color: var(--fg); opacity: 0.7; flex: 1; }
-    .color-row input[type="color"],
-    .color-row input.cp-swatch-input {
-      width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 50%;
-      background: none; cursor: pointer; padding: 0; flex-shrink: 0;
-      overflow: hidden;
-      -webkit-appearance: none;
-      appearance: none;
-    }
-    .color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-    .color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
-    .color-row input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
-    .color-row input.cp-swatch-input {
-      color: transparent;
-      text-shadow: none;
-      caret-color: transparent;
-      font-size: 0;
-      user-select: none;
-    }
-    .color-row input.cp-swatch-input::selection { background: transparent; }
-    .color-row input.cp-swatch-input:focus { outline: 1px solid var(--red); outline-offset: 1px; }
-    .color-reset-btn {
-      width: 24px; height: 24px; border: none; background: none; cursor: pointer;
-      color: var(--fg); opacity: 0; font-size: 1.15rem; padding: 0; line-height: 1;
-      transition: opacity 0.15s, color 0.15s; flex-shrink: 0; pointer-events: none;
-    }
-    .color-reset-btn.changed { opacity: 0.4; pointer-events: auto; }
-    .color-reset-btn.changed:hover { opacity: 1; color: var(--red); }
+    /* The color-row / color-reset-btn swatch styling migrated to the .ow-color-well kit
+       primitive (#1638, in the ELEMENT KIT region). This bespoke block was retired. */
     .theme-custom-divider {
       grid-column: 1 / -1; font-size: 11px; color: var(--fg); opacity: 0.5;
       text-transform: uppercase; letter-spacing: 0.04em; margin: 6px 0 2px;
       border-top: 1px solid var(--border); padding-top: 6px;
     }
-    .theme-swatch[data-custom] { position: relative; overflow: visible; }
-    /* Accent-coloured circular X — always visible (mobile-friendly), sits
-       INSIDE the swatch's top-right corner so it never crops into a
-       neighbouring swatch. */
+    /* Each custom entry is a presentational wrapper cell (grid item) owning the role=option
+       swatch AND the delete X as SIBLINGS — the button lives OUTSIDE the option (an option's
+       descendants are presentational), so it keeps its button role + is a separate tab stop.
+       The cell is the position anchor for the ✕; it sizes exactly like the swatch it wraps, so
+       the ✕ still sits in the tile's top-right corner (visual placement unchanged). */
+    .ow-swatch-cell { position: relative; }
+    /* Accent-coloured circular X — always visible (mobile-friendly), anchored to the wrapper
+       cell's top-right corner so it never crops into a neighbouring swatch. */
     .theme-delete-btn {
       position: absolute;
       top: -2px;
@@ -12121,11 +12039,11 @@ body:has(.compare-active) .hamburger-btn { display: none !important; }
 }
 /* Highlight the color row itself too so the user has a strong visual link
    between the input they're hovering and the zone overlay on the page. */
-#theme-tab-customize .color-row {
+#theme-tab-customize .ow-color-well {
   transition: background 0.15s, border-color 0.15s;
   border-radius: 6px;
 }
-#theme-tab-customize .color-row:hover {
+#theme-tab-customize .ow-color-well:hover {
   background: color-mix(in srgb, var(--accent, var(--red)) 8%, transparent);
 }
 
@@ -15573,24 +15491,15 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   color: color-mix(in srgb, var(--fg) 45%, transparent);
 }
 .shortcut-key-unset:hover .shortcut-unset { border-color: var(--accent, var(--red)); color: var(--fg); }
-.shortcut-key kbd {
-  display: inline-block; font-family: inherit; font-size: var(--fs-xs);
-  padding: 2px 6px; min-width: 20px; text-align: center;
-  /* Highlight kbd chips in the theme accent so they stand out from
-     normal text and clearly mark "this is a key you press". */
-  background: color-mix(in srgb, var(--accent, var(--red)) 14%, var(--bg));
-  border: 1px solid color-mix(in srgb, var(--accent, var(--red)) 40%, var(--border));
-  color: var(--accent, var(--red));
-  border-radius: 3px;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent, var(--red)) 25%, transparent);
-  line-height: 1.4;
-  font-weight: 600;
-}
+/* The keycap chips migrated to the neutral, accent-free `.ow-kbd` kit primitive (ELEMENT KIT
+   region, #1638). Both the legacy `.shortcut-key kbd` (accent fill/border/glyph) and the
+   `.shortcut-key.listening kbd` accent-border override are RETIRED — settings.js:_formatKeyCaps
+   now emits `<kbd class="ow-kbd">`, and the listening state swaps the chips for a "Press keys…"
+   label anyway, so no accent border can reappear. */
 .shortcut-key.listening {
   background: color-mix(in srgb, var(--accent, #cc6a3a) 10%, transparent);
   animation: shortcut-pulse 1s infinite;
 }
-.shortcut-key.listening kbd { border-color: var(--accent, #cc6a3a); }
 .shortcut-action-btn {
   width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--border);
   background: transparent; color: var(--fg); cursor: pointer; font-size: var(--fs-sm);
@@ -21785,6 +21694,10 @@ body.theme-frosted .ow-window .ow-body button.admin-tab.active svg { color: #fff
      never trips the no-accent-on-glass contract). HIG: focus is system-driven. */
   --ow-focus-ring: var(--ow-ios-blue, #0a84ff);
   --ow-focus-ring-w: 3px;
+  /* The STRONG luminous glass rim — the bright neutral edge a grip/affordance paints on
+     hover/active-drag (a brighter sibling of the soft --ow-glass-rim bloom). Neutral white,
+     NO accent hue, so an edge-resize grip reads as glass chrome, never a colored control. */
+  --ow-glass-rim-strong: rgba(255,255,255,0.55);
   /* THE GLASS TECHNIQUE for kit controls (owner directive). The in-browser Liquid
      Glass method is kube.io "Liquid Glass with CSS + SVG"
      (https://kube.io/blog/liquid-glass-css-svg/) + Frontend-Masters "Liquid Glass on
@@ -22359,6 +22272,481 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
     backdrop-filter: none !important;
   }
 }
+/* ── KEYCAP: .ow-kbd — a physical key-chip (#1638) ──────────────────────────────
+   The Settings → Shortcuts keycaps. Emphasis is the RAISED CHIP SHAPE (a key you press),
+   never an accent hue on the glyph (#726/#773 no-accent-on-text) — the exact contract the
+   legacy `.shortcut-key kbd` violated (it painted the glyph in var(--accent)). Neutral chrome
+   ink on a translucent glass chip; the "keycap" depth is a soft top rim + a 1px bottom lip.
+   Passive glyph: NO tap-floor of its own — the 44px WCAG 2.5.5 floor belongs to the wrapping
+   .shortcut-key button (audit §5e → .ow-btn-plain, a separate lane). */
+.ow-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; padding: 2px 6px;
+  font-family: var(--ow-ui-font, inherit); font-size: var(--ow-fs-caption, 0.75rem);
+  font-weight: var(--ow-fw-semibold, 600); line-height: 1.4;
+  color: var(--ow-control-ink, #16191f);                 /* NEUTRAL ink — the fix */
+  background: var(--ow-control-fill, color-mix(in srgb, #16191f 10%, transparent));
+  border: 1px solid var(--ow-control-rim, color-mix(in srgb, #16191f 22%, transparent));
+  border-radius: 4px;                                    /* small chip radius */
+  /* the "keycap" depth: a soft top rim + a 1px bottom lip (the key's front face) */
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,.5)),
+              0 1px 0 color-mix(in srgb, #16191f 18%, transparent);
+}
+.ow-kbd-group { display: inline-flex; align-items: center; gap: 2px; }
+/* Flat / default tiers: the keycap sits on the dark --panel surface, where the frosted-tuned
+   dark --ow-control-* inks read dark-on-dark. Re-ink from the theme's own flat control tokens
+   (a legible --fg glyph on a raised, panel-derived chip), matching the flat .ow-btn family (#1657). */
+body:not(.theme-frosted) .ow-kbd {
+  color: var(--fg);
+  background: var(--own-flat-fill-strong);
+  border-color: var(--own-flat-border-strong);
+}
+/* Full Glass: the chip rides the real glass sample like other kit controls */
+body.glass-full .ow-kbd {
+  -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+  backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
+}
+/* a11y trio */
+@media (prefers-reduced-transparency: reduce) {
+  .ow-kbd { background: var(--panel, var(--bg)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* MUST match the body.glass-full .ow-kbd specificity, or the Full-Glass rule's higher
+     specificity keeps its backdrop-filter active and the user preference is ignored. */
+  body.glass-full .ow-kbd { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  .ow-kbd { border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent); }
+  /* flat tier: raise the rim from the theme's own --fg so the bump stays legible on --panel (#1657) */
+  body:not(.theme-frosted) .ow-kbd { border-color: color-mix(in srgb, var(--fg) 60%, var(--border)); }
+}
+
+/* ── SWATCH GRID: .ow-swatch-grid / .ow-swatch — a selectable option-in-a-set (#1638) ──
+   The Theme window's preset + custom swatch grids: a role=listbox grid of role=option tiles.
+   Not a button (a swatch is a selectable option, the kit analog of a radio/listbox-option, not a
+   CTA). SELECTION is single-sourced on [aria-selected="true"] (the value the roving-tabindex code
+   already sets) — a NEUTRAL luminous ring, NEVER the accent hue (#726/#773), so the visual can
+   never diverge from the AT state. A tile DISPLAYS colors (its own bg/fg preview + the dot row),
+   so it is never a glass material and takes no blur on any tier (authored tier-agnostic, like the
+   old .theme-swatch). Text inks the adaptive var(--fg) so a custom tile (no inline preview colors)
+   stays legible on any theme. */
+.ow-swatch-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  gap: var(--ow-space-2, 8px);
+}
+.ow-swatch {
+  border: 2px solid var(--ow-control-rim); border-radius: var(--ow-radius-inner, 16px);
+  padding: var(--ow-space-1, 5px); text-align: center; cursor: pointer;
+  font-size: var(--ow-fs-caption, 0.65rem); color: var(--fg);
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.ow-swatch:hover { transform: scale(1.06); }
+/* SELECTED — a NEUTRAL luminous ring (emphasis = luminosity + weight, NOT accent hue), driven by
+   aria-selected. box-shadow + a neutral border layer OVER the --preview tile's inline border. */
+.ow-swatch[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
+}
+/* FOCUS — the fixed system-blue ring (new; the roving-tabindex .focus() had none). */
+.ow-swatch:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff); outline-offset: 2px;
+}
+.ow-swatch__dots { display: flex; justify-content: center; margin-bottom: 3px; }
+.ow-swatch__dot {
+  width: 15px; height: 15px; border-radius: 50%; margin-left: -5px; border: none;
+  /* J1-24: a dot IS the theme's OWN color, so a --fg-keyed border vanishes on a same-tone tile.
+     A background-independent dual ring (light inner edge + dark outer edge) reads on any tile. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.ow-swatch__dot:first-child { margin-left: 0; }
+.ow-swatch__name { display: block; }
+.ow-swatch--custom { position: relative; overflow: visible; }   /* anchors the per-tile delete X */
+@media (prefers-reduced-motion: reduce) { .ow-swatch:hover { transform: none; } }
+/* WCAG 2.5.5 — coarse-pointer 44px hit floor. A tile is ≥66px wide but the short axis is
+   borderline; floor it on touch (mirrors the .oc-pin / .ow-color-well floors). */
+@media (any-pointer: coarse) {
+  .ow-swatch { min-height: var(--ow-tap-min, 44px); }
+}
+/* Increased-contrast: the neutral 22%-ink selected ring vanishes on the darkest tiles (e.g.
+   #16191f). Swap to a fully-opaque DUAL ring (light inner + dark outer) that reads on ANY swatch
+   bg — the same background-independent trick the .ow-swatch__dot uses (#1657). */
+@media (prefers-contrast: more) {
+  .ow-swatch[aria-selected="true"] {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 4px rgba(0, 0, 0, 0.92);
+  }
+}
+
+/* ── PORTRAIT TILE: .ow-portrait / .ow-portrait-tile — the face frame (#1638, G4/G5/G6) ──
+   The square, clipped, radiused frame that wraps a houseguest's face (a generated portrait OR the
+   designed monogram fallback) plus the selection / loading / broken / muted chrome the frame owns.
+   Unifies three drifted bespoke frames — cast cards (.oc-portrait), casting-headshot tiles
+   (.hs-cand / .hs-libitem), and premiere status tiles (.os-tile) — behind ONE primitive. The INNER
+   content stays owned by OrwellMonogram.face() (or a raw <img> for an unnamed candidate);
+   .ow-portrait is the FRAME + STATES only, never a new image system, never the badge/cache logic.
+   Sizing is CALLER-owned via the grid track + three tokens (--ow-portrait-aspect /
+   --ow-portrait-radius / --ow-portrait-cap) — no fixed width/height here (the #310 "don't hard-code
+   control heights" rule). EVICTION monochrome stays owned by .ow-mono-face.ow-mono-evicted — the
+   frame never re-declares it. */
+.ow-portrait {
+  aspect-ratio: var(--ow-portrait-aspect, 1 / 1);
+  border-radius: var(--ow-portrait-radius, var(--ow-radius-inner, 10px));
+  overflow: hidden; position: relative;
+  /* FLAT / Normal tier: solid --panel fill + --border hairline (the .og-card cross-tier idiom). */
+  background: var(--panel, var(--ow-control-fill));
+  border: 1px solid var(--border, var(--ow-control-rim));
+}
+/* content fills the frame and inherits its radius (so a raw <img> self-rounds even when the coarse
+   ::after un-clips the frame; .ow-mono-face already carries border-radius:inherit at :149). */
+.ow-portrait > .ow-mono-face,
+.ow-portrait > img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+/* interactive variant — a bare <button> that IS the frame (G4/G5) or WRAPS it (the G6 card door) */
+.ow-portrait-tile {
+  padding: 0; margin: 0; font: inherit; cursor: pointer; position: relative;
+  background: none; border: 0; -webkit-appearance: none; appearance: none;
+  /* OWN-4: the app-wide button-height reset would letterbox an aspect-ratio tile — height:auto
+     re-arms the ratio; the caller's grid track owns the width. */
+  height: auto;
+  transition: background-color .15s ease, transform .14s ease, box-shadow .15s ease;
+}
+.ow-portrait-tile:hover { transform: translateY(-1px); }
+.ow-portrait-tile:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ow-focus-ring, var(--ow-ios-blue, #0a84ff));
+}
+/* SELECTED — the kit-owned system-blue RING (G4's .sel pattern generalized; the fixed a11y blue,
+   NOT the theme accent, and a ring — never an accent background fill). aria-pressed OR .is-selected. */
+.ow-portrait.is-selected,
+.ow-portrait[aria-pressed="true"] {
+  outline: 3px solid var(--ow-ios-blue, #0a84ff); outline-offset: 1px;
+}
+/* LOADING — a token shimmer skeleton over the frame; the inner img stays invisible until decoded.
+   (descendant, not > img, so a candidate whose <img> is nested in an overlay button also hides). */
+.ow-portrait.is-loading {
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--panel, #11151c) 88%, transparent) 30%,
+    color-mix(in srgb, var(--border, #355a66) 60%, var(--panel, #11151c)) 50%,
+    color-mix(in srgb, var(--panel, #11151c) 88%, transparent) 70%);
+  background-size: 200% 100%; animation: owPortraitSkeleton 1.1s ease-in-out infinite;
+}
+.ow-portrait.is-loading img { opacity: 0; }
+/* BROKEN — a static token fill, no shimmer (face() heals to the monogram before this ever fires). */
+.ow-portrait.is-broken {
+  background: color-mix(in srgb, var(--panel, #11151c) 92%, var(--border, #355a66));
+}
+/* MUTED — dim only (jury / out; generalizes .oc-out). MUTED-GREY — dim AND desaturate (not-yet-met;
+   the full .os-tile-unmet state in ONE class — carries BOTH the .34 opacity AND the grayscale, drops
+   neither). */
+.ow-portrait--muted { opacity: var(--ow-portrait-muted-opacity, .5); }
+.ow-portrait--muted-grey { opacity: .34; filter: grayscale(.7); }
+/* REVEAL — a generic arrival fade (generalizes .oc-justin) available to FUTURE consumers; G6 keeps
+   its own two-layer reveal seam under the frame-only ruling and does not switch to this. */
+@keyframes owPortraitSkeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes owPortraitFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ow-portrait--reveal { animation: owPortraitFadeIn .35s ease; }
+/* SM — a compact cap for narrow-tier portrait-LESS tiles (generalizes .oc-portrait-ph). */
+.ow-portrait--sm { max-width: var(--ow-portrait-cap, min(88px, 26vw)); margin-inline: auto; }
+/* FROSTED tier — the luminous glass rim; the tile does NOT stack a second backdrop-filter (glass-on-
+   glass ban) — the face inside is opaque image/monogram, so the frame only needs the rim. */
+body.theme-frosted .ow-portrait {
+  background: var(--ow-control-fill);
+  border-color: var(--ow-glass-rim-border);
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim);
+}
+/* a11y trio */
+@media (prefers-reduced-motion: reduce) {
+  .ow-portrait-tile { transition: none; }
+  .ow-portrait-tile:hover { transform: none; }
+  .ow-portrait.is-loading { animation: none;
+    background: color-mix(in srgb, var(--panel, #11151c) 88%, var(--border, #355a66)); }
+  .ow-portrait--reveal { animation: none; }
+}
+@media (prefers-contrast: more) {
+  .ow-portrait { border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent); }
+  .ow-portrait.is-selected, .ow-portrait[aria-pressed="true"] { outline-width: 4px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-portrait {
+    background: var(--panel, var(--bg)); box-shadow: none; border-color: var(--border);
+  }
+}
+/* WCAG 2.5.5 — coarse-pointer 44px hit floor for sub-44 interactive tiles (G5's 30px). Grow only the
+   HIT area with an invisible ≥44px ::after (the .os-tile idiom, kit-hosted so every consumer inherits
+   it); overflow:visible lets it escape, and the inner content self-rounds via border-radius:inherit. */
+@media (pointer: coarse) {
+  .ow-portrait-tile { overflow: visible; }
+  .ow-portrait-tile::after {
+    content: ""; position: absolute; top: 50%; left: 50%;
+    width: var(--ow-tap-min, 44px); height: var(--ow-tap-min, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ── RESIZE HANDLE: .ow-resize-handle — an edge-hugging drag/keyboard GRIP (#1638, G7) ──
+   The thin grab affordance that drives a container's width (or height) by drag AND keyboard.
+   It is a GRIP, not a value control, so it is NOT `.ow-slider` (a track + thumb painting a
+   VALUE): a transparent hit strip that paints a 2px NEUTRAL glass-rim bar on hover/active-drag
+   and the ONE sanctioned system-blue on keyboard focus (the bar IS the focus signal). This is
+   presentation + affordance ONLY — the drag/keyboard/clamp/persist logic stays in the consumer
+   (orwellGadgetRail.js); the kit never owns width state. #8/#9: NO accent hue on the bar. The
+   kit supplies the full-height extent (`inset-block:0`) + the strip width; the horizontal edge
+   anchor is consumer-owned (via `[data-edge]` or a thin consumer override, §3.2). */
+.ow-resize-handle {
+  position: absolute; inset-block: 0;
+  width: var(--ow-resize-thickness, 8px); z-index: var(--ow-resize-z, 4);
+  cursor: var(--ow-resize-cursor, ew-resize); touch-action: none;
+  background: transparent; border: none; padding: 0; margin: 0;
+}
+.ow-resize-handle::before {
+  content: ""; position: absolute; inset-block: 0;
+  width: var(--ow-resize-bar, 2px);
+  background: transparent; border-radius: var(--ow-radius-pill, 999px);
+  transition: background .12s ease;
+}
+/* hover / active-drag: the NEUTRAL luminous rim — never an accent / red (#8/#9 contract) */
+.ow-resize-handle:hover::before,
+.ow-resize-handle.is-active::before {
+  background: var(--ow-glass-rim-strong, rgba(255,255,255,0.55));
+}
+/* keyboard focus: the bar IS the focus signal — the one sanctioned system-blue */
+.ow-resize-handle:focus-visible::before {
+  background: var(--ow-focus-ring, var(--ow-ios-blue, #0a84ff));
+}
+.ow-resize-handle:focus-visible { outline: none; }
+/* EDGE anchor (consumer-owned): the leading/trailing −3px strip offset + the 3px ::before inset.
+   These MUST survive the migration — without the edge offset the strip detaches from the rail,
+   and without the ::before inset the 2px bar collapses onto the wrong edge (§3.2 / migration map). */
+.ow-resize-handle[data-edge="start"] { inset-inline-start: -3px; inset-inline-end: auto; }
+.ow-resize-handle[data-edge="start"]::before { inset-inline-start: 3px; inset-inline-end: auto; }
+.ow-resize-handle[data-edge="end"] { inset-inline-end: -3px; inset-inline-start: auto; }
+.ow-resize-handle[data-edge="end"]::before { inset-inline-end: 3px; inset-inline-start: auto; }
+/* HORIZONTAL variant — a HEIGHT grip: swap the axis so the strip spans the inline extent and the
+   2px bar becomes a horizontal line (so the primitive isn't width-only). */
+.ow-resize-handle[aria-orientation="horizontal"] {
+  inset-block: auto; inset-inline: 0;
+  width: auto; height: var(--ow-resize-thickness, 8px);
+  cursor: var(--ow-resize-cursor, ns-resize);
+}
+.ow-resize-handle[aria-orientation="horizontal"]::before {
+  inset-block: auto; inset-inline: 0;
+  width: auto; height: var(--ow-resize-bar, 2px);
+}
+/* a11y trio */
+@media (prefers-reduced-motion: reduce) { .ow-resize-handle::before { transition: none; } }
+@media (prefers-contrast: more) {
+  .ow-resize-handle { --ow-resize-bar: 3px; }              /* thicken the bar so the grip is unmistakable */
+  .ow-resize-handle:hover::before,
+  .ow-resize-handle.is-active::before { background: rgba(255,255,255,0.85); }   /* strengthen the rim */
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ow-resize-handle:hover::before,
+  .ow-resize-handle.is-active::before { background: rgba(255,255,255,1); }      /* solid neutral fill */
+}
+/* Desktop-only affordance (§3.3): the sub-44 grip carries NO coarse-pointer tap-target obligation
+   because the consumer already hides it on touch (mobile uses the full drawer, not a width grip).
+   The kit reinforces it — a resize grip is a pointer-fine affordance. */
+@media (pointer: coarse) { .ow-resize-handle { display: none; } }
+
+/* ── PW REVEAL: .ow-pw-field / .ow-pw-reveal — the in-field password show/hide toggle (#1638, G3) ──
+   A TREATMENT on an .ow-field/.ow-input, not a standalone control: a relative wrapper that reserves
+   trailing room and hosts an in-field trailing eye button flipping the input password↔text. The
+   geometry (wrapper, inset, trailing anchor, glyph size, focus ring, native-glyph suppression, the
+   coarse-pointer tap floor) is tier-agnostic and authored unscoped; only the muted glyph INK differs
+   per tier (frosted below; the flat sibling in the NORMAL tier region). The a11y contract (fixes the
+   pre-kit login gaps): the toggle is a real <button>, keyboard-reachable by default (NO tabindex=-1),
+   carries aria-pressed (false = masked, true = revealed) with the aria-label swapped in lockstep, and
+   the eye-open / eye-closed glyph pair is swapped by the [aria-pressed] CSS state (so the static demo
+   renders both states without JS). #6/#8: the ink is a NEUTRAL control token, never an accent hue.
+   OWNER RULING 2026-07-15: this lane standardizes the EXISTING login toggle ONLY — in-app secret
+   fields keep their bare type=password (no reveal); the kit primitive + OrwellPwReveal.attach helper
+   exist so a field CAN adopt it later without re-implementing the toggle. */
+.ow-pw-field { position: relative; display: block; }
+.ow-pw-field > .ow-input,
+.ow-pw-field > .ow-field {
+  padding-inline-end: var(--ow-pw-inset, 2.5rem);   /* reserve room for the trailing eye */
+}
+.ow-pw-reveal {
+  position: absolute; inset-inline-end: 6px; top: 50%;
+  transform: translateY(calc(-50% + 1px));
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto; background: none; border: none; padding: 4px; cursor: pointer;
+  border-radius: var(--ow-radius-inner, 12px);
+  transition: color .12s ease;
+}
+.ow-pw-reveal svg { display: block; width: 18px; height: 18px; }
+/* eye glyph pair — masked (aria-pressed=false) shows the slashed eye; revealed shows the open iris */
+.ow-pw-reveal .ow-pw-eye-open { display: none; }
+.ow-pw-reveal .ow-pw-eye-closed { display: block; }
+.ow-pw-reveal[aria-pressed="true"] .ow-pw-eye-open { display: block; }
+.ow-pw-reveal[aria-pressed="true"] .ow-pw-eye-closed { display: none; }
+.ow-pw-reveal:focus-visible {
+  outline: 2px solid var(--ow-focus-ring, var(--ow-ios-blue, #0a84ff));
+  outline-offset: 1px; border-radius: var(--ow-radius-inner, 12px);
+}
+/* kill Edge's duplicate native reveal/clear glyph — the .ow-pw-reveal is the single affordance */
+.ow-pw-field .ow-input::-ms-reveal,
+.ow-pw-field .ow-input::-ms-clear,
+.ow-pw-field .ow-field::-ms-reveal,
+.ow-pw-field .ow-field::-ms-clear { display: none; }
+/* frosted tier: muted neutral DARK control ink over the light glass field */
+body.theme-frosted .ow-pw-reveal {
+  color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
+}
+body.theme-frosted .ow-pw-reveal:hover { color: var(--ow-control-ink, #16191f); }
+/* coarse-pointer 44px tap floor (WCAG 2.5.5) — the button grows its hit area; the glyph stays
+   centered and compact (inline-flex), the field reserves a wider inset for the larger target. */
+@media (pointer: coarse) {
+  .ow-pw-field > .ow-input,
+  .ow-pw-field > .ow-field { padding-inline-end: var(--ow-pw-inset, 3rem); }
+  .ow-pw-reveal { min-width: var(--tap-min, 44px); min-height: var(--tap-min, 44px); }
+}
+/* a11y trio: reduced-motion drops the glyph transition; increased-contrast raises the rest ink
+   (55%→80%) and thickens the focus ring; reduced-transparency makes the ink fully solid. */
+@media (prefers-reduced-motion: reduce) {
+  .ow-pw-reveal { transition: none; }
+}
+@media (prefers-contrast: more) {
+  body.theme-frosted .ow-pw-reveal { color: color-mix(in srgb, var(--ow-control-ink, #16191f) 80%, transparent); }
+  .ow-pw-reveal:focus-visible { outline-width: 3px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  body.theme-frosted .ow-pw-reveal { color: var(--ow-control-ink, #16191f); }
+}
+/* ── COLOR WELL: .ow-color-well — kit frame around a native color swatch (#1638) ────
+   The Theme → Customize color rows: a label + a native <input type="color"> swatch (which
+   colorPicker.js swaps in place to type="text" + .cp-swatch-input, opening the in-house
+   .cp-popover) + an optional trailing reset. The swatch SHOWS its picked value, so — unlike
+   .ow-btn / .ow-field — it is NOT a glass material and takes NO backdrop-filter (that would
+   muddy the color it exists to display); the block is authored tier-agnostic, only the rim
+   upgrades at Full Glass. Focus is the fixed system-blue ring, never the theme accent. The
+   swatch rule targets BOTH the native input AND the post-swap .cp-swatch-input in one rule. */
+.ow-color-well { display: flex; align-items: center; gap: var(--ow-space-1, 4px); }
+.ow-color-well--start { justify-content: flex-start; gap: var(--ow-space-2, 8px); }
+.ow-color-well--compact { margin: 0; padding: 0; }
+.ow-color-well > label,
+.ow-color-well .ow-color-well__label {
+  font-size: var(--ow-fs-body, 0.8125rem); font-weight: var(--ow-fw-medium, 500);
+  color: var(--ow-control-ink, #16191f);      /* neutral chrome ink — NO accent on the label */
+  opacity: 0.72; flex: 1;
+}
+.ow-color-well input[type="color"],
+.ow-color-well input.cp-swatch-input {
+  width: 24px; height: 24px; flex-shrink: 0; padding: 0; overflow: hidden;
+  border-radius: 50%; cursor: pointer; background: none;
+  border: 1px solid var(--ow-control-rim);    /* soft tokenized hairline, not var(--border) */
+  -webkit-appearance: none; appearance: none;
+}
+.ow-color-well input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.ow-color-well input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+.ow-color-well input[type="color"]::-moz-color-swatch     { border: none; border-radius: 50%; }
+.ow-color-well input.cp-swatch-input { color: transparent; text-shadow: none; caret-color: transparent; font-size: 0; user-select: none; }
+.ow-color-well input.cp-swatch-input::selection { background: transparent; }
+/* tokenized system-blue focus ring (replaces the old accent-hued 1px var(--red) outline) */
+.ow-color-well input[type="color"]:focus-visible,
+.ow-color-well input.cp-swatch-input:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff);
+  outline-offset: 2px;
+}
+/* trailing action slot (the reset ↺, or a free-form hex readout). Hidden from SIGHT
+   (opacity:0) and POINTER (pointer-events:none) at rest; theme.js ALSO toggles [disabled]
+   in lockstep with .changed so an unchanged, invisible reset is not keyboard-reachable. */
+.ow-color-well__reset {
+  width: 24px; height: 24px; flex-shrink: 0; padding: 0; line-height: 1;
+  border: none; background: none; cursor: pointer; font-size: 1.15rem;
+  color: var(--ow-control-ink, #16191f); opacity: 0;
+  pointer-events: none; transition: opacity .15s, color .15s;
+}
+.ow-color-well__reset:disabled { cursor: default; }
+.ow-color-well__reset.changed { opacity: 0.4; pointer-events: auto; }
+.ow-color-well__reset.changed:hover { opacity: 1; }
+.ow-color-well__reset.changed:focus-visible {
+  outline: var(--ow-focus-ring-w, 3px) solid var(--ow-focus-ring, #0a84ff); outline-offset: 2px;
+}
+/* Full Glass: the swatch is a genuine glass chip → take the specular rim like other kit controls */
+body.glass-full .ow-color-well input[type="color"],
+body.glass-full .ow-color-well input.cp-swatch-input {
+  box-shadow: inset 0 1px 0 var(--ow-glass-rim, rgba(255,255,255,0.12));
+}
+/* WCAG 2.5.5 — coarse-pointer 44px hit floor. The .ow-color-well WRAPPER owns the tap area as
+   a SINGLE box model (min-height on the row); the swatch's own hit box grows via PADDING (NOT a
+   ::before/::after overlay — pseudo-elements are suppressed/unreliable on the replaced color
+   input), while its visual chip stays a 24px content box. The trailing reset carries the same
+   floor. `!important` beats the 24px fine-pointer sizing. */
+@media (any-pointer: coarse) {
+  .ow-color-well { min-height: var(--ow-tap-min, 44px); }
+  .ow-color-well input[type="color"],
+  .ow-color-well input.cp-swatch-input { box-sizing: content-box; padding: 10px !important; }
+  .ow-color-well__reset { min-width: var(--ow-tap-min, 44px); min-height: var(--ow-tap-min, 44px); }
+}
+
+/* ── PROGRESS: .ow-progress / .ow-progress-fill — a display-only progressbar (#1638, G8) ──
+   A genuinely reusable kit progressbar primitive (future callers: portrait-backfill progress,
+   image-gen budget, upload progress). Track + fill are TOKEN-driven and tier-agnostic (the
+   .og-card cross-tier idiom — no `body.theme-frosted` gate; they never stack a backdrop sample,
+   so one author reads coherently on frosted AND flat). DISPLAY-ONLY: no :hover / :focus / cursor,
+   never a tab stop — the ARIA `role="progressbar"` + value lives on the consumer element. The
+   `.ow-progress--edge` variant is the fixed bottom-edge season-progress bar. */
+.ow-progress {
+  overflow: hidden;
+  border-radius: var(--ow-progress-radius, var(--ow-radius-pill));
+  height: var(--ow-progress-h, 6px);
+  background: var(--ow-progress-track, color-mix(in srgb, var(--fg) 12%, transparent));
+}
+.ow-progress-fill {
+  height: 100%; width: 0%;
+  /* A progress FILL is a legitimate accent use (a branded completion cue), unlike chrome TEXT —
+     so the accent chain is intentional. The final #6d4aff literal is RETAINED from the bespoke
+     season-bar chain so the fill can never render unpainted if both accent tokens are unset. */
+  background: var(--ow-progress-fill-color, var(--accent, var(--accent-primary, #6d4aff)));
+  transition: width .5s ease-out;
+  will-change: width;
+}
+/* fixed bottom-edge variant — the season progress bar (a non-interactive overlay). left:0/right:0
+   (NOT 100vw) so the bar spans the viewport WITHOUT adding a horizontal scrollbar. */
+.ow-progress--edge {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  z-index: var(--ow-progress-z, 60);
+  height: var(--ow-progress-edge-h, 4px);
+  pointer-events: none; border-radius: 0;
+}
+/* a11y trio */
+@media (prefers-reduced-motion: reduce) {
+  .ow-progress-fill { transition: none; }
+}
+@media (prefers-contrast: more) {
+  .ow-progress { background: var(--ow-progress-track, color-mix(in srgb, var(--fg) 24%, transparent)); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ow-progress { background: color-mix(in srgb, var(--fg) 20%, var(--panel, var(--bg))); }
+}
+
+/* ── CHIP: .on-chip — a display-only notice-family status pill (#1638, G8) ──
+   A static labelled pill (the "Season N" chip). A NON-INTERACTIVE member of the notice family
+   (.on-*) — passive, never dismissible. Drift-fixes folded in vs the old bespoke chip: the
+   canonical --ow-ui-font face (the "no stray monospace chrome" rule the cast-pin fix #771
+   established — drops the old `--mono, monospace`); legible --fg ink (NO accent hue on chrome
+   text, #726/#773 — drops the old accent-tinted color); and the --ow-glass-rim-border hairline
+   (drops the old accent-tinted border). Tier-agnostic (the .og-card idiom). */
+.on-chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--ow-radius-pill);
+  font: 600 var(--fs-2xs)/1 var(--ow-ui-font);
+  letter-spacing: .04em;
+  color: var(--fg);
+  background: var(--on-chip-bg, color-mix(in srgb, var(--panel) 82%, transparent));
+  border: 1px solid var(--ow-glass-rim-border);
+}
+/* placement variant — the season chip pinned top-right (a non-interactive overlay). */
+.on-chip--season {
+  position: fixed; top: 8px; right: 10px; z-index: 58;
+  pointer-events: none; opacity: .9;
+}
+/* a11y trio — reduced-transparency solidifies the fill; contrast strengthens the hairline. */
+@media (prefers-reduced-transparency: reduce) {
+  .on-chip { background: var(--panel, var(--bg)); }
+}
+@media (prefers-contrast: more) {
+  .on-chip { border-color: color-mix(in srgb, var(--fg) 45%, transparent); }
+}
+
 /* ── END ELEMENT KIT ── (#773) ──────────────────────────────────────────────── */
 
 /* ╔══════════════════════════════════════════════════════════════════════════╗ */
@@ -22885,6 +23273,16 @@ body:not(.theme-frosted) .admin-switch input:checked + .admin-slider,
 body:not(.theme-frosted) .toggle-switch input:checked + .toggle-slider,
 body:not(.theme-frosted) .cookbook-checkbox:checked {
   background: var(--ow-ios-blue, #0a84ff) !important;
+}
+/* ── PW REVEAL: .ow-pw-reveal flat-tier ink (#1638, G3) — the geometry is unscoped in the ELEMENT
+   KIT region; only the muted glyph ink is tier-specific. Flat inks the adaptive --fg (dark on the
+   light-glass card, light on the dark app), never an accent hue. ── */
+body:not(.theme-frosted) .ow-pw-reveal {
+  color: color-mix(in srgb, var(--fg) 55%, transparent);
+}
+body:not(.theme-frosted) .ow-pw-reveal:hover { color: var(--fg); }
+@media (prefers-contrast: more) {
+  body:not(.theme-frosted) .ow-pw-reveal { color: color-mix(in srgb, var(--fg) 80%, transparent); }
 }
 /* ── END ELEMENT KIT: NORMAL (FLAT) TIER ──────────────────────────────────────── */
 

@@ -54,7 +54,8 @@ def test_j1_17_password_card_has_a_stable_id():
 
 def test_j1_24_swatch_dots_use_background_independent_ring():
     css = _read("static/style.css")
-    block = css[css.index(".theme-swatch-colors span"):]
+    # Migrated to the .ow-swatch__dot kit primitive (#1638).
+    block = css[css.index(".ow-swatch__dot {"):]
     block = block[: block.index("}") + 1]
     # The old --fg-keyed border vanished on dark dots over dark tiles. The ring is
     # now a dual light/dark box-shadow, independent of the page colours.
@@ -70,7 +71,7 @@ def test_j1_24_swatch_dots_use_background_independent_ring():
 
 def test_j1_24_swatch_tile_previews_the_theme_colors():
     js = _read("static/js/theme.js")
-    assert "theme-swatch--preview" in js, "the swatch must carry the preview class"
+    assert "ow-swatch--preview" in js, "the swatch must carry the preview class"
     # The tile paints in the theme's OWN bg + fg so it is a mini-preview, not just
     # an abstract dot row.
     assert "background:${c.bg};color:${c.fg}" in js, (
@@ -110,7 +111,9 @@ def test_j1_33_slash_help_labels_use_chat_vocabulary():
 
 def test_j1_06_game_build_shows_house_themes_first_with_reveal():
     js = _read("static/js/theme.js")
-    assert "theme-show-all" in js and "theme-extra" in js, (
+    # #1638: the reveal BUTTON (`theme-show-all`) now lives OUTSIDE the role=listbox; the extra
+    # (non-house) tiles are direct grid options collapsed via `.ow-swatch--extra` + `is-collapsed`.
+    assert "theme-show-all" in js and "ow-swatch--extra" in js, (
         "the game build must show the curated house themes first and tuck the rest "
         "behind a 'Show all themes' reveal (J1-06 / #666)."
     )

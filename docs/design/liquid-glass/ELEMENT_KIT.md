@@ -87,6 +87,7 @@ implements — not a flat approximation. The technique sources:
 | `--ow-control-rim` | the control's hairline rim |
 | `--ow-control-ink` | the control's legible ink (→ `--fg`, never accent) |
 | `--ow-danger` / `--ow-on-danger` | system red + its legible on-red label (Destructive role) |
+| `--ow-glass-rim-strong` | the bright NEUTRAL luminous rim a grip paints on hover/active-drag (`rgba(255,255,255,.55)`; a brighter sibling of the soft `--ow-glass-rim`) |
 
 Reused from the existing design system: `--ow-tap-min`, `--ow-ui-font`, `--ow-fw-*`,
 `--ow-fs-*`, `--ow-space-*`, `--ow-radius-*`, `--ow-btn-glass`, `--ow-ios-blue`,
@@ -291,6 +292,114 @@ JS) to color the filled portion on WebKit. `:focus-visible` ring; `:disabled`.
 
 ```html
 <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%">
+```
+
+### Portrait tile — `.ow-portrait` / `.ow-portrait-tile` (#1638)
+
+The square, clipped, radiused **frame** around a houseguest's face — a generated portrait or the
+designed monogram fallback (`OrwellMonogram.face()`) — plus the chrome the frame owns. The face
+content stays owned by the monogram kit; `.ow-portrait` is the frame + states only (never a new
+image system). Sizing is **caller-owned** via the grid track + three tokens — no fixed width/height
+on the primitive.
+
+- **`.ow-portrait`** — the frame: `aspect-ratio` (token, default `1 / 1`), `overflow: hidden`,
+  radius (token), a `--panel`/`--border` fill on the flat tier, the luminous `--ow-glass-rim` edge
+  on the frosted tier (no second `backdrop-filter` — glass-on-glass ban). The inner face/`img`
+  fills it and inherits the radius.
+- **`.ow-portrait-tile`** — the interactive variant on a bare `<button>` (button-chrome reset,
+  `height:auto` so the app-wide `button{height}` reset can't letterbox the aspect-ratio, a hover
+  lift, the system-blue `:focus-visible` ring, and the coarse-pointer 44px hit floor via an
+  invisible `::after`).
+- **States** — `.is-selected` / `[aria-pressed="true"]` (system-blue ring, never an accent fill),
+  `.is-loading` (token shimmer skeleton, `@keyframes owPortraitSkeleton`), `.is-broken` (static
+  fill), `.ow-portrait--muted` (dim), `.ow-portrait--muted-grey` (dim **and** desaturate — the
+  not-yet-met state, carries both `opacity` and `grayscale`), `.ow-portrait--reveal` (generic
+  arrival fade), `.ow-portrait--sm` (compact cap for narrow portrait-less tiles). Eviction
+  monochrome stays owned by `.ow-mono-face.ow-mono-evicted` — the frame never re-declares it.
+- **Tokens** — `--ow-portrait-radius` (per-tier radius: cast 10px, headshot 8px, premiere 7px),
+  `--ow-portrait-aspect`, `--ow-portrait-cap`.
+
+Consumers (frame-only migration): cast cards (`.oc-portrait` / `.oc-hg`), casting-headshot tiles
+(`.hs-cand` / `.hs-libitem` / `.hs-preview`), premiere status tiles (`.os-tile`).
+
+```html
+<button type="button" class="ow-portrait ow-portrait-tile" aria-label="Open …'s dossier">
+  <span class="ow-mono-face">…</span>
+</button>
+```
+
+### Resize handle — `.ow-resize-handle` (#1638)
+
+The thin, edge-hugging grab affordance that drives a container's width (or height) by drag **and**
+keyboard — today the gadget-rail width grip (`.gadget-rail-resize-handle`). It is a **grip, not a
+value control**, which is exactly **why it is not `.ow-slider`**: `.ow-slider` is a track + thumb
+that paints a *value*, whereas this is a transparent hit strip that only signals *where to grab*. The
+primitive is presentation + affordance **only** — the drag / keyboard / clamp / persist logic stays in
+the consumer (the kit never owns width state), mirroring how `.ow-slider` is styling-only.
+
+- **`.ow-resize-handle`** — the hit strip: `position:absolute`, full-height `inset-block:0`, a tunable
+  `--ow-resize-thickness` (8px) width, `touch-action:none`, transparent background. It paints a 2px
+  `::before` bar (`--ow-resize-bar`, pill-radiused).
+- **States** — `:hover` / `.is-active` (the drag class, added on `pointerdown`, removed on
+  `pointerup`/`pointercancel`/aborted drag) paint the **neutral** `--ow-glass-rim-strong` bar — **no
+  accent, no red** (the colorless-glass-chrome contract); `:focus-visible` paints the one sanctioned
+  system-blue (`--ow-focus-ring`) and drops the outline (the bar **is** the focus signal).
+- **Edge anchor** — consumer-owned via `[data-edge="start"]` / `[data-edge="end"]` (the leading /
+  trailing `−3px` strip offset + `3px` bar inset), so the strip stays hugged to the rail's edge and
+  mirrors under side-swap. The kit supplies only the full-height extent + width.
+- **Orientation** — `[aria-orientation="horizontal"]` swaps the axis into a **height** grip
+  (`ns-resize`, a horizontal bar).
+- **a11y** — reduced-motion drops the bar transition; increased-contrast thickens the bar + strengthens
+  the rim; reduced-transparency solidifies the fill. The grip is **desktop-only** (pointer-fine): the
+  consumer hides it on touch and the kit reinforces it on `@media (pointer: coarse)`, so the sub-44px
+  grip is never a tap-target violation. Keyboard resize (`role="slider"` + `aria-value*` + Arrow-key
+  nudges) is preserved in the consumer.
+
+```html
+<div class="ow-resize-handle" data-edge="start" role="slider" aria-orientation="vertical"
+     aria-label="Resize the control room" aria-valuemin="220" aria-valuenow="300"
+     aria-valuemax="520" aria-valuetext="300 pixels" tabindex="0"></div>
+```
+
+### Password reveal — `.ow-pw-field` / `.ow-pw-reveal` (#1638)
+
+The in-field eye toggle that flips a secret `<input>` between `type="password"` and `type="text"`. It
+is a **treatment on an `.ow-field`/`.ow-input`, not a standalone control**: an `.ow-pw-field` wrapper
+that reserves trailing room and hosts an in-field trailing `.ow-pw-reveal` button. It standardizes the
+one eye glyph, the reveal look, and the accessibility contract so a secret field reveals identically
+everywhere instead of one page implementing it.
+
+- **`.ow-pw-field`** — the relative wrapper (`position:relative`); its child `.ow-input`/`.ow-field`
+  reserves `padding-inline-end: var(--ow-pw-inset, 2.5rem)` so the text never runs under the eye.
+- **`.ow-pw-reveal`** — the trailing toggle button: `position:absolute`, `inset-inline-end:6px`,
+  borderless, `cursor:pointer`, an 18px glyph. Ink is a **neutral** control token — the frosted tier
+  the muted `--ow-control-ink`, the flat tier the adaptive `--fg` — **never an accent hue**.
+- **Glyphs** — one eye pair, reused verbatim from the login page: eye-closed (slashed) = **masked**,
+  eye-open (iris) = **revealed**. The pair is swapped by the `[aria-pressed]` CSS state, so the static
+  demo shows both without JS.
+- **a11y (fixes the pre-kit login gaps)** — the toggle is a real `<button>`, **keyboard-reachable by
+  default** (no `tabindex="-1"`), carries **`aria-pressed`** (`false` = masked, `true` = revealed) with
+  the `aria-label` swapped Show↔Hide in lockstep, shows the system-blue `--ow-focus-ring` on
+  `:focus-visible`, and reaches the 44px `var(--tap-min)` floor on `@media (pointer: coarse)`. The
+  native Edge reveal (`::-ms-reveal`/`::-ms-clear`) is suppressed so the kit eye is the single
+  affordance. The a11y trio: reduced-motion drops the glyph transition; increased-contrast raises the
+  rest ink 55%→80% and thickens the ring; reduced-transparency solidifies the ink.
+- **Wiring** — `window.OrwellPwReveal.attach(inputEl)` (a tiny idempotent, fail-open helper) wraps an
+  existing `.ow-input`, inserts the wired button, and binds click → flip `type`, toggle `aria-pressed`,
+  swap `aria-label`, refocus. **Owner ruling (2026-07-15):** this lane standardizes the **existing
+  login toggle only** — the in-app secret fields (search / endpoint API keys, admin env) keep their
+  bare `type=password` with no reveal; the primitive + helper exist so a field **can** adopt it later.
+  Login is a standalone page that **mirrors** the kit inline (it does not link `style.css`) and keeps
+  its own `wireToggle` (now toggling `aria-pressed`).
+
+```html
+<div class="ow-pw-field">
+  <input class="ow-input" type="password" autocomplete="current-password">
+  <button type="button" class="ow-pw-reveal" aria-pressed="false" aria-label="Show password">
+    <svg class="ow-pw-eye ow-pw-eye-open" …><!-- iris eye --></svg>
+    <svg class="ow-pw-eye ow-pw-eye-closed" …><!-- slashed eye --></svg>
+  </button>
+</div>
 ```
 
 ## Demo / verification — the full kit reference

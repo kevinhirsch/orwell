@@ -386,6 +386,51 @@
       </div>
     </section>
 
+    <!-- PW REVEAL (.ow-pw-field / .ow-pw-reveal) -->
+    <section class="ek-card">
+      <h2>Password reveal — .ow-pw-field / .ow-pw-reveal (#1638)</h2>
+      <p class="ek-note">A <b>treatment</b> on an <code>.ow-field</code>/<code>.ow-input</code>, not a
+        standalone control: a relative <code>.ow-pw-field</code> wrapper reserves trailing room and
+        hosts an in-field <code>.ow-pw-reveal</code> eye button that flips the input
+        <code>password</code>↔<code>text</code>. The eye-open / eye-closed glyph pair swaps by the
+        <code>[aria-pressed]</code> CSS state; the toggle is keyboard-reachable (no
+        <code>tabindex="-1"</code>) and carries <code>aria-pressed</code> with the
+        <code>aria-label</code> swapped Show↔Hide in lockstep. Ink is a neutral control token, never
+        an accent. <b>Owner ruling (2026-07-15):</b> this lane standardizes the existing login toggle
+        only — in-app secret fields keep their bare <code>type=password</code>; the kit primitive +
+        <code>OrwellPwReveal.attach</code> exist so a field can adopt it later.</p>
+
+      <div class="ek-label">Masked (aria-pressed=false) · revealed (aria-pressed=true) · keyboard focus</div>
+      <div class="ek-stack">
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="password" value="hunter2secret" aria-label="Masked password">
+          <button type="button" class="ow-pw-reveal" aria-pressed="false" aria-label="Show password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="text" value="hunter2secret" aria-label="Revealed password">
+          <button type="button" class="ow-pw-reveal" aria-pressed="true" aria-label="Hide password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+        <div class="ow-pw-field">
+          <input class="ow-field ow-input" type="password" value="hunter2secret" aria-label="Focused password">
+          <button type="button" class="ow-pw-reveal ek-force-focus" aria-pressed="false" aria-label="Show password">
+            <svg class="ow-pw-eye ow-pw-eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="ow-pw-eye ow-pw-eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="ek-label">Live — wired by <code>OrwellPwReveal.attach()</code> (click the eye)</div>
+      <div class="ek-stack">
+        <input class="ow-field ow-input" type="password" value="paste-your-key" id="ek-pw-live" aria-label="Live wired password">
+      </div>
+    </section>
+
     <!-- CHECK / RADIO -->
     <section class="ek-card">
       <h2>Checkbox &amp; Radio — .ow-check / .ow-radio</h2>
@@ -439,6 +484,255 @@
         <input type="range" class="ow-slider" min="0" max="100" value="30" style="--ow-slider-fill:30%">
         <input type="range" class="ow-slider" min="0" max="100" value="75" style="--ow-slider-fill:75%">
         <input type="range" class="ow-slider" min="0" max="100" value="50" style="--ow-slider-fill:50%" disabled>
+      </div>
+    </section>
+
+    <!-- COLOR WELL -->
+    <section class="ek-card">
+      <h2>Color well — .ow-color-well (#1638)</h2>
+      <p class="ek-note">The Theme → Customize color rows: a label + a native
+        <code>&lt;input type="color"&gt;</code> swatch (24px chip, tokenized rim, system-blue focus)
+        + an optional trailing <code>.ow-color-well__reset</code> ↺ that fades in only when the color
+        differs from its reference. The swatch shows its own value, so it is never a glass material on
+        any tier; the wrapper owns the 44px coarse-pointer hit floor.</p>
+
+      <div class="ek-label">Labelled swatch + reset (rest · changed)</div>
+      <div class="ek-stack" style="max-width:320px">
+        <div class="ow-color-well">
+          <label for="ek-cw-bg">Background</label>
+          <input type="color" id="ek-cw-bg" value="#2b3040">
+          <button class="ow-color-well__reset" title="Reset this color" aria-label="Reset color" disabled>&#x21BA;</button>
+        </div>
+        <div class="ow-color-well">
+          <label for="ek-cw-accent">Accent</label>
+          <input type="color" id="ek-cw-accent" value="#e06c75">
+          <button class="ow-color-well__reset changed" title="Reset this color" aria-label="Reset color">&#x21BA;</button>
+        </div>
+      </div>
+
+      <div class="ek-label">Left-aligned (--start, hex readout) · compact (--compact)</div>
+      <div class="ek-stack" style="max-width:320px">
+        <div class="ow-color-well ow-color-well--start">
+          <input type="color" value="#7c5cff" aria-label="Accent color">
+          <span style="font-size:var(--fs-xs);opacity:0.65;font-family:ui-monospace,monospace;">#7c5cff</span>
+        </div>
+        <div class="ow-color-well ow-color-well--compact">
+          <label for="ek-cw-effect">Effect</label>
+          <input type="color" id="ek-cw-effect" value="#9cdef2">
+          <button class="ow-color-well__reset changed" title="Reset" aria-label="Reset color">&#x21BA;</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SWATCH GRID -->
+    <section class="ek-card">
+      <h2>Swatch grid — .ow-swatch-grid / .ow-swatch (#1638)</h2>
+      <p class="ek-note">The Theme window's selectable preset/custom tiles: a <code>role="listbox"</code>
+        grid of <code>role="option"</code> <code>.ow-swatch</code> tiles. Selection is driven SOLELY by
+        <code>aria-selected="true"</code> — a NEUTRAL luminous ring (never the accent hue); focus shows the
+        system-blue ring; each tile previews a theme's own bg/fg with a dual-ring
+        <code>.ow-swatch__dot</code> row that reads on any tile. A tile displays colors, so it is never a
+        glass material on any tier.</p>
+
+      <div class="ek-label">Selectable tiles (one selected) — role=listbox / role=option</div>
+      <div class="ow-swatch-grid" role="listbox" aria-label="Demo themes" style="max-width:320px">
+        <div class="ow-swatch ow-swatch--preview" role="option" aria-selected="true"
+             style="background:#16191f;color:#e8eef2;border-color:#2b3040;" aria-label="midnight theme">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#16191f"></span>
+            <span class="ow-swatch__dot" style="background:#2b3040"></span>
+            <span class="ow-swatch__dot" style="background:#e8eef2"></span>
+            <span class="ow-swatch__dot" style="background:#e06c75"></span>
+          </div>
+          midnight
+        </div>
+        <div class="ow-swatch ow-swatch--preview" role="option" aria-selected="false"
+             style="background:#fdf6e3;color:#3b3228;border-color:#e5dcc3;" aria-label="parchment theme">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#fdf6e3"></span>
+            <span class="ow-swatch__dot" style="background:#e5dcc3"></span>
+            <span class="ow-swatch__dot" style="background:#3b3228"></span>
+            <span class="ow-swatch__dot" style="background:#b58900"></span>
+          </div>
+          parchment
+        </div>
+        <div class="ow-swatch ow-swatch--preview ek-force-focus" role="option" aria-selected="false"
+             style="background:#0d1b2a;color:#a9d6e5;border-color:#1b3a52;" aria-label="ocean theme (focus)">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:#0d1b2a"></span>
+            <span class="ow-swatch__dot" style="background:#1b3a52"></span>
+            <span class="ow-swatch__dot" style="background:#a9d6e5"></span>
+            <span class="ow-swatch__dot" style="background:#48cae4"></span>
+          </div>
+          ocean
+        </div>
+      </div>
+    </section>
+
+    <!-- KEYCAP (.ow-kbd) -->
+    <section class="ek-card">
+      <h2>Keycap — .ow-kbd / .ow-kbd-group (#1638)</h2>
+      <p class="ek-note">The Settings → Shortcuts key-chips: a passive <code>&lt;kbd class="ow-kbd"&gt;</code>
+        glyph rendering one key of a combo. Emphasis is the RAISED CHIP SHAPE (a physical key), never an
+        accent hue on the glyph — the exact <code>color: var(--accent)</code> contract the legacy
+        <code>.shortcut-key kbd</code> violated. Neutral chrome ink on a translucent glass chip; the
+        optional <code>.ow-kbd-group</code> wraps a run into a cluster. Non-interactive — the 44px tap
+        floor belongs to the wrapping rebind button, not the chip.</p>
+
+      <div class="ek-label">Single chips</div>
+      <div class="ek-row" style="gap:8px">
+        <kbd class="ow-kbd">Ctrl</kbd>
+        <kbd class="ow-kbd">Shift</kbd>
+        <kbd class="ow-kbd">Cmd</kbd>
+        <kbd class="ow-kbd">Esc</kbd>
+        <kbd class="ow-kbd">Space</kbd>
+        <kbd class="ow-kbd">K</kbd>
+      </div>
+
+      <div class="ek-label">Combo cluster — .ow-kbd-group</div>
+      <div class="ek-row" style="gap:12px">
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Ctrl</kbd><kbd class="ow-kbd">Shift</kbd><kbd class="ow-kbd">K</kbd></span>
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Cmd</kbd><kbd class="ow-kbd">,</kbd></span>
+        <span class="ow-kbd-group"><kbd class="ow-kbd">Alt</kbd><kbd class="ow-kbd">/</kbd></span>
+      </div>
+    </section>
+
+    <!-- PORTRAIT TILE (.ow-portrait / .ow-portrait-tile) -->
+    <section class="ek-card">
+      <h2>Portrait tile — .ow-portrait / .ow-portrait-tile (#1638)</h2>
+      <p class="ek-note">The square, clipped, radiused frame around a houseguest's face — a generated
+        portrait or the designed monogram fallback — plus the chrome the frame owns: selected (the kit
+        system-blue ring, never an accent fill), loading (a token shimmer skeleton), broken (a static
+        fill), muted (dim), and muted-grey (dim <b>and</b> desaturate — the not-yet-met state). One
+        primitive behind three drifted frames (cast <code>.oc-portrait</code>, headshot
+        <code>.hs-cand</code>, premiere <code>.os-tile</code>). Sizing is caller-owned via the grid
+        track + <code>--ow-portrait-radius</code> / <code>--ow-portrait-aspect</code> /
+        <code>--ow-portrait-cap</code>. The interactive <code>.ow-portrait-tile</code> adds the button
+        reset, focus ring, and the coarse-pointer 44px hit floor.</p>
+
+      <div class="ek-label">Frame states — interactive tiles (.ow-portrait-tile), radius token 12px</div>
+      <div class="ek-row" style="gap:14px; --ow-portrait-radius:12px">
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile" aria-label="A portrait">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">A</span>
+          </button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">image / monogram</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-selected" aria-pressed="true" aria-label="Selected portrait">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8a5a9c,#3a2352);color:#f0e6f4;font-weight:800;font-size:1.6rem">B</span>
+          </button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">selected (ring)</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-loading" aria-label="Loading portrait"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt=""></button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">loading (skeleton)</div>
+        </div>
+        <div style="width:84px">
+          <button type="button" class="ow-portrait ow-portrait-tile is-broken" aria-label="Broken portrait"></button>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">broken</div>
+        </div>
+      </div>
+
+      <div class="ek-label">Muted modifiers — display frames (.ow-portrait)</div>
+      <div class="ek-row" style="gap:14px; --ow-portrait-radius:12px">
+        <div style="width:84px">
+          <div class="ow-portrait ow-portrait--muted">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">C</span>
+          </div>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">muted (dim)</div>
+        </div>
+        <div style="width:84px">
+          <div class="ow-portrait ow-portrait--muted-grey">
+            <span class="ow-mono-face" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3a6ea5,#1b3a52);color:#dfeaf2;font-weight:800;font-size:1.6rem">D</span>
+          </div>
+          <div class="ek-caption" style="text-align:center;font-size:.7rem;opacity:.7;margin-top:4px">muted-grey (dim+grey)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESIZE HANDLE (.ow-resize-handle) -->
+    <section class="ek-card">
+      <h2>Resize handle — .ow-resize-handle (#1638)</h2>
+      <p class="ek-note">The thin, edge-hugging grab affordance that drives a container's width (or
+        height) by drag <b>and</b> keyboard — the gadget-rail width grip. It is a <b>grip</b>, not a
+        value control, so it is <b>not <code>.ow-slider</code></b> (a track + thumb painting a value):
+        a transparent hit strip that paints a 2px <b>neutral glass-rim</b> bar on hover / active-drag
+        (never an accent or red — the colorless-glass contract) and the one sanctioned system-blue on
+        keyboard focus (the bar <i>is</i> the focus signal). The kit supplies the full-height extent
+        (<code>inset-block:0</code>) + strip width; the edge anchor is consumer-owned via
+        <code>[data-edge]</code>. The consumer keeps all drag / keyboard / clamp / persist logic
+        (<code>role="slider"</code> + <code>aria-value*</code> + Arrow-key nudges).</p>
+
+      <div class="ek-label">Vertical edge grip (drives width) — rest / hover-active / focus</div>
+      <div class="ek-row" style="gap:22px">
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (rest)" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">rest</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (active drag)" aria-valuemin="220" aria-valuenow="360" aria-valuemax="520"
+               aria-valuetext="360 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">hover / active-drag</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle ek-force-focus" data-edge="start" role="slider" aria-orientation="vertical"
+               aria-label="Resize (focus)" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">keyboard focus</div>
+        </div>
+      </div>
+
+      <div class="ek-label">End-edge + horizontal (height) variant</div>
+      <div class="ek-row" style="gap:22px">
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="end" role="slider" aria-orientation="vertical"
+               aria-label="Resize from the trailing edge" aria-valuemin="220" aria-valuenow="300" aria-valuemax="520"
+               aria-valuetext="300 pixels" tabindex="0"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">data-edge="end"</div>
+        </div>
+        <div style="position:relative; width:120px; height:80px; border-radius:10px; background:color-mix(in srgb, var(--fg) 8%, transparent)">
+          <div class="ow-resize-handle is-active" data-edge="start" aria-orientation="horizontal" role="slider"
+               aria-label="Resize height" aria-valuemin="120" aria-valuenow="200" aria-valuemax="480"
+               aria-valuetext="200 pixels" tabindex="0" style="inset-block-start:-3px"></div>
+          <div class="ek-caption" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.7rem;opacity:.7">horizontal (height)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROGRESS + CHIP (.ow-progress / .on-chip) -->
+    <section class="ek-card">
+      <h2>Progress &amp; chip — .ow-progress / .on-chip (#1638)</h2>
+      <p class="ek-note">Two <b>display-only</b> overlays (both <code>pointer-events:none</code> in the
+        wild) migrated off bespoke fills onto kit tokens (G8, season-progress). The
+        <code>.ow-progress</code> primitive is a reusable progressbar (token track +
+        <code>.ow-progress-fill</code>; the fill keeps the accent chain — a progress FILL is a
+        legitimate accent use); <code>.ow-progress--edge</code> is the fixed bottom-edge season bar.
+        The <code>.on-chip</code> is a static notice-family pill — the drift-fix drops the old
+        <code>--mono</code> face for <code>--ow-ui-font</code>, the accent-tinted ink for legible
+        <code>--fg</code>, and the accent border for <code>--ow-glass-rim-border</code>. Neither is
+        interactive — no hover / focus / tab-stop; the ARIA <code>role="progressbar"</code> lives on
+        the consumer element.</p>
+
+      <div class="ek-label">Progressbar — .ow-progress + .ow-progress-fill (60%)</div>
+      <div class="ek-row" style="gap:14px; flex-direction:column; align-items:stretch; max-width:340px">
+        <div class="ow-progress" role="progressbar" aria-label="Demo progress"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="60">
+          <div class="ow-progress-fill" style="width:60%"></div>
+        </div>
+        <div class="ow-progress" role="progressbar" aria-label="Demo progress (near done)"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="92">
+          <div class="ow-progress-fill" style="width:92%"></div>
+        </div>
+      </div>
+
+      <div class="ek-label">Season chip — .on-chip (static label pill, value-bearing name)</div>
+      <div class="ek-row" style="gap:12px">
+        <div class="on-chip" aria-label="Season 5">Season 5</div>
+        <div class="on-chip" aria-label="Season 12">Season 12</div>
       </div>
     </section>
 
@@ -588,6 +882,7 @@
 
   <!-- The COMPOSITE kits + their deps (same files index.html loads), then the demo driver. -->
   <script type="module" src="/static/js/orwellSlots.js"></script>
+  <script src="/static/js/orwellPwReveal.js"></script>
   <script type="module" src="/static/js/orwellWindow.js"></script>
   <!-- #1638: THE menu/popover kit — OrwellMenuKit + OrwellPopoverKit (window globals). Loads with
        the other composite kits so the demo driver can wire the live menu/popover triggers. -->

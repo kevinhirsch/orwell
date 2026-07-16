@@ -77,11 +77,14 @@ def test_glass_button_bloom_ring_is_neutral_not_red():
 def test_gadget_rail_resize_handle_hover_is_neutral_not_red():
     # The GADGET-sidebar (rail) resize affordance glowed RED on hover/drag (var(--accent)/--red).
     # Colorless glass chrome: hover/drag → neutral luminous white; keyboard focus → system-blue.
-    hover = _block(CSS, ".gadget-rail.grail-resizing .gadget-rail-resize-handle::before")
+    # #1638 G7: the grip LOOK migrated to the `.ow-resize-handle` KIT primitive — the hover/drag
+    # paint now lives on `.is-active`, and focus on the kit `:focus-visible`. The #8/#9 no-red
+    # contract is pinned here (and, more fully, in test_1638_resize_handle_kit.py).
+    hover = _block(CSS, ".ow-resize-handle.is-active::before")
     assert "var(--red" not in hover and "var(--accent" not in hover and "e06c75" not in hover
-    assert "rgba(255,255,255" in hover
-    focus = _block(CSS, ".gadget-rail-resize-handle:focus-visible::before")
-    assert "var(--ow-ios-blue" in focus
+    assert "rgba(255,255,255" in hover  # neutral luminous rim (via --ow-glass-rim-strong)
+    focus = _block(CSS, ".ow-resize-handle:focus-visible::before")
+    assert "var(--ow-ios-blue" in focus or "var(--ow-focus-ring" in focus
     assert "var(--red" not in focus and "var(--accent" not in focus
 
 

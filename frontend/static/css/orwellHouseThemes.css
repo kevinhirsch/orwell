@@ -34,7 +34,7 @@
 }
 
 /* ---- Shared house polish (motion-free, so it survives reduced-motion) ----- */
-body.house-theme .theme-swatch,
+body.house-theme .ow-swatch,
 body.house-theme button {
   transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
@@ -62,7 +62,7 @@ body.house-theme button {
   }
 
   /* Memory Wall — swatches/buttons backlight on hover, like the gallery. */
-  body.house-theme--memory-wall .theme-swatch:hover,
+  body.house-theme--memory-wall .ow-swatch:hover,
   body.house-theme--memory-wall .ofin-btn:hover {
     box-shadow: 0 0 14px color-mix(in srgb, var(--red) 55%, transparent);
   }
