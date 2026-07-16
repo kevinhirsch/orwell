@@ -139,13 +139,17 @@ async function _createDirectChatFromPreferredModel() {
 // whose handler lands on a dropped vertical (POST /api/document is 404 by
 // design under the build). Runs before the menu wiring, so handlers never
 // attach to removed nodes.
+//
+// #1638: the composer overflow "+" menu is no longer a static DOM menu (it mounts through
+// OrwellMenuKit), so its empty-chevron cascade moved OUT of this static-DOM sweep and into the
+// builder-driven refreshOverflowChevron() (initOverflowMenu). This sweep now covers only the
+// remaining static-DOM menu (the export dropdown).
 function _g13CascadeMenuTriggers() {
   // The cascade rule: a launcher whose whole menu has zero visible items is
   // a zombie parent (the Tools-chevron instance, G3, generalized) — it hides
   // with its children. Re-run after any async pass that hides entries.
   [
     ['export-dl-btn', 'export-dropdown-menu', '.export-dropdown-item'],
-    ['overflow-plus-btn', 'overflow-menu', '.overflow-menu-item'],
   ].forEach(([btnId, menuId, itemSel]) => {
     const btn = el(btnId), menu = el(menuId);
     if (!btn || !menu) return;
@@ -160,25 +164,15 @@ function applyGameBuildMenuGating() {
   if (!document.body.hasAttribute('data-game-build')) return;
   // Menu entries acting on game-build-dropped verticals are removed outright.
   ['export-doc-btn'].forEach(id => { const n = el(id); if (n) n.remove(); });
-  // Voice is the build's one opt-in vertical: its JS ships only when the
-  // voice flag is on (src/settings.py strips the tts-ai.js <script> tag
-  // otherwise). With the module unshipped the "TTS Mode" entry is a dead
-  // toggle — and .overflow-menu-item's display:flex would defeat its
-  // [hidden] attribute if the TTS-settings pass ever cleared the inline
-  // style — so the entry goes with its vertical.
-  if (!document.querySelector('script[src*="tts-ai.js"]')) {
-    const tts = el('overflow-tts-btn');
-    if (tts) tts.remove();
-  }
-  // #760 → #831: the game build's first-class attach control is now the composer's SEND button
-  // itself — an empty composer shows a "+" that opens the picker (see _updateSendBtnIcon). Keeping
-  // "Attach files" in the overflow tray too = a duplicate behind the chevron. Drop the tray
-  // duplicate; the cascade below then hides the now-empty chevron, so the composer shows exactly ONE
-  // attach control (the send-button "+"). (Full build keeps the tray entry as its only attach.)
-  if (document.body.hasAttribute('data-game-build')) {
-    const trayAttach = el('overflow-attach-btn');
-    if (trayAttach) trayAttach.remove();
-  }
+  // #1638: the composer overflow entries (Attach files, TTS Mode) are no longer static DOM nodes —
+  // they are BUILDER items (buildOverflowItems). The two game-build drops that used to `.remove()`
+  // those nodes here now live IN the builder's filter:
+  //   • TTS Mode is included only when the voice module (tts-ai.js) is shipped AND settings enable
+  //     it — the game build strips the tts-ai.js <script> tag, so it never appears.
+  //   • Attach files is dropped under the game build (#760 → #831): the composer SEND button is the
+  //     single attach affordance there (an empty composer shows a "+" that opens the picker).
+  // With both dropped, the builder yields zero items and refreshOverflowChevron() (initOverflowMenu)
+  // hides the now-empty chevron — the same G13 empty-chevron cascade, driven by the builder.
   _g13CascadeMenuTriggers();
 }
 
@@ -189,8 +183,9 @@ function initializeEventListeners() {
   // G13: trim refused menu entries before any wiring below looks them up.
   applyGameBuildMenuGating();
 
-  // File attachments (inside overflow menu)
-  const _overflowAttach = el('overflow-attach-btn');
+  // File attachments. #1638: the overflow-tray "Attach files" entry is now a buildOverflowItems item
+  // (its onSelect calls fileHandlerModule.openPicker) — there is no #overflow-attach-btn DOM node to
+  // wire here anymore.
   // #831: the game build's first-class attach affordance is now the composer SEND button ("+" on an
   // empty composer — see _updateSendBtnIcon / the send-btn click handler), so the standalone paperclip
   // is REDUNDANT and stays hidden (dropped) in the game build. The full build never showed it either
@@ -203,7 +198,6 @@ function initializeEventListeners() {
       if (fi) fi.click();
     });
   }
-  if (_overflowAttach) _overflowAttach.addEventListener('click', fileHandlerModule.openPicker);
   el('file-input').addEventListener('change', (e)=>{
     for (const f of e.target.files) fileHandlerModule.addFiles([f]);
     fileHandlerModule.renderAttachStrip();
@@ -303,8 +297,11 @@ function initializeEventListeners() {
   // windows are deliberately NOT touched here — those close via their own
   // controls.
   window.closeAllPopups = function closeAllPopups(except) {
+    // #1638: the composer overflow "+" menu is no longer a `.overflow-menu.open` toggle — it mounts
+    // through OrwellMenuKit, whose escMenuStack seat already dismisses it on any outside click (a
+    // rail/sidebar click IS an outside click), so it needs no entry here.
     document.querySelectorAll(
-      '.export-dropdown-menu.open, .overflow-menu.open, .model-picker-menu.open, .doc-overflow-menu.open'
+      '.export-dropdown-menu.open, .model-picker-menu.open, .doc-overflow-menu.open'
     ).forEach(m => { if (m !== except) m.classList.remove('open'); });
     document.querySelectorAll(
       '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .email-card-dropdown, .msg-overflow-menu'
@@ -1464,6 +1461,10 @@ function initializeEventListeners() {
       // G13: this pass may have hidden menu entries — a menu left with zero
       // visible items must take its trigger down with it (gating cascades).
       try { _g13CascadeMenuTriggers(); } catch (_) {}
+      // #1638: this pass can also hide a collapsible composer button (e.g. web search), changing the
+      // overflow builder's item set — refresh the chevron + active dot.
+      try { if (window._refreshOverflowChevron) window._refreshOverflowChevron(); } catch (_) {}
+      try { if (window._updateOverflowPlusDot) window._updateOverflowPlusDot(); } catch (_) {}
     })
     .catch(() => {});
 
@@ -1478,15 +1479,16 @@ function initializeEventListeners() {
       // tool is blocked server-side (chat_routes / agent_loop). The Gallery
       // holds uploads and past images too, so it stays visible regardless;
       // use the `gallery` feature flag to hide the Gallery entirely.
-      // Hide TTS overflow button when TTS is disabled or no provider configured
+      // #1638: the overflow "TTS Mode" entry is a buildOverflowItems item now, not a DOM node —
+      // record whether settings enable TTS so the builder includes/drops it (the builder also
+      // requires the tts-ai.js voice module, so the game build stays empty regardless).
       const ttsOff = settings.tts_enabled === false || !settings.tts_provider || settings.tts_provider === 'disabled';
-      const overflowTts = el('overflow-tts-btn');
-      if (overflowTts) {
-        overflowTts.style.display = ttsOff ? 'none' : '';
-      }
-      // G13: same cascade rule after the TTS-settings pass (it can hide the
-      // overflow entry too) — zero visible items hides the trigger.
+      window._overflowTtsEnabled = !ttsOff;
+      // G13: the export cascade re-runs after this async pass; the overflow item set changed too, so
+      // refresh the builder-driven chevron (empty menu ⇒ hidden trigger) + the active dot.
       try { _g13CascadeMenuTriggers(); } catch (_) {}
+      try { if (window._refreshOverflowChevron) window._refreshOverflowChevron(); } catch (_) {}
+      try { if (window._updateOverflowPlusDot) window._updateOverflowPlusDot(); } catch (_) {}
     })
     .catch(() => {});
 
@@ -1837,46 +1839,40 @@ function initializeEventListeners() {
     const planBtn = el('plan-toggle-btn');
     if (!planBtn) return;
     const _hasPlan = () => { try { return !!(window._getStoredPlan && window._getStoredPlan()); } catch (_) { return false; } };
-    const _close = () => { const m = document.getElementById('plan-menu'); if (m) m.remove(); };
+    // #1638: the plan menu was the ONLY other producer of `.overflow-menu` DOM (it borrowed the
+    // composer overflow's classes). It now opens through OrwellMenuKit — the kit owns anchoring,
+    // escMenuStack dismissal, and role=menu a11y — so those styles can be retired.
+    const _PLAN_SHOW_ICON =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
+    const _PLAN_TOGGLE_ICON =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+    // Track the live menu instance so _open() TOGGLES (close on re-click) instead of stacking a 2nd
+    // .ow-popover. The kit's outside-click seat treats the anchor (planBtn) as "inside", so re-clicking
+    // the toggle does NOT dismiss the open menu — the toggle must be owned here. (attach() has this
+    // built in, but the plan button has dual behavior — it opens the menu ONLY when _hasPlan(), else it
+    // falls through to the normal plan-mode toggle — so it can't use attach()'s always-toggle click.)
+    let _planMenu = null;
+    const _planMenuOpen = () => !!(_planMenu && typeof _planMenu.isOpen === 'function' && _planMenu.isOpen());
     function _open() {
-      _close();
+      if (!(window.OrwellMenuKit && typeof window.OrwellMenuKit.open === 'function')) return;
+      if (_planMenuOpen()) { try { _planMenu.close('toggle'); } catch (_) {} _planMenu = null; return; }
       const planChk = el('plan-toggle');
       const on = !!(planChk && planChk.checked);
-      const menu = document.createElement('div');
-      menu.id = 'plan-menu';
-      menu.className = 'overflow-menu plan-menu';
-      menu.innerHTML =
-        '<button type="button" class="overflow-menu-item" data-act="show">'
-        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'
-        + '<span>Show plan</span></button>'
-        + '<button type="button" class="overflow-menu-item" data-act="toggle">'
-        + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
-        + '<span>Plan mode: ' + (on ? 'On' : 'Off') + '</span></button>';
-      document.body.appendChild(menu);
-      const r = planBtn.getBoundingClientRect();
-      menu.style.position = 'fixed';
-      menu.style.left = Math.round(r.left) + 'px';
-      menu.style.top = Math.round(r.top - menu.offsetHeight - 6) + 'px';
-      menu.querySelector('[data-act="show"]').addEventListener('click', () => {
-        _close();
-        const txt = window._getStoredPlan ? window._getStoredPlan() : '';
-        if (txt && window.planWindowModule) window.planWindowModule.openPlanWindow(txt, null);
+      _planMenu = window.OrwellMenuKit.open({
+        anchor: planBtn,
+        placement: 'top',
+        align: 'start',
+        ariaLabel: 'Plan options',
+        onClose: () => { _planMenu = null; },   // any close path (select / outside / Escape) clears it
+        items: [
+          { id: 'plan-show', label: 'Show plan', icon: _PLAN_SHOW_ICON, onSelect: () => {
+              const txt = window._getStoredPlan ? window._getStoredPlan() : '';
+              if (txt && window.planWindowModule) window.planWindowModule.openPlanWindow(txt, null);
+            } },
+          { id: 'plan-toggle-mode', label: 'Plan mode: ' + (on ? 'On' : 'Off'), icon: _PLAN_TOGGLE_ICON,
+            onSelect: () => { _setPlanMode(!on); } },   // flip state directly (no click → no menu re-open)
+        ],
       });
-      menu.querySelector('[data-act="toggle"]').addEventListener('click', () => {
-        _close();
-        _setPlanMode(!on);   // flip state directly (no click → no menu re-open)
-      });
-      // Dismiss on any outside click (capture so it beats other handlers) / Escape.
-      setTimeout(() => {
-        const off = (e) => {
-          if (!menu.contains(e.target) && e.target !== planBtn) {
-            _close(); document.removeEventListener('click', off, true); document.removeEventListener('keydown', esc, true);
-          }
-        };
-        const esc = (e) => { if (e.key === 'Escape') { _close(); document.removeEventListener('click', off, true); document.removeEventListener('keydown', esc, true); } };
-        document.addEventListener('click', off, true);
-        document.addEventListener('keydown', esc, true);
-      }, 0);
     }
     planBtn.addEventListener('click', (e) => {
       // With a stored plan, the button opens the menu (Show plan / toggle).
@@ -1951,16 +1947,108 @@ function initializeEventListeners() {
     _syncRagIndicator(ragState);
   }
 
-  // ── Overflow "..." menu (Research) ──
+  // ── Overflow "+" menu (#1638 — composed on OrwellMenuKit) ──
+  // The composer overflow "+" menu is no longer a static DOM tray: it mounts through
+  // OrwellMenuKit.attach (initOverflowMenu below), which body-appends a .ow-menu[role=menu] surface
+  // and owns anchoring/dismissal/a11y. Its item set is BUILD-DEPENDENT, so it is built fresh on
+  // every open by buildOverflowItems():
+  //   • responsive toolbar mirrors — a collapsed web/shell composer button (initToolbarOverflow adds
+  //     .toolbar-collapsed when the bar is tight) folds in as a menu entry;
+  //   • "Attach files" — the full-build tray attach (DROPPED under the game build, where the composer
+  //     SEND "+" is the single attach affordance — the G13 drop that used to .remove() the node);
+  //   • "TTS Mode" — shipped only when the tts-ai.js voice module is present AND settings enable it
+  //     (the game build strips tts-ai.js, so it never appears — the other G13 drop).
+  const _OVERFLOW_COLLAPSIBLE_IDS = ['bash-toggle-btn', 'web-toggle-btn'];
+  const _OVERFLOW_ATTACH_ICON =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+  const _OVERFLOW_TTS_ICON =
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>';
+  function buildOverflowItems() {
+    const items = [];
+    const gameBuild = document.body.hasAttribute('data-game-build');
+    // 1. Responsive toolbar mirrors — a collapsible composer button currently collapsed folds in
+    //    here. FULL BUILD ONLY: web/shell are game-trim-hidden under the game build (a dead lever
+    //    there), so they must NEVER fold into the overflow — guarding on !gameBuild keeps the
+    //    game-build menu empty regardless of viewport (the G13 empty-chevron cascade holds).
+    if (!gameBuild) {
+      _OVERFLOW_COLLAPSIBLE_IDS.forEach(id => {
+        const btn = el(id);
+        // Only a button that is genuinely collapsed FOR SPACE folds in. A feature/Appearance-hidden
+        // button (inline display:none or [hidden]) can also carry .toolbar-collapsed — checkToolbarOverflow
+        // collapses by width and ignores visibility — but folding it in would advertise a dead lever AND
+        // wrongly inflate the empty-chevron count. `.toolbar-collapsed` hides via CSS (not inline style),
+        // so a normally-collapsed button keeps style.display==='' and is unaffected by this guard.
+        if (!btn || btn.hidden || btn.style.display === 'none' || !btn.classList.contains('toolbar-collapsed')) return;
+        const svg = btn.querySelector('svg');
+        items.push({
+          id: 'ovf-mirror-' + id,
+          label: btn.title || id.replace(/-toggle-btn$/, '').replace(/-/g, ' '),
+          icon: svg ? svg.outerHTML : undefined,
+          checked: btn.classList.contains('active'),
+          onSelect: () => { try { btn.click(); } catch (_) {} },
+        });
+      });
+    }
+    // 2. Attach files — full build only (dropped under the game build; honors the Appearance
+    //    UI-vis "attach-btn" toggle).
+    if (!gameBuild) {
+      let attachVisible = true;
+      try { const uv = window.loadUIVis ? window.loadUIVis() : {}; attachVisible = uv['attach-btn'] !== false; } catch (_) {}
+      if (attachVisible) {
+        items.push({
+          id: 'overflow-attach-btn',
+          label: 'Attach files',
+          icon: _OVERFLOW_ATTACH_ICON,
+          onSelect: () => { try { fileHandlerModule.openPicker(); } catch (_) {} },
+        });
+      }
+    }
+    // 3. TTS Mode — voice module present AND settings enable it.
+    if (window._overflowTtsEnabled && document.querySelector('script[src*="tts-ai.js"]')) {
+      let ttsOn = false;
+      try { ttsOn = !!loadToggleState().ttsMode; } catch (_) {}
+      items.push({
+        id: 'overflow-tts-btn',
+        label: 'TTS Mode',
+        icon: _OVERFLOW_TTS_ICON,
+        checked: ttsOn,
+        onSelect: () => {
+          let on = false;
+          try { const s = loadToggleState(); on = !s.ttsMode; s.ttsMode = on; saveToggleState(s); } catch (_) {}
+          if (window.aiTTSManager) window.aiTTSManager.autoPlay = on;
+          try { updatePlusDot(); } catch (_) {}
+        },
+      });
+    }
+    return items;
+  }
+  // The trigger's active dot (.has-active) is recomputed from the current item set — any toggle
+  // item reporting `checked` lights the dot (#1638: was a DOM `.overflow-menu-item.active` scan).
   function updatePlusDot() {
     const plusBtn = el('overflow-plus-btn');
     if (!plusBtn) return;
-    const menu = el('overflow-menu');
-    const anyActive = menu ? Array.from(menu.querySelectorAll('.overflow-menu-item.active')).some(item => item.style.display !== 'none') : false;
+    let anyActive = false;
+    try { anyActive = buildOverflowItems().some(it => it && it.checked); } catch (_) {}
     plusBtn.classList.toggle('has-active', anyActive);
   }
+  // G13 empty-chevron cascade (the G3 Tools-chevron rule), builder-driven now that the overflow menu
+  // has no static DOM: a launcher whose menu builds ZERO items hides; one that builds any RESTORES.
+  // It MUST be reversible — a later non-empty build (the settings pass enabling TTS, or a full-build
+  // responsive collapse folding in a mirror) has to un-hide the "+", or the menu becomes permanently
+  // unreachable. Setting the button's OWN inline display never fights the Appearance UI-vis toggle for
+  // the "+": that toggle targets `.overflow-wrapper` (the PARENT), a different element — a hidden
+  // wrapper hides the button regardless of the button's own display, and a visible wrapper defers to it.
+  function refreshOverflowChevron() {
+    const plusBtn = el('overflow-plus-btn');
+    if (!plusBtn) return;
+    let count = 0;
+    try { count = buildOverflowItems().length; } catch (_) { count = 0; }
+    plusBtn.style.display = count === 0 ? 'none' : '';
+  }
+  window._updateOverflowPlusDot = updatePlusDot;
+  window._refreshOverflowChevron = refreshOverflowChevron;
   // External modules (compare) dispatch this when their overflow state changes
-  document.addEventListener('overflow-state-change', () => updatePlusDot());
+  document.addEventListener('overflow-state-change', () => { updatePlusDot(); refreshOverflowChevron(); });
 
   // ── Prevent toolbar buttons from stealing focus (avoids mobile keyboard bounce) ──
   const chatInputBar = document.querySelector('.chat-input-bar');
@@ -1982,9 +2070,8 @@ function initializeEventListeners() {
       if (document.activeElement === _msgTextarea) _refocusOnBlur = true;
     }
     chatInputBar.addEventListener('touchstart', _flagRefocus, { passive: true });
-    // Overflow menu is position:fixed — may not bubble through chatInputBar on mobile
-    const _overflowMenu = el('overflow-menu');
-    if (_overflowMenu) _overflowMenu.addEventListener('touchstart', _flagRefocus, { passive: true });
+    // #1638: the overflow menu is now a body-appended OrwellMenuKit surface with its own roving
+    // focus management (APG menu pattern) — no bespoke #overflow-menu touchstart refocus needed.
     // Model picker menu too
     const _pickerMenu = document.getElementById('model-picker-menu');
     if (_pickerMenu) _pickerMenu.addEventListener('touchstart', _flagRefocus, { passive: true });
@@ -2003,102 +2090,36 @@ function initializeEventListeners() {
 
   (function initOverflowMenu() {
     const plusBtn = el('overflow-plus-btn');
-    const menu = el('overflow-menu');
-    if (!plusBtn || !menu) return;
+    if (!plusBtn) return;
 
-    // `.chat-input-bar` has `container-type: inline-size`, which makes it the
-    // containing block for `position: fixed` descendants — so this menu gets
-    // trapped in the composer's stacking context and renders BEHIND the
-    // attach-strip (worse the more files you add). Portal it to <body> while
-    // open so its fixed position + z-index apply against the viewport, then
-    // restore it to its wrapper on close.
-    const ownerWrap = menu.parentElement;
-    const pickerWrap = el('model-picker-wrap');
-    let _vvReposition = null;
-    // Pin the menu's bottom 8px above the chevron (viewport-relative, since it's
-    // portaled to <body>). Only cap height + show a scrollbar when the list is
-    // genuinely taller than the room above the button.
-    function positionMenu() {
-      const r = plusBtn.getBoundingClientRect();
-      menu.style.left = r.left + 'px';
-      menu.style.right = 'auto';
-      menu.style.bottom = 'auto';
-      menu.style.maxHeight = '';      // reset so we can measure the natural height
-      menu.style.overflowY = '';
-      const avail = r.top - 16;        // room above the chevron
-      const natural = menu.scrollHeight;
-      const h = Math.min(natural, avail);
-      if (natural > avail) {           // only cap + scroll when it doesn't fit
-        menu.style.maxHeight = avail + 'px';
-        menu.style.overflowY = 'auto';
-      }
-      menu.style.top = (r.top - 8 - h) + 'px';
-    }
-    // Tapping the chevron must NOT steal focus from the message box, or the
-    // mobile keyboard collapses. preventDefault on pointerdown keeps the
-    // textarea focused (keyboard stays up) while click still opens the menu.
-    plusBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); });
-    plusBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      // Closing path needs to play the fold-in animation, not just flip
-      // .hidden — route through closeOverflowMenu so the second-click
-      // close looks the same as click-outside / Escape / item-pick.
-      const isOpen = !menu.classList.contains('hidden') && !menu.classList.contains('closing');
-      if (isOpen) {
-        closeOverflowMenu();
+    // G13 empty-chevron cascade runs SYNCHRONOUSLY (it needs only the builder, not the kit) so the
+    // empty game-build chevron never flashes visible before the kit finishes wiring.
+    refreshOverflowChevron();
+    updatePlusDot();
+
+    // #1638: wire the "+" trigger to OrwellMenuKit — the kit body-appends a .ow-menu[role=menu]
+    // surface and owns flip/shift anchoring (placement:'top' — the composer sits at the bottom, so
+    // the menu opens UPWARD), escMenuStack dismissal, and role=menu roving-keyboard a11y. The item
+    // set is BUILD-DEPENDENT, so we pass the () => items[] builder form (re-evaluated on each open).
+    // orwellMenu.js is a sibling <script type="module"> that evaluates AFTER app.js, so the kit's
+    // global may not exist yet at init — retry on the next task until it registers.
+    let _kitTries = 0;
+    (function _wireKit() {
+      if (window.OrwellMenuKit && typeof window.OrwellMenuKit.attach === 'function') {
+        window.OrwellMenuKit.attach(plusBtn, buildOverflowItems, {
+          ariaLabel: 'More tools',
+          placement: 'top',
+          align: 'start',
+          onOpen: () => { try { updatePlusDot(); } catch (_) {} },
+          onClose: () => { try { updatePlusDot(); } catch (_) {} },
+        });
+        // Tapping the chevron must NOT steal focus from the message box (mobile keyboard bounce) —
+        // preventDefault on pointerdown keeps the textarea focused while the kit's click still opens.
+        plusBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); });
         return;
       }
-      // Re-opening while a fold-in is mid-animation: cancel it cleanly.
-      menu.classList.remove('closing');
-      menu.classList.remove('hidden');
-      plusBtn.classList.add('expanded');
-      document.body.appendChild(menu);  // escape the composer's container-type trap
-      // Hide pill bar label so it doesn't show through the menu
-      if (pickerWrap) pickerWrap.style.visibility = 'hidden';
-      // Keep the textarea focused so the keyboard stays up if it was open (the
-      // pointerdown handler above prevents the focus-steal). Still watch
-      // visualViewport so the menu follows the chevron if the viewport shifts.
-      positionMenu();
-      if (window.visualViewport && !_vvReposition) {
-        _vvReposition = () => positionMenu();
-        window.visualViewport.addEventListener('resize', _vvReposition);
-        window.visualViewport.addEventListener('scroll', _vvReposition);
-      }
-    });
-    function closeOverflowMenu() {
-      if (menu.classList.contains('hidden')) return;
-      if (menu.classList.contains('closing')) return;
-      if (_vvReposition && window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', _vvReposition);
-        window.visualViewport.removeEventListener('scroll', _vvReposition);
-        _vvReposition = null;
-      }
-      // Play the fold-in animation (items peel top-down, then container
-      // scales back into the chevron) before flipping to display:none.
-      menu.classList.add('closing');
-      plusBtn.classList.remove('expanded');
-      if (pickerWrap) pickerWrap.style.visibility = '';
-      // Item delays max at 0.18s + 0.20s anim = 0.38s for items, container
-      // delay 0.16s + 0.22s = 0.38s. 400ms covers both with margin.
-      setTimeout(() => {
-        menu.classList.add('hidden');
-        menu.classList.remove('closing');
-        if (ownerWrap) ownerWrap.appendChild(menu);  // restore from <body> portal
-      }, 400);
-    }
-    // Close menu when clicking any item inside it. preventDefault on pointerdown
-    // so tapping an item (e.g. Attach files) doesn't steal focus from the message
-    // box — keeps the mobile keyboard up.
-    menu.querySelectorAll('.overflow-menu-item').forEach(item => {
-      item.addEventListener('pointerdown', (e) => { e.preventDefault(); });
-      item.addEventListener('click', () => closeOverflowMenu());
-    });
-    document.addEventListener('click', (e) => {
-      if (!menu.contains(e.target) && e.target !== plusBtn) closeOverflowMenu();
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !menu.classList.contains('hidden')) closeOverflowMenu();
-    });
+      if (_kitTries++ < 50) setTimeout(_wireKit, 0);
+    })();
 
     // Research toggle
     const researchBtn = el('research-toggle-btn');
@@ -2160,38 +2181,21 @@ function initializeEventListeners() {
   // ── Auto-collapse toolbar buttons into overflow when space is tight ──
   (function initToolbarOverflow() {
     const inputLeft = document.querySelector('.chat-input-left');
-    const overflowMenu = el('overflow-menu');
     const overflowWrapper = document.querySelector('.overflow-wrapper');
-    if (!inputLeft || !overflowMenu || !overflowWrapper) return;
+    if (!inputLeft || !overflowWrapper) return;
 
-    // Buttons that can be collapsed (in reverse priority — last collapsed first)
+    // Buttons that can be collapsed (in reverse priority — last collapsed first). #1638: collapsing
+    // just toggles `.toolbar-collapsed` on the real button (CSS hides it); the overflow menu no
+    // longer holds injected mirror DOM — buildOverflowItems() reads `.toolbar-collapsed` and folds a
+    // matching entry into the OrwellMenuKit menu on each open.
     const collapsibleIds = ['bash-toggle-btn', 'web-toggle-btn'];
     const collapsibleBtns = collapsibleIds.map(id => el(id)).filter(Boolean);
-    // Map of toolbar btn id → overflow mirror element (created dynamically)
-    const overflowMirrors = new Map();
 
-    // Create overflow mirror items for each collapsible button
-    collapsibleBtns.forEach(btn => {
-      const mirror = document.createElement('button');
-      mirror.type = 'button';
-      mirror.className = 'overflow-menu-item toolbar-overflow-mirror';
-      mirror.dataset.mirrorOf = btn.id;
-      const title = btn.title || btn.id.replace(/-/g, ' ');
-      mirror.innerHTML = btn.querySelector('svg').outerHTML + '<span>' + title + '</span>' +
-        '<span class="overflow-active-dot"></span>';
-      mirror.style.display = 'none';
-      mirror.addEventListener('click', () => btn.click());
-      // Insert at top of overflow menu (before existing items)
-      overflowMenu.insertBefore(mirror, overflowMenu.firstChild);
-      overflowMirrors.set(btn.id, mirror);
-    });
-
+    // A collapse/uncollapse or an active-state flip changes the overflow builder's item set — refresh
+    // the chevron (a collapse can re-populate an empty menu) + the active dot.
     function syncMirrorStates() {
-      overflowMirrors.forEach((mirror, btnId) => {
-        const btn = el(btnId);
-        if (btn) mirror.classList.toggle('active', btn.classList.contains('active'));
-      });
       updatePlusDot();
+      refreshOverflowChevron();
     }
 
     function checkToolbarOverflow() {
@@ -2203,7 +2207,6 @@ function initializeEventListeners() {
 
       // Uncollapse all to measure natural widths
       collapsibleBtns.forEach(btn => btn.classList.remove('toolbar-collapsed'));
-      overflowMirrors.forEach(m => m.style.display = 'none');
 
       // Temporarily allow overflow for accurate measurement
       const prevOverflow = inputLeft.style.overflow;
@@ -2234,11 +2237,7 @@ function initializeEventListeners() {
       const _researchOn = _resChk && _resChk.checked;
       const _docViewOn = document.body.classList.contains('doc-view');
       if (_researchOn && _docViewOn) {
-        collapsibleBtns.forEach(btn => {
-          btn.classList.add('toolbar-collapsed');
-          const mirror = overflowMirrors.get(btn.id);
-          if (mirror) mirror.style.display = '';
-        });
+        collapsibleBtns.forEach(btn => { btn.classList.add('toolbar-collapsed'); });
         inputLeft.style.overflow = prevOverflow;
         inputLeft.style.flexWrap = '';
         syncMirrorStates();
@@ -2249,8 +2248,6 @@ function initializeEventListeners() {
       if (totalWidth > available) {
         for (let i = 0; i < collapsibleBtns.length; i++) {
           collapsibleBtns[i].classList.add('toolbar-collapsed');
-          const mirror = overflowMirrors.get(collapsibleBtns[i].id);
-          if (mirror) mirror.style.display = '';
           totalWidth -= btnWidths[i];
           if (totalWidth <= available) break;
         }
@@ -2262,7 +2259,7 @@ function initializeEventListeners() {
       syncMirrorStates();
     }
 
-    // Observe active class changes to sync mirror states
+    // Observe active class changes to keep the chevron dot + item set in sync
     const observer = new MutationObserver(() => syncMirrorStates());
     collapsibleBtns.forEach(btn => {
       observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
@@ -2343,25 +2340,14 @@ function initializeEventListeners() {
     checkPickerOverflow();
   })();
 
-  // TTS Mode toggle (separate from overflow IIFE for safety)
+  // TTS Mode init (#1638: the toggle is now a buildOverflowItems item — its onSelect flips ttsMode +
+  // aiTTSManager.autoPlay. This only restores the saved autoplay state on load; there is no
+  // #overflow-tts-btn DOM node to wire anymore.)
   (function initTTSToggle() {
-    const ttsBtn = document.getElementById('overflow-tts-btn');
-    if (!ttsBtn) return;
     try {
       const st = loadToggleState();
-      if (st.ttsMode) {
-        ttsBtn.classList.add('active');
-        if (window.aiTTSManager) window.aiTTSManager.autoPlay = true;
-      }
-    } catch(e) {}
-
-    ttsBtn.addEventListener('click', () => {
-      const isActive = !ttsBtn.classList.contains('active');
-      ttsBtn.classList.toggle('active', isActive);
-      if (window.aiTTSManager) window.aiTTSManager.autoPlay = isActive;
-      const s = loadToggleState(); s.ttsMode = isActive; saveToggleState(s);
-      updatePlusDot();
-    });
+      if (st.ttsMode && window.aiTTSManager) window.aiTTSManager.autoPlay = true;
+    } catch (e) {}
   })();
 
 

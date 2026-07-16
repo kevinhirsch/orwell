@@ -99,10 +99,21 @@ def test_app_js_removes_refused_menu_entries_before_wiring():
         "'Save to Documents' acts on the dropped documents vertical — the "
         "entry must be REMOVED (hidden-not-click-refused), not left for CSS."
     )
-    assert "script[src*=\"tts-ai.js\"]" in gate and "overflow-tts-btn" in gate, (
-        "the TTS overflow entry must go with its unshipped voice module — "
-        ".overflow-menu-item's display:flex would defeat its [hidden] attr if "
-        "the TTS-settings pass ever cleared the inline style."
+    # #1638: the composer overflow entries (Attach files, TTS Mode) are no longer static DOM nodes —
+    # they are buildOverflowItems() items, so their game-build drop moved OUT of applyGameBuildMenuGating
+    # (this `gate` body) and INTO the builder's filter. The TTS voice-module probe now lives there.
+    assert "overflow-tts-btn" not in gate, (
+        "the overflow TTS entry is no longer a DOM node removed here — its gating moved to the builder"
+    )
+    builder = js[js.index("function buildOverflowItems()"):]
+    builder = builder[: builder.index("\n  function updatePlusDot")]
+    assert "script[src*=\"tts-ai.js\"]" in builder, (
+        "the TTS overflow item must go with its unshipped voice module — the builder includes it "
+        "only when the tts-ai.js <script> tag is shipped (the game build strips it)."
+    )
+    assert "gameBuild" in builder and "Attach files" in builder, (
+        "the Attach-files drop under the game build now lives in the builder (dropped when "
+        "data-game-build is set — the composer SEND '+' is the single attach affordance there)."
     )
     # The gate runs before any menu wiring looks the entries up.
     init = js[js.index("function initializeEventListeners()"):]
@@ -121,10 +132,25 @@ def test_menu_trigger_cascade_is_hide_only_and_rerun_after_async_passes():
     block = js[js.index("function _g13CascadeMenuTriggers()"):]
     block = block[:block.index("\nfunction applyGameBuildMenuGating")]
     assert "['export-dl-btn', 'export-dropdown-menu', '.export-dropdown-item']" in block
-    assert "['overflow-plus-btn', 'overflow-menu', '.overflow-menu-item']" in block
+    # #1638: the composer overflow "+" no longer has static DOM (it mounts through OrwellMenuKit), so
+    # its empty-chevron cascade left this static-DOM sweep. The sweep now covers only the export
+    # dropdown; the overflow cascade is builder-driven (refreshOverflowChevron).
+    assert "'overflow-plus-btn', 'overflow-menu'" not in block, (
+        "the composer overflow menu is builder-driven now — its tuple must be OUT of the static "
+        "_g13CascadeMenuTriggers sweep (it lives in refreshOverflowChevron)."
+    )
     assert "if (!anyVisible) btn.style.display = 'none';" in block, (
         "the cascade is HIDE-ONLY — un-hiding belongs to the user's "
         "Appearance UI-vis toggles, never this rule."
+    )
+    # The overflow empty-chevron cascade is now builder-driven: refreshOverflowChevron hides the "+"
+    # trigger (hide-only) when buildOverflowItems() yields zero items.
+    refresh = js[js.index("function refreshOverflowChevron()"):]
+    refresh = refresh[: refresh.index("\n  window._updateOverflowPlusDot")]
+    assert "buildOverflowItems().length" in refresh and "count === 0 ? 'none' : ''" in refresh, (
+        "refreshOverflowChevron must be REVERSIBLE — hide the overflow '+' when the builder yields "
+        "zero items and RESTORE it when the build is non-empty (not hide-only, else a later non-empty "
+        "build leaves the menu permanently unreachable). The G13 empty-chevron cascade, builder-driven."
     )
     # Both async passes can hide entries — the cascade re-runs after each.
     feats = js[js.index("window._initFeaturesReady = ("):]
@@ -201,7 +227,9 @@ def test_browser_smoke_carries_the_g13_walk():
     assert "every game-trim'd launcher stays invisible" in smoke
     assert "is removed from the DOM" in smoke
     assert "hides its launcher for the player" in smoke
-    assert "the cascade is hide-only, never over-hides" in smoke
+    # #1638: the composer overflow "+" cascade is now builder-driven AND reversible (hide when the
+    # builder is empty, restore when non-empty) — the old "hide-only" phrasing no longer applies.
+    assert "emptiness-driven + reversible" in smoke
 
 
 def test_smoke_derives_the_dropped_list_from_the_builds_source():

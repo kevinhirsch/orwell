@@ -214,22 +214,27 @@ def test_markdown_timer_has_pinnable_class():
 # #759 sweep — the DOC-FENCE indicator family is the SAME defect class.
 #
 # The active document indicator in the chat toolbar (.doc-indicator-active /
-# #doc-indicator-btn.active) and its overflow-menu twin (#overflow-doc-btn.has-docs /
-# .active) paint their OWN text at var(--accent, var(--red)) (base ~line 3014/3023) for
-# the "docs attached / panel open" state. On the glass theme --accent is unset and --red
+# #doc-indicator-btn.active) paints its OWN text at var(--accent, var(--red)) for the
+# "docs attached / panel open" state. On the glass theme --accent is unset and --red
 # resolves to the house accent HUE (#c6613f on the default glass theme) — an ACCENT-ON-GLASS
 # glyph on the LIGHT glass chrome (measured ~4.05:1 vs. a white-composited surface, vs.
-# ~17.6:1 after the fix). #overflow-doc-btn sits inside .overflow-menu, whose dark-ink
-# redefine only touches --fg (NOT --accent/--red), so it is NOT covered by that scope.
-# Fix: flip the TEXT to the SAME neutral dark ink (#16191f) + a LIGHT halo, scoped to
-# body.theme-frosted (Normal tier untouched). NON-text state cues (opacity, the chip
-# background tint) persist — only the accent HUE on the glyph goes neutral.
+# ~17.6:1 after the fix). Fix: flip the TEXT to the SAME neutral dark ink (#16191f) + a LIGHT
+# halo, scoped to body.theme-frosted (Normal tier untouched). NON-text state cues (opacity, the
+# chip background tint) persist — only the accent HUE on the glyph goes neutral.
+#
+# #1638 re-anchor: the doc indicator's OVERFLOW-MENU twin used to be a bespoke #overflow-doc-btn
+# entry INSIDE .overflow-menu — which only redefined --fg (NOT --accent/--red), so it needed its
+# own #overflow-doc-btn dark-ink rule. The composer overflow menu now mounts through OrwellMenuKit,
+# whose frosted surface rule (body.theme-frosted .ow-popover { color: #16191f }) hands every
+# .ow-menu-item the neutral dark ink CENTRALLY — so the menu twin's ink is re-anchored to the kit
+# surface, no longer a bespoke #overflow-doc-btn rule.
 # ══════════════════════════════════════════════════════════════════════════════════
 _DOC_TARGETS = (
     "body.theme-frosted .doc-indicator-active",
     "body.theme-frosted #doc-indicator-btn.active",
-    "body.theme-frosted #overflow-doc-btn.has-docs",
-    "body.theme-frosted #overflow-doc-btn.active",
+    # #1638: the overflow-menu twin's dark ink is now the kit menu SURFACE's ink (color inherited by
+    # every .ow-menu-item) — re-anchored from the retired bespoke #overflow-doc-btn frosted rule.
+    "body.theme-frosted .ow-popover",
 )
 
 
@@ -257,7 +262,7 @@ def test_doc_indicator_family_carries_light_halo():
     --ow-glass-text-shadow (a dark shadow under dark ink = a smudge, #725)."""
     blocks = [
         (s, b) for (s, b) in _blocks_for("body.theme-frosted .doc-indicator-active")
-        if "body.theme-frosted #overflow-doc-btn.active" in s and DARK_INK in b.lower()
+        if "body.theme-frosted #doc-indicator-btn.active" in s and DARK_INK in b.lower()
     ]
     assert blocks, "the shared #759-sweep doc-indicator dark-ink fix block was not found"
     _, body = blocks[0]
@@ -277,7 +282,7 @@ def test_doc_indicator_fix_scoped_to_frosted_only():
     Normal tier keeps its accent-state glyph."""
     blocks = [
         s for (s, b) in _blocks_for(".doc-indicator-active")
-        if DARK_INK in b.lower() and "#overflow-doc-btn.active" in s
+        if DARK_INK in b.lower() and "#doc-indicator-btn.active" in s
     ]
     assert blocks, "no shared dark-ink fix block for the doc-indicator family"
     for s in blocks:

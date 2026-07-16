@@ -2786,17 +2786,47 @@ def main() -> int:
             if g13_voice_dropped:
                 check(page.evaluate("!document.getElementById('overflow-tts-btn')") is True,
                       "G13: the TTS overflow entry goes with its unshipped voice module")
+            # #1638: the composer overflow "+" wiring is DEFERRED — OrwellMenuKit.attach waits for the
+            # sibling orwellMenu.js module to register the global (a setTimeout retry), and only then
+            # sets aria-haspopup='menu'. Wait for that to settle before the kitWired + restore-path
+            # probes so they aren't racing init (bounded + non-fatal — the checks below still report
+            # accurately if it never settles, and the pre-#1638 checks in this block are unaffected).
+            try:
+                page.wait_for_function(
+                    "() => document.getElementById('overflow-plus-btn') "
+                    "&& typeof window._refreshOverflowChevron === 'function' "
+                    "&& window.OrwellMenuKit "
+                    "&& document.getElementById('overflow-plus-btn').getAttribute('aria-haspopup') === 'menu'",
+                    timeout=5000)
+            except Exception:
+                pass
             g13_menus = page.evaluate("""() => {
               const vis = el => el && !el.hidden && getComputedStyle(el).display !== 'none';
-              const items = (menuId, sel) => [...document.querySelectorAll(`#${menuId} ${sel}`)]
-                .filter(vis).map(i => (i.id + ' ' + (i.textContent || '')).replace(/\\s+/g, ' ').trim());
               // #795: the top-center conversation caret DROPDOWN is gone — the only title-bar
               // affordance is a pencil that renames the current conversation inline. (Its
               // export sub-menu no longer exists in the title bar, so there is nothing to open.)
               const renamePencil = document.getElementById('topbar-rename-btn');
+              // #1638: the composer overflow "+" now mounts through OrwellMenuKit — the kit
+              // body-appends a .ow-popover[role=menu] surface (the role lives on .ow-popover; its
+              // .ow-menu list holds the .ow-menu-item rows) and sets aria-haspopup='menu' + toggles
+              // aria-expanded on the trigger. There is NO static #overflow-menu / .overflow-menu-item
+              // anymore; the item set is built dynamically and the game-build gating lives in the
+              // builder (buildOverflowItems) — so under the game build the "+" builds ZERO items and
+              // its chevron is hidden (the G13 empty-chevron cascade, now builder-driven).
               const ovfTrigger = document.getElementById('overflow-plus-btn');
-              if (vis(ovfTrigger)) ovfTrigger.click();
-              const ovf = items('overflow-menu', '.overflow-menu-item');
+              const kitWired = ovfTrigger ? ovfTrigger.getAttribute('aria-haspopup') === 'menu' : false;
+              let owMenuMounted = false;
+              let ariaExpanded = ovfTrigger ? ovfTrigger.getAttribute('aria-expanded') : null;
+              // The trigger is hidden under the game build (empty menu), so this only opens the kit
+              // menu when the "+" is actually visible (the full build). Read the item labels from the
+              // kit surface, not the retired #overflow-menu.
+              if (vis(ovfTrigger)) {
+                ovfTrigger.click();
+                owMenuMounted = !!document.querySelector('.ow-popover[role="menu"]');
+                ariaExpanded = ovfTrigger.getAttribute('aria-expanded');
+              }
+              const ovf = [...document.querySelectorAll('.ow-popover[role="menu"] .ow-menu-item')]
+                .filter(vis).map(i => (i.textContent || '').replace(/\\s+/g, ' ').trim());
               // #831 (supersedes #760's paperclip): in the game build the SINGLE attach affordance
               // is the send button itself — an EMPTY composer paints it as a "+" in mode 'attach'
               // (opens the file picker); the standalone composer paperclip is dropped. Empty the
@@ -2812,6 +2842,9 @@ def main() -> int:
                        exportDropdownGone: !document.getElementById('export-dl-btn')
                                            && !document.getElementById('export-dropdown-menu'),
                        overflowTrigger: vis(ovfTrigger),
+                       kitWired: kitWired,
+                       owMenuMounted: owMenuMounted,
+                       ariaExpanded: ariaExpanded,
                        sendAttachMode: sendBtn ? (sendBtn.dataset.mode || '') : null,
                        sendAttachTitle: sendBtn ? (sendBtn.title || '') : null,
                        paperclipGone: !vis(attachPaperclip),
@@ -2825,19 +2858,83 @@ def main() -> int:
                   "G13/#795: the title-bar rename pencil (#topbar-rename-btn) is visible")
             check(g13_menus["exportDropdownGone"] is True,
                   "G13/#795: the top-center caret 'More' dropdown is gone (no dropdown switcher)")
+            # #1638: the composer overflow "+" is wired through OrwellMenuKit — its attach() sets
+            # aria-haspopup='menu' on the trigger regardless of the trigger's own visibility, so this
+            # positive "the kit is wired" check holds even under the game build (where the chevron is
+            # hidden because the builder yields zero items).
+            check(g13_menus["kitWired"] is True,
+                  "#1638: the composer overflow '+' is wired through OrwellMenuKit "
+                  "(aria-haspopup='menu' on #overflow-plus-btn)")
+            # G13 re-expressed against the kit DOM: the gated entries (Attach files / TTS Mode)
+            # never appear under the game build — the builder drops them — so there is no zombie
+            # entry whose handler lands on a build-refusal path.
             check(g13_zombies(g13_menus["overflow"]) == [],
                   f"G13: no overflow item present whose handler is the refusal path ({g13_zombies(g13_menus['overflow'])})")
-            # The cascade is HIDE-ONLY and emptiness-driven (the G3 Tools-chevron rule):
-            # a menu WITH visible keep-set items keeps its trigger; a menu intentionally
-            # emptied (here, #760 promoting attach to a first-class visible paperclip) has
-            # its trigger correctly hidden — never over-hidden, never left as a zombie that
-            # opens nothing. So: trigger-visible IFF the menu has visible items.
+            # The cascade is HIDE-ONLY and emptiness-driven (the G3 Tools-chevron rule): a menu WITH
+            # keep-set items keeps its trigger; a menu the builder empties (here, the game build drops
+            # attach → the send-button "+" — and tts → its unshipped voice module) has its trigger
+            # correctly hidden — never over-hidden, never left as a zombie that opens nothing. Now that
+            # the menu is builder-driven the item read comes from the kit surface (.ow-popover[role=menu]
+            # .ow-menu-item), not the retired #overflow-menu. So: trigger-visible IFF the menu builds
+            # visible items.
             overflow_has_items = len(g13_menus["overflow"]) >= 1
             check(g13_menus["overflowTrigger"] is overflow_has_items,
-                  "G13: the overflow chevron is visible IFF its menu has keep-set items "
-                  "(the cascade is hide-only, never over-hides — a non-empty menu keeps its "
-                  "trigger; an emptied one correctly hides it) "
+                  "G13: the overflow chevron is visible IFF its menu builds keep-set items "
+                  "(emptiness-driven + reversible — a non-empty menu keeps its trigger; an emptied "
+                  "one hides it) "
                   f"(items={g13_menus['overflow']}, trigger={g13_menus['overflowTrigger']})")
+            # And when the "+" IS visible (the full build), clicking it must mount the kit menu
+            # surface + flip the trigger's aria-expanded — the kit's role=menu contract. (Skipped
+            # when the chevron is hidden under the game build, where the two G13 checks above are the
+            # load-bearing assertions.)
+            check((not g13_menus["overflowTrigger"])
+                  or (g13_menus["owMenuMounted"] is True and g13_menus["ariaExpanded"] == "true"),
+                  "#1638: opening the visible '+' mounts the kit .ow-popover[role=menu] surface and "
+                  f"sets aria-expanded=true (mounted={g13_menus['owMenuMounted']}, expanded={g13_menus['ariaExpanded']!r})")
+            # #1638 restore-path (Greptile/CodeRabbit): the empty-chevron cascade MUST be REVERSIBLE —
+            # a builder that goes empty→non-empty must UN-HIDE the "+", else the menu is permanently
+            # unreachable (the hide-only bug). The existing probe above can't catch it: the game-build
+            # builder is legitimately empty (attach/tts/mirrors all dropped/guarded), so it never has a
+            # non-empty state to restore FROM. Drive the ONE builder branch reachable under the game
+            # build — the TTS gate — to force non-empty (a <script src="data:…tts-ai.js"> + the
+            # _overflowTtsEnabled flag; no network), prove the "+" is RESTORED + opens, then restore the
+            # empty state so the G13 intent stays intact for the rest of the run.
+            restore = page.evaluate("""() => {
+              const vis = el => el && !el.hidden && getComputedStyle(el).display !== 'none';
+              const plus = document.getElementById('overflow-plus-btn');
+              if (!plus || typeof window._refreshOverflowChevron !== 'function')
+                return { ok: false };
+              window._refreshOverflowChevron();
+              const startedDisplay = plus.style.display, startedVisible = vis(plus);
+              const s = document.createElement('script');
+              s.src = 'data:text/javascript,/*tts-ai.js*/'; s.dataset.owSmokeTts = '1';
+              document.head.appendChild(s);
+              window._overflowTtsEnabled = true;
+              window._refreshOverflowChevron();
+              const restoredDisplay = plus.style.display, restoredVisible = vis(plus);
+              let opened = false, itemCount = 0;
+              if (window.OrwellMenuKit && vis(plus)) {
+                plus.click();
+                const surf = document.querySelector('.ow-popover[role="menu"]');
+                opened = !!surf;
+                itemCount = surf ? surf.querySelectorAll('.ow-menu-item').length : 0;
+                try { window.OrwellMenuKit.closeAll(); } catch (_) {}
+              }
+              window._overflowTtsEnabled = false; s.remove();
+              window._refreshOverflowChevron();
+              return { ok: true, startedDisplay, startedVisible, restoredDisplay, restoredVisible,
+                       opened, itemCount, reHidden: !vis(plus) };
+            }""")
+            page.evaluate("document.body.click()")
+            check(restore.get("ok") is True and restore.get("startedVisible") is False,
+                  f"#1638 restore-path: the game-build '+' starts hidden (empty builder) ({restore})")
+            check(restore.get("restoredDisplay") != "none" and restore.get("restoredVisible") is True,
+                  "#1638 restore-path (bug#1): a non-empty builder RESTORES the hidden '+' — "
+                  f"refreshOverflowChevron is REVERSIBLE, not hide-only ({restore})")
+            check(restore.get("opened") is True and restore.get("itemCount", 0) >= 1,
+                  f"#1638 restore-path: the restored '+' opens the kit menu carrying the built item ({restore})")
+            check(restore.get("reHidden") is True,
+                  f"#1638 restore-path: clearing the builder re-hides the '+' (empty state restored) ({restore})")
             # #831 (supersedes #760's paperclip): exactly one attach affordance in the game build —
             # the EMPTY composer's send button paints a "+" in mode 'attach' (opens the picker); the
             # standalone paperclip is dropped and the overflow-tray duplicate stays gone.
