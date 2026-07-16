@@ -285,6 +285,27 @@ function commitCurrent() {
 // Escape, via bindMenuDismiss/escMenuStack) are OWNED by the OrwellPopover kit.
 // This module only builds the content and drives the HSV math; the kit mounts
 // `content` inside its `.ow-popover` surface and manages the lifecycle.
+//
+// ONE dedicated dismissal-adjacent listener survives (it does NOT close the
+// picker — the kit does): while the picker is open, a click on an ENCLOSING
+// modal's close-X must close ONLY the picker, not the modal underneath. The
+// color picker lives inside the Theme / Settings modals, whose close buttons
+// match this selector; the kit's capture-phase outside-click closes the picker
+// but does not stopPropagation, so without this the SAME click would also reach
+// the modal's close handler and dismiss both. We swallow that one click at
+// document-capture with stopPropagation — but NOT stopImmediatePropagation, so
+// the kit's SIBLING capture listener still runs and tears the picker down; the
+// modal's own (bubble-phase) close handler never fires. A SECOND click — picker
+// already closed, this listener removed — reaches the modal and closes it. This
+// restores exactly what the old bespoke outside-click close-btn branch provided.
+function _swallowModalCloseClick(e) {
+  const t = e.target;
+  if (t && t.closest && t.closest('.close-btn, [aria-label*="lose" i]')) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+
 function open(inputEl) {
   close();                                    // tear down any previous popover
   const Kit = window.OrwellPopoverKit;
@@ -298,13 +319,22 @@ function open(inputEl) {
     content,
     focusTrap: true,
     ariaLabel: 'Color picker',
-    onClose: () => { _popover = null; _pop = null; _input = null; _drag = null; },
+    onClose: () => {
+      document.removeEventListener('click', _swallowModalCloseClick, true);
+      _popover = null; _pop = null; _input = null; _drag = null;
+    },
   });
+  // Register SYNCHRONOUSLY (now) so this sits BEFORE the kit's own outside-click
+  // listener, which it attaches on a setTimeout(0): both are document-capture
+  // siblings, so both run on a close-X click (plain stopPropagation does not stop
+  // a same-node sibling) — ours just blocks the deeper modal-close handler first.
+  document.addEventListener('click', _swallowModalCloseClick, true);
   syncUI();
 }
 
 function close() {
   if (_pop) { try { _pop.close('api'); } catch (_) {} }
+  document.removeEventListener('click', _swallowModalCloseClick, true);
   _popover = null;
   _pop = null;
   _input = null;

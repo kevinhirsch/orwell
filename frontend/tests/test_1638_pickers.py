@@ -53,9 +53,9 @@ def test_emoji_picker_has_no_adhoc_dismissal_or_positioning():
 
 
 def test_color_picker_has_no_adhoc_dismissal_or_positioning():
-    # the kit's bindMenuDismiss/escMenuStack own outside-click + Escape — no document listeners
-    # and no bespoke Escape/outside handlers survive.
-    assert "document.addEventListener" not in COLOR
+    # the kit's bindMenuDismiss/escMenuStack own outside-click + Escape — the bespoke
+    # dismissal handlers are gone (the ONE surviving document listener is the narrow
+    # modal-close swallow, asserted separately below — it does NOT close the picker).
     assert "_onOutside" not in COLOR
     assert "_onEsc" not in COLOR
     assert ".key === 'Escape'" not in COLOR, "only Enter stays in the hex input; Escape is the kit's"
@@ -65,6 +65,28 @@ def test_color_picker_has_no_adhoc_dismissal_or_positioning():
     # the HSV drag's window-level pointer listeners are LEGITIMATELY kept (internal drag, not dismissal).
     assert "window.addEventListener('pointermove'" in COLOR
     assert "window.addEventListener('pointerup'" in COLOR
+
+
+def test_color_picker_swallows_modal_close_x_only_while_open():
+    """REGRESSION (Greptile P1): the color picker lives inside the Theme/Settings
+    modals. A click on the modal close-X while the picker is open must close ONLY the
+    picker (the kit's outside-click), not the modal underneath. The old bespoke
+    _onOutside swallowed close-btn clicks; the kit's capture-phase dismissal does not
+    stopPropagation, so one click would close BOTH. A narrow document-capture swallow
+    restores the single-close behavior. Live proof: test_1638_color_picker_modal_close_browser.py."""
+    # the swallow exists and targets the modal close-button selector (both forms).
+    assert "_swallowModalCloseClick" in COLOR
+    assert ".close-btn, [aria-label*=\"lose\" i]" in COLOR
+    # it uses stopPropagation but NOT stopImmediatePropagation — the kit's sibling
+    # capture listener must still run and close the picker.
+    swallow = COLOR[COLOR.index("function _swallowModalCloseClick"):]
+    swallow = swallow[:swallow.index("\n}") + 2]
+    assert "e.stopPropagation()" in swallow
+    assert "stopImmediatePropagation" not in swallow, \
+        "must NOT stopImmediatePropagation — that would block the kit's own close listener too"
+    # it is scoped to the open lifecycle: added in open(), removed in onClose + close().
+    assert "document.addEventListener('click', _swallowModalCloseClick, true)" in COLOR
+    assert "document.removeEventListener('click', _swallowModalCloseClick, true)" in COLOR
 
 
 # ── 3. liquidGlass refraction set folds .cp-popover → .ow-popover ───────────────
