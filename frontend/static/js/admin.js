@@ -822,20 +822,38 @@ function initEndpointForm() {
   // Custom provider picker — mirrors the (now hidden) <select id="adm-epProvider">
   // so the rest of this function (which reads provider.value and dispatches
   // change events) keeps working unchanged.
+  //
+  // #1638 (consumer #9b): migrated onto the shared OrwellMenuKit (the twin of the search
+  // provider picker in settings.js). The button stays the trigger; the kit owns the anchored
+  // role=menu surface, the click-toggle, aria-haspopup/aria-expanded on the trigger, and the
+  // outside-click + Escape dismissal — so there is NO ad-hoc document click listener and NO
+  // bespoke .adm-provider-menu container here anymore. The caret rotates off aria-expanded.
+  //
+  // CRITICAL — the bidirectional URL<->provider sync is preserved verbatim:
+  //   • picking a provider writes provider.value AND dispatches 'change' (whose handler below
+  //     sets #adm-epUrl + kind), then re-syncs the picker's current display; and
+  //   • typing a URL that no longer matches the picked provider resets provider.value to
+  //     "Custom URL" and re-syncs the current display.
+  // Dropping the 'change' dispatch would silently desync the endpoint form.
   const picker = el('adm-provider-picker');
   const pickerBtn = el('adm-provider-btn');
-  const pickerMenu = el('adm-provider-menu');
   const pickerCurrent = picker ? picker.querySelector('.adm-provider-current') : null;
-  function _renderPickerMenu() {
-    if (!pickerMenu) return;
-    pickerMenu.innerHTML = Array.from(provider.options).map(o => {
+  function _buildAdminProviderItems() {
+    // Re-evaluated on every open, so `checked` always tracks the live selection.
+    return Array.from(provider.options).map(o => {
+      const value = o.value;
       const logo = o.dataset.logo ? (providerLogo(o.dataset.logo) || '') : '';
-      const active = o.value === provider.value ? ' active' : '';
-      return `<div class="adm-provider-item${active}" role="option" data-value="${o.value.replace(/"/g, '&quot;')}">
-        <span class="adm-provider-logo">${logo}</span>
-        <span>${o.textContent}</span>
-      </div>`;
-    }).join('');
+      return {
+        icon: logo,
+        label: o.textContent,
+        checked: value === provider.value,
+        onSelect: () => {
+          provider.value = value;
+          provider.dispatchEvent(new Event('change', { bubbles: true }));
+          _syncPickerCurrent();
+        },
+      };
+    });
   }
   function _syncPickerCurrent() {
     if (!pickerCurrent) return;
@@ -844,25 +862,12 @@ function initEndpointForm() {
     pickerCurrent.querySelector('.adm-provider-logo').innerHTML = logo;
     pickerCurrent.querySelector('.adm-provider-name').textContent = opt.textContent;
   }
-  if (picker && pickerBtn && pickerMenu && pickerCurrent) {
-    _renderPickerMenu();
+  if (picker && pickerBtn && pickerCurrent && window.OrwellMenuKit) {
     _syncPickerCurrent();
     if (provider.value && !urlInput.value) urlInput.value = provider.value;
-    pickerBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      pickerMenu.classList.toggle('hidden');
-    });
-    pickerMenu.addEventListener('click', (e) => {
-      const item = e.target.closest('.adm-provider-item');
-      if (!item) return;
-      provider.value = item.dataset.value;
-      provider.dispatchEvent(new Event('change', { bubbles: true }));
-      pickerMenu.classList.add('hidden');
-      _renderPickerMenu();
-      _syncPickerCurrent();
-    });
-    document.addEventListener('click', (e) => {
-      if (!picker.contains(e.target)) pickerMenu.classList.add('hidden');
+    window.OrwellMenuKit.attach(pickerBtn, _buildAdminProviderItems, {
+      matchAnchorWidth: true,
+      ariaLabel: 'Provider',
     });
   }
 
@@ -875,7 +880,6 @@ function initEndpointForm() {
     if (provider.value && urlInput.value.trim() !== provider.value) {
       provider.value = '';
       if (kindSel) kindSel.value = 'api';
-      _renderPickerMenu();
       _syncPickerCurrent();
     }
   });

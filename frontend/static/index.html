@@ -2432,14 +2432,15 @@
               <div class="admin-model-form">
                 <!-- Custom picker (with logos). Hidden native <select> mirrors
                      its value so the existing JS that reads adm-epProvider
-                     keeps working unchanged. -->
+                     keeps working unchanged. #1638 (consumer #9b): the menu is
+                     now a kit-owned anchored surface (OrwellMenuKit.attach in
+                     admin.js) — no bespoke .adm-provider-menu container here. -->
                 <div class="adm-provider-picker adm-provider-combo" id="adm-provider-picker">
                   <input id="adm-epUrl" type="text" placeholder="Base URL or pick provider" autocomplete="off">
                   <button type="button" class="adm-provider-btn" id="adm-provider-btn" title="Pick provider">
                     <span class="adm-provider-current"><span class="adm-provider-logo"></span><span class="adm-provider-name">Provider</span></span>
                     <svg class="adm-provider-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
                   </button>
-                  <div class="adm-provider-menu hidden" id="adm-provider-menu"></div>
                 </div>
                 <select id="adm-epProvider" class="ow-select" style="display:none">
                   <option value="">Custom URL</option>
