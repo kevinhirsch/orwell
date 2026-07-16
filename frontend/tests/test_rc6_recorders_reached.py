@@ -204,6 +204,34 @@ def test_authoring_call_exception_is_not_a_reasoning_misroute(_clean_ledger):
         "the exception path must NOT be mislabeled a reasoning-channel misroute (that is empty-body only)")
 
 
+def test_empty_completion_then_raised_retry_is_call_failed_not_misroute(_clean_ledger):
+    # RC6 review follow-on (finding 3, SECOND retry site): the FIRST call returns a genuine empty body
+    # (would classify `reasoning-misroute`), but the empty/truncated RETRY then RAISES. A raised retry
+    # must be preserved as a call failure — the turn is `cast-authoring-call`, never `reasoning-misroute`.
+    ca = importlib.import_module("src.orwell_cast_authoring")
+    calls = {"n": 0}
+
+    async def _empty_then_timeout(_messages):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ""  # a genuine empty-visible completion (the misroute shape)
+        raise TimeoutError("provider timed out on the retry")  # ...but the retry raises
+
+    async def _write(_profile):
+        return {"accepted": True}
+
+    cast = [{"id": "player"}, {"id": "npc:1"}]
+    written = _run(ca.author_cast(cast, _empty_then_timeout, _write, user="probe-user"))
+    assert written == 0, "an empty body followed by a raised retry authors nothing"
+    assert calls["n"] >= 2, "the empty body must have triggered a retry (which then raised)"
+
+    classes = {r["callClass"] for r in enrichment_policy.failures("probe-user")}
+    assert "cast-authoring-call" in classes, (
+        "an empty completion FOLLOWED BY a raised retry is a call failure, not a reasoning misroute")
+    assert "reasoning-misroute" not in classes, (
+        "the raised retry must be preserved even after a prior empty completion")
+
+
 # ══ S6b reached — a dropped consequence fold via the deferred-fold drop sites ════════════════════
 
 

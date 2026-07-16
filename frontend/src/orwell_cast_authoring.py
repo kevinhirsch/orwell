@@ -710,19 +710,19 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
           3. #1002 — a NON-empty body with NO parseable JSON (genuine prose) ⇒ ONE strict-JSON reparse.
 
         Returns ``(profile_or_None, last_text, call_error)`` where ``call_error`` is the message of a
-        provider EXCEPTION when the call NEVER produced a completion body (RC6 S6c: `_call_with_retries`
+        provider EXCEPTION on ANY attempt that left no usable profile (RC6 S6c: `_call_with_retries`
         used to return an empty-string sentinel on BOTH a genuine empty-visible completion AND a
         raised timeout/HTTP/network error, so the exception path was mislabeled a reasoning-channel
-        misroute). ``call_error`` is None whenever any completion body WAS obtained — even an empty
-        one — so the caller records `reasoning-misroute` only for a genuine successful-but-empty
-        completion, and a provider-call failure class for the exception path."""
+        misroute). ``call_error`` is set whenever the FIRST call OR a retry raised (a raised retry is
+        preserved even after a prior completion — an empty completion FOLLOWED BY a timeout is a
+        call failure, not a misroute) and None only when every attempt returned. So the caller records
+        `reasoning-misroute` only for a genuine successful-but-empty completion, and a provider-call
+        failure class for the exception path."""
         messages = build_authoring_messages(npc)
         _spend_attempt(ukey, hid)  # M1-10: every real provider call spends from the season budget
-        saw_completion = False  # RC6 S6c: did any llm_fn call return (vs only raise)?
-        call_error = None
+        call_error = None  # RC6 S6c: the message of the last provider EXCEPTION (None ⇒ every call returned)
         try:
             text = await llm_fn(messages)
-            saw_completion = True
         except Exception as e:  # the model can fail for one houseguest; carry on
             logger.warning(f"[cast-authoring] llm failed for {hid}: {e}")
             return None, "", str(e)  # a raised call with NO completion body — never a misroute
@@ -746,9 +746,9 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
             _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _TRUNCATION_RETRY}])
-                saw_completion = True
             except Exception as e:
                 logger.warning(f"[cast-authoring] llm empty/truncated retry failed for {hid}: {e}")
+                call_error = str(e)  # RC6 S6c: a raised retry is a call failure, not the prior empty body
                 break
             profile = parse_authored_profile(text or "", hid)
         # #1002: one-shot reparse retry — a NON-empty body with NO JSON object at all (genuine prose).
@@ -761,15 +761,15 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
             _spend_attempt(ukey, hid)
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
-                saw_completion = True
             except Exception as e:
                 logger.warning(f"[cast-authoring] llm retry failed for {hid}: {e}")
+                call_error = str(e)  # RC6 S6c: a raised retry is a call failure, not the prior body
             else:
                 profile = parse_authored_profile(text or "", hid)
-        # A completion body WAS obtained on at least one attempt ⇒ not a pure call failure (an empty
-        # body is a genuine misroute, classified by the caller); report the exception only when the
-        # provider never once returned.
-        return profile, (text or ""), (None if saw_completion else call_error)
+        # RC6 S6c: report the exception whenever ANY attempt raised without yielding a usable profile —
+        # a raised retry is preserved even after a prior completion (a completion then a timeout is a
+        # call failure, never the prior empty body's misroute). None ⇒ every attempt returned.
+        return profile, (text or ""), call_error
 
     async def _write_with_retries(profile: dict, hid: str):
         """#1057: commit one profile through the SERIALIZED single-flight write-back, retrying a transient

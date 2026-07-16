@@ -359,6 +359,8 @@ def test_write_failure_restores_drained_counts_and_baseline(_tmp_ledger, monkeyp
     ledger.note_stale_rejection("player")           # buffer 1 stale
     ledger.note_belt_fire("player", "trust-belt")   # buffer 1 belt
 
+    _orig_write = ledger.atomic_write_json
+
     def _boom(*a, **k):
         raise OSError("disk full")
 
@@ -370,8 +372,10 @@ def test_write_failure_restores_drained_counts_and_baseline(_tmp_ledger, monkeyp
     assert ledger._PENDING_BELTS.get("player", {}).get("trust-belt") == 1, "and the drained belts"
     assert ledger._LAST_BEAT_AFTER.get("player") is None, "a failed write must not advance the beat baseline"
 
-    # Now the write succeeds — the restored counts fold into THIS turn instead of vanishing.
-    monkeypatch.undo()
+    # Now the write succeeds — the restored counts fold into THIS turn instead of vanishing. Restore
+    # ONLY `atomic_write_json` (NOT monkeypatch.undo(), which would also drop `_tmp_ledger`'s
+    # LEDGER_PATH override and send this second write to the DEFAULT ledger).
+    monkeypatch.setattr(ledger, "atomic_write_json", _orig_write)
     ledger.record_turn("player", session="s", turn_id="t2", beat_seq_before=6, beat_seq_after=7)
     entry = ledger.get_recent("player")[-1]
     assert entry["staleRejections"] == 1, "the restored stale count must survive to the next turn"

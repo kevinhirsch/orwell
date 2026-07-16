@@ -164,7 +164,7 @@ def _classify_search_error(exc: BaseException) -> str:
         from src.search import NetworkError, RateLimitError
         if isinstance(exc, (NetworkError, RateLimitError)):
             return "search-provider"
-    except Exception:  # pragma: no cover - defensive: the typed errors may be unimportable in isolation
+    except ImportError:  # pragma: no cover - defensive: the typed errors may be unimportable in isolation
         pass
     low = str(exc).lower()
     if any(m in low for m in _SEARCH_TRANSPORT_MARKERS):
