@@ -307,7 +307,7 @@ on the primitive.
   on the frosted tier (no second `backdrop-filter` — glass-on-glass ban). The inner face/`img`
   fills it and inherits the radius.
 - **`.ow-portrait-tile`** — the interactive variant on a bare `<button>` (button-chrome reset,
-  `height:auto` so the app-wide `button{height}` reset can't letterboxthe aspect-ratio, a hover
+  `height:auto` so the app-wide `button{height}` reset can't letterbox the aspect-ratio, a hover
   lift, the system-blue `:focus-visible` ring, and the coarse-pointer 44px hit floor via an
   invisible `::after`).
 - **States** — `.is-selected` / `[aria-pressed="true"]` (system-blue ring, never an accent fill),

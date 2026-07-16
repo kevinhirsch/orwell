@@ -499,13 +499,13 @@
       <div class="ek-label">Labelled swatch + reset (rest · changed)</div>
       <div class="ek-stack" style="max-width:320px">
         <div class="ow-color-well">
-          <label>Background</label>
-          <input type="color" value="#2b3040">
+          <label for="ek-cw-bg">Background</label>
+          <input type="color" id="ek-cw-bg" value="#2b3040">
           <button class="ow-color-well__reset" title="Reset this color" aria-label="Reset color" disabled>&#x21BA;</button>
         </div>
         <div class="ow-color-well">
-          <label>Accent</label>
-          <input type="color" value="#e06c75">
+          <label for="ek-cw-accent">Accent</label>
+          <input type="color" id="ek-cw-accent" value="#e06c75">
           <button class="ow-color-well__reset changed" title="Reset this color" aria-label="Reset color">&#x21BA;</button>
         </div>
       </div>
@@ -513,12 +513,12 @@
       <div class="ek-label">Left-aligned (--start, hex readout) · compact (--compact)</div>
       <div class="ek-stack" style="max-width:320px">
         <div class="ow-color-well ow-color-well--start">
-          <input type="color" value="#7c5cff">
+          <input type="color" value="#7c5cff" aria-label="Accent color">
           <span style="font-size:var(--fs-xs);opacity:0.65;font-family:ui-monospace,monospace;">#7c5cff</span>
         </div>
         <div class="ow-color-well ow-color-well--compact">
-          <label>Effect</label>
-          <input type="color" value="#9cdef2">
+          <label for="ek-cw-effect">Effect</label>
+          <input type="color" id="ek-cw-effect" value="#9cdef2">
           <button class="ow-color-well__reset changed" title="Reset" aria-label="Reset color">&#x21BA;</button>
         </div>
       </div>
@@ -536,7 +536,7 @@
 
       <div class="ek-label">Selectable tiles (one selected) — role=listbox / role=option</div>
       <div class="ow-swatch-grid" role="listbox" aria-label="Demo themes" style="max-width:320px">
-        <div class="ow-swatch ow-swatch--preview" role="option" tabindex="0" aria-selected="true"
+        <div class="ow-swatch ow-swatch--preview" role="option" aria-selected="true"
              style="background:#16191f;color:#e8eef2;border-color:#2b3040;" aria-label="midnight theme">
           <div class="ow-swatch__dots">
             <span class="ow-swatch__dot" style="background:#16191f"></span>
@@ -546,7 +546,7 @@
           </div>
           midnight
         </div>
-        <div class="ow-swatch ow-swatch--preview" role="option" tabindex="-1" aria-selected="false"
+        <div class="ow-swatch ow-swatch--preview" role="option" aria-selected="false"
              style="background:#fdf6e3;color:#3b3228;border-color:#e5dcc3;" aria-label="parchment theme">
           <div class="ow-swatch__dots">
             <span class="ow-swatch__dot" style="background:#fdf6e3"></span>
@@ -556,7 +556,7 @@
           </div>
           parchment
         </div>
-        <div class="ow-swatch ow-swatch--preview ek-force-focus" role="option" tabindex="-1" aria-selected="false"
+        <div class="ow-swatch ow-swatch--preview ek-force-focus" role="option" aria-selected="false"
              style="background:#0d1b2a;color:#a9d6e5;border-color:#1b3a52;" aria-label="ocean theme (focus)">
           <div class="ow-swatch__dots">
             <span class="ow-swatch__dot" style="background:#0d1b2a"></span>

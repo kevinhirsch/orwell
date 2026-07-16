@@ -72,12 +72,18 @@ def test_swatch_grids_are_listboxes():
         assert "aria-label=" in tag, f"#{gid} must carry an aria-label"
 
 
-# ── 3. the selected state is NEUTRAL, not the accent hue ─────────────────────────────
+# ── 3. the selected state is NEUTRAL, not the accent hue — aria-selected is the SOLE source ──
 def test_swatch_selected_state_is_neutral_not_accent():
-    sel = _block(SWATCH, '.ow-swatch[aria-selected="true"], .ow-swatch.is-selected')
+    # selection is single-sourced on aria-selected: the CSS keys ONLY off [aria-selected="true"];
+    # a redundant `.ow-swatch.is-selected` selector must NOT exist (it would be a second, driftable
+    # source of the selected visual).
+    sel = _block(SWATCH, '.ow-swatch[aria-selected="true"]')
     assert "--ow-control-ink" in sel, "the selected ring must use the neutral --ow-control-ink"
     assert "var(--red)" not in sel and "--accent" not in sel, (
         "the selected state must NOT use the accent hue (the old .theme-swatch.active var(--red) ring)"
+    )
+    assert ".ow-swatch.is-selected" not in SWATCH, (
+        "the selected state must be single-sourced on aria-selected — no `.ow-swatch.is-selected` selector"
     )
 
 
@@ -161,11 +167,25 @@ def test_show_all_button_is_outside_the_listbox():
     )
 
 
-def test_delete_btn_stays_in_tile_micro_control():
-    # OWNER/spec ruling: the per-tile delete X is out of the .ow-swatch primitive's scope; it stays
-    # an in-tile micro-control (mirrors #session-list, where each role=option owns its action button).
+def test_delete_btn_renders_as_sibling_outside_the_option():
+    # WAI-ARIA: an option's descendants are presentational, so the per-tile delete X must be a
+    # SIBLING of the role=option swatch (inside a presentational wrapper cell), NOT nested inside
+    # it — otherwise the <button> loses its role and adds a phantom tab stop (#1657 / #1658).
     assert ".theme-delete-btn" in CSS, "the per-tile delete X micro-control CSS is retained"
-    assert 'class="theme-delete-btn"' in THEME_JS, "the delete X stays rendered in the custom tile"
+    assert 'class="theme-delete-btn"' in THEME_JS, "the delete X stays rendered on the custom tile"
+    # the custom entry is wrapped in a presentational cell (the grid item), so the listbox still
+    # owns only options and the ✕ button is a sibling of — not a descendant of — the option.
+    assert 'class="ow-swatch-cell"' in THEME_JS, "each custom entry must be wrapped in an .ow-swatch-cell"
+    # structural proof the ✕ is OUTSIDE the option: bound to the custom template, the option's own
+    # closing </div> (the first </div> after the name span) must come BEFORE the delete button.
+    tmpl = THEME_JS[THEME_JS.index("ow-swatch ow-swatch--custom"):]
+    tmpl = tmpl[:tmpl.index(".join('')")]
+    name_idx = tmpl.index("ow-swatch__name")
+    close_idx = tmpl.index("</div>", name_idx)      # closes the role=option swatch
+    btn_idx = tmpl.index("theme-delete-btn")
+    assert name_idx < close_idx < btn_idx, (
+        "the delete button must render AFTER the option's closing </div> (a sibling, not a child)"
+    )
 
 
 # ── 12. the reference demo instantiates the primitive ────────────────────────────────

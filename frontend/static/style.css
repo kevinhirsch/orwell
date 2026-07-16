@@ -7110,11 +7110,14 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
       text-transform: uppercase; letter-spacing: 0.04em; margin: 6px 0 2px;
       border-top: 1px solid var(--border); padding-top: 6px;
     }
-    /* The custom-tile position anchor migrated to `.ow-swatch--custom` (ELEMENT KIT region).
-       Accent-coloured circular X — always visible (mobile-friendly), sits INSIDE the swatch's
-       top-right corner so it never crops into a neighbouring swatch. The per-tile delete X is a
-       micro-control kept in-tile (out of the .ow-swatch primitive's scope; mirrors #session-list,
-       where each role=option owns its own action button). */
+    /* Each custom entry is a presentational wrapper cell (grid item) owning the role=option
+       swatch AND the delete X as SIBLINGS — the button lives OUTSIDE the option (an option's
+       descendants are presentational), so it keeps its button role + is a separate tab stop.
+       The cell is the position anchor for the ✕; it sizes exactly like the swatch it wraps, so
+       the ✕ still sits in the tile's top-right corner (visual placement unchanged). */
+    .ow-swatch-cell { position: relative; }
+    /* Accent-coloured circular X — always visible (mobile-friendly), anchored to the wrapper
+       cell's top-right corner so it never crops into a neighbouring swatch. */
     .theme-delete-btn {
       position: absolute;
       top: -2px;
@@ -22284,6 +22287,14 @@ body.glass-full input[type="range"].ow-slider::-webkit-slider-thumb {
               0 1px 0 color-mix(in srgb, #16191f 18%, transparent);
 }
 .ow-kbd-group { display: inline-flex; align-items: center; gap: 2px; }
+/* Flat / default tiers: the keycap sits on the dark --panel surface, where the frosted-tuned
+   dark --ow-control-* inks read dark-on-dark. Re-ink from the theme's own flat control tokens
+   (a legible --fg glyph on a raised, panel-derived chip), matching the flat .ow-btn family (#1657). */
+body:not(.theme-frosted) .ow-kbd {
+  color: var(--fg);
+  background: var(--own-flat-fill-strong);
+  border-color: var(--own-flat-border-strong);
+}
 /* Full Glass: the chip rides the real glass sample like other kit controls */
 body.glass-full .ow-kbd {
   -webkit-backdrop-filter: var(--ow-btn-glass, blur(10px) saturate(118%));
@@ -22298,6 +22309,8 @@ body.glass-full .ow-kbd {
 }
 @media (prefers-contrast: more) {
   .ow-kbd { border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent); }
+  /* flat tier: raise the rim from the theme's own --fg so the bump stays legible on --panel (#1657) */
+  body:not(.theme-frosted) .ow-kbd { border-color: color-mix(in srgb, var(--fg) 60%, var(--border)); }
 }
 
 /* ── SWATCH GRID: .ow-swatch-grid / .ow-swatch — a selectable option-in-a-set (#1638) ──
@@ -22322,7 +22335,7 @@ body.glass-full .ow-kbd {
 .ow-swatch:hover { transform: scale(1.06); }
 /* SELECTED — a NEUTRAL luminous ring (emphasis = luminosity + weight, NOT accent hue), driven by
    aria-selected. box-shadow + a neutral border layer OVER the --preview tile's inline border. */
-.ow-swatch[aria-selected="true"], .ow-swatch.is-selected {
+.ow-swatch[aria-selected="true"] {
   border-color: color-mix(in srgb, var(--ow-control-ink, #16191f) 55%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ow-control-ink, #16191f) 22%, transparent);
 }
@@ -22345,6 +22358,14 @@ body.glass-full .ow-kbd {
    borderline; floor it on touch (mirrors the .oc-pin / .ow-color-well floors). */
 @media (any-pointer: coarse) {
   .ow-swatch { min-height: var(--ow-tap-min, 44px); }
+}
+/* Increased-contrast: the neutral 22%-ink selected ring vanishes on the darkest tiles (e.g.
+   #16191f). Swap to a fully-opaque DUAL ring (light inner + dark outer) that reads on ANY swatch
+   bg — the same background-independent trick the .ow-swatch__dot uses (#1657). */
+@media (prefers-contrast: more) {
+  .ow-swatch[aria-selected="true"] {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 4px rgba(0, 0, 0, 0.92);
+  }
 }
 
 /* ── PORTRAIT TILE: .ow-portrait / .ow-portrait-tile — the face frame (#1638, G4/G5/G6) ──

@@ -398,9 +398,12 @@
         // #1638: toggle BOTH the legacy hs-* classes AND the shared kit .is-loading/.is-broken so the
         // .ow-portrait state chrome activates alongside the (test-pinned) J3-15 skeleton.
         const done = () => { tile.classList.remove("hs-loading", "is-loading"); };
-        if (img.complete && img.naturalWidth > 0) { done(); return; }
+        const failed = () => { tile.classList.remove("hs-loading", "is-loading"); tile.classList.add("hs-broken", "is-broken"); };
+        // An already-decoded image never fires load/error again — including a CACHED FAILURE
+        // (complete but naturalWidth===0), which must resolve to broken, not stay is-loading.
+        if (img.complete) { (img.naturalWidth > 0 ? done : failed)(); return; }
         img.addEventListener("load", done, { once: true });
-        img.addEventListener("error", () => { tile.classList.remove("hs-loading", "is-loading"); tile.classList.add("hs-broken", "is-broken"); }, { once: true });
+        img.addEventListener("error", failed, { once: true });
       });
     }
     function wireLibrary() {

@@ -441,9 +441,9 @@
 
   <form id="authForm" autocomplete="on">
     <label for="username">Username</label>
-    <div class="ow-pw-field">
-      <input id="username" name="username" type="text" required autofocus autocomplete="username">
-    </div>
+    <!-- #1657: the username is a normal field (no reveal button), so it must NOT sit in an
+         .ow-pw-field wrapper — that reserves trailing padding for a nonexistent eye toggle. -->
+    <input id="username" name="username" type="text" required autofocus autocomplete="username">
 
     <label for="password">Password</label>
     <div class="ow-pw-field">

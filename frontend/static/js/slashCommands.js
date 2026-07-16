@@ -2072,7 +2072,7 @@ async function _cmdDemo(args, ctx) {
       tooltip.innerHTML = `<div class="tour-text">${text}</div>
         ${breathing ? '<div style="font-size:0.72rem;opacity:0.35;margin-bottom:6px">Click the highlighted element to continue</div>' : ''}
         <div class="tour-nav" style="${breathing ? 'justify-content:center' : ''}">
-          ${breathing ? '' : `<button class="ow-btn${isFirst ? ' is-disabled' : ''}" data-act="back">\u2190</button>`}
+          ${breathing ? '' : `<button class="ow-btn${isFirst ? ' is-disabled' : ''}"${isFirst ? ' disabled aria-disabled="true"' : ''} data-act="back">\u2190</button>`}
           <button class="ow-btn ow-btn-plain" data-act="skip">${stepOpts.finishLabel ? 'finish tour' : 'skip tour'}</button>
           ${breathing ? '' : `<button class="ow-btn ow-btn-prominent${pulseNext ? ' tour-btn-arrow-pulse' : ''}" data-act="next">\u2192</button>`}
         </div>`;
@@ -2408,7 +2408,7 @@ async function _cmdTourCompare(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' + hint +
         '<div class="tour-nav">' +
-          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
           '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
           '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
@@ -2686,7 +2686,7 @@ async function _cmdTourCookbook(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
           '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
           '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
@@ -2915,7 +2915,7 @@ async function _cmdTourTheme(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
@@ -3151,7 +3151,7 @@ async function _cmdTourSettings(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
@@ -3375,7 +3375,7 @@ async function _cmdTourGallery(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
@@ -3580,7 +3580,7 @@ async function _cmdTourNotes(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
@@ -3772,7 +3772,7 @@ async function _cmdTourBrain(args, ctx) {
         tooltip.innerHTML =
           '<div class="tour-text">' + text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
           '</div>';
@@ -3953,7 +3953,7 @@ async function _runTaskTour(steps, doneText, opts) {
         tooltip.innerHTML =
           '<div class="tour-text">' + step.text + '</div>' +
           '<div class="tour-nav">' +
-            '<button class="ow-btn' + (i === 0 ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+            '<button class="ow-btn' + (i === 0 ? ' is-disabled' : '') + '"' + (i === 0 ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
             '<button class="ow-btn ow-btn-plain" data-act="skip">' + (i === steps.length - 1 ? 'done' : 'skip tour') + '</button>' +
             '<button class="ow-btn ow-btn-prominent" data-act="next">' + (i === steps.length - 1 ? '✓' : '→') + '</button>' +
           '</div>';
@@ -4193,7 +4193,7 @@ async function _cmdTourResearch(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
           '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
           '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';
@@ -4401,7 +4401,7 @@ async function _cmdTourLibrary(args, ctx) {
       tooltip.innerHTML =
         '<div class="tour-text">' + text + '</div>' +
         '<div class="tour-nav">' +
-          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '" data-act="back">←</button>' +
+          '<button class="ow-btn' + (isFirst ? ' is-disabled' : '') + '"' + (isFirst ? ' disabled aria-disabled="true"' : '') + ' data-act="back">←</button>' +
           '<button class="ow-btn ow-btn-plain" data-act="skip">' + (isLast ? 'done' : 'skip tour') + '</button>' +
           '<button class="ow-btn ow-btn-prominent" data-act="next">' + (isLast ? '✓' : '→') + '</button>' +
         '</div>';

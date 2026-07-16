@@ -1628,17 +1628,23 @@ export function initThemeUI() {
   const customEntries = Object.entries(customThemes);
   if (customEntries.length > 0 && userGrid && userCard) {
     userCard.style.display = '';
+    // Each custom entry is a presentational WRAPPER cell owning the role=option swatch AND the
+    // delete button as SIBLINGS — the button sits OUTSIDE the option (per WAI-ARIA, an option's
+    // descendants are presentational, so a nested <button> would lose its role + add a phantom
+    // tab stop). The wrapper anchors the ✕'s absolute placement so the tile look is unchanged.
     userGrid.innerHTML = customEntries.map(([name, c]) => `
-      <div class="ow-swatch ow-swatch--custom" data-theme="${name}" data-custom="1"
-           role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${name} theme">
-        <div class="ow-swatch__dots">
-          <span class="ow-swatch__dot" style="background:${c.bg}"></span>
-          <span class="ow-swatch__dot" style="background:${c.panel}"></span>
-          <span class="ow-swatch__dot" style="background:${c.fg}"></span>
-          <span class="ow-swatch__dot" style="background:${c.red}"></span>
+      <div class="ow-swatch-cell" role="presentation">
+        <div class="ow-swatch ow-swatch--custom" data-theme="${name}" data-custom="1"
+             role="option" tabindex="-1" aria-selected="${name === activeName}" aria-label="${name} theme">
+          <div class="ow-swatch__dots">
+            <span class="ow-swatch__dot" style="background:${c.bg}"></span>
+            <span class="ow-swatch__dot" style="background:${c.panel}"></span>
+            <span class="ow-swatch__dot" style="background:${c.fg}"></span>
+            <span class="ow-swatch__dot" style="background:${c.red}"></span>
+          </div>
+          <span class="ow-swatch__name">${name}</span>
         </div>
-        <span class="ow-swatch__name">${name}</span>
-        <button type="button" class="theme-delete-btn" data-delete="${name}" title="Delete theme"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="theme-delete-btn" data-delete="${name}" title="Delete theme" aria-label="Delete theme ${name}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     `).join('');
   } else if (userCard) {
@@ -1794,6 +1800,17 @@ export function initThemeUI() {
         const changed = picker.value.toLowerCase() !== ref.toLowerCase();
         btn.classList.toggle('changed', changed);
         btn.disabled = !changed;   // sync keyboard-reachability with .changed (#1638)
+      }
+    });
+    // The bg-effect-color reset (#1657): its reference is the TEXT color (the reset target, matching
+    // the click handler's `currentColors.fg`), so an unchanged effect reset is invisible AND inert.
+    document.querySelectorAll('.ow-color-well__reset[data-reset-effect]').forEach(btn => {
+      const picker = document.getElementById('theme-bg-effect-color');
+      const ref = currentColors.fg || '#9cdef2';
+      if (picker) {
+        const changed = picker.value.toLowerCase() !== ref.toLowerCase();
+        btn.classList.toggle('changed', changed);
+        btn.disabled = !changed;
       }
     });
   }
@@ -2100,6 +2117,7 @@ export function initThemeUI() {
         ec.value = fg;
         applyBgEffectColor('');
         const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+        syncResetButtons();   // #1657: the effect reset is now itself synced (.changed + [disabled])
       }
     });
   });
@@ -2245,7 +2263,9 @@ export function initThemeUI() {
     effectColorPicker.addEventListener('input', () => {
       applyBgEffectColor(effectColorPicker.value);
       const s = getSaved(); if (s) _saveFull(s.name, s.colors);
+      syncResetButtons();   // #1657: reflect the effect reset's .changed / [disabled] on every edit
     });
+    syncResetButtons();   // #1657: correct the effect reset's initial state (value set just above)
   }
 
   const intensitySlider = document.getElementById('theme-bg-intensity');

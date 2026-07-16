@@ -118,9 +118,10 @@ def test_keycap_honors_a11y_trio_subset():
 def test_settings_emits_kit_keycap():
     assert '<kbd class="ow-kbd">' in SETTINGS, \
         "settings.js _formatKeyCaps must emit <kbd class=\"ow-kbd\">"
-    # no bare <kbd> (no class) survives
-    assert not re.search(r"<kbd>(?!\s*class)", SETTINGS), \
-        "no bare <kbd> (without the .ow-kbd class) may remain in settings.js"
+    # no <kbd> tag — bare OR attributed (e.g. `<kbd id="key">`) — may survive without the .ow-kbd
+    # class (the old `<kbd>(?!\s*class)` only caught the bare spelling).
+    assert not re.search(r"<kbd(?![^>]*\bclass=[\"'][^\"']*\bow-kbd\b)[^>]*>", SETTINGS), \
+        "no <kbd> tag (bare or attributed) without the .ow-kbd class may remain in settings.js"
     assert "<kbd>${label}</kbd>" not in SETTINGS
 
 
