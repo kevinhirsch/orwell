@@ -32,7 +32,6 @@ import pytest
 FRONTEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(FRONTEND, "static")
 
-_PORT = int(os.environ.get("ORWELL_1638_CP_PORT", "8801"))
 VIEWPORT = {"width": 1280, "height": 720}
 
 
@@ -51,13 +50,16 @@ def _static_server():
     class _Q(socketserver.TCPServer):
         allow_reuse_address = True
 
-    httpd = _Q(("127.0.0.1", _PORT), handler)
+    # Bind an EPHEMERAL port (0) to avoid collisions with a parallel/other run.
+    httpd = _Q(("127.0.0.1", 0), handler)
+    port = httpd.server_address[1]
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     try:
-        yield f"http://127.0.0.1:{_PORT}"
+        yield f"http://127.0.0.1:{port}"
     finally:
         httpd.shutdown()
+        httpd.server_close()   # release the listening socket (shutdown() alone leaves it open)
 
 
 # A modal that mirrors the real Theme/Settings chrome: a `.close-btn` (aria-label
@@ -68,15 +70,19 @@ def _static_server():
 _HARNESS = """
 <!doctype html><html><head><meta charset="utf-8"></head>
 <body data-game-build="1">
-  <div id="test-modal" class="modal" style="position:fixed;inset:0;">
-    <div class="modal-content">
-      <button class="close-btn" id="modal-close" aria-label="Close settings"
-              style="position:fixed;top:8px;left:8px;width:40px;height:40px;">x</button>
-      <input type="text" id="outside-field"
-             style="position:fixed;top:8px;left:220px;width:120px;">
-      <input type="color" id="test-color" value="#336699"
-             style="position:fixed;bottom:40px;left:560px;">
-    </div>
+  <div id="test-modal" class="modal-content" role="dialog" style="position:fixed;inset:0;">
+    <button class="close-btn" id="modal-close" aria-label="Close settings"
+            style="position:fixed;top:8px;left:8px;width:40px;height:40px;">x</button>
+    <input type="text" id="outside-field"
+           style="position:fixed;top:8px;left:220px;width:120px;">
+    <input type="color" id="test-color" value="#336699"
+           style="position:fixed;bottom:40px;left:560px;">
+  </div>
+  <!-- An UNRELATED modal (does NOT enclose the colour input): its close-btn must
+       NOT be swallowed by the picker's scoped guard. -->
+  <div id="other-modal" class="modal-content" role="dialog" style="position:fixed;top:8px;left:420px;">
+    <button class="close-btn" id="other-close" aria-label="Close other"
+            style="width:40px;height:40px;">x</button>
   </div>
   <script type="module">
     import '/js/orwellMenu.js';
@@ -86,11 +92,16 @@ _HARNESS = """
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && dismissTopMenu()) { e.preventDefault(); e.stopPropagation(); }
     }, true);
-    // A REAL modal close handler (bubble phase, like the app's close buttons).
+    // REAL modal close handlers (bubble phase, like the app's close buttons).
     window.__modalClosed = false;
     document.getElementById('modal-close').addEventListener('click', () => {
       window.__modalClosed = true;
       document.getElementById('test-modal').classList.add('hidden');
+    });
+    window.__otherClosed = false;
+    document.getElementById('other-close').addEventListener('click', () => {
+      window.__otherClosed = true;
+      document.getElementById('other-modal').classList.add('hidden');
     });
     attachColorPicker(document.getElementById('test-color'));
     window.__ready = true;
@@ -104,6 +115,7 @@ _STATE_JS = """
   hasHsv: !!document.querySelector('.ow-popover .cp-sl'),
   modalClosed: window.__modalClosed === true,
   modalHidden: document.getElementById('test-modal').classList.contains('hidden'),
+  otherClosed: window.__otherClosed === true,
 })
 """
 
@@ -185,6 +197,31 @@ def test_plain_outside_click_still_closes_the_picker(_static_server):
     assert not errs, f"no page errors ({errs})"
     assert not after["pickerOpen"], "a normal outside click must still close the picker"
     assert not after["modalClosed"], "an outside click on a non-close field must not close the modal"
+
+
+def test_unrelated_modal_close_btn_is_not_swallowed(_static_server):
+    """The swallow is scoped to the picker's ENCLOSING modal only. Clicking a
+    DIFFERENT modal's close-X while the picker is open must NOT be swallowed — that
+    modal closes normally (and, being an outside click, the picker dismisses too)."""
+    _require_browser()
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser, page = _new_page(pw)
+        errs = []
+        page.on("pageerror", lambda e: errs.append(str(e)))
+        try:
+            _load(page, _static_server)
+            _open_picker(page)
+            assert page.evaluate(_STATE_JS)["pickerOpen"]
+            page.click("#other-close")
+            page.wait_for_timeout(60)
+            after = page.evaluate(_STATE_JS)
+        finally:
+            browser.close()
+    assert not errs, f"no page errors ({errs})"
+    assert after["otherClosed"], "an UNRELATED modal's close-X must NOT be swallowed — it closes normally"
+    assert not after["modalClosed"], "the picker's own modal is untouched"
+    assert not after["pickerOpen"], "the outside click still dismisses the picker via the kit"
 
 
 def test_escape_closes_the_picker(_static_server):

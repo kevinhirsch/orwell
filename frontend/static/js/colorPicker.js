@@ -287,10 +287,10 @@ function commitCurrent() {
 // `content` inside its `.ow-popover` surface and manages the lifecycle.
 //
 // ONE dedicated dismissal-adjacent listener survives (it does NOT close the
-// picker — the kit does): while the picker is open, a click on an ENCLOSING
+// picker — the kit does): while the picker is open, a click on THE ENCLOSING
 // modal's close-X must close ONLY the picker, not the modal underneath. The
-// color picker lives inside the Theme / Settings modals, whose close buttons
-// match this selector; the kit's capture-phase outside-click closes the picker
+// color picker lives inside the Theme / Settings modals (their close controls
+// carry `.close-btn`); the kit's capture-phase outside-click closes the picker
 // but does not stopPropagation, so without this the SAME click would also reach
 // the modal's close handler and dismiss both. We swallow that one click at
 // document-capture with stopPropagation — but NOT stopImmediatePropagation, so
@@ -298,9 +298,19 @@ function commitCurrent() {
 // modal's own (bubble-phase) close handler never fires. A SECOND click — picker
 // already closed, this listener removed — reaches the modal and closes it. This
 // restores exactly what the old bespoke outside-click close-btn branch provided.
+//
+// Tightly SCOPED (CodeRabbit): only THIS picker's own enclosing modal's close-X
+// is swallowed — an exact `.close-btn` (no aria-label substring, which matched
+// "Disclose" etc.) that is contained by the modal wrapping `_input`. An unrelated
+// modal's close-btn is left untouched (it closes normally, and the outside click
+// still dismisses the picker via the kit).
 function _swallowModalCloseClick(e) {
+  if (!_input) return;
   const t = e.target;
-  if (t && t.closest && t.closest('.close-btn, [aria-label*="lose" i]')) {
+  const closeBtn = t && t.closest && t.closest('.close-btn');
+  if (!closeBtn) return;
+  const modal = _input.closest('.modal-content, .modal, [role="dialog"], .ow-window');
+  if (modal && modal.contains(closeBtn)) {
     e.preventDefault();
     e.stopPropagation();
   }

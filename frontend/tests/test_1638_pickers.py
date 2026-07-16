@@ -74,13 +74,19 @@ def test_color_picker_swallows_modal_close_x_only_while_open():
     _onOutside swallowed close-btn clicks; the kit's capture-phase dismissal does not
     stopPropagation, so one click would close BOTH. A narrow document-capture swallow
     restores the single-close behavior. Live proof: test_1638_color_picker_modal_close_browser.py."""
-    # the swallow exists and targets the modal close-button selector (both forms).
+    # the swallow exists and targets an EXACT .close-btn (no aria-label substring,
+    # which over-matched "Disclose" etc.).
     assert "_swallowModalCloseClick" in COLOR
-    assert ".close-btn, [aria-label*=\"lose\" i]" in COLOR
-    # it uses stopPropagation but NOT stopImmediatePropagation — the kit's sibling
-    # capture listener must still run and close the picker.
     swallow = COLOR[COLOR.index("function _swallowModalCloseClick"):]
     swallow = swallow[:swallow.index("\n}") + 2]
+    assert ".closest('.close-btn')" in swallow
+    assert '[aria-label*="lose"' not in swallow, "the over-broad aria-label match must be dropped"
+    # it is SCOPED to the picker's own enclosing modal — the clicked .close-btn must
+    # be contained by the modal wrapping _input (an unrelated modal's close-btn is left alone).
+    assert "_input.closest(" in swallow
+    assert "modal.contains(closeBtn)" in swallow
+    # it uses stopPropagation but NOT stopImmediatePropagation — the kit's sibling
+    # capture listener must still run and close the picker.
     assert "e.stopPropagation()" in swallow
     assert "stopImmediatePropagation" not in swallow, \
         "must NOT stopImmediatePropagation — that would block the kit's own close listener too"
