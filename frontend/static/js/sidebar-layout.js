@@ -359,6 +359,17 @@ export function initSidebarLayout(Storage, opts) {
     mobileBackdrop.classList.toggle('visible', sidebarOpen || miniOpen);
   }
 
+  // Snapshot whether a kit menu/popover (OrwellMenuKit / OrwellPopoverKit,
+  // #1638) is open at PRESS time. The kit's outside-click dismissal runs in the
+  // click CAPTURE phase (bindMenuDismiss), so it detaches the .ow-popover before
+  // this backdrop handler's bubble-phase runs — a live query there would already
+  // be null and race away. pointerdown fires before the click while the surface
+  // is still mounted, so the flag captures the pre-dismissal truth.
+  window._owPopoverOpenAtPress = false;
+  document.addEventListener('pointerdown', () => {
+    window._owPopoverOpenAtPress = !!document.querySelector('.ow-popover');
+  }, true);
+
   // Suppress sidebar close briefly after dropdown actions
   window._suppressSidebarClose = false;
   mobileBackdrop.addEventListener('click', (e) => {
@@ -367,19 +378,18 @@ export function initSidebarLayout(Storage, opts) {
     // lives inside the sidebar, and a backdrop tap (e.g. to dismiss the
     // keyboard) would otherwise kick the user out mid-rename.
     if (document.querySelector('.session-rename-input')) return;
-    // Don't close if a dropdown or submenu is visible
-    const openDD = document.querySelector('.session-dropdown-menu[style*="display: block"], .session-dropdown-menu[style*="display:block"]');
-    const openSub = document.querySelector('.session-folder-submenu[style*="display: block"], .session-folder-submenu[style*="display:block"]');
-    if (openDD || openSub) {
-      if (openSub) openSub.style.display = 'none';
-      if (openDD) openDD.style.display = 'none';
+    // A kit menu/popover was open when this tap began — the FIRST backdrop tap
+    // dismisses THAT menu (via the kit's own capture-phase outside-click seat),
+    // never the sidebar. Consume the flag so the SECOND tap (nothing open) falls
+    // through and closes the sidebar. stopPropagation keeps the sibling
+    // document-level outside-click handler (below) from closing the sidebar on
+    // this same tap — that handler keys on e.target (the backdrop, not the menu),
+    // so it can't tell a menu was open; only this snapshot can. (#1638)
+    if (window._owPopoverOpenAtPress) {
+      window._owPopoverOpenAtPress = false;
+      e.stopPropagation();
       return;
     }
-    // A kit menu/popover (OrwellMenuKit / OrwellPopoverKit, #1638) is open — a
-    // backdrop tap dismisses the menu through the kit's own outside-click seat,
-    // never the sidebar. The kit surface has no inline display toggle, so match
-    // its live body-level .ow-popover element instead.
-    if (document.querySelector('.ow-popover')) return;
     const sb = document.getElementById('sidebar');
     if (sb && !sb.classList.contains('hidden')) {
       sb.classList.add('hidden');
