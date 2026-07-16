@@ -1340,9 +1340,13 @@
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn ow-btn ow-btn-compact" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
-          <div class="model-picker-menu hidden" id="model-picker-menu" tabindex="-1">
-            <div class="model-picker-list" id="model-picker-list"></div>
-          </div>
+          <!-- #1638: the model-picker dropdown is now an OrwellPopoverKit surface (modelPicker.js).
+               The bespoke `.model-picker-menu` tray is retired — the kit body-appends a `.ow-popover`
+               and owns anchoring, escMenuStack dismissal, flip/shift positioning, and a11y. This
+               `#model-picker-list` node is a DETACHED template (hidden) the kit re-parents into the
+               popover on each open; the rich rows / provider groups / favorite dots render here
+               (modelPicker.js `_populate`). -->
+          <div class="model-picker-list" id="model-picker-list" hidden></div>
         </div>
       </div>
       <div id="pinned-tools-bar"></div>

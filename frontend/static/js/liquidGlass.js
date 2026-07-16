@@ -220,13 +220,12 @@
     ".modal-content",
     ".admin-card",                 // settings / theme / memory / integrations panels
     ".chat-top-bar",
-    ".model-picker-menu",
     ".toast",
     // Transient menus & popovers: small + short-lived, so they refract when open and
     // share size buckets (one map per size). watchMounts() schedules a pass when they mount.
     ".dropdown",
     ".overflow-menu",
-    ".ow-popover",                 // the OrwellPopover kit surface (#1638) — hosts the color picker (folded from .cp-popover) + kit menus
+    ".ow-popover",                 // the OrwellPopover kit surface (#1638) — hosts the color picker (folded from .cp-popover), the kit menus, AND the model picker (folded from .model-picker-menu)
     // ── GLASS BUTTONS (kube.io demos the refraction on PILL BUTTONS — the authentic
     // look). The high-emphasis glass variants get the SAME feImage→feDisplacementMap
     // refraction + specular rim as the chrome, applied via backdrop-filter (refracts the

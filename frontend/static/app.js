@@ -300,8 +300,11 @@ function initializeEventListeners() {
     // #1638: the composer overflow "+" menu is no longer a `.overflow-menu.open` toggle — it mounts
     // through OrwellMenuKit, whose escMenuStack seat already dismisses it on any outside click (a
     // rail/sidebar click IS an outside click), so it needs no entry here.
+    // #1638: the model-picker dropdown is no longer a `.model-picker-menu.open` toggle — it
+    // mounts through OrwellPopoverKit, whose escMenuStack seat already dismisses it on any
+    // outside click, so it needs no entry here (matching the composer overflow "+" above).
     document.querySelectorAll(
-      '.export-dropdown-menu.open, .model-picker-menu.open, .doc-overflow-menu.open'
+      '.export-dropdown-menu.open, .doc-overflow-menu.open'
     ).forEach(m => { if (m !== except) m.classList.remove('open'); });
     document.querySelectorAll(
       '.skill-kebab-menu, .note-reminder-menu, .task-dropdown, .doclib-card-dropdown, .email-card-dropdown, .msg-overflow-menu'
@@ -620,12 +623,9 @@ function initializeEventListeners() {
         return;
       }
 
-      // Model picker popup — close before opening any modals
-      const modelPickerMenu = document.getElementById('model-picker-menu');
-      if (modelPickerMenu && modelPickerMenu.classList.contains('open')) {
-        modelPickerMenu.classList.remove('open');
-        return;
-      }
+      // #1638: the model-picker popup is now an OrwellPopoverKit surface — its Escape
+      // dismissal is owned by the kit's escMenuStack seat (drained by the ui.js arbiter BEFORE
+      // page-level fallbacks), so the bespoke `.model-picker-menu.open` branch here is retired.
 
       // Close one modal at a time (last in DOM = topmost)
       // Map modal id → sidebar list-item id to clear active state
@@ -2143,11 +2143,10 @@ function initializeEventListeners() {
       if (document.activeElement === _msgTextarea) _refocusOnBlur = true;
     }
     chatInputBar.addEventListener('touchstart', _flagRefocus, { passive: true });
-    // #1638: the overflow menu is now a body-appended OrwellMenuKit surface with its own roving
-    // focus management (APG menu pattern) — no bespoke #overflow-menu touchstart refocus needed.
-    // Model picker menu too
-    const _pickerMenu = document.getElementById('model-picker-menu');
-    if (_pickerMenu) _pickerMenu.addEventListener('touchstart', _flagRefocus, { passive: true });
+    // #1638: the overflow menu AND the model picker are now body-appended OrwellMenu/Popover
+    // kit surfaces with their own focus management (APG / returnFocus) — no bespoke
+    // #overflow-menu / #model-picker-menu touchstart refocus needed (the kit surface is not a
+    // child of .chat-input-bar, so it never triggered _flagRefocus anyway).
     // Attach strip (outside chat-input-bar)
     const _attachStrip = el('attach-strip');
     if (_attachStrip) _attachStrip.addEventListener('touchstart', _flagRefocus, { passive: true });
