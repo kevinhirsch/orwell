@@ -19081,7 +19081,6 @@ body.theme-frosted .cookbook-pane,
 body.theme-frosted .doc-pane,
 body.theme-frosted .doc-pane-floating,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .doc-tab-dropdown,
 body.theme-frosted .email-reader,
 body.theme-frosted .admin-card,
@@ -24094,7 +24093,6 @@ body.theme-frosted .tool-indicator,
 body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 /* #738 item 5: the chat-header export popover (Rename/Copy/PDF) + the per-message overflow
    menu still painted the dark `var(--panel)` opaque fill, reading as a dark box in the light
    glass theme. Fold BOTH onto the ONE shared light-glass material like every other chrome
@@ -24136,10 +24134,10 @@ body.theme-frosted #minimized-dock.ow-has-rows {
    displacement map's outer edge so it no longer samples beyond the surface, but a rounded
    corner still renders the rectangular filter region in the corner gap; clipping the backdrop
    to the element's border-radius removes any residual halo past the corners. Scoped to the
-   four transient popovers (leaf menus — no submenu/shadow to clip); the chrome panels +
-   gadget cards (owned elsewhere) are untouched. */
+   transient leaf popovers (`.dropdown` + the kit `.ow-popover` — no submenu/shadow to clip;
+   #1638 retired the dead `.overflow-menu` member here); the chrome panels + gadget cards
+   (owned elsewhere) are untouched. */
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .ow-popover {
   overflow: hidden;
 }
@@ -24163,7 +24161,6 @@ body.theme-frosted .tool-indicator,
 body.theme-frosted .thinking-section,
 body.theme-frosted .thinking-section .thinking-header,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .export-dropdown-menu,
 body.theme-frosted .msg-overflow-menu,
 /* the jump-to-bottom FAB now carries the light glass (above), so its chevron takes the same
@@ -24345,7 +24342,6 @@ body.theme-frosted .ow-window .ow-body,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .export-dropdown-menu,
 body.theme-frosted .msg-overflow-menu,
 body.theme-frosted .cp-popover {
@@ -24590,7 +24586,6 @@ body.theme-frosted .plan-window-content #plan-window-title {
   body.glass-full .on-card,
   body.glass-full .toast,
   body.glass-full .dropdown,
-  body.glass-full .overflow-menu,
   body.glass-full .cp-popover,
   /* bubbles are content in BOTH tiers (consolidated above), so drop their scrim
      under reduced transparency for both, not just glass-full. */
