@@ -16,6 +16,22 @@ Plus source-level asserts that the wiring is in place (extract before the id-scr
 after mdToHtml, the mdToHtml fail-open degrade, exports), and that the game-build scrub still
 redacts raw ids (the existing gate stays green — asserted structurally here, exercised by the
 L6b/#1047 suites).
+
+#1638 — the sanctioned tag is OPTIONAL, and in real play the narrator reliably skips it,
+writing its own house style instead: a line-leading BOLD houseguest name
+(``**Full Name** does something.`` / ``**Full Name:** "quote"``). `extractSpeakerTags` gained a
+SECOND, narrower pass (`_SPEAKER_BOLD_LINE_RE` + `_isKnownRosterName`) that recognizes that
+pattern too — but ONLY when the bold text is an EXACT (case/whitespace-insensitive) live-roster
+name, never fuzzy/partial/non-roster — and routes it into the SAME `.ow-speaker-line` chip
+machinery. Unlike the sanctioned tag (which IS machinery and is fully consumed), this is pure
+STYLING: it only ever INSERTS a placeholder ahead of the bold run, never touches the
+`**Name**`/`**Name:**` markdown itself (ADR 0005 — never normalize/rewrite creative prose). The
+render-contract battery below is extended with a roster-stubbed Node harness
+(`_run_natural_battery`) to cover: a natural-style line gets a chip with its prose preserved
+verbatim; non-roster bold is untouched; a sanctioned-tagged line is never ALSO matched by the
+bold pass (no double chip); a mid-sentence bold mention (not line-leading) is untouched; and
+the fallback fails closed (no chip) with no roster resolver wired at all (headless / cold
+cache), exactly like every other malformed-input case in this suite.
 """
 
 import json
@@ -106,8 +122,10 @@ def _run_battery(cases):
       escapeHtml,
       grab('const _SPEAKER_TAG_RE = ', ';'),
       grab('const _SPEAKER_TRAILING_PARTIAL_RE = ', ';'),
+      grab('const _SPEAKER_BOLD_LINE_RE = ', ';'),
       grabFn('function _speakerInitials'),
       grabFn('function _resolveSpeakerSeed'),
+      grabFn('function _isKnownRosterName'),
       grabFn('function ensureSpeakerCss'),
       grabFn('function _speakerChipHtml'),
       grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
@@ -183,6 +201,75 @@ def _run_html_battery(cases):
     """
     res = subprocess.run([_NODE, "-e", program, "--", MD, json.dumps(cases)],
                          capture_output=True, text=True, timeout=60)
+    assert res.returncode == 0, f"node failed: {res.stderr}"
+    return json.loads(res.stdout)
+
+
+def _run_natural_battery(cases, roster):
+    """Like `_run_battery`, but ALSO stubs `window.orwellResolveHouseguestId` (the same global
+    hook the real orwellMonogram.js cast-roster cache installs — see markdown.js's
+    `_resolveSpeakerSeed`/`_isKnownRosterName`) so the #1638 natural-style bold-name fallback
+    (`_SPEAKER_BOLD_LINE_RE`) can actually fire. `roster` is the list of exact houseguest names
+    the stub treats as live-roster names — a case/whitespace-insensitive lookup, mirroring the
+    real `cardFor`'s `.trim().toLowerCase()` match; any other name resolves to null, exactly
+    like a name that is not a real houseguest (or no roster loaded at all)."""
+    program = r"""
+    const fs = require('fs');
+    const src = fs.readFileSync(process.argv[1], 'utf8');
+    function grab(marker, end) {
+      const i = src.indexOf(marker); const j = src.indexOf(end, i);
+      return src.slice(i, j + end.length);
+    }
+    function grabFn(marker) {
+      let fn = src.slice(src.indexOf(marker));
+      fn = fn.slice(0, fn.indexOf('\n}\n') + 2).replace('export function', 'function');
+      return fn;
+    }
+    const escapeHtml = "function escapeHtml(s){return String(s==null?'':s)"
+      + ".replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')"
+      + ".replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}";
+    const roster = JSON.parse(process.argv[3]);
+    const rosterLower = {};
+    for (const nm of roster) rosterLower[String(nm).trim().toLowerCase()] = true;
+    // A minimal stand-in for the real orwellMonogram.js roster resolver: exact
+    // (case/whitespace-folded) lookup only — never substring/fuzzy.
+    const windowStub = 'var window = { orwellResolveHouseguestId: function (name) {'
+      + ' var k = String(name || "").trim().toLowerCase();'
+      + ' return (' + JSON.stringify(rosterLower) + ')[k] ? ("npc:" + k.replace(/[^a-z0-9]+/g, "-")) : null;'
+      + ' } };';
+    const body = [
+      windowStub,
+      escapeHtml,
+      grab('const _SPEAKER_TAG_RE = ', ';'),
+      grab('const _SPEAKER_TRAILING_PARTIAL_RE = ', ';'),
+      grab('const _SPEAKER_BOLD_LINE_RE = ', ';'),
+      grabFn('function _speakerInitials'),
+      grabFn('function _resolveSpeakerSeed'),
+      grabFn('function _isKnownRosterName'),
+      grabFn('function ensureSpeakerCss'),
+      grabFn('function _speakerChipHtml'),
+      grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
+      grabFn('function _scanTopLevelBlocks'),
+      grabFn('function _extendSpeakerContinuations'),
+      grabFn('export function extractSpeakerTags'),
+      grabFn('export function restoreSpeakerChips'),
+    ].join('\n');
+    const api = (new Function(body + '\nreturn {extractSpeakerTags, restoreSpeakerChips};'))();
+    const cases = JSON.parse(process.argv[2]);
+    const out = {};
+    for (const [name, input] of Object.entries(cases)) {
+      const ex = api.extractSpeakerTags(input);
+      const wrapped = ex.text.split('\n').filter(Boolean)
+        .map(l => '<p>' + l + '</p>').join('');
+      const restored = api.restoreSpeakerChips(wrapped, ex.chips);
+      const restoredTwice = api.restoreSpeakerChips(restored, ex.chips);
+      out[name] = { text: ex.text, chips: ex.chips, restored, restoredTwice };
+    }
+    process.stdout.write(JSON.stringify(out));
+    """
+    res = subprocess.run(
+        [_NODE, "-e", program, "--", MD, json.dumps(cases), json.dumps(roster)],
+        capture_output=True, text=True, timeout=60)
     assert res.returncode == 0, f"node failed: {res.stderr}"
     return json.loads(res.stdout)
 
@@ -508,3 +595,197 @@ def test_restore_speaker_chips_is_idempotent():
     hr = _run_html_battery(html_cases)
     for name, res in hr.items():
         assert res["restored"] == res["restoredTwice"], f"not idempotent: {name}"
+
+
+# ── #1638 — natural-style bold-name fallback (the narrator writes ITS OWN house style,
+# no sanctioned @[Name] tag) ──────────────────────────────────────────────────────── #
+#
+# The sanctioned tag is OPTIONAL, and real play showed the narrator reliably skips it,
+# writing a line-leading BOLD name instead: `**Full Name** does something.` /
+# `**Full Name:** "quote"`. `_SPEAKER_BOLD_LINE_RE` + `_isKnownRosterName` recognize that
+# pattern too, but ONLY for an EXACT (never fuzzy/partial) live-roster name, and — unlike the
+# sanctioned tag, which IS machinery and gets fully consumed — this only ever INSERTS a
+# placeholder ahead of the bold run. The `**Name**`/`**Name:**` markdown is never touched, so
+# this is pure styling, never a rewrite of the model's prose (ADR 0005).
+
+def test_source_level_natural_bold_fallback_is_wired():
+    md = _read("static", "js", "markdown.js")
+    assert "const _SPEAKER_BOLD_LINE_RE = " in md
+    assert "function _isKnownRosterName(" in md
+    # the fallback runs INSIDE extractSpeakerTags (so both processWithThinking call sites — live
+    # stream and settled history — get it automatically; see the ADR-0015 parity test below),
+    # not as a second standalone pass a caller could omit.
+    exsrc = md[md.index("export function extractSpeakerTags"):]
+    exsrc = exsrc[:exsrc.index("\nexport function restoreSpeakerChips")]
+    assert "_SPEAKER_BOLD_LINE_RE" in exsrc
+    assert "_isKnownRosterName(" in exsrc
+    # the roster check is the SAME resolver the sanctioned-tag id-lookup already uses —
+    # reusing the live roster cache, not a second/parallel source of truth.
+    assert "window.orwellResolveHouseguestId" in md
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_natural_style_bold_roster_name_renders_a_speaker_row():
+    r = _run_natural_battery(
+        {
+            "natural": '**Stephanie Briggs** leans against the counter. '
+                       '*"I trust no one this week," she says.*',
+        },
+        roster=["Stephanie Briggs", "Marcus Chen"],
+    )
+    n = r["natural"]
+    assert len(n["chips"]) == 1
+    assert n["chips"][0]["name"] == "Stephanie Briggs"
+    assert n["chips"][0]["id"] is None  # name-only, resolved to a real id later at render time
+    assert 'class="ow-speaker-line"' in n["restored"]
+    assert 'class="ow-speaker-chip"' in n["restored"]
+    assert 'data-hg-name="Stephanie Briggs"' in n["restored"]
+    # STYLING ONLY: the model's own bold markdown + every word of its prose survive verbatim —
+    # this is never a rewrite (ADR 0005). No text is dropped, no space silently eaten.
+    assert '**Stephanie Briggs** leans against the counter.' in n["restored"]
+    assert 'I trust no one this week' in n["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_natural_style_bold_name_with_colon_either_side_of_the_stars():
+    r = _run_natural_battery(
+        {
+            "colon_inside": '**Stephanie Briggs:** "I trust no one this week."',
+            "colon_outside": '**Stephanie Briggs**: "I trust no one this week."',
+        },
+        roster=["Stephanie Briggs"],
+    )
+    for name, res in r.items():
+        assert len(res["chips"]) == 1, name
+        assert res["chips"][0]["name"] == "Stephanie Briggs", name
+        assert 'class="ow-speaker-line"' in res["restored"], name
+        assert '"I trust no one this week."' in res["restored"], name
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_non_roster_bold_is_completely_untouched():
+    # A plain **bold** that is NOT an exact roster name must render exactly as it always has —
+    # never fuzzy-matched, never promoted to a chip.
+    r = _run_natural_battery(
+        {"note": "**Important Note** this should not change."},
+        roster=["Stephanie Briggs"],
+    )
+    n = r["note"]
+    assert n["chips"] == []
+    assert n["text"] == "**Important Note** this should not change."
+    assert "ow-speaker-chip" not in n["restored"]
+    assert n["restored"] == "<p>**Important Note** this should not change.</p>"
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_mid_sentence_bold_roster_name_is_not_line_leading_so_untouched():
+    # constraint (b): the bold name must be LINE-LEADING — a mid-sentence bold mention of a
+    # real houseguest's name is prose, not an attribution, and must not become a chip.
+    r = _run_natural_battery(
+        {"midline": "You catch **Stephanie Briggs** watching you from the couch."},
+        roster=["Stephanie Briggs"],
+    )
+    m = r["midline"]
+    assert m["chips"] == []
+    assert "ow-speaker-chip" not in m["restored"]
+    assert "**Stephanie Briggs**" in m["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_sanctioned_tagged_line_is_never_also_matched_by_the_bold_pass():
+    # constraint (c): idempotent with the @[...] path — a line already carrying a sanctioned
+    # tag consumes into a placeholder that no longer starts with `**`, so the SAME line can
+    # never double-fire through the natural-style pass too (never two chips for one line).
+    r = _run_natural_battery(
+        {"both": "@[Stephanie Briggs] **Stephanie Briggs** grins at the room."},
+        roster=["Stephanie Briggs"],
+    )
+    b = r["both"]
+    assert len(b["chips"]) == 1
+    assert b["restored"].count('class="ow-speaker-chip"') == 1
+    assert b["restored"].count('class="ow-speaker-line"') == 1
+    # the bold text itself (untouched — it wasn't consumed by the sanctioned-tag match) still
+    # renders as ordinary prose alongside the one chip.
+    assert "**Stephanie Briggs** grins at the room." in b["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_natural_style_fallback_fails_closed_with_no_roster_resolver_at_all():
+    # No `window.orwellResolveHouseguestId` at all (headless / cold cache / before the roster
+    # loads) — exactly the environment every OTHER malformed-input case in this suite runs
+    # under (`_run_battery`, no window stub). The natural-style line must degrade to plain,
+    # untouched prose, never a broken half-render.
+    r = _run_battery({
+        "natural_no_roster": '**Stephanie Briggs** leans against the counter.',
+    })
+    n = r["natural_no_roster"]
+    assert n["chips"] == []
+    assert n["text"] == "**Stephanie Briggs** leans against the counter."
+    assert "ow-speaker-chip" not in n["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_natural_style_roster_match_is_exact_not_fuzzy():
+    # A partial/substring match of a roster name must NOT fire — constraint (a): exact match
+    # only, never fuzzy, never partial.
+    r = _run_natural_battery(
+        {
+            "partial": "**Stephanie** leans against the counter.",
+            "extra_word": "**Stephanie Briggs Jr** leans against the counter.",
+        },
+        roster=["Stephanie Briggs"],
+    )
+    for name, res in r.items():
+        assert res["chips"] == [], name
+        assert "ow-speaker-chip" not in res["restored"], name
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_multiple_natural_speaker_lines_each_get_their_own_chip():
+    r = _run_natural_battery(
+        {
+            "two": "**Stephanie Briggs** I am not going anywhere.\n"
+                   "**Marcus Chen** We will see about that.",
+        },
+        roster=["Stephanie Briggs", "Marcus Chen"],
+    )
+    two = r["two"]
+    assert len(two["chips"]) == 2
+    assert [c["name"] for c in two["chips"]] == ["Stephanie Briggs", "Marcus Chen"]
+    assert two["restored"].count('class="ow-speaker-line"') == 2
+    assert two["restored"].count('class="ow-speaker-chip"') == 2
+    assert 'data-hg-name="Stephanie Briggs"' in two["restored"]
+    assert 'data-hg-name="Marcus Chen"' in two["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_natural_style_restore_is_idempotent():
+    r = _run_natural_battery(
+        {"natural": '**Stephanie Briggs** leans against the counter.'},
+        roster=["Stephanie Briggs"],
+    )
+    n = r["natural"]
+    assert n["restored"] == n["restoredTwice"]
+
+
+# ── (d) live stream vs settled/history render parity (ADR 0015) ─────────────────────────── #
+#
+# extractSpeakerTags (which owns BOTH the sanctioned-tag pass and the #1638 natural-style
+# fallback) runs INSIDE processWithThinking — the ONE render seam both the live stream
+# renderer (chat.js) and the settled/history renderer (chatRenderer.js) call. There is no
+# second, path-specific implementation either file could drift from.
+
+def test_live_and_history_render_paths_share_the_one_processwiththinking_seam():
+    chat = _read("static", "js", "chat.js")
+    chat_renderer = _read("static", "js", "chatRenderer.js")
+    assert "markdownModule.processWithThinking(" in chat, \
+        "the live stream renderer must render via processWithThinking"
+    assert "markdownModule.processWithThinking(" in chat_renderer, \
+        "the settled/history renderer must render via processWithThinking"
+    # neither path may re-implement (or bypass into) the speaker-chip transform directly —
+    # it must stay owned by markdown.js's extractSpeakerTags/restoreSpeakerChips alone, so a
+    # natural-style line renders identically wherever it's painted.
+    for src, label in ((chat, "chat.js"), (chat_renderer, "chatRenderer.js")):
+        assert "_SPEAKER_BOLD_LINE_RE" not in src, f"{label} must not duplicate the speaker regex"
+        assert "extractSpeakerTags(" not in src, f"{label} must not bypass processWithThinking"
+        assert "restoreSpeakerChips(" not in src, f"{label} must not bypass processWithThinking"
