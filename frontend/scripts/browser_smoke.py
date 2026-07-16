@@ -216,10 +216,12 @@ def main() -> int:
                   };
                   const bar = document.querySelector('.chat-input-bar');
                   const surfLum = bar ? lum(getComputedStyle(bar).backgroundColor) : null;
-                  // open the model-picker menu so its rows are measurable on the light glass
-                  // (the "Select Model" dropdown regressed light-on-light too).
-                  const menu = document.querySelector('.model-picker-menu');
-                  if (menu) menu.classList.remove('hidden');
+                  // open the model-picker popover so its rows are measurable on the light glass
+                  // (#1638: the picker is an OrwellPopoverKit `.ow-popover` surface now — clicking
+                  // the trigger body-appends it; the "Select Model" dropdown regressed
+                  // light-on-light too). Closed again before this probe returns.
+                  const _pickerBtn = document.getElementById('model-picker-btn');
+                  if (_pickerBtn) _pickerBtn.click();
 
                   // #725 (kit-level): inner text on GLASS CHROME surfaces (gadget cards, settings
                   // rows) used to go light-on-light because inner nodes set their OWN var(--fg) /
@@ -274,7 +276,7 @@ def main() -> int:
                     icon: probe('.chat-input-bar .input-icon-btn'),
                     picker: probe('.model-picker-btn'),
                     pickerLabel: probe('.model-picker-btn #model-picker-label'),
-                    menu: probe('.model-picker-menu'),
+                    menu: probe('.ow-popover .model-picker-list'),
                     // #725 gadget card + settings row (full + muted inner text on glass chrome):
                     gadgetTitle: probe('.og-probe-lol .og-title'),
                     gadgetFull: probe('.og-probe-lol .ogp-full'),
@@ -344,6 +346,10 @@ def main() -> int:
                     });
                   });
                   out.sweepLight = sweep;
+                  // close the model-picker popover we opened above so it can't overlap / linger
+                  // into the later smoke steps (they query `.ow-popover[role=menu]` for the sort
+                  // menus; our role=dialog picker is separate, but tidy up regardless).
+                  try { if (window.OrwellPopoverKit) window.OrwellPopoverKit.closeAll(); } catch (_) {}
                   og.remove(); ad.remove(); rl.remove();
                   try { if (_kitProbe) _kitProbe.destroy(); } catch (_) {}
                   try { const k = document.getElementById('ow-titlebar-lol-probe'); if (k) k.remove(); } catch (_) {}

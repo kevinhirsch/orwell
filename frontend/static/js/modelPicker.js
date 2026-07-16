@@ -258,28 +258,22 @@ export function initModelPicker(deps) {
 function _initModelPickerDropdown() {
   const wrap = document.getElementById('model-picker-wrap');
   const btn = document.getElementById('model-picker-btn');
-  const menu = document.getElementById('model-picker-menu');
   const listEl = document.getElementById('model-picker-list');
-  if (!wrap || !btn || !menu || !listEl) return;
+  if (!wrap || !btn || !listEl) return;
+
+  // #1638: the dropdown is an OrwellPopoverKit `.ow-popover` surface — the kit owns
+  // anchoring, flip/shift positioning, outside-click + Escape dismissal, and a11y. We track
+  // the live instance so a re-click TOGGLES it closed (the kit's outside-click seat treats the
+  // trigger as "inside", so the toggle is owned here, mirroring initPlanMenu in app.js).
+  let _popover = null;
+  const _popoverOpen = () => !!(_popover && typeof _popover.isOpen === 'function' && _popover.isOpen());
 
   function _close() {
-    if (menu.classList.contains('hidden')) return;
-    // Restore scroll button (#887: the single jump-to-bottom button is #orwell-scroll-bottom)
-    const _scrollBtn = document.getElementById('orwell-scroll-bottom');
-    if (_scrollBtn) _scrollBtn.style.display = '';
-    menu.classList.add('closing');
-    menu.addEventListener('animationend', function _onDone() {
-      menu.removeEventListener('animationend', _onDone);
-      menu.classList.remove('closing');
-      menu.classList.add('hidden');
-    }, { once: true });
-    // Fallback if animationend doesn't fire
-    setTimeout(() => {
-      if (!menu.classList.contains('hidden')) {
-        menu.classList.remove('closing');
-        menu.classList.add('hidden');
-      }
-    }, 200);
+    // Closing the popover fires its onClose (in _openPicker), which restores the jump-to-bottom
+    // FAB — so the restore lives there: exactly one hide (_openPicker) + one restore (onClose),
+    // both targeting #orwell-scroll-bottom (#887).
+    if (_popover) { try { _popover.close('api'); } catch (_) {} }
+    _popover = null;
   }
 
   // Local endpoint health — only probed for LOCAL endpoints, since
@@ -421,7 +415,6 @@ function _initModelPickerDropdown() {
     const all = _getAllModels();
     const hasAnyModel = all.length > 0;
     listEl.classList.toggle('is-empty', !hasAnyModel);
-    menu.classList.toggle('no-models', !hasAnyModel);
 
     if (!hasAnyModel) return; // collapsed empty list — nothing to render
 
@@ -706,44 +699,59 @@ function _initModelPickerDropdown() {
     if (match) await _pick(match);
   });
 
+  // Open (or toggle-close) the picker as an OrwellPopoverKit surface. The picker is RICH
+  // content (provider groups, favorites, offline badges, the favorite-dot status control), so
+  // it rides the base `.ow-popover` (role='dialog') with our own `#model-picker-list` node as
+  // content — NOT the declarative `.attach()` item model.
+  function _openPicker() {
+    if (!(window.OrwellPopoverKit && typeof window.OrwellPopoverKit.open === 'function')) return;
+    if (_popoverOpen()) { _close(); return; }        // re-click toggles closed
+    listEl.hidden = false;
+    _populate('');
+    // Hide the jump-to-bottom FAB so it doesn't overlap the popover (#887).
+    const _scrollBtn = document.getElementById('orwell-scroll-bottom');
+    if (_scrollBtn) _scrollBtn.style.display = 'none';
+    _popover = window.OrwellPopoverKit.open({
+      anchor: btn,
+      content: listEl,                 // the kit re-parents this detached list into the popover
+      role: 'dialog',
+      ariaLabel: 'Select model',
+      placement: 'top',                // the composer sits at the bottom — open upward
+      align: 'end',                    // right-aligned to the trigger (old `right: 0`)
+      className: 'model-picker-pop',
+      minWidth: 260,
+      onClose: () => {
+        _popover = null;
+        const _sb = document.getElementById('orwell-scroll-bottom');
+        if (_sb) _sb.style.display = '';
+      },
+    });
+    // Keyboard nav (↑/↓ move, Enter pick, Esc close). The surface (`.ow-popover`) holds focus,
+    // so the handler lives on it (a listener on the inner list would miss keys while the frame is
+    // focused). Esc also drains through the kit's escMenuStack seat — `_close()` is idempotent, so
+    // the two paths can't double-close.
+    if (_popover && _popover.el) {
+      _popover.el.addEventListener('keydown', (e) => {
+        _handlePickerKeydown(e, listEl, '.model-switch-item', _close);
+      });
+    }
+    // Refresh the catalog + probe local endpoints, then re-render + reposition WHILE OPEN so a
+    // late-arriving model list / stale-local dimming lands and the flip/shift re-runs for the
+    // new size.
+    if (window.modelsModule && window.modelsModule.refreshModels) {
+      window.modelsModule.refreshModels().then(() => {
+        if (_popoverOpen()) { _populate(''); try { _popover.reposition(); } catch (_) {} }
+        updateModelPicker();
+      }).catch(() => {});
+    }
+    _refreshLocalProbe().then(() => {
+      if (_popoverOpen()) { _populate(''); try { _popover.reposition(); } catch (_) {} }
+    });
+  }
+
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (menu.classList.contains('hidden') || menu.classList.contains('closing')) {
-      // Force-clear any in-progress close animation
-      menu.classList.remove('closing', 'hidden');
-      _populate('');
-      if (window.modelsModule && window.modelsModule.refreshModels) {
-        window.modelsModule.refreshModels().then(() => {
-          if (!menu.classList.contains('hidden')) _populate('');
-          updateModelPicker();
-        }).catch(() => {});
-      }
-      // Kick off a local-endpoint probe — when it returns, re-render
-      // the list so stale local servers get dimmed. Cloud entries
-      // aren't probed; they stay visible.
-      _refreshLocalProbe().then(() => {
-        if (!menu.classList.contains('hidden')) _populate('');
-      });
-      // Focus the menu so its keydown handler (↑/↓/Enter/Esc) receives keys —
-      // skip on mobile to avoid a keyboard/scroll bounce.
-      if (!isNarrow()) menu.focus();
-      // Hide scroll button so it doesn't overlap (#887: now #orwell-scroll-bottom)
-      const _scrollBtn = document.getElementById('orwell-scroll-bottom');
-      if (_scrollBtn) _scrollBtn.style.display = 'none';
-    } else {
-      _close();
-    }
-  });
-
-  // Keyboard nav (↑/↓ to move, Enter to pick, Esc to close) lives on the menu
-  // now that the search input — its former host — is gone.
-  menu.addEventListener('keydown', (e) => {
-    _handlePickerKeydown(e, listEl, '.model-switch-item', _close);
-  });
-  document.addEventListener('click', (e) => {
-    if (!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target !== btn) {
-      _close();
-    }
+    _openPicker();
   });
 }
 

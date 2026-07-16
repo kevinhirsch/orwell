@@ -1,20 +1,21 @@
-"""Issue #735 — the model-picker dropdown adopts the Liquid Glass kit and is legible.
+"""Issue #735 / #1638 — the model-picker dropdown rides the shared kit glass and is legible.
 
 Source-pinned gate (the live look is verified by the render-parity loop under
 Playwright; CI lacks a GPU compositor, so these pin the load-bearing CSS contract
 so a refactor can't silently regress it):
 
-  * Under body.theme-frosted (the glass tiers — Full Glass AND Frosted) the model
-    picker button + popover ride the shared kit LIGHT glass material (the same
-    --ow-glass-* tokens / kube light fill the OrwellWindow + Notice kits use).
-  * DARK INK (#16191f family) on the light glass for every text node — model name,
-    provider/endpoint label, section labels, the selected/active row, the button
-    label, the favorite dot's resting state. NO light-on-light anywhere.
-  * SOFT LUMINOUS hairlines (rgba(255,255,255,0.14) family), NOT a hard dark
-    var(--border) stroke (Apple defines glass by lensing, not stroke).
+  * #1638 retired the bespoke `.model-picker-menu` tray: the picker now opens as an
+    OrwellPopoverKit `.ow-popover` surface, which carries the shared kit LIGHT glass
+    MATERIAL (light fill + backdrop blur + dark ink) exactly like every other migrated
+    popover — so the surface-material contract is pinned against `.ow-popover`.
+  * DARK INK (#16191f family) on the light glass for every CONTENT text node — model
+    name, provider/endpoint label, section labels, the selected/active row, the button
+    label, the favorite dot's resting state. The picker's `.model-picker-list` content
+    still paints `color: var(--fg)`, so --fg is refolded to the chrome dark ink on the
+    content root. NO light-on-light anywhere.
   * NO accent HUE on TEXT (mandate). The favorite-status dot keeps its accent only as
     a sanctioned NON-text status indicator (a ● glyph), and only on .active.
-  * Every new rule is scoped under body.theme-frosted, so the Normal tier (neither
+  * Every picker rule is scoped under body.theme-frosted, so the Normal tier (neither
     class) keeps its original flat look.
 
 The picker spans two disjoint style.css regions: the base picker block (~3130) and
@@ -54,49 +55,54 @@ def _blocks_for(selector_pat: str):
 
 # ── 1. Glass MATERIAL on the picker under the glass tiers ───────────────────────
 def test_picker_menu_and_button_carry_kit_glass_material():
-    # The popover + button are folded onto the ONE light-glass material rule (the
-    # same kube light fill the windows/notice kit use).
+    # #1638: the picker surface is now the shared kit `.ow-popover`, which carries the ONE
+    # light-glass material rule (the same kube light fill the windows/notice kit use).
     fill_block = None
-    for sel, body in _blocks_for("body.theme-frosted .model-picker-menu"):
+    for sel, body in _blocks_for("body.theme-frosted .ow-popover"):
         if "--ow-glass-light-color" in body or "--ow-glass-light-fill" in body:
             fill_block = (sel, body)
             break
     assert fill_block, (
-        "the model-picker menu must adopt the shared kit light-glass fill "
+        "the migrated picker surface (.ow-popover) must carry the shared kit light-glass fill "
         "(--ow-glass-light-color / --ow-glass-light-fill) under body.theme-frosted"
     )
     assert "body.theme-frosted .model-picker-btn" in CSS, (
         "the model-picker button must also be folded onto the glass material list"
     )
+    # the bespoke `.model-picker-menu` tray must be GONE (folded onto `.ow-popover`).
+    assert "body.theme-frosted .model-picker-menu" not in CSS, (
+        "the bespoke .model-picker-menu glass rules must be retired (the picker rides .ow-popover)"
+    )
 
 
 def test_picker_menu_uses_kit_backdrop_blur():
-    # The popover blurs the backdrop using the kit backdrop token (Regular glass).
+    # #1638: the surface (.ow-popover) blurs the backdrop using the kit backdrop token.
     hit = False
-    for sel, body in _blocks_for("body.theme-frosted .model-picker-menu"):
+    for sel, body in _blocks_for("body.theme-frosted .ow-popover"):
         if "--ow-glass-backdrop" in body or re.search(r"backdrop-filter:\s*blur", body):
             hit = True
             break
-    assert hit, "the model-picker popover must carry the kit backdrop blur (Regular glass)"
+    assert hit, "the migrated picker surface (.ow-popover) must carry the kit backdrop blur"
 
 
 # ── 2. DARK INK on every text node — no light-on-light ──────────────────────────
 def test_picker_text_nodes_are_dark_ink():
-    # The popover sets the chrome dark ink as --fg so every inner `color: var(--fg)`
-    # / color-mix(--fg N%) resolves dark, AND the explicit text-node rule pins it.
-    menu_redefines_fg = any(
+    # #1638: the picker CONTENT root (.model-picker-list) sets the chrome dark ink as --fg so
+    # every inner `color: var(--fg)` / color-mix(--fg N%) resolves dark, AND the explicit
+    # text-node rule pins it (now scoped to .model-picker-list, re-parented into the popover).
+    content_redefines_fg = any(
         re.search(r"--fg:\s*#16191f", body, re.I)
-        for _sel, body in _blocks_for("body.theme-frosted .model-picker-menu")
+        for _sel, body in _blocks_for("body.theme-frosted .model-picker-list")
     )
-    # Explicit dark-ink rule covering the named text nodes (either region may carry it).
+    # Explicit dark-ink rule covering the named content text nodes (either region may carry it).
     explicit = re.search(
-        r"body\.theme-frosted[^{}]*\.model-picker-(?:menu|btn)[^{}]*\{[^{}]*#16191f",
+        r"body\.theme-frosted[^{}]*\.model-picker-(?:list|btn)[^{}]*\{[^{}]*#16191f",
         CSS,
         re.I | re.S,
     )
-    assert menu_redefines_fg or explicit, (
+    assert content_redefines_fg or explicit, (
         "the picker's text nodes must resolve to dark ink (#16191f) on the light glass "
-        "— either by redefining --fg on the popover or an explicit dark-ink text rule"
+        "— either by redefining --fg on the content root or an explicit dark-ink text rule"
     )
 
 
@@ -107,16 +113,22 @@ def test_fav_dot_has_legible_resting_ink():
     )
 
 
-# ── 3. SOFT LUMINOUS hairlines, not a hard dark var(--border) stroke ────────────
-def test_picker_menu_border_is_soft_luminous_hairline():
-    hit = False
-    for sel, body in _blocks_for("body.theme-frosted .model-picker-menu"):
-        m = re.search(r"border(?:-color)?:\s*([^;]+)", body)
-        if m and ("rgba(255,255,255" in m.group(1).replace(" ", "") or "--ow-glass-edge" in m.group(1)):
-            hit = True
-    assert hit, (
-        "the model-picker popover border must be a soft luminous hairline "
-        "(rgba(255,255,255,…)/--ow-glass-edge), never a hard dark var(--border)"
+# ── 3. SOFT hairlines on the picker's own edges, not a hard dark var(--border) ──
+def test_picker_inner_edges_are_soft_hairlines():
+    # #1638: the popover SURFACE edge is now owned by the shared `.ow-popover` kit (its border
+    # is the kit's concern, gated by the kit's own tests). What survives here is the picker's
+    # own INNER definition edge — the offline/stale badge rim — which must stay a SOFT hairline,
+    # never a hard dark var(--border) stroke (Apple defines glass by lensing, not stroke).
+    badge = _rule("body.theme-frosted .model-picker-list .model-switch-stale-badge")
+    m = re.search(r"border(?:-color)?:\s*([^;!]+)", badge)
+    assert m, "the stale/offline badge must set a border under the glass tier"
+    stroke = m.group(1).replace(" ", "")
+    assert "var(--border" not in stroke, (
+        "the offline badge rim must not be a hard dark var(--border) stroke under glass "
+        f"(got {stroke!r})"
+    )
+    assert "rgba(0,0,0,0.1" in stroke or "rgba(255,255,255" in stroke or "--ow-glass-edge" in stroke, (
+        "the offline badge rim must be a soft hairline (a low-alpha ink / luminous edge)"
     )
 
 
