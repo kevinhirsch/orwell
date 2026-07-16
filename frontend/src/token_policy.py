@@ -93,7 +93,19 @@ _MAX_MAX_TOKENS = 200_000
 # the per-NPC deep-authoring calls keep the untouched class cap (they finish well under it, and
 # they are pinned at cap 3000 in the committed golden fixture — raising the CLASS default would
 # stale it; the sketch call is not in the fixture).
-GENESIS_SKETCH_MIN_OUTPUT_TOKENS = 8000
+#
+# The floor MUST clear the whole-cast skeleton size with headroom. A 15-NPC skeleton (names +
+# identities + biographies + 3-6 hidden elements each + banded stats + ties) measures ~4400 output
+# tokens (RC3: the live 3000 cap ended finish_reason=length mid-JSON). The floor is set well above
+# that so the sketch completes in ONE pass, and a length-retry (doubled cap) is the belt.
+GENESIS_SKELETON_TOKEN_ESTIMATE = 4400
+GENESIS_SKETCH_MIN_OUTPUT_TOKENS = 8192
+
+# Structural guard: the sketch floor must always clear the skeleton estimate with headroom (RC3 —
+# the whole starvation bug was a floor below the skeleton size). A regression that lowers the floor
+# under the estimate trips this at import time, never silently at runtime.
+assert GENESIS_SKETCH_MIN_OUTPUT_TOKENS >= GENESIS_SKELETON_TOKEN_ESTIMATE, (
+    "the cast-genesis sketch output floor must clear the 15-NPC skeleton estimate")
 
 # When any JSON-authoring completion ends ``finish_reason=length`` (the model was CUT OFF by the
 # output cap, so the body is chopped mid-JSON and unparseable), the call is re-issued EXACTLY ONCE

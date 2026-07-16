@@ -1038,10 +1038,16 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
     if _max_tokens < _floor:
         _max_tokens = _floor
 
-    async def _once(messages: list[dict], cap: int) -> tuple[str, Optional[str]]:
-        """One completion at output cap ``cap``. Returns ``(visible_text, finish_reason)`` and
-        records one Vault-free token-ledger entry (ADR 0010) for the attempt."""
+    async def _once(messages: list[dict], cap: int) -> tuple[str, Optional[str], str]:
+        """One completion at output cap ``cap``. Returns ``(visible_text, finish_reason, reasoning_text)``
+        and records one Vault-free token-ledger entry (ADR 0010) for the attempt.
+
+        S3b (RC4): the reasoning/thinking channel is captured SEPARATELY (it never pollutes the visible
+        body — `_delta_text` still drops it) so a reasoning-channel MISROUTE (glm-4.7 emitting the whole
+        JSON answer as `thinking` deltas with an empty visible body) can be recovered instead of silently
+        discarded as paid-for content."""
         parts: list[str] = []
+        rparts: list[str] = []
         _usage: dict = {}
         _finish: Optional[str] = None
         # #1002: request strict JSON (response_format) so a model that honours it can't leak prose/
@@ -1055,6 +1061,12 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
             piece = _delta_text(chunk)
             if piece:
                 parts.append(piece)
+                continue
+            # S3b: keep reasoning/thinking deltas in a SEPARATE buffer (never the visible body) so a
+            # misrouted JSON answer is recoverable — see the empty-visible fallback in `_fn`.
+            rpiece = _reasoning_delta_text(chunk)
+            if rpiece:
+                rparts.append(rpiece)
                 continue
             # ADR 0010: capture the usage envelope (the trailing 'usage' SSE event) for the meter,
             # and the terminal finish event ("length" ⇒ the model was CUT OFF by the output cap).
@@ -1101,7 +1113,7 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
                 )
             except Exception:
                 pass
-        return "".join(parts), _finish
+        return "".join(parts), _finish, "".join(rparts)
 
     async def _fn(messages) -> str:
         # Shape-normalize the input. The cast-authoring path passes a proper `list[dict]` of chat
@@ -1117,7 +1129,7 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
             messages = [{"role": "user", "content": messages}]
         elif not isinstance(messages, list):
             messages = [{"role": "user", "content": str(messages)}]
-        text, finish = await _once(messages, _max_tokens)
+        text, finish, reasoning = await _once(messages, _max_tokens)
         # 2026-07-13 retry-on-length: `finish_reason == "length"` means the completion was CUT OFF
         # by the output cap — for a JSON-authoring call the body is chopped mid-object and
         # unparseable, so a same-cap retry (#1057) can never fix it. Re-issue EXACTLY ONCE at
@@ -1128,9 +1140,20 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
             logger.warning(
                 f"[cast-authoring] completion hit the output cap (finish_reason=length at "
                 f"max_tokens={_max_tokens}) — retrying ONCE at a doubled cap {retry_cap}")
-            retry_text, _retry_finish = await _once(messages, retry_cap)
+            retry_text, _retry_finish, retry_reasoning = await _once(messages, retry_cap)
             if retry_text:
                 return retry_text
+            # The retry's visible body was also empty — carry its reasoning as an extra recovery source.
+            if retry_reasoning and not (reasoning or "").strip():
+                reasoning = retry_reasoning
+        # S3b (RC4): the visible body came back EMPTY but the model MISROUTED the JSON answer into the
+        # reasoning channel (glm-4.7 does this even with reasoning:{enabled:false} sent). Recover the
+        # paid-for content instead of discarding it — and record a RED-eligible health event (#1599:
+        # a real fault is logged even when auto-corrected, never an `except: pass` of a live error).
+        if not (text or "").strip() and (reasoning or "").strip():
+            recovered = _recover_from_reasoning_channel(reasoning, owner)
+            if recovered:
+                return recovered
         return text
 
     return _fn
@@ -1172,6 +1195,60 @@ def _delta_text(chunk) -> str:
                 return str(d.get("delta") or d.get("content") or d.get("text") or "")
         return ""
     return s
+
+
+def _reasoning_delta_text(chunk) -> str:
+    """The MIRROR of `_delta_text` for the REASONING/thinking channel (S3b). `_stream_delta_event`
+    (llm_core) emits reasoning content as ``data: {"delta": "<text>", "thinking": true}``; the visible
+    reader drops it. This reader keeps ONLY those thinking deltas (their `delta` text), so a reasoning-
+    channel misroute (an empty visible body while the JSON answer streamed as reasoning) is recoverable.
+    Non-thinking / typed-meta chunks yield ""."""
+    if isinstance(chunk, dict):
+        if chunk.get("type"):
+            return ""
+        if chunk.get("thinking"):
+            return str(chunk.get("delta") or chunk.get("content") or chunk.get("text") or "")
+        return ""
+    s = str(chunk or "")
+    if s.startswith("data:"):
+        body = s[5:].strip()
+        if body and body != "[DONE]":
+            try:
+                d = json.loads(body)
+            except (ValueError, TypeError):
+                return ""
+            if isinstance(d, dict) and d.get("thinking") and not d.get("type"):
+                return str(d.get("delta") or d.get("content") or d.get("text") or "")
+        return ""
+    return ""
+
+
+def _recover_from_reasoning_channel(reasoning: str, owner: Optional[str]) -> Optional[str]:
+    """S3b (RC4): when the visible body is empty but a parseable JSON answer sat in the reasoning
+    channel, recover it (via the genesis detector) and return the JSON STRING so the normal parser
+    consumes it — counting the recovery a SUCCESS, never a silent discard of paid-for content. A
+    RED-eligible ``reasoning-channel-misroute`` health event is recorded regardless of the enrichment
+    policy (#1599: a real fault is surfaced even when auto-corrected). Returns ``None`` when the
+    reasoning holds no usable JSON (the caller then keeps the empty body ⇒ the deterministic floor)."""
+    try:
+        from src.orwell_cast_genesis import recover_reasoning_channel_json
+    except Exception:
+        return None
+    recovered = recover_reasoning_channel_json(reasoning)
+    if not recovered:
+        return None
+    logger.warning(
+        "[cast-authoring] the model MISROUTED its JSON answer into the reasoning channel "
+        "(empty visible body) — recovered it (reasoning-channel-misroute)")
+    try:
+        from src import enrichment_policy
+        enrichment_policy.record_failure(
+            owner, "cast-genesis", "reasoning-channel-misroute",
+            detail="model emitted JSON into the reasoning channel with an empty visible body; "
+                   "recovered the paid-for content (auto-corrected, but RED-eligible per #1599)")
+    except Exception:  # pragma: no cover - the health record must never break the recovery
+        pass
+    return recovered
 
 
 async def run_authoring(cast: list[dict], owner: Optional[str],
