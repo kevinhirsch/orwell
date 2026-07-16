@@ -63,9 +63,10 @@ def _exc_fail_class(exc: BaseException) -> str:
     try:
         if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
             return "timeout"
-        low = f"{type(exc).__name__}: {exc}".lower()
-        if any(m in low for m in ("timeout", "timed out", "read timed out", "deadline")):
-            return "timeout"
+        # HTTP status is the AUTHORITATIVE signal — classify it BEFORE a timeout WORD in the message,
+        # so a `HTTPException(504, "Gateway Timeout")` (the impl wraps upstream statuses this way) reads
+        # as its 5xx class, not the blunt "timeout" (Greptile P1). Only a genuine transport/read-timeout
+        # word with NO HTTP status falls through to "timeout".
         status = getattr(exc, "status_code", None)
         if status is None:
             status = getattr(exc, "status", None)
@@ -77,6 +78,9 @@ def _exc_fail_class(exc: BaseException) -> str:
                 return "5xx"
         except (TypeError, ValueError):
             pass
+        low = f"{type(exc).__name__}: {exc}".lower()
+        if any(m in low for m in ("timeout", "timed out", "read timed out", "deadline")):
+            return "timeout"
     except Exception:
         pass
     return "error"

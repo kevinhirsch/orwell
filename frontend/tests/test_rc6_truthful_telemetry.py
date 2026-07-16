@@ -111,6 +111,19 @@ def test_http_504_gateway_timeout_is_classed_5xx_not_timeout(_trace_dir):
     assert _last_record(_trace_dir)["failClass"] == "5xx"
 
 
+def test_exc_fail_class_http_504_exception_is_5xx_not_timeout():
+    # Greptile P1 (non-streaming path): the impl wraps upstream statuses as HTTPException(504, "...
+    # Gateway Timeout ..."). HTTP status is authoritative — a 504 must class 5xx, never "timeout".
+    from fastapi import HTTPException
+    from src.llm_core import _exc_fail_class
+    assert _exc_fail_class(HTTPException(504, "Upstream returned 504 Gateway Timeout")) == "5xx"
+    assert _exc_fail_class(HTTPException(429, "Too Many Requests")) == "4xx"
+    # A genuine transport timeout with no HTTP status still classes "timeout".
+    import httpx
+    assert _exc_fail_class(httpx.ReadTimeout("read timed out")) == "timeout"
+    assert _exc_fail_class(RuntimeError("connection deadline exceeded")) == "timeout"
+
+
 def test_pure_transport_timeout_without_status_still_timeout(_trace_dir):
     # No HTTP status anywhere ⇒ a transport/read-timeout word is the next-best signal (unchanged).
     llm_trace.record_llm_call(
