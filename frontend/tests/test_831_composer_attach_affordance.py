@@ -74,11 +74,14 @@ def test_standalone_paperclip_is_not_shown_in_game_build():
 
 
 def test_tray_attach_duplicate_still_dropped_in_game_build():
-    # The game build still removes the overflow-tray "Attach files" duplicate, so the composer
-    # never shows two attach entry points.
-    gate = APP_JS[APP_JS.index("function applyGameBuildMenuGating"):]
-    gate = gate[: gate.index("_g13CascadeMenuTriggers();") + 40]
-    assert "overflow-attach-btn" in gate and "remove()" in gate and "data-game-build" in gate
+    # The game build still drops the overflow-tray "Attach files" duplicate, so the composer never
+    # shows two attach entry points. #1638: the tray entry is now a buildOverflowItems() item (not a
+    # DOM node), so its game-build drop moved from applyGameBuildMenuGating's `.remove()` into the
+    # builder's filter — pushed only in the full build, dropped when data-game-build is set.
+    builder = APP_JS[APP_JS.index("function buildOverflowItems()"):]
+    builder = builder[: builder.index("\n  function updatePlusDot")]
+    assert "'Attach files'" in builder
+    assert "gameBuild" in builder and "data-game-build" in builder
 
 
 # ── 3. a stale 'attach' mode can never BLOCK sending (review P1) ────────────────

@@ -122,22 +122,26 @@ def test_avatar_glyph_hidden_once_a_headshot_loads():
 # ── C. exactly one attach paperclip ───────────────────────────────────────────
 
 def test_game_build_drops_the_duplicate_tray_attach():
-    # applyGameBuildMenuGating must remove #overflow-attach-btn under the game build
-    # so the first-class composer paperclip is the ONLY attach entry point.
-    gate = APP_JS[APP_JS.index("function applyGameBuildMenuGating"):]
-    gate = gate[: gate.index("_g13CascadeMenuTriggers();") + 40]
-    assert "overflow-attach-btn" in gate
-    assert "remove()" in gate
-    assert "data-game-build" in gate
+    # #1638: the overflow-tray "Attach files" is now a buildOverflowItems() item, not a DOM node.
+    # Its game-build drop moved from applyGameBuildMenuGating into the builder's filter, so the
+    # first-class composer paperclip stays the ONLY attach entry point under the game build.
+    builder = APP_JS[APP_JS.index("function buildOverflowItems()"):]
+    builder = builder[: builder.index("\n  function updatePlusDot")]
+    assert "'Attach files'" in builder
+    # the attach item is pushed only in the FULL build (dropped when data-game-build is set).
+    assert "gameBuild" in builder and "data-game-build" in builder
 
 
 def test_cascade_hides_the_now_empty_chevron():
-    # the existing cascade (re-run after the gating pass) hides a launcher whose
-    # menu has zero visible items — i.e. the chevron disappears once attach is gone.
-    assert "_g13CascadeMenuTriggers" in APP_JS
-    cascade = APP_JS[APP_JS.index("function _g13CascadeMenuTriggers"):]
-    cascade = cascade[: cascade.index("}\n}") + 3] if "}\n}" in cascade else cascade[:1200]
-    assert "overflow-plus-btn" in cascade and "overflow-menu" in cascade
+    # #1638: the empty-chevron cascade for the overflow "+" is builder-driven now (the menu has no
+    # static DOM) — refreshOverflowChevron hides the trigger when buildOverflowItems() yields zero
+    # items, i.e. the chevron disappears once attach (+ tts) are gone under the game build.
+    assert "function refreshOverflowChevron()" in APP_JS
+    cascade = APP_JS[APP_JS.index("function refreshOverflowChevron()"):]
+    cascade = cascade[: cascade.index("\n  window._updateOverflowPlusDot")]
+    assert "overflow-plus-btn" in cascade
+    assert "buildOverflowItems().length" in cascade
+    assert "plusBtn.style.display = 'none'" in cascade
 
 
 def test_composer_first_class_paperclip_still_wired_to_file_input():

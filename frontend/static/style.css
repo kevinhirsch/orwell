@@ -3871,123 +3871,12 @@ body.bg-pattern-perlin-flow {
     .overflow-plus-btn.has-active .plus-active-dot {
       display: block;
     }
-    .overflow-menu {
-      position: fixed;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 4px;
-      min-width: 170px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-      z-index: 1000;
-      /* Container spring-in: the rounded panel scales/grows out of the
-         chevron's position before the menu items domino in on top. */
-      transform-origin: bottom left;
-      animation: overflow-menu-pop 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    @keyframes overflow-menu-pop {
-      0%   { transform: scale(0.6) translateY(8px); opacity: 0; }
-      100% { transform: scale(1)   translateY(0);   opacity: 1; }
-    }
-    .overflow-menu.hidden {
-      display: none;
-    }
-    /* Closing state: JS adds `.closing` to play the fold-in animation,
-       waits for it to finish, then flips to `.hidden`. Container
-       scales/translates back into the chevron while items peel off from
-       the top down so the menu collapses into its anchor. */
-    .overflow-menu.closing {
-      animation: overflow-menu-pop-out 0.22s cubic-bezier(0.5, 0, 0.75, 0) forwards;
-      animation-delay: 0.16s;
-    }
-    @keyframes overflow-menu-pop-out {
-      0%   { transform: scale(1)   translateY(0);   opacity: 1; }
-      100% { transform: scale(0.6) translateY(8px); opacity: 0; }
-    }
-    .overflow-menu-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      width: 100%;
-      padding: 8px 12px;
-      background: none;
-      border: none;
-      color: var(--fg);
-      opacity: 0.7;
-      cursor: pointer;
-      border-radius: 6px;
-      font-size: 13px;
-      font-family: inherit;
-      transition: background 0.15s, opacity 0.15s, color 0.15s;
-      /* Domino-style cascade: each item slides up + fades in with a tiny
-         delay after the previous one (set via nth-last-child below so the
-         BOTTOM item appears first and the cascade rolls upward — visually
-         feels like the menu is "stacking up" from the chevron). The
-         container itself springs in via .overflow-menu's keyframe. */
-      animation: overflow-item-in 0.32s cubic-bezier(0.22, 1.61, 0.36, 1) backwards;
-    }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(1)  { animation-delay: 0.06s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(2)  { animation-delay: 0.10s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(3)  { animation-delay: 0.14s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(4)  { animation-delay: 0.18s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(5)  { animation-delay: 0.22s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(6)  { animation-delay: 0.26s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(7)  { animation-delay: 0.30s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(8)  { animation-delay: 0.34s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(9)  { animation-delay: 0.38s; }
-    .overflow-menu:not(.hidden):not(.closing) .overflow-menu-item:nth-last-child(10) { animation-delay: 0.42s; }
-    @keyframes overflow-item-in {
-      0%   { opacity: 0; transform: translateY(10px) translateX(-6px) scale(0.9); }
-      60%  { opacity: 1; }
-      100% { opacity: 1; transform: translateY(0)    translateX(0)    scale(1); }
-    }
-    /* Fold-in: items peel off top-down (mirror of the open's bottom-up
-       cascade) so the menu visibly empties before the container scales
-       back into the chevron. */
-    .overflow-menu.closing .overflow-menu-item {
-      animation: overflow-item-out 0.20s ease-in forwards;
-    }
-    .overflow-menu.closing .overflow-menu-item:nth-child(1)  { animation-delay: 0.00s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(2)  { animation-delay: 0.02s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(3)  { animation-delay: 0.04s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(4)  { animation-delay: 0.06s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(5)  { animation-delay: 0.08s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(6)  { animation-delay: 0.10s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(7)  { animation-delay: 0.12s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(8)  { animation-delay: 0.14s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(9)  { animation-delay: 0.16s; }
-    .overflow-menu.closing .overflow-menu-item:nth-child(10) { animation-delay: 0.18s; }
-    @keyframes overflow-item-out {
-      0%   { opacity: 1; transform: translateY(0)   translateX(0)    scale(1); }
-      100% { opacity: 0; transform: translateY(6px) translateX(-3px) scale(0.92); }
-    }
-    .overflow-menu-item:hover {
-      opacity: 1;
-      background: color-mix(in srgb, var(--red) 10%, transparent);
-    }
-    #overflow-attach-btn {
-      position: relative;
-      font-weight: 600;
-    }
-    #overflow-attach-btn svg {
-      transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    .overflow-menu-item.active {
-      opacity: 1;
-      color: var(--fg);
-    }
-    .overflow-active-dot {
-      width: 6px;
-      height: 6px;
-      background: var(--fg);
-      border-radius: 50%;
-      margin-left: auto;
-      display: none;
-      flex-shrink: 0;
-    }
-    .overflow-menu-item.active .overflow-active-dot {
-      display: block;
-    }
+    /* #1638: the composer overflow "+" menu (and the plan menu, its only other consumer) now mount
+       through OrwellMenuKit — the .ow-menu / .ow-popover family (see the linked-stylesheet copy of
+       that region) owns the surface, items, hover, active/checked state, and open/close motion. The
+       bespoke `.overflow-menu` / `.overflow-menu-item` container, the domino stagger keyframes
+       (overflow-menu-pop / overflow-item-in / -out), and the `.overflow-active-dot` are RETIRED. The
+       trigger + its `.plus-active-dot` (above) and `.overflow-wrapper` (composer layout) are KEPT. */
     .attach-strip {
       display: flex;
       gap: 6px;
@@ -17257,8 +17146,7 @@ button .spinner-whirlpool {
 .msg-group .role {
   font-weight: 600;
 }
-#group-toggle-btn.active,
-.overflow-menu-item#overflow-group-btn.active {
+#group-toggle-btn.active {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 12%, transparent);
 }
@@ -19680,7 +19568,6 @@ body.theme-frosted .modal {
    keep the hover light and consistent instead of giving one action a special
    glow. */
 :is(
-  .overflow-menu-item,
   .dropdown-item,
   .dropdown-item-compact,
   .export-dropdown-item,
@@ -19696,7 +19583,6 @@ body.theme-frosted .modal {
     transform 0.14s ease;
 }
 :is(
-  .overflow-menu-item,
   .dropdown-item,
   .dropdown-item-compact,
   .export-dropdown-item,
