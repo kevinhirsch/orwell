@@ -914,6 +914,22 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                             f"{floor_gaveup} given-up"))
         except Exception:
             pass
+    # RC6 S6c (#1599): an EMPTY visible body after the retry ladder is the reasoning-channel misroute —
+    # the model routed its whole turn to the reasoning channel (or otherwise vanished), leaving the
+    # visible reply empty, so nothing could be authored. It was previously folded only into the aggregate
+    # `cast-authoring` floor row above (strict-gated). Land it as its OWN alarm-eligible runtime class
+    # (`enrichment:reasoning-misroute`) via the unconditional runtime recorder — a vanished completion is
+    # a genuine provider fault (a wired model returned nothing), never the deliberate no-model floor, so
+    # it is loud regardless of the enrichment soft/strict policy. Fail-soft; telemetry never blocks start.
+    if floor_empty > 0:
+        try:
+            from src import enrichment_policy
+            enrichment_policy.record_runtime_failure(
+                user, "reasoning-misroute",
+                f"model routed the whole turn to the reasoning channel (empty visible body) for "
+                f"{floor_empty} houseguest(s) — nothing authored, seeded floor stands")
+        except Exception:
+            pass
     return written
 
 

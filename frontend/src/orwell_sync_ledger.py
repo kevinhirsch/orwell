@@ -408,12 +408,23 @@ def record_turn(
         # Fire only when BOTH ends are real tracked beats (>0), so a 0/0 turn can neither raise a
         # false gap nor be measured against one. A positive gap beyond the counted stale rejections
         # is an unaccounted board move — the invisible dropped fold.
-        if isinstance(last_after, int) and last_after > 0 and entry["beatSeqBefore"] > 0:
+        #
+        # RC6 verify fix (#1599): a between-turns gap is NOT proof of a dropped fold on THIS session. A
+        # legitimate concurrent multi-window advance (another window/device drives the SAME game between
+        # this window's turns — expected under ADR 0008/0012) moves the board with no fold lost here, and
+        # the FE FLAGS that reconcile: it either counts the stale-beat 409(s) (`staleRejections`) or
+        # stashes a re-ground (`desyncDetected`). So the gap is only "unaccounted" — a truly invisible
+        # drop on this session's own turn — when the move was NEITHER counted NOR reconciled. Suppressing
+        # on `desyncDetected` removes the cross-window false positive while still catching the genuine
+        # A-S3 latent (an invisible drop leaves no stale count AND no desync signal). A real fold-bearing
+        # drop still surfaces RED directly via `note_stale_rejection(dropped_fold=True)` at the drop site.
+        if (isinstance(last_after, int) and last_after > 0 and entry["beatSeqBefore"] > 0
+                and not entry["desyncDetected"]):
             gap = entry["beatSeqBefore"] - last_after
             if gap > entry["staleRejections"]:
                 _emit_dropped_fold(user, "an unaccounted beatSeq gap between turns — the board moved "
-                                   "without this FE recording the write", beat_gap=gap,
-                                   stale=entry["staleRejections"])
+                                   "without this FE recording the write or reconciling a cross-window "
+                                   "advance", beat_gap=gap, stale=entry["staleRejections"])
         with _LOCK:
             data = _load()
             bucket = data.get(k)

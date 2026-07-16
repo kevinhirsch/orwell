@@ -162,6 +162,7 @@ async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
     async def _run() -> str:
         loop = asyncio.get_event_loop()
         chunks: list[str] = []
+        _provider_down_recorded = False  # RC6 S6c: record the outage ONCE per run, not per-query
         for q in _RESEARCH_QUERIES:
             try:
                 txt = await loop.run_in_executor(
@@ -170,6 +171,21 @@ async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
                     chunks.append(f"## {q}\n{txt}")
             except Exception as e:
                 logger.warning("[zeitgeist] search failed for %r: %s", q, e)
+                # RC6 S6c (#1599): a web-search provider outage feeding the zeitgeist enrichment lane
+                # ("SearXNG search failed: [Errno 111] Connection refused") was recorded NOWHERE — it
+                # fell through this best-effort WARN with no failure row, and synthesis quietly stood on
+                # the model's framed knowledge. Land it in the admin-visible LOUD failure ledger + a
+                # RED-eligible health event (class `enrichment:search-provider`, the ONLY capture point
+                # for this non-LLM fault). Once per run (a down provider fails every query). Fail-soft.
+                if not _provider_down_recorded:
+                    _provider_down_recorded = True
+                    try:
+                        from src import enrichment_policy as _ep
+                        _ep.record_runtime_failure(
+                            owner, "search-provider",
+                            f"web-search provider unavailable for the move-in zeitgeist: {e}")
+                    except Exception:  # pragma: no cover - defensive: telemetry never breaks the lane
+                        pass
         return "\n\n".join(chunks)
 
     return _run

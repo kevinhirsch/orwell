@@ -5777,6 +5777,23 @@ async def _stream_agent_loop_impl(
                         err_msg = data.get("error", "unknown")
                         _turn_had_error = True  # #872: mark the turn so the casting safety-net treats it as a stall
                         logger.error(f"Agent round {round_num}: stream error: {err_msg}")
+                        # RC6 S6c (#1599): a narrator provider error ("OpenRouter returned HTTP 400:
+                        # Provider returned error") ended the round with 0 chars and was SWALLOWED from
+                        # the failure ledger — only this typed error SSE + the ERROR log carried it, so it
+                        # alarmed nowhere. On a game/casting (narration) turn, land it in the admin-visible
+                        # LOUD ledger + a RED-eligible health event (class `enrichment:narrator-http`, also
+                        # caught at the LLMIO tier by S6a — recording here makes it alarm-eligible on the
+                        # enrichment surface too). Fail-soft; the narrator path is out-of-scope of the
+                        # enrichment soft-floor contract (always loud), so it is not policy-gated.
+                        if game_mode:
+                            try:
+                                from src import enrichment_policy as _ep
+                                _ep.record_runtime_failure(
+                                    owner, "narrator-http",
+                                    f"narrator provider error on a {('casting' if game_mode == 'casting' else 'game')} "
+                                    f"turn (round ended with no visible reply): {err_msg}")
+                            except Exception:  # pragma: no cover - defensive: telemetry never breaks a turn
+                                pass
                         # FEPY-1 (#621): a mid-stream upstream error must NOT land in the GM body bubble
                         # (a casting 502/503/504 reads as in-fiction producer narration). Emit a typed
                         # `error` SSE — the FE renders it as a styled error notice (chat.js `json.error`),
