@@ -7668,26 +7668,45 @@ async def _stream_agent_loop_impl(
                 # corrected body — the chat route repairs its OWN persisted buffer separately via the
                 # `realign_body` event below.
                 try:
+                    # `strip_ungrounded_closed_set` is FAIL-OPEN: on a board-read hiccup it returns the
+                    # body UNCHANGED. Its `excised` flag (True only when it actually dropped ≥1 sentence)
+                    # gates the append — the beat is NEVER appended to an unstripped buffer, so a
+                    # transient strip failure can never leave [fabrication]+[correction] (the exact bug
+                    # this lane fixes). Each buffer is gated on ITS OWN excision result.
                     # (a) the merged `full_response` (feeds the empty-response fallback + student_reply).
-                    _fr_ex = await _strip_cs(owner, full_response, _desync_tool_names)
-                    full_response = ((_fr_ex.rstrip() + "\n\n" + _s2a.text).strip()
-                                     if _s2a.text else _fr_ex)
+                    _fr_clean, _fr_excised = await _strip_cs(owner, full_response, _desync_tool_names)
+                    if _fr_excised:
+                        full_response = ((_fr_clean.rstrip() + "\n\n" + _s2a.text).strip()
+                                         if _s2a.text else _fr_clean)
                     # (b) `round_texts` — its join is `_turn_narration_full` (faith/roster) AND the
-                    #     history reload. Excise per round, append the beat to the last non-empty round.
-                    _rt_new = [(await _strip_cs(owner, _rt, _desync_tool_names) if _rt else _rt)
-                               for _rt in round_texts]
-                    _last_i = next((i for i in range(len(_rt_new) - 1, -1, -1)
-                                    if _rt_new[i] and _rt_new[i].strip()), None)
-                    if _last_i is not None:
-                        _rt_new[_last_i] = (_rt_new[_last_i].rstrip() + "\n\n" + _s2a.text).strip()
-                    else:
-                        _rt_new.append(_s2a.text)
-                    round_texts[:] = _rt_new  # in-place so later `round_texts` reads see the correction
-                    # refresh the narration the post-belt faith/roster checks read
-                    _turn_narration_full = "\n".join(t for t in round_texts if t)
+                    #     history reload. Excise per round; append the beat to the last non-empty round
+                    #     ONLY when at least one round was actually excised.
+                    _rt_new = []
+                    _rt_excised = False
+                    for _rt in round_texts:
+                        if _rt:
+                            _c, _ex = await _strip_cs(owner, _rt, _desync_tool_names)
+                            _rt_new.append(_c)
+                            _rt_excised = _rt_excised or _ex
+                        else:
+                            _rt_new.append(_rt)
+                    if _rt_excised:
+                        _last_i = next((i for i in range(len(_rt_new) - 1, -1, -1)
+                                        if _rt_new[i] and _rt_new[i].strip()), None)
+                        if _last_i is not None:
+                            _rt_new[_last_i] = (_rt_new[_last_i].rstrip() + "\n\n" + _s2a.text).strip()
+                        else:
+                            _rt_new.append(_s2a.text)
+                        round_texts[:] = _rt_new  # in-place so later `round_texts` reads see it
+                        # refresh the narration the post-belt faith/roster checks read
+                        _turn_narration_full = "\n".join(t for t in round_texts if t)
+                    if not (_fr_excised or _rt_excised):
+                        logger.warning("[orwell] S2a strip fail-opened (no excision confirmed) — declined "
+                                       "to append the beat to the unstripped buffers user=%s", owner)
                 except Exception as _s2a_rep_err:
                     logger.warning(f"[orwell] S2a generator-buffer repair skipped: {_s2a_rep_err}")
-                    full_response += "\n\n" + _s2a.text  # at least keep this buffer internally coherent
+                # The route repairs its OWN persisted buffer under the SAME excision guard; the event
+                # fires regardless (a strip that no-ops there just declines the append too).
                 yield f'data: {json.dumps({"type": "realign_body", "beat": _s2a.text})}\n\n'
         except Exception as _s2a_err:
             logger.warning(f"[orwell] S2a in-turn realignment belt skipped: {_s2a_err}")

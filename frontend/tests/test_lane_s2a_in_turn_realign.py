@@ -307,17 +307,20 @@ def test_chat_route_excises_the_phantom_from_the_persisted_body():
     # re-streamed to the client as a `text` field.
     assert "strip_ungrounded_closed_set(" in src
     assert '"type": "realign_body", "text": full_response' in src
+    # The append is GATED on the excision flag — the beat is never appended to an unstripped body.
+    assert "_did_excise" in src
 
 
 def test_strip_ungrounded_closed_set_removes_only_the_phantom_sentence(monkeypatch):
     """The excision DROPS the fabricated closed-set sentence(s) and KEEPS creative/social prose
     byte-identical (ADR 0005 #1). On a premiere board an HOH-win sentence is a fabrication by
-    construction; the surrounding open-set prose survives unchanged."""
+    construction; the surrounding open-set prose survives unchanged. Returns (cleaned, excised=True)."""
     _premiere_board(monkeypatch)
     body = ("The houseguests trade nervous jokes by the pool. "
             "A houseguest wins the Head of Household competition! "
             "The player drifts toward the kitchen to scheme.")
-    out = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, []))
+    out, excised = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, []))
+    assert excised is True                           # a sentence was actually dropped
     assert "Head of Household" not in out            # the phantom closed-set sentence was excised
     assert "trade nervous jokes by the pool" in out  # open-set prose survives byte-identical
     assert "drifts toward the kitchen to scheme" in out
@@ -325,7 +328,7 @@ def test_strip_ungrounded_closed_set_removes_only_the_phantom_sentence(monkeypat
 
 def test_strip_ungrounded_closed_set_stands_down_on_progression_tool(monkeypatch):
     """When a progression tool committed the outcome (board moved off the turn-start baseline) the
-    excision removes nothing — a grounded outcome is never stripped."""
+    excision removes nothing — a grounded outcome is never stripped: (body, False)."""
     chat_helpers._LAST_BEAT_SIG[_USER] = {
         "week": 1, "phase": "premiere", "pending": None, "hoh": None, "hohName": None,
         "noms": [], "nomNames": [], "activeNames": ["Player", "Alpha"],
@@ -334,19 +337,38 @@ def test_strip_ungrounded_closed_set_stands_down_on_progression_tool(monkeypatch
     }
     _hoh_committed_board(monkeypatch)  # phase moved premiere→hoh, a holder is now set
     body = "The competition ends and a houseguest wins the Head of Household!"
-    out = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, ["advanceGame"]))
-    assert out == body  # progression tool + moved board ⇒ grounded ⇒ nothing excised
+    out, excised = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, ["advanceGame"]))
+    assert out == body and excised is False  # progression tool + moved board ⇒ grounded ⇒ nothing excised
 
 
 def test_strip_ungrounded_closed_set_is_fail_open_on_pure_prose(monkeypatch):
-    """Pure open-set prose never reaches the board read and is returned byte-identical."""
+    """Pure open-set prose never reaches the board read and is returned byte-identical: (prose, False)."""
     async def boom(user=None):
         raise AssertionError("read the board for pure creative prose (ADR 0005 #1)")
 
     monkeypatch.setattr(orwell_engine, "game_status", boom)
     monkeypatch.setattr(orwell_engine, "get_game_state", boom)
     prose = "The player narrates the house as a doomed ocean liner and everyone laughs too hard."
-    assert _run(chat_helpers.strip_ungrounded_closed_set(_USER, prose, [])) == prose
+    out, excised = _run(chat_helpers.strip_ungrounded_closed_set(_USER, prose, []))
+    assert out == prose and excised is False
+
+
+def test_strip_fail_open_board_error_reports_not_excised(monkeypatch):
+    """Finding 1 follow-up (#1664): when the board read HICCUPS mid-excision the helper is fail-open and
+    returns (body_UNCHANGED, False) — so the caller declines to append the beat and never persists the
+    fabrication followed by a correction. The body carries a closed-set claim (passes the pre-filter),
+    but the board read raises, so no sentence can be verified/dropped."""
+    async def boom_status(user=None):
+        raise RuntimeError("engine unreachable mid-turn")
+
+    # get_game_state raising makes `_capture_beat_signature` return None → `_detect_ungrounded_overclaim`
+    # emits (conservatism), so no sentence is dropped → excised is False, body unchanged.
+    monkeypatch.setattr(orwell_engine, "game_status", boom_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", boom_status)
+    body = "A houseguest wins the Head of Household competition! The house erupts in cheers."
+    out, excised = _run(chat_helpers.strip_ungrounded_closed_set(_USER, body, []))
+    assert excised is False           # nothing confirmed excised on the board-read hiccup
+    assert out == body                # body returned UNCHANGED (fail-open) — caller must NOT append
 
 
 def test_chat_helpers_holds_the_mechanism():

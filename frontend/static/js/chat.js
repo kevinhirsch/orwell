@@ -1681,6 +1681,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       // stacked frozen segments (the "growing bubble") — the stream-end finalize then
       // commits only the LAST round's segment instead of re-rendering the whole body.
       let _turnCoalesced = false;
+      // S2a realignment (#1664): set true once the realign_body handler has re-rendered THIS bubble's
+      // body from the corrected (excised) text WITH the Thinking accordion rebuilt. The stream-end
+      // finalize then SKIPS its body re-render for this holder (it would otherwise re-render from the
+      // reply-only roundReplyText and drop the accordion) — everything else in finalize still runs.
+      let _realignedBodyRendered = false;
       let currentToolBubble = null;   // Current tool execution bubble
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -3236,35 +3241,35 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   const _rbReply = (typeof json.text === 'string') ? json.text : '';
                   const _rbHolder = roundHolder || currentHolder;
                   if (_rbReply && _rbHolder) {
-                    // Finding 2 (#1664): PRESERVE the Thinking accordion. The corrected `text` is reply
-                    // ONLY (no reasoning), so rebuild the body from a MERGED buffer — the current round's
-                    // reasoning wrapped in <think> + the corrected reply — through the SAME
-                    // processWithThinking chain the stopped-render uses. processWithThinking routes the
-                    // <think> block into the accordion and the rest into the public body, so the F8
-                    // reply/reasoning split holds (reasoning never reaches the public bubble) AND the
-                    // accordion the reloaded/peer view shows is preserved in the live view too.
-                    const _rbMerged = (roundReasoningText && roundReasoningText.trim())
-                      ? ('<think>' + roundReasoningText + '</think>\n\n' + _rbReply)
-                      : _rbReply;
-                    // roundReplyText carries the merged form so the trailing final render REBUILDS the
-                    // same accordion (its processWithThinking sees the <think>); the merged buffer's
-                    // consumers (dataset.raw / persistence) stay reply-only + scrubbed below.
-                    roundReplyText = _rbMerged;
+                    // Finding 2 (#1664): keep roundReplyText REPLY-ONLY (the F8 contract — the reply
+                    // buffer must never carry reasoning; persistence/dataset.raw + the final render read
+                    // it). The reasoning stays in roundReasoningText and is used ONLY at the render
+                    // boundary below, wrapped in <think>, to rebuild the Thinking accordion via
+                    // processWithThinking (which routes the <think> block into the accordion and the
+                    // rest into the public body — so reasoning never reaches the public bubble).
+                    roundReplyText = _rbReply;
                     roundText = _rbReply;
                     accumulated = _rbReply;
                     currentAccumulated = _rbReply;
-                    // The corrected body is the WHOLE turn: collapse any coalesced segments and re-render
-                    // the one bubble body from it, then route the trailing final render down the legacy
-                    // full-re-render path so it never re-clobbers with stale segment text.
+                    // The corrected body is the WHOLE turn — collapse any coalesced segments.
                     _turnCoalesced = false;
                     const _rbBody = _rbHolder.querySelector('.body');
                     if (_rbBody) {
                       _rbHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(_rbReply);
+                      // Render-boundary ONLY: merge the reasoning back in as a <think> block so the
+                      // accordion is rebuilt; the buffers above stay reply-only.
+                      const _rbMerged = (roundReasoningText && roundReasoningText.trim())
+                        ? ('<think>' + roundReasoningText + '</think>\n\n' + _rbReply)
+                        : _rbReply;
                       _rbBody.innerHTML = markdownModule.processWithThinking(
                         markdownModule.squashOutsideCode(_rbMerged));
                       if (window.hljs) {
                         _rbBody.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
                       }
+                      // The stream-end finalize must NOT re-render this body from the reply-only buffer
+                      // (that would drop the accordion just rebuilt); flag it so finalize skips the
+                      // body render for this holder (metrics/dataset.raw/etc. still run).
+                      _realignedBodyRendered = true;
                     }
                     uiModule.scrollHistory();
                   }
@@ -3649,6 +3654,12 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
             _cf.insertBefore(_cfSrc.firstChild || _cfSrc, _cf.firstChild);
           }
           if (_cf && _findingsData) _cf.insertAdjacentHTML('beforeend', chatRenderer.buildFindingsBox(_findingsData));
+        } else if (_realignedBodyRendered) {
+          // S2a realignment (#1664): the realign_body handler ALREADY rendered this bubble's corrected
+          // (excised) body WITH the Thinking accordion rebuilt. Re-rendering here from the reply-only
+          // roundReplyText would drop that accordion — so SKIP the body render (everything else in
+          // finalize, incl. dataset.raw + RAG below, still runs). In-game realign turns carry no
+          // web sources/findings, so nothing else is owed here.
         } else {
         // Finalize the last round's bubble — flatten stream-content wrapper for clean DOM.
         // F8: finalize the BODY from the reply-only buffer; reasoning lives in the accordion

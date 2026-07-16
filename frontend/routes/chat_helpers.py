@@ -2772,25 +2772,28 @@ async def enforce_grounded_draft(user, draft, tools_called, *, regenerate=None) 
         return GroundedDraftResult(draft, "pass", None)
 
 
-async def strip_ungrounded_closed_set(user, body, tools=None) -> str:
+async def strip_ungrounded_closed_set(user, body, tools=None) -> tuple:
     """Round-end EXCISION sibling of the mid-stream `screen_streamed_outcome` guard and the S2a
     realignment (finding 1 / RC2 #1664): split `body` into sentences and DROP each that INDIVIDUALLY
     makes a closed-set overclaim the live board does not back (the SAME `_detect_ungrounded_overclaim`
-    verdict that fires S2a), preserving delimiters so creative/social prose is byte-identical. This is
-    what lets the round-end realignment REMOVE the fabricated closed-set claim from the persisted body
-    rather than merely appending a correction AFTER the lie. Closed-set ONLY (ADR 0005 #1). Fail-open:
-    returns `body` unchanged on any hiccup or when nothing is excised.
+    verdict that fires S2a), preserving delimiters so creative/social prose is byte-identical.
+
+    Returns ``(cleaned, excised)``. `excised` is True ONLY when ≥1 sentence was actually dropped —
+    callers MUST gate any "append the engine-truth beat" on it. A fail-open no-op (a board-read hiccup,
+    or nothing individually matched) returns ``(body, False)``, so the beat is NEVER appended to an
+    UNSTRIPPED body (which would reproduce the exact fabrication-then-correction bug this lane fixes).
+    Closed-set ONLY (ADR 0005 #1). Fail-open on any hiccup: ``(body, False)``.
 
     The `tools` set is threaded to `_detect_ungrounded_overclaim` unchanged, so a progression-tool turn
     that actually committed the outcome excises nothing (that early-return owns the grounded case)."""
     try:
         if not body or not str(body).strip():
-            return body
+            return (body, False)
         _tools = {str(t) for t in (tools or []) if t}
         # Cheap synchronous pre-filter over the WHOLE body — no closed-set / met-everyone language
         # anywhere ⇒ pure open-set prose ⇒ nothing to excise, never read the board (ADR 0005 #1).
         if not (_sentence_has_closed_set_claim(body) or _MET_EVERYONE_RE.search(body)):
-            return body
+            return (body, False)
         parts = re.split(r"(?<=[.!?\n])", body)  # keeps each delimiter attached to its sentence
         kept = []
         excised = False
@@ -2802,11 +2805,11 @@ async def strip_ungrounded_closed_set(user, body, tools=None) -> str:
                     continue  # DROP this phantom closed-set sentence from the persisted body
             kept.append(part)
         if not excised:
-            return body
-        return "".join(kept)
+            return (body, False)
+        return ("".join(kept), True)
     except Exception as e:
         logger.warning("[orwell] strip_ungrounded_closed_set skipped for user=%s: %s", user, _exc_detail(e))
-        return body
+        return (body, False)
 
 
 async def screen_streamed_met_everyone(user, sentence: str) -> bool:
