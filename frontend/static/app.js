@@ -327,28 +327,12 @@ function initializeEventListeners() {
   // non-game build) keeps its open/close wiring; the export actions below stay wired and
   // self-guard, so Copy/PDF/Save survive wherever the menu is rendered.
   const exportMenu = el('export-dropdown-menu');
-  if (exportDlBtn && exportMenu) {
-    exportDlBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (exportMenu.classList.contains('open')) {
-        exportMenu.classList.remove('open');
-      } else {
-        // Move menu to body so it's not affected by ancestor transforms
-        if (exportMenu.parentElement !== document.body) document.body.appendChild(exportMenu);
-        const rect = exportDlBtn.getBoundingClientRect();
-        exportMenu.style.top = (rect.bottom + 4) + 'px';
-        exportMenu.style.left = 'auto';
-        exportMenu.style.right = (window.innerWidth - rect.right) + 'px';
-        exportMenu.classList.add('open');
-      }
-    });
-    document.addEventListener('click', () => exportMenu.classList.remove('open'));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && exportMenu.classList.contains('open')) {
-        exportMenu.classList.remove('open');
-      }
-    });
-  }
+  // #1638 (batch A): the chat-header export popover's trigger + menu markup were removed in
+  // #795 (the top-center caret dropdown is gone), so #export-dl-btn / #export-dropdown-menu
+  // resolve to null and the bespoke open/close toggle + its own document-click and Escape
+  // dismissal here was permanently dead. Removed — menu dismissal is the kit's seat now
+  // (OrwellMenuKit / escMenuStack). The Copy/PDF/Rename item handlers below stay null-guarded
+  // and self-guard wherever the menu might be reintroduced in a non-game build.
   // Opening the sidebar should dismiss any open popup. Many code paths open
   // the sidebar (toggle button, swipe, keyboard, rail), so watch its class
   // for a hidden→visible transition rather than hooking each one. (Independent

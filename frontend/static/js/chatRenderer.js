@@ -1492,45 +1492,29 @@ export function createMsgFooter(msgElement) {
     moreBtn.textContent = '\u00B7\u00B7\u00B7';
     moreBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Toggle overflow menu — close any existing one first (through its own
-      // dismiss so the Escape registry entry goes with it).
-      const existing = document.querySelector('.msg-overflow-menu');
-      if (existing) {
-        if (typeof existing._dismiss === 'function') existing._dismiss(); else existing.remove();
-        if (existing._trigger === moreBtn) return;
+      // #1638: anchored OrwellMenuKit menu — the kit owns flip/shift positioning (prefer-up,
+      // auto-flip-down when clipped, right-clamp), dismissal through the shared escMenuStack seat
+      // (outside-click + the Escape arbiter), and role=menu/menuitem roving-keyboard nav.
+      // Toggle: a second click on the same ··· closes its open menu.
+      if (moreBtn._owMenu && moreBtn._owMenu.isOpen()) {
+        moreBtn._owMenu.close('toggle');
+        moreBtn._owMenu = null;
+        return;
       }
-
-      const menu = document.createElement('div');
-      menu.className = 'msg-overflow-menu';
-      let closeMenu = () => menu.remove();
-      overflow.forEach(a => {
-        const item = document.createElement('button');
-        item.className = 'msg-overflow-item';
-        item.type = 'button';
-        item.title = a.title;
-        item.innerHTML = `<span class="overflow-icon">${a.icon}</span> ${a.title}`;
-        item.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          _trackAction(a.id);
-          closeMenu();
-          a.handler(ev);
-        });
-        menu.appendChild(item);
+      if (!window.OrwellMenuKit) return;
+      moreBtn._owMenu = window.OrwellMenuKit.open({
+        anchor: moreBtn,
+        placement: 'top',
+        align: 'start',
+        ariaLabel: 'Message actions',
+        items: overflow.map((a) => ({
+          label: a.title,
+          icon: a.icon,
+          onSelect: (item, ev) => { _trackAction(a.id); a.handler(ev); },
+        })),
+        onClose: () => { moreBtn._owMenu = null; },
       });
-      menu._trigger = moreBtn;
-      document.body.appendChild(menu);
-      // Position fixed relative to the ··· button
-      const btnRect = moreBtn.getBoundingClientRect();
-      menu.style.top = (btnRect.top - menu.offsetHeight - 4) + 'px';
-      menu.style.left = btnRect.left + 'px';
-      // Flip down if above viewport
-      if (parseFloat(menu.style.top) < 8) menu.style.top = (btnRect.bottom + 4) + 'px';
-      // Keep within right edge
-      const mr = menu.getBoundingClientRect();
-      if (mr.right > window.innerWidth - 8) menu.style.left = (window.innerWidth - mr.width - 8) + 'px';
-      // Close on outside click or Escape. The trigger button is treated as
-      // "inside" so its own click toggles rather than double-fires.
-      closeMenu = bindMenuDismiss(menu, () => menu.remove(), (ev) => !menu.contains(ev.target) && ev.target !== moreBtn);    });
+    });
     actions.appendChild(moreBtn);
   }
 
@@ -1691,38 +1675,28 @@ export function createUserMsgFooter(msgElement) {
     moreBtn.textContent = '\u00B7\u00B7\u00B7';
     moreBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const existing = document.querySelector('.msg-overflow-menu');
-      if (existing) {
-        if (typeof existing._dismiss === 'function') existing._dismiss(); else existing.remove();
-        if (existing._trigger === moreBtn) return;
+      // #1638: anchored OrwellMenuKit menu (see the received-message twin above) — the kit owns
+      // flip/shift positioning, escMenuStack dismissal, and role=menu roving-keyboard nav.
+      // Toggle: a second click on the same ··· closes its open menu.
+      if (moreBtn._owMenu && moreBtn._owMenu.isOpen()) {
+        moreBtn._owMenu.close('toggle');
+        moreBtn._owMenu = null;
+        return;
       }
-
-      const menu = document.createElement('div');
-      menu.className = 'msg-overflow-menu';
-      let closeMenu = () => menu.remove();
-      overflow.forEach(a => {
-        const item = document.createElement('button');
-        item.className = 'msg-overflow-item';
-        item.type = 'button';
-        item.title = a.title;
-        item.innerHTML = `<span class="overflow-icon">${a.icon}</span> ${a.title}`;
-        item.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          _trackUserAction(a.id);
-          closeMenu();
-          a.handler(ev);
-        });
-        menu.appendChild(item);
+      if (!window.OrwellMenuKit) return;
+      moreBtn._owMenu = window.OrwellMenuKit.open({
+        anchor: moreBtn,
+        placement: 'top',
+        align: 'start',
+        ariaLabel: 'Message actions',
+        items: overflow.map((a) => ({
+          label: a.title,
+          icon: a.icon,
+          onSelect: (item, ev) => { _trackUserAction(a.id); a.handler(ev); },
+        })),
+        onClose: () => { moreBtn._owMenu = null; },
       });
-      menu._trigger = moreBtn;
-      document.body.appendChild(menu);
-      const btnRect = moreBtn.getBoundingClientRect();
-      menu.style.top = (btnRect.top - menu.offsetHeight - 4) + 'px';
-      menu.style.left = btnRect.left + 'px';
-      if (parseFloat(menu.style.top) < 8) menu.style.top = (btnRect.bottom + 4) + 'px';
-      const mr = menu.getBoundingClientRect();
-      if (mr.right > window.innerWidth - 8) menu.style.left = (window.innerWidth - mr.width - 8) + 'px';
-      closeMenu = bindMenuDismiss(menu, () => menu.remove(), (ev) => !menu.contains(ev.target) && ev.target !== moreBtn);    });
+    });
     actions.appendChild(moreBtn);
   }
 
