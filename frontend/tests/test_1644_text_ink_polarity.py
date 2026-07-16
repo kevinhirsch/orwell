@@ -461,7 +461,8 @@ JS_COOL_REGISTRY = {
     ('static/js/sessions.js', 'color-mix(in srgb, var(--fg) 50%, transparent)'): 2,
     ('static/js/sessions.js', 'var(--accent)'): 1,
     ('static/js/sessions.js', 'var(--accent, var(--red))'): 4,
-    ('static/js/sessions.js', 'var(--accent-primary)'): 1,
+    # #1638 KM-W10: the "+ New Folder" var(--accent-primary) ink retired with the bespoke
+    # folder submenu (now an OrwellMenuKit submenu — the kit paints the row).
     ('static/js/settings.js', '#0b0'): 1,
     ('static/js/settings.js', '#fff'): 8,
     ('static/js/settings.js', 'color-mix(in srgb, var(--fg) 45%, transparent)'): 1,
