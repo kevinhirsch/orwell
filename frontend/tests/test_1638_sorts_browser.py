@@ -51,7 +51,7 @@ def _boot(env, port):
     proc.terminate()
     try:
         proc.wait(timeout=10)
-    except Exception:
+    except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
     raise RuntimeError("server never became ready")
