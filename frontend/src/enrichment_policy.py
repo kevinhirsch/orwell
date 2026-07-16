@@ -60,6 +60,18 @@ DEFAULT_POLICY = "strict"
 CALL_CLASSES = ("cast-authoring", "cast-identity", "cast-prewarm", "cast-genesis", "zeitgeist",
                 "offscreen-texture")
 
+# ── S6c (#1599 item): PROVIDER/RUNTIME failure classes the enrichment lanes depend on ──────────
+# Three failure classes were happening LIVE but recorded NOWHERE (the debug-bundle audit): a
+# search-provider outage feeding zeitgeist/off-screen enrichment ("SearXNG search failed: [Errno 111]
+# Connection refused"), a narrator HTTP 4xx ("OpenRouter returned HTTP 400: Provider returned error"),
+# and a reasoning-channel misroute (the model routed its whole turn to the reasoning channel, leaving
+# the visible reply empty). Each is a genuine class-A fault: `record_runtime_failure` lands them in
+# the SAME admin-visible loud ledger + emits a RED-eligible health event, so they show RED on
+# /admin/status instead of a swallowed WARN. (The narrator-http / reasoning-misroute classes are also
+# caught at the LLMIO tier by the S6a failClass derivation; recording here makes them alarm-eligible on
+# the enrichment surface too, and is the ONLY capture point for the non-LLM search-provider outage.)
+RUNTIME_CLASSES = ("search-provider", "narrator-http", "reasoning-misroute")
+
 # ── the loud failure ledger (admin-visible; in-process, bounded) ───────────────────────────
 _MAX_FAILURES_PER_USER = 50
 _FAILURES: dict = {}  # user_key -> list[{at, callClass, reason, detail}]
@@ -136,6 +148,20 @@ def record_failure(user: Optional[str], call_class: str, reason: str,
             _overseer.assess_enrichment_health(user)
     except Exception:  # pragma: no cover - defensive
         pass
+
+
+def record_runtime_failure(user: Optional[str], call_class: str, reason: str,
+                           detail: Optional[str] = None) -> None:
+    """S6c: record a PROVIDER/RUNTIME failure (search-provider outage, narrator HTTP 4xx, reasoning
+    misroute) into the SAME admin-visible loud ledger + a RED-eligible health event. These were
+    happening live but recorded nowhere — a search-provider ``Connection refused`` fell through
+    ``orwell_zeitgeist``'s best-effort WARN with no failure row. Unconditional (never gated on
+    ``is_strict()`` — a provider outage is always a real fault) and never raises.
+
+    Reuses :func:`record_failure` so a runtime failure shows up on the same ``enrichment.failures``
+    surface and under the same rollup guard (``enrichment:<class>``) — the RED alarm keys on the
+    provider classes (see the admin alarm route). ``call_class`` is a short RUNTIME_CLASSES token."""
+    record_failure(user, call_class, reason, detail)
 
 
 def failures(user: Optional[str]) -> list:

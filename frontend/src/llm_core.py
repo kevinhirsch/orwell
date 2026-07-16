@@ -54,6 +54,34 @@ def is_image_model(model_id: Optional[str]) -> bool:
     return False
 
 
+def _exc_fail_class(exc: BaseException) -> str:
+    """S6a: classify an LLM-call exception into the llmIo triage taxonomy (timeout|4xx|5xx|error).
+
+    A read/connect timeout (or an asyncio.wait_for cancellation) is ``timeout``; an ``HTTPException``
+    carries its status → 4xx/5xx; anything else is a generic ``error``. Keeps the failClass truthful
+    even when the impl has wrapped a socket timeout in a 502."""
+    try:
+        if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError)):
+            return "timeout"
+        low = f"{type(exc).__name__}: {exc}".lower()
+        if any(m in low for m in ("timeout", "timed out", "read timed out", "deadline")):
+            return "timeout"
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            status = getattr(exc, "status", None)
+        try:
+            s = int(status)
+            if 400 <= s < 500:
+                return "4xx"
+            if 500 <= s < 600:
+                return "5xx"
+        except (TypeError, ValueError):
+            pass
+    except Exception:
+        pass
+    return "error"
+
+
 class LLMConfig:
     """Configuration constants for LLM operations."""
     DEFAULT_TIMEOUT = 30
@@ -1526,6 +1554,9 @@ async def _llm_call_async_traced(
             kind="call", model=model, messages=messages, temperature=temperature,
             max_tokens=max_tokens, ok=False, duration_ms=int((time.time() - started) * 1000),
             call_class=call_class, user=user,
+            # S6a: hand the trace the true failure class from the exception shape (timeout vs a
+            # 4xx/5xx HTTPException) so llmIo triage isn't a bare "FAILED".
+            fail_class=_exc_fail_class(e),
             # The terminal stop reason still rides on a FAILED call when the impl saw one
             # (e.g. the empty-stop guard below raised after parsing finish_reason=stop).
             response={"error": {"type": type(e).__name__, "message": str(e)[:500]},

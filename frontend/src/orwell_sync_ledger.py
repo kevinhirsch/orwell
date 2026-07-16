@@ -103,6 +103,22 @@ _NAME_MAP_FIELDS = ("beltsFired",)  # {beltName: count} maps — names + small i
 # never pass through a belt name.
 _PENDING_BELTS: dict[str, dict[str, int]] = {}
 
+# ── S6b (#1599 item 3): count ALL StaleBeatErrors + a beat-continuity dropped-fold check ──
+# Today only the advance path's `_handle_stale_beat` bumped a process-global counter that the agent
+# loop folded into the turn's `staleRejections`. A `recordInteraction` fold that got dropped on a
+# double stale-409 (the A-S3 latent) reconciled OUTSIDE that window, so its ledger row showed
+# `staleRejections:0` even though the board had moved 46 beats under it — a lost consequence fold
+# that was completely invisible. `note_stale_rejection` gives EVERY stale-handling path (advance
+# AND recordInteraction/makeDeal/the trust belts) a per-user buffer that drains into the next
+# `record_turn`, and a fold-bearing drop additionally emits a RED-eligible `sync:dropped-fold`
+# health event. The beat-continuity check in `record_turn` is the safety net: an unaccounted
+# beatSeq gap (the board moved by more than this turn's counted stale rejections explain) emits the
+# same RED event even when nothing called `note_stale_rejection` at all.
+_PENDING_STALE: dict[str, int] = {}
+# The last recorded `beatSeqAfter` per user — the baseline the next turn's `beatSeqBefore` is
+# checked against for continuity. In-process only (a restart re-derives from the next live turn).
+_LAST_BEAT_AFTER: dict[str, int] = {}
+
 
 def _key(user: str | None) -> str:
     # A missing user maps to the same "default" bucket the rest of the relay uses.
@@ -246,6 +262,57 @@ def note_belt_fire(user: str | None, belt: Any, n: Any = 1) -> None:
         pass
 
 
+def _emit_dropped_fold(user: str | None, reason: str, *, beat_gap: Any = None,
+                       stale: Any = None) -> None:
+    """Emit ONE RED-eligible ``sync:dropped-fold`` health event (the A-S3 latent, made visible).
+
+    A dropped fold is a scene's only record of a hidden relationship impact evaporating — a real,
+    already-happened play lost (mandate #4 / I4). It is UNCORRECTED (the fold did not land), so it
+    surfaces RED, never cloaked. Fail-soft: telemetry must never hurt the app."""
+    try:
+        from src import log_rings as _lr
+        _gap = _clean_int(beat_gap) if beat_gap is not None else None
+        detail = reason
+        if _gap:
+            detail += f" (beatSeq gap {_gap}"
+            if stale is not None:
+                detail += f", {_clean_int(stale)} stale-rejection(s) counted"
+            detail += ")"
+        _lr.record_soft_failure("sync:dropped-fold", detail, corrected=None, user=user)
+    except Exception:  # pragma: no cover - defence in depth
+        pass
+
+
+def note_stale_rejection(user: str | None, n: Any = 1, *, dropped_fold: bool = False,
+                         beat_gap: Any = None) -> None:
+    """Count StaleBeatError 409s this FE reconciled (0065 Part A) — for EVERY stale-handling path,
+    not just the advance path. The count buffers per user and drains into the next ``record_turn``
+    entry's ``staleRejections`` (mirroring ``note_belt_fire``), so a ``recordInteraction`` stale-drop
+    can no longer show ``staleRejections:0``.
+
+    ``dropped_fold=True`` marks that a FOLD-BEARING call's stale-409 ended with the fold DROPPED (the
+    A-S3 latent): a RED-eligible ``sync:dropped-fold`` health event is emitted immediately so the lost
+    consequence is never invisible. Never raises; telemetry must never hurt the app."""
+    try:
+        count = _clean_int(n)
+        if count <= 0:
+            count = 1
+        k = _key(user)
+        with _LOCK:
+            _PENDING_STALE[k] = _PENDING_STALE.get(k, 0) + count
+        if dropped_fold:
+            _emit_dropped_fold(user, "a fold-bearing recordInteraction/deal write was dropped on a "
+                               "stale-beat 409", beat_gap=beat_gap, stale=count)
+    except Exception:  # pragma: no cover - defence in depth
+        pass
+
+
+def _drain_pending_stale(user_key: str) -> int:
+    """Pop (and return) the user's buffered stale-rejection count. Caller holds no lock."""
+    with _LOCK:
+        return _PENDING_STALE.pop(user_key, 0) or 0
+
+
 def note_belt(user: str | None, belt: Any, n: Any = 1) -> None:
     """The thin never-raises convenience wrapper over :func:`note_belt_fire` for belt call
     sites OUTSIDE this module (chat_helpers / tool_implementations / the agent loop) — one
@@ -312,6 +379,9 @@ def record_turn(
         merged_belts = _clean_belt_map(belts_fired)
         for name, count in _drain_pending_belts(k).items():
             merged_belts[name] = merged_belts.get(name, 0) + count
+        # S6b: fold every buffered `note_stale_rejection` into this turn's staleRejections so a
+        # recordInteraction stale-drop is COUNTED here, not lost (it used to show staleRejections:0).
+        eff_stale = _clean_int(stale_rejections) + _drain_pending_stale(k)
         entry = _entry(
             session=session,
             turn_id=turn_id,
@@ -321,10 +391,29 @@ def record_turn(
             nudges_fired=nudges_fired,
             auto_backfills=auto_backfills,
             desync_detected=desync_detected,
-            stale_rejections=stale_rejections,
+            stale_rejections=eff_stale,
             idempotency_hits=idempotency_hits,
             belts_fired=merged_belts,
         )
+        # S6b beat-continuity check: the board must not move MORE than this turn's counted stale
+        # rejections explain. `beatSeqBefore` should pick up where the last turn's `beatSeqAfter`
+        # left off; a positive gap beyond `staleRejections` is an UNACCOUNTED board move — a fold
+        # dropped without being counted (the A-S3 latent). Emit the same RED-eligible dropped-fold.
+        with _LOCK:
+            last_after = _LAST_BEAT_AFTER.get(k)
+            # Only baseline off a real (tracked, non-zero) beat — an untracked 0/0 turn (the inert
+            # spine posture) must never seed a phantom gap for the next real turn.
+            if entry["beatSeqAfter"] > 0:
+                _LAST_BEAT_AFTER[k] = entry["beatSeqAfter"]
+        # Fire only when BOTH ends are real tracked beats (>0), so a 0/0 turn can neither raise a
+        # false gap nor be measured against one. A positive gap beyond the counted stale rejections
+        # is an unaccounted board move — the invisible dropped fold.
+        if isinstance(last_after, int) and last_after > 0 and entry["beatSeqBefore"] > 0:
+            gap = entry["beatSeqBefore"] - last_after
+            if gap > entry["staleRejections"]:
+                _emit_dropped_fold(user, "an unaccounted beatSeq gap between turns — the board moved "
+                                   "without this FE recording the write", beat_gap=gap,
+                                   stale=entry["staleRejections"])
         with _LOCK:
             data = _load()
             bucket = data.get(k)
@@ -365,6 +454,8 @@ def clear(user: str | None) -> None:
     k = _key(user)
     with _LOCK:
         _PENDING_BELTS.pop(k, None)
+        _PENDING_STALE.pop(k, None)
+        _LAST_BEAT_AFTER.pop(k, None)
         data = _load()
         if k in data:
             del data[k]
