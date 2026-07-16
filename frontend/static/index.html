@@ -1072,15 +1072,15 @@
                  into the menu row on each open, so the layout is preserved exactly. -->
             <div id="session-sort-tidy-control" style="display:none;flex-direction:column;width:100%;">
               <div id="auto-sort-sessions-row" style="display:flex;align-items:center;width:100%;">
-                <span id="auto-sort-sessions-btn" style="flex:1;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
+                <button type="button" id="auto-sort-sessions-btn" style="appearance:none;-webkit-appearance:none;background:none;border:0;font:inherit;color:inherit;text-align:left;flex:1;padding:5px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">
                   <span class="auto-sort-icon"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy</span>
                   <span class="auto-sort-spinner" style="display:none;">Sorting...</span>
-                </span>
-                <span role="button" tabindex="0" id="auto-sort-sessions-more" title="Tidy options" aria-label="Tidy options" style="border-left:1px solid var(--border);cursor:pointer;padding:5px 8px;font-size:var(--fs-2xs);opacity:0.7;display:inline-flex;align-items:center;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+                </button>
+                <button type="button" id="auto-sort-sessions-more" title="Tidy options" aria-label="Tidy options" style="appearance:none;-webkit-appearance:none;background:none;color:inherit;font:inherit;border:0;border-left:1px solid var(--border);cursor:pointer;padding:5px 8px;font-size:var(--fs-2xs);opacity:0.7;display:inline-flex;align-items:center;"><svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
               </div>
-              <div id="auto-sort-sessions-noai-btn" title="Delete empty/throwaway chats without using AI" style="display:none;padding:5px 10px 5px 24px;cursor:pointer;">
+              <button type="button" id="auto-sort-sessions-noai-btn" title="Delete empty/throwaway chats without using AI" style="appearance:none;-webkit-appearance:none;background:none;color:inherit;font:inherit;border:0;text-align:left;width:100%;display:none;padding:5px 10px 5px 24px;cursor:pointer;">
                 Clean up (no AI) <span class="auto-sort-noai-spinner" style="display:none;font-size:var(--fs-2xs);opacity:0.6;margin-left:4px;">Cleaning...</span>
-              </div>
+              </button>
             </div>
           </div>
         </div>

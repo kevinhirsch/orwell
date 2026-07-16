@@ -49,6 +49,11 @@ def _boot(env, port):
         except Exception:
             time.sleep(1)
     proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        proc.kill()
+        proc.wait()
     raise RuntimeError("server never became ready")
 
 
@@ -67,10 +72,9 @@ def _app():
         DATABASE_URL="sqlite:///" + os.path.join(tempfile.mkdtemp(prefix="orwell-1638sorts-"), "app.db"),
     )
     port = _free_port()
-    try:
-        proc, base = _boot(env, port)
-    except RuntimeError as e:
-        pytest.skip(str(e))
+    # Playwright-missing (above) is the only sanctioned skip; a uvicorn-never-ready is a real
+    # regression and must FAIL, not silently skip.
+    proc, base = _boot(env, port)
     yield base
     proc.terminate()
     try:

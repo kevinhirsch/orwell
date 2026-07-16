@@ -1103,7 +1103,7 @@ function _enterSelectMode() {
 
 // Public entry for the OrwellMenuKit session-sort "Select" item (#1638) — the kit item's
 // onSelect calls this to enter bulk-select mode.
-export function enterSelectMode() { _enterSelectMode(); }
+export function enterSelectMode() { if (!_selectMode) _enterSelectMode(); }
 
 function _exitSelectMode() {
   _selectMode = false;

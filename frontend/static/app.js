@@ -1313,16 +1313,23 @@ function initializeEventListeners() {
     // AI auto-sort — spinner on the sort button itself. Used by both the main "Tidy"
     // (AI) and the sub-row "Clean up (no AI)" (H6: Phase 1 cleanup only — never a second
     // bare "Tidy" label) via the skipLlm flag. Closes the kit menu on run.
+    // Guard against a double-click firing two destructive auto-sort POSTs (the no-AI
+    // skipLlm path DELETES chats). Set at entry, cleared in the finally on EVERY path
+    // (including a throw during spinner setup), so the flag can never wedge.
+    let _tidyInFlight = false;
     async function _runTidy(skipLlm) {
+      if (_tidyInFlight) return;
+      _tidyInFlight = true;
       const btnIcon = sortBtn.querySelector('.sort-icon');
-      if (btnIcon) btnIcon.style.display = 'none';
-      const wp = spinnerModule.create('', 'clean', 'whirlpool');
-      const wpEl = wp.createElement();
-      wpEl.style.cssText = 'width:13px;height:13px;display:inline-block;vertical-align:middle;margin-top:-5px;';
-      sortBtn.appendChild(wpEl);
-      wp.start();
-      try { if (window.OrwellMenuKit) window.OrwellMenuKit.closeAll(); } catch (_) {}
+      let wp = null, wpEl = null;
       try {
+        if (btnIcon) btnIcon.style.display = 'none';
+        wp = spinnerModule.create('', 'clean', 'whirlpool');
+        wpEl = wp.createElement();
+        wpEl.style.cssText = 'width:13px;height:13px;display:inline-block;vertical-align:middle;margin-top:-5px;';
+        sortBtn.appendChild(wpEl);
+        wp.start();
+        try { if (window.OrwellMenuKit) window.OrwellMenuKit.closeAll(); } catch (_) {}
         const url = `${API_BASE}/api/sessions/auto-sort${skipLlm ? '?skip_llm=true' : ''}`;
         const res = await fetch(url, { method: 'POST' });
         const data = await res.json();
@@ -1358,9 +1365,10 @@ function initializeEventListeners() {
       } catch (e) {
         uiModule.showError('Auto-sort: ' + e.message);
       } finally {
-        wp.destroy();
-        if (wpEl.parentNode) wpEl.parentNode.removeChild(wpEl);
+        if (wp) wp.destroy();
+        if (wpEl && wpEl.parentNode) wpEl.parentNode.removeChild(wpEl);
         if (btnIcon) btnIcon.style.display = '';
+        _tidyInFlight = false;
       }
     }
 
