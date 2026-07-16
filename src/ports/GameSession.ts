@@ -483,6 +483,27 @@ export interface GameStateView {
    */
   createRefusedReason?: string;
   /**
+   * RC5 / feature 0116 / #1599 — the cast-identity COHERENCE outcome of this game start (Vault-free
+   * diagnostic; NEVER player content, never a secret). A model-authored dossier is assembled across three
+   * async write-backs (genesis skeleton + `recordCastIdentity` gender pin + `recordCastProfile` body), so a
+   * houseguest can go live INTERNALLY CONTRADICTORY — the pinned `genderPresentation` reads one sex while a
+   * self-referential field ("her shyness" / "his forearm") names the other (the Lily Evans object), or a bio
+   * states a life span implausible for the age, or a public vocation disagrees with the cover story. At game
+   * start the engine runs `validateDossierCoherence` over every committed Character and AUTO-CORRECTS: it
+   * REPAIRS a hard contradiction (clears only the offending self-referential field — the pinned gender spine
+   * is authoritative and never cleared), and if a contradiction SURVIVES repair it FLOORS the remaining
+   * self-referential prose (never ships a contradictory cast). Present ONLY when a correction happened;
+   * `repaired`/`floored` count the affected houseguests, and `houseguests[]` names the ids + the public
+   * identity fields the correction touched (no secret content). The FE routes this to the #1599 health
+   * rollup so an AUTO-CORRECTED cast still shows RED on /admin/status (a correction is not a cloak). Absent
+   * on a clean cast (the deterministic floor is always coherent ⇒ this never appears for a floor cast).
+   */
+  castCoherence?: {
+    repaired: number;
+    floored: number;
+    houseguests: Array<{ id: EntityId; fields: string[]; action: "repaired" | "floored" }>;
+  };
+  /**
    * M0-7 — the live pending decision, IDENTICAL to `gameStatus().pending` (both read
    * `pendingView()`). The two closed-set projections of one sandbox used to DISAGREE: a
    * pending created inside an advance (the eviction-vote ballot) surfaced on `gameStatus`

@@ -45,8 +45,8 @@ import { dayOfWeek } from "../../engine/houseEvents";
 import { HOUSE_SIGHTLINE, areVisible, isPrivateRoom, roomDisplayName, resolveRoom, WALKABLE_ROOMS, zonesFor } from "../../domain/house";
 import type { Room, Zone, Occupancy } from "../../domain/house";
 import type { RandomnessSource } from "../../ports/RandomnessSource";
-import type { CastingIntake } from "../../engine/castingIntake";
-import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars } from "../../engine/castingIntake";
+import type { CastingIntake, DossierForCoherence } from "../../engine/castingIntake";
+import { castingStatusOf, emptyIntake, ignoredCastingKeys, intakeIsEmpty, mergeCastingUpdate, overwrittenScalars, validateDossierCoherence, repairDossierCoherence } from "../../engine/castingIntake";
 import { DealLedger } from "../../engine/deals";
 import type { BindingAction, Deal } from "../../engine/deals";
 import { isPositiveObligation } from "../../domain/deal";
@@ -178,7 +178,7 @@ import { buildPortraitPrompt, buildCastPortraitPrompts, physicalFacetToAppearanc
 import { STYLE_ANCHOR_VARIANTS } from "../../engine/imageConstants";
 import { startNewGame, hashSeed, isPlausibleArchetype, strengthTier, dispositionOf, archetypeMenace, VOL_OF } from "../../engine/characterFactory";
 import type { Disposition } from "../../engine/characterFactory";
-import type { GameHouse, StrategyStyle, Soul, HiddenElement } from "../../engine/characterFactory";
+import type { GameHouse, StrategyStyle, Soul, HiddenElement, Character } from "../../engine/characterFactory";
 import { evolveEmotion, arcNote, offscreenEmotion, composedEmotion, effectiveDisposition, settleScaleOf } from "../../engine/emotionalArc";
 import { strategicDriveWeight } from "../../engine/offscreen";
 import type { EmotionalEvent } from "../../engine/emotionalArc";
@@ -4451,6 +4451,123 @@ export class GameSessionAdapter implements GameSession {
   }
   // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * RC5 (feature 0116 / #1599) — ENFORCE cast-identity coherence at game start. The model-authored
+   * dossier is assembled across THREE async write-backs (`recordCastGenesis` skeleton +
+   * `recordCastIdentity` gender pin + `recordCastProfile` body), so a houseguest can go LIVE internally
+   * contradictory — the pinned `genderPresentation` reads one sex while a self-referential field ("her
+   * shyness" / "his forearm") names the other (the Lily Evans object), a biography states a life span
+   * implausible for the age (Donna), or a public vocation disagrees with the cover story. This is the ONE
+   * point the WHOLE assembled dossier exists (season start, after adopt/seeders), so it is where the pure
+   * `validateDossierCoherence`/`repairDossierCoherence` (castingIntake.ts) become REACHED IN PRODUCTION:
+   *   • validate each committed Character against its pinned `genderPresentation` (authoritative);
+   *   • on a hard contradiction REPAIR it — clear ONLY the offending self-referential field (the gender
+   *     spine is never cleared), re-validate;
+   *   • if a contradiction SURVIVES repair, FLOOR the remaining self-referential prose (strip it so the
+   *     narrator falls back to the coherent structured facets) — never ship a contradictory cast (#1599);
+   *   • record a RED-eligible, Vault-free coherence event per corrected/floored houseguest (a WARN + the
+   *     returned `castCoherence` summary the FE routes to the #1599 health rollup — a correction is not a
+   *     cloak). The deterministic FLOOR cast is always coherent, so this is a no-op there (byte-neutral).
+   * Runs BEFORE the season-start persist, so the corrected dossier is what durably lands. Vault-free: it
+   * touches only PUBLIC identity facets and reports only ids + field names, never a secret value.
+   */
+  private enforceCastCoherence(): GameStateView["castCoherence"] {
+    if (!this.house) return undefined;
+    const affected: Array<{ id: EntityId; fields: string[]; action: "repaired" | "floored" }> = [];
+    for (const n of this.house.npcs) {
+      const c = n.character;
+      // A floor cast carries no model-authored genesis pin/prose contradiction; only a model-authored cast
+      // (genesisAuthored / deepProfileAuthored) can ship one. Still validate all — cheap, and the guard is
+      // the safety net, not a fast-path — but the byte-neutrality of the floor path is what keeps golden green.
+      const project = (): DossierForCoherence => ({
+        ...(c.genderPresentation ? { genderPresentation: c.genderPresentation } : {}),
+        ...(c.appearance ? { appearance: c.appearance } : {}),
+        ...(c.demeanor ? { demeanor: c.demeanor } : {}),
+        ...(c.background ? { background: c.background } : {}),
+        ...(c.biography ? { biography: c.biography } : {}),
+        ...(typeof c.age === "number" && Number.isFinite(c.age) ? { age: c.age } : {}),
+        ...(c.vocation ? { vocation: c.vocation } : {}),
+        ...(c.physicalCharacteristics
+          ? {
+            physicalCharacteristics: {
+              distinguishingMark: c.physicalCharacteristics.distinguishingMark,
+              facialFeatures: c.physicalCharacteristics.facialFeatures,
+              hair: c.physicalCharacteristics.hair,
+              heightBuild: c.physicalCharacteristics.heightBuild,
+            },
+          }
+          : {}),
+      });
+      const first = validateDossierCoherence(project());
+      if (first.ok) continue;
+      // REPAIR — clear only the contradicting self-referential fields, then RE-VALIDATE. The repaired
+      // dossier is a projection; write the cleared fields back onto the byte-stable Character.
+      const { repairedFields } = repairDossierCoherence(project());
+      this.clearCoherenceFields(c, repairedFields);
+      const after = validateDossierCoherence(project());
+      let action: "repaired" | "floored" = "repaired";
+      let fields = [...repairedFields];
+      if (!after.ok) {
+        // A contradiction SURVIVED the surgical repair (defensive — clearing a field removes it from the
+        // scan, so this is rare): FLOOR the NPC by stripping EVERY remaining hard-contradiction field, which
+        // is guaranteed coherent (an absent field cannot contradict the pin). Never ship a contradictory cast.
+        action = "floored";
+        const floorFields = after.repairFields;
+        this.clearCoherenceFields(c, floorFields);
+        fields = [...new Set([...fields, ...floorFields])];
+      }
+      affected.push({ id: n.id, fields, action });
+      // #1599 — a genuine fault, surfaced even though auto-corrected (never swallowed). Vault-free: ids +
+      // public field names only, never a secret value or the offending prose.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[cast-coherence] ${action} internally-contradictory dossier for ${n.id} ` +
+        `(fields: ${fields.join(", ") || "none"}) — pinned genderPresentation is authoritative (#1599)`,
+      );
+    }
+    if (affected.length === 0) return undefined;
+    return {
+      repaired: affected.filter((a) => a.action === "repaired").length,
+      floored: affected.filter((a) => a.action === "floored").length,
+      houseguests: affected,
+    };
+  }
+
+  /**
+   * Clear the coherence-repair fields on a byte-stable Character (the `repairDossierCoherence` contract:
+   * the offending field is cleared so it can no longer contradict the pinned gender). Maps the validator's
+   * flat field labels onto the Character's real locations — `distinguishingMark` and the
+   * `physicalCharacteristics.*` leaves live inside the structured facet. The pinned `genderPresentation`
+   * spine is NEVER a repair field (the validator never returns it), so it is always preserved.
+   */
+  private clearCoherenceFields(c: Character, fields: readonly string[]): void {
+    for (const field of fields) {
+      switch (field) {
+        case "appearance": c.appearance = ""; break;
+        case "demeanor": delete c.demeanor; break;
+        case "background": c.background = ""; break;
+        case "biography": delete c.biography; break;
+        case "vocation": delete c.vocation; break;
+        case "distinguishingMark":
+          if (c.physicalCharacteristics) c.physicalCharacteristics.distinguishingMark = "";
+          break;
+        case "physicalCharacteristics.distinguishingMark":
+          if (c.physicalCharacteristics) c.physicalCharacteristics.distinguishingMark = "";
+          break;
+        case "physicalCharacteristics.facialFeatures":
+          if (c.physicalCharacteristics) c.physicalCharacteristics.facialFeatures = "";
+          break;
+        case "physicalCharacteristics.hair":
+          if (c.physicalCharacteristics) c.physicalCharacteristics.hair = "";
+          break;
+        case "physicalCharacteristics.heightBuild":
+          if (c.physicalCharacteristics) c.physicalCharacteristics.heightBuild = "";
+          break;
+        default: break; // an unknown/`genderPresentation` label is never cleared (spine preserved)
+      }
+    }
+  }
+
   createCharacter(req: CreateCharacterReq): GameStateView {
     // 0056 — "keep the existing character": on a CONFIRMED restart with `keepCharacter`, capture the
     // prior player's AUTHORED fields HERE (the only point the prior season still exists, before any
@@ -4742,11 +4859,21 @@ export class GameSessionAdapter implements GameSession {
     this.presence.set(meId, "living-room");
     const pr = this.presence.get(meId);
     if (pr) this.presenceBase.set(meId, pr);
+    // RC5 (#1599) — ENFORCE cast-identity coherence at the ONE point the whole assembled dossier exists
+    // (genesis skeleton + identity pin + authored body all folded), BEFORE the season-start persist so the
+    // corrected dossier is what durably lands. This is the production caller that makes the pure
+    // castingIntake validator/repair REACHED — a model-authored cast can never go live internally
+    // contradictory (Lily Evans). A deterministic floor cast is always coherent ⇒ a no-op (byte-neutral).
+    const castCoherence = this.enforceCastCoherence();
     this.persist(); // durable save (0030): a started game must survive a restart
     // 0051: attach the season-start portrait prompts — present ONLY on this response (the FE calls
     // the image API once at move-in and stores the results). Built from PUBLIC appearance facets
     // only (id/name/appearance/age/presentation) — never stats, soul, or hidden elements.
-    return { ...this.view(), portraitPrompts: this.castPortraitPrompts() };
+    return {
+      ...this.view(),
+      portraitPrompts: this.castPortraitPrompts(),
+      ...(castCoherence ? { castCoherence } : {}),
+    };
   }
 
   /**

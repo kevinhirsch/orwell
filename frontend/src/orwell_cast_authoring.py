@@ -377,16 +377,31 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     # write-back regardless, so this is for the surrounding facets — hair, features, style.)
     # `voice` (the 2026-07-11 expressive-e2e widening): the engine's seeded voice-fingerprint clause —
     # included as the BRIEF the model sharpens into a full authored idiolect (never a script to copy).
+    # S4c (RC5, #1599): thread the committed IDENTITY HEADER — `genderPresentation` (the PINNED pronoun
+    # spine the portrait + narration both read) and `vocation`/`name` — into the skeleton as IMMUTABLE
+    # context, so the authored secret bible cannot invent a DIFFERENT person: a "man" houseguest's secrets
+    # must not read "her past", and a concierge's secret must not become a bartender's (the bundle's
+    # concierge/bar, mortgage/teacher mismatches). Without the pin the model reliably drifts pronouns in the
+    # hidden prose; with it the whole dossier coheres at the SOURCE (the engine's game-start coherence gate
+    # is still the airtight belt). `genderPresentation` is a PUBLIC, Vault-free HouseguestCard facet.
     skeleton = {
         k: npc.get(k)
-        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity", "voice")
+        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity", "genderPresentation", "voice")
         if npc.get(k) is not None
     }
+    gp = npc.get("genderPresentation")
+    pronoun_rule = (
+        f" This houseguest's PINNED gender presentation is '{gp}' — every self-reference in the biography, "
+        f"secrets, true goals, and weakness MUST use the matching pronouns and never the opposite; the "
+        f"pinned identity is immutable, do not re-gender {name}."
+        if gp in ("man", "woman", "nonbinary") else ""
+    )
     user = (
         f"Houseguest to flesh out: {name}.\n"
         f"Public skeleton (build FROM this, never contradict it): {json.dumps(skeleton, ensure_ascii=False)}\n"
         f"Ground {name}'s secrets, true goals, and weakness in THIS skeleton — their specific occupation, "
-        f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else. "
+        f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else."
+        f"{pronoun_rule}\n"
         f"Write {name}'s secret bible as JSON now — their own independent life, no protagonist."
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]

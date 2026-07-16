@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   validateDossierCoherence,
   repairDossierCoherence,
@@ -6,6 +9,9 @@ import {
 } from "../../src/engine/castingIntake";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
 import { genderPresentationPhrase } from "../../src/domain/gender";
+import { composeRuntime } from "../../src/composition/runtime";
+import { FileSaveStore } from "../../src/adapters/engine/FileSaveStore";
+import { FakeClock } from "../../src/adapters/time/FakeClock";
 
 /**
  * Feature 0116 / RC5 — cast-identity coherence.
@@ -155,6 +161,83 @@ describe("validateDossierCoherence — N generated coherent casts pass clean", (
       expect(res.ok, `dossier ${i} (${genders[i % 3]}) should be coherent: ${JSON.stringify(res.contradictions)}`).toBe(true);
       expect(res.contradictions.filter((c) => c.severity === "hard")).toHaveLength(0);
     }
+  });
+});
+
+describe("RC5 — the validator is REACHED IN PRODUCTION at game start (not just the pure fn)", () => {
+  // The whole point of the wiring lane: `validateDossierCoherence`/`repairDossierCoherence` are no longer
+  // DEAD CODE — `GameSessionAdapter.createCharacter` runs them over the fully-assembled cast at every game
+  // start, BEFORE the season-start persist. This drives the ACTUAL commit path (preSeedCast → recordCastGenesis
+  // fold → createCharacter adopt), injecting the Lily-Evans-shaped contradiction through the real write-back,
+  // and asserts the COMMITTED live cast is coherent (repaired) with the pinned gender spine preserved.
+  const freshDir = (): string => mkdtempSync(join(tmpdir(), "orwell-rc5-"));
+  const liveRuntime = (): ReturnType<typeof composeRuntime> =>
+    composeRuntime({ saveStore: new FileSaveStore(freshDir()), clock: new FakeClock() });
+
+  it("game start REPAIRS a 'man' dossier whose demeanor says 'her', keeps the consistent appearance, and preserves the pin", () => {
+    const runtime = liveRuntime();
+    const sb = runtime.registry.sandboxFor("u");
+    const SEED = 424242;
+
+    // 1) Warm the floor cast (seeds each NPC's genderPresentation), then pick a binary-gendered NPC so the
+    //    "opposite pronoun" contradiction is unambiguous (a nonbinary pin isn't contradicted by a lone pronoun).
+    const warm = sb.session.preSeedCast({ seed: SEED });
+    const target = warm.house.find((c) => c.genderPresentation === "man" || c.genderPresentation === "woman");
+    expect(target, "the warmed cast should carry a binary-gendered houseguest").toBeTruthy();
+    const pin = target!.genderPresentation as "man" | "woman";
+    const oppPoss = pin === "man" ? "her" : "his"; // the CONTRADICTING self-reference
+    const samePoss = pin === "man" ? "his" : "her"; // a CONSISTENT self-reference (must be kept)
+
+    // 2) Fold the Lily-Evans-shaped prose through the REAL genesis write-back: a demeanor that self-references
+    //    the OPPOSITE gender ("her shyness" against a 'man' pin) beside a same-gender appearance ("his forearm").
+    const contradictingDemeanor = `quiet — ${oppPoss} shyness reads as aloofness`;
+    const consistentAppearance = `slight build; a tattoo runs down ${samePoss} left forearm`;
+    const gen = sb.session.recordCastGenesis({
+      npcs: [{ id: target!.id, demeanor: contradictingDemeanor, appearance: consistentAppearance }],
+    });
+    expect(gen.accepted).toBe(true);
+    expect(gen.committed).toBeGreaterThanOrEqual(1);
+
+    // 3) Finalize — adopts the warmed cast (same seed) and runs the coherence gate at game start.
+    const view = sb.session.createCharacter({
+      playerName: "Player One", seed: SEED,
+      backstory: "grew up on the coast", motivation: "to prove myself", personaArchetype: "underdog",
+    });
+
+    // The COMMITTED live cast is coherent: the contradicting demeanor was cleared (repaired), the pin stands,
+    // and the consistent appearance is kept.
+    const live = sb.session.snapshot().house!.npcs.find((n) => n.id === target!.id)!;
+    expect(live.character.genderPresentation).toBe(pin);            // spine preserved
+    expect(live.character.demeanor ?? "").not.toMatch(new RegExp(`\\b${oppPoss}\\b`, "i")); // contradiction gone
+    expect(live.character.appearance).toContain(samePoss);          // consistent self-ref kept
+
+    // And it validates clean now — the validator is genuinely REACHED (repaired in production), not dead code.
+    expect(validateDossierCoherence({
+      genderPresentation: live.character.genderPresentation,
+      demeanor: live.character.demeanor,
+      appearance: live.character.appearance,
+      biography: live.character.biography,
+      age: live.character.age,
+    }).ok).toBe(true);
+
+    // #1599 — the auto-correction is SURFACED (Vault-free) on the create result, never silently swallowed.
+    expect(view.castCoherence).toBeTruthy();
+    expect(view.castCoherence!.repaired).toBeGreaterThanOrEqual(1);
+    const hit = view.castCoherence!.houseguests.find((h) => h.id === target!.id);
+    expect(hit, "the corrected houseguest is named in the coherence summary").toBeTruthy();
+    expect(hit!.action).toBe("repaired");
+    expect(hit!.fields).toContain("demeanor");
+  });
+
+  it("a clean floor cast start reports NO coherence correction (byte-neutral no-op)", () => {
+    const runtime = liveRuntime();
+    const sb = runtime.registry.sandboxFor("u");
+    // A plain floor start (no model-authored genesis) — the deterministic cast is always coherent.
+    const view = sb.session.createCharacter({
+      playerName: "Player Two", seed: 77,
+      backstory: "small-town start", motivation: "the money", personaArchetype: "strategist",
+    });
+    expect(view.castCoherence).toBeUndefined();
   });
 });
 

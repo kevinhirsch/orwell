@@ -56,6 +56,29 @@ def test_l28b_prompt_grounds_the_hidden_life_in_the_specific_character():
     assert "player" not in user.lower() or "no protagonist" in user.lower()
 
 
+def test_s4c_pins_genderpresentation_into_the_authoring_skeleton():
+    """S4c (RC5, #1599): the committed IDENTITY HEADER — the pinned `genderPresentation` — is threaded
+    into the authoring skeleton as immutable context, so the model cannot author a secret bible that
+    re-genders the houseguest (the bundle's "man" + "her past" drift). The pin appears in the passed
+    skeleton AND the prompt spells out that every self-reference must use the matching pronouns."""
+    npc = {
+        "id": "npc:7", "vocation": "court reporter", "archetype": "underdog",
+        "genderPresentation": "man",
+    }
+    msgs = A.build_authoring_messages(npc)
+    user = msgs[1]["content"]
+    # the pin is carried in the skeleton the model builds FROM, and the pronoun rule names it explicitly.
+    assert "genderPresentation" in user
+    assert "man" in user
+    assert "pronoun" in user.lower()
+
+    # A woman-pinned houseguest gets the woman pin (not a hard-coded string); a missing pin adds no rule.
+    woman = A.build_authoring_messages({"id": "npc:8", "vocation": "welder", "genderPresentation": "woman"})[1]["content"]
+    assert "woman" in woman and "pronoun" in woman.lower()
+    no_pin = A.build_authoring_messages({"id": "npc:9", "vocation": "welder"})[1]["content"]
+    assert "pinned gender presentation" not in no_pin.lower()
+
+
 def test_l28b_prompt_carries_no_player_coupling_and_no_protagonist():
     """ANTI-SYCOPHANCY (mandate #3): an NPC's STORYLINE is authored as if the player does not exist.
     The prompt must (a) take no player identity at all, and (b) instruct the model that the cast is a
