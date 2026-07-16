@@ -2637,44 +2637,29 @@ def _engine_truth_beat(live: dict) -> str:
     )
 
 
-# The CLOSED-SET outcome fields of a beat signature (phase / ceremony state / evicted / finished) —
-# the ones whose MOVEMENT proves a progression actually committed. Deliberately EXCLUDES room/present
-# (the once-per-turn off-screen presence tick shifts those every turn without any closed-set commit),
-# so "the board's outcome state did not move" is judged only on the fields a progression would change.
-_OUTCOME_SIG_FIELDS = ("phase", "hoh", "noms", "vetoHolder", "vetoUsed", "evicted", "finished")
-
-
-def _outcome_board_unmoved(before, live) -> bool:
-    """True iff we can PROVE the closed-set outcome state did NOT move this turn (a real turn-start
-    baseline exists and every outcome field is byte-identical to it). Absent a usable baseline it
-    returns False — we cannot prove non-movement, so the caller keeps the conservative stand-down."""
-    if not isinstance(before, dict) or not isinstance(live, dict) or not before:
-        return False
-    return all(before.get(k) == live.get(k) for k in _OUTCOME_SIG_FIELDS)
-
-
 async def _detect_ungrounded_overclaim(user, text: str, tools: set) -> tuple:
     """Return ``(directive, label)`` when `text` makes a CLOSED-SET overclaim the live board does not
-    back AND no progression tool COMMITTED this turn; else ``(None, None)``. The single decision used by
-    both `enforce_grounded_draft` and its post-regenerate re-check. Fail-open (returns no directive)."""
+    back; else ``(None, None)``. The single decision used by both `enforce_grounded_draft` and its
+    post-regenerate re-check. Fail-open (returns no directive).
+
+    A progression tool firing is NOT a blanket pass (findings 3 + 4): the tool NAME alone is not proof
+    the outcome committed, and a committed progression does not license an ungrounded SIBLING claim in
+    the same text. In every case the per-claim verification below (`_narration_claims_outcome`, which is
+    phase-gated and exempts a genuine fresh crown) is the arbiter — it PASSES a board-backed outcome
+    while CATCHING an ungrounded sibling. The only unconditional stand-down is an UNREADABLE board (we
+    cannot prove a fabrication → conservatism, ADR 0005 #1)."""
     try:
         if tools & _S2A_PROGRESSION_TOOLS:
-            # A progression tool fired — it is the ONLY way a closed-set outcome commits, so the board
-            # MAY legitimately hold the outcome and the before/after identity guards own that case.
-            # But the mere tool NAME is not proof it SUCCEEDED (finding 4): a failed/refused advance
-            # still appears in tool_events while the board never moved. So STAND DOWN only unless we can
-            # PROVE the outcome state did NOT move — a real turn-start baseline that is byte-identical to
-            # the live board. When it provably did not move, the progression did not commit ⇒ fall through
-            # and verify the claim. Absent a baseline we cannot prove non-movement ⇒ keep the historical
-            # stand-down (conservative, ADR 0005 #1 — never re-block a grounded outcome on uncertainty).
+            # A progression tool fired — confirm the board is READABLE, then fall through to the SAME
+            # per-claim verification the no-tool path uses (finding 3): it passes a board-backed outcome
+            # and still catches an ungrounded sibling claim. Stand down ONLY when the board is unreadable.
             try:
-                _before_p = _LAST_BEAT_SIG.get(_desync_key(user))
                 _live_p = await _capture_beat_signature(user)
             except Exception:
-                return (None, None)  # cannot read the board → cannot prove non-movement → stand down
-            if not _outcome_board_unmoved(_before_p, _live_p):
+                return (None, None)  # cannot read the board → cannot prove a fabrication → stand down
+            if not _live_p:
                 return (None, None)
-            # else: a progression tool fired but the outcome board is provably unmoved — verify below.
+            # else: board readable — fall through and verify each claim below (moved or not).
         has_outcome = _sentence_has_closed_set_claim(text)
         has_met = bool(_MET_EVERYONE_RE.search(text or ""))
         if not has_outcome and not has_met:

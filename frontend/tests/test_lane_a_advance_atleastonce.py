@@ -184,24 +184,72 @@ def test_s1c_stall_unconverted_telemetry_source_pin():
 
 # ── S2b — a judge that could not run FAILS CLOSED on a closed-set outcome draft ─────────────────── #
 
-def test_faith_guard_down_fails_closed_on_closed_set_draft():
-    """The msg53 hole: the faithfulness judge TIMED OUT and the fabricated 'Jasmine wins Head of
-    Household!' soft-passed. A guard-down draft carrying closed-set outcome vocabulary must fail CLOSED
-    — queue a visible re-ground AND arm the forced advance — never soft-pass."""
+def _premiere_board_for(monkeypatch):
+    """A live PREMIERE board (no HOH/nom/veto/eviction) so a narrated ceremony outcome is a fabrication
+    the deterministic grounding check flags (finding 5)."""
+    async def fake_status(user=None):
+        return {"week": 1, "phase": "premiere", "hoh": None, "nominees": [],
+                "veto": {"holder": None, "used": False, "players": []}, "pending": None, "beatSeq": 3}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 1, "phase": "premiere", "finished": False,
+                "house": [{"id": "player", "status": "active", "name": "Player"}], "beatSeq": 3}
+
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+
+def test_faith_guard_down_fails_closed_on_ungrounded_closed_set_draft(monkeypatch):
+    """The msg53 hole: the faithfulness judge TIMED OUT and the fabricated 'wins Head of Household!'
+    soft-passed. An UNGROUNDED guard-down draft (the live board is in premiere — no crown committed) must
+    fail CLOSED — queue a visible re-ground AND arm the forced advance — never soft-pass."""
     chat_helpers._DESYNC_REGROUND.clear()
     chat_helpers._ADVANCE_ESCALATION.clear()
-    out = al._faith_guard_down_p0("owner", "Jasmine wins Head of Household! The house erupts.")
+    _premiere_board_for(monkeypatch)
+    out = _run(al._faith_guard_down_p0("owner", "A houseguest wins Head of Household! The house erupts."))
     assert out is True
     assert "owner" in chat_helpers._DESYNC_REGROUND, "a visible next-turn re-ground was queued"
     assert chat_helpers.advance_escalation_armed("owner"), "the forced advance was armed"
 
 
-def test_faith_guard_down_never_touches_open_set_prose():
-    """ADR 0005 #1: a guard-down draft with NO closed-set claim (pure social prose) is NOT failed
-    closed — creative/open-set narration is never held or re-grounded."""
+def test_faith_guard_down_leaves_a_board_backed_outcome_alone(monkeypatch):
+    """Finding 5 (#1664): a judge OUTAGE must NOT 'correct' a closed-set narration the LIVE board
+    actually BACKS. When the board committed the crown this turn (baseline premiere → live `hoh`), a
+    grounded 'wins Head of Household' draft is left alone — no re-ground, no forced advance."""
     chat_helpers._DESYNC_REGROUND.clear()
     chat_helpers._ADVANCE_ESCALATION.clear()
-    out = al._faith_guard_down_p0("owner", "We all settle into the kitchen and laugh about the day.")
+    chat_helpers._LAST_BEAT_SIG["owner"] = {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None, "hohName": None,
+        "noms": [], "nomNames": [], "activeNames": ["Player", "Alpha"],
+        "vetoHolder": None, "vetoHolderName": None, "vetoUsed": False,
+        "playerIsHoh": None, "playerHasVeto": None, "evicted": 0, "finished": False,
+    }
+
+    async def fake_status(user=None):
+        return {"week": 1, "phase": "hoh", "hoh": {"id": "npc:1", "name": "Alpha"}, "nominees": [],
+                "veto": {"holder": None, "used": False, "players": []}, "pending": None, "beatSeq": 5}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 1, "phase": "hoh", "finished": False,
+                "house": [{"id": "player", "status": "active", "name": "Player"},
+                          {"id": "npc:1", "status": "active", "name": "Alpha"}],
+                "player": {"id": "player"}, "beatSeq": 5}
+
+    monkeypatch.setattr(orwell_engine, "game_status", fake_status)
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+    out = _run(al._faith_guard_down_p0("owner", "A houseguest wins Head of Household! The house erupts."))
+    assert out is False
+    assert "owner" not in chat_helpers._DESYNC_REGROUND
+    assert chat_helpers.advance_escalation_armed("owner") is False
+
+
+def test_faith_guard_down_never_touches_open_set_prose():
+    """ADR 0005 #1: a guard-down draft with NO closed-set claim (pure social prose) is NOT failed
+    closed — creative/open-set narration is never held or re-grounded (short-circuits before any board
+    read, so no engine fake is needed)."""
+    chat_helpers._DESYNC_REGROUND.clear()
+    chat_helpers._ADVANCE_ESCALATION.clear()
+    out = _run(al._faith_guard_down_p0("owner", "We all settle into the kitchen and laugh about the day."))
     assert out is False
     assert "owner" not in chat_helpers._DESYNC_REGROUND
     assert chat_helpers.advance_escalation_armed("owner") is False

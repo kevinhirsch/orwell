@@ -3230,28 +3230,38 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // from the accumulated (persisted) body and appended a deterministic engine-truth beat.
                 // Re-render THIS turn's bubble from the corrected `text` so the sender window matches the
                 // persisted (reload/peer) view — never a fabrication followed by a correction. Closed-set
-                // only; the corrected body is reply text (no reasoning), so the F8 reply/reasoning channel
-                // split is preserved. Skip background streams.
+                // only. Skip background streams.
                 if (_isBg) continue;
                 try {
-                  const _rbText = (typeof json.text === 'string') ? json.text : '';
+                  const _rbReply = (typeof json.text === 'string') ? json.text : '';
                   const _rbHolder = roundHolder || currentHolder;
-                  if (_rbText && _rbHolder) {
-                    // Reset the stream buffers to the corrected body so the final render + persistence
-                    // (dataset.raw ← accumulated; final body ← roundReplyText) both use the corrected text.
-                    roundReplyText = _rbText;
-                    roundText = _rbText;
-                    accumulated = _rbText;
-                    currentAccumulated = _rbText;
+                  if (_rbReply && _rbHolder) {
+                    // Finding 2 (#1664): PRESERVE the Thinking accordion. The corrected `text` is reply
+                    // ONLY (no reasoning), so rebuild the body from a MERGED buffer — the current round's
+                    // reasoning wrapped in <think> + the corrected reply — through the SAME
+                    // processWithThinking chain the stopped-render uses. processWithThinking routes the
+                    // <think> block into the accordion and the rest into the public body, so the F8
+                    // reply/reasoning split holds (reasoning never reaches the public bubble) AND the
+                    // accordion the reloaded/peer view shows is preserved in the live view too.
+                    const _rbMerged = (roundReasoningText && roundReasoningText.trim())
+                      ? ('<think>' + roundReasoningText + '</think>\n\n' + _rbReply)
+                      : _rbReply;
+                    // roundReplyText carries the merged form so the trailing final render REBUILDS the
+                    // same accordion (its processWithThinking sees the <think>); the merged buffer's
+                    // consumers (dataset.raw / persistence) stay reply-only + scrubbed below.
+                    roundReplyText = _rbMerged;
+                    roundText = _rbReply;
+                    accumulated = _rbReply;
+                    currentAccumulated = _rbReply;
                     // The corrected body is the WHOLE turn: collapse any coalesced segments and re-render
                     // the one bubble body from it, then route the trailing final render down the legacy
                     // full-re-render path so it never re-clobbers with stale segment text.
                     _turnCoalesced = false;
                     const _rbBody = _rbHolder.querySelector('.body');
                     if (_rbBody) {
-                      _rbHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(_rbText);
+                      _rbHolder.dataset.raw = markdownModule.scrubMachineryForPersistence(_rbReply);
                       _rbBody.innerHTML = markdownModule.processWithThinking(
-                        markdownModule.squashOutsideCode(_rbText));
+                        markdownModule.squashOutsideCode(_rbMerged));
                       if (window.hljs) {
                         _rbBody.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
                       }

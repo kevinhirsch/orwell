@@ -2905,20 +2905,36 @@ def _faith_queue_reground(owner, directive) -> bool:
 # the record is set straight against engine truth, and arm the S1b lull-independent forced advance so the
 # next round is put back on the rail. Closed-set only (the cheap `_sentence_has_closed_set_claim` gate) —
 # creative/open-set prose is never touched (ADR 0005). Fail-soft: never raises.
-def _faith_guard_down_p0(owner, narration) -> bool:
-    """When the faithfulness guard is DOWN, fail CLOSED on a closed-set outcome draft (S2b). Returns
-    True iff the draft carried closed-set outcome vocabulary and we queued the corrective re-ground."""
+async def _faith_guard_down_p0(owner, narration) -> bool:
+    """When the faithfulness guard is DOWN, fail CLOSED on an UNGROUNDED closed-set outcome draft (S2b).
+    Returns True iff the draft carried an ungrounded closed-set claim and we queued the corrective
+    re-ground.
+
+    Finding 5 (#1664): a judge OUTAGE must not "correct" a closed-set narration the LIVE board actually
+    BACKS. Before queuing the visible re-ground + arming the forced advance, consult the SAME
+    deterministic board grounding the S2a belt uses (`_detect_ungrounded_overclaim`, which passes a
+    committed/board-backed outcome and flags only a genuine fabrication). Only an UNGROUNDED claim fails
+    closed; a board-backed narration is left alone."""
     try:
         if not narration or not str(narration).strip():
             return False
         from routes import chat_helpers as _ch_p0
         if not _ch_p0._sentence_has_closed_set_claim(str(narration)):
             return False  # no closed-set claim — open-set prose, nothing to fail closed on
-        # A closed-set outcome was drafted with the judge DOWN → unjudged P0. Set the record straight
-        # visibly next turn and force the model back onto the rail (never a silent soft-pass).
-        # Finding 5: capture whether the re-ground was actually RETAINED (queued now, or already in
-        # flight) — only then report the fail-closed as effective. The forced advance is armed either
-        # way (it is the other half of the correction).
+        # Finding 5: is the closed-set claim actually UNGROUNDED against the live board? The deterministic
+        # check passes a committed, board-backed outcome (a real progression this turn) and only flags a
+        # genuine fabrication — so the judge merely being down never falsely corrects a grounded outcome.
+        try:
+            _dir_chk, _ = await _ch_p0._detect_ungrounded_overclaim(owner, str(narration), set())
+        except Exception as _det_err:
+            logger.debug("[orwell] faith-guard-down grounding check skipped: %s", _det_err)
+            _dir_chk = None
+        if not _dir_chk:
+            return False  # the board BACKS the claim (or it is unverifiable) — do not fail closed on it
+        # An UNGROUNDED closed-set outcome was drafted with the judge DOWN → unjudged P0. Set the record
+        # straight visibly next turn and force the model back onto the rail (never a silent soft-pass).
+        # Finding 5 (retained): report the fail-closed as effective only when the re-ground was actually
+        # RETAINED (queued now, or already in flight). The forced advance is armed either way.
         _queued = _faith_queue_reground(owner, _FAITH_VISIBLE_DIRECTIVE)
         _already = False
         if not _queued:
@@ -2991,8 +3007,9 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:resolve-failed health-event write failed: {_rec_err}")
-            # S2b: the guard is DOWN — a closed-set outcome draft must fail CLOSED, never soft-pass.
-            _faith_guard_down_p0(owner, narration)
+            # S2b: the guard is DOWN — an ungrounded closed-set outcome draft must fail CLOSED, never
+            # soft-pass (finding 5: a board-backed narration is left alone).
+            await _faith_guard_down_p0(owner, narration)
             _llm = None
         if _llm is None:
             return
@@ -3019,9 +3036,9 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:call-failed health-event write failed: {_rec_err}")
-            # S2b: the judge could not RUN (timeout / 400) — the exact msg53 hole. A closed-set outcome
-            # draft must fail CLOSED here, never soft-pass on the bare `return`.
-            _faith_guard_down_p0(owner, narration)
+            # S2b: the judge could not RUN (timeout / 400) — the exact msg53 hole. An ungrounded closed-
+            # set outcome draft must fail CLOSED here, never soft-pass on the bare `return` (finding 5).
+            await _faith_guard_down_p0(owner, narration)
             return
         verdict = judge.verdict_from_reply(_raw, narration or "", _proj)
         if verdict is None or not verdict.is_slip:
@@ -5203,10 +5220,21 @@ async def _stream_agent_loop_impl(
     # reads of process-local state — never any new tracking. Fail-open: a hiccup leaves them None.
     _ledger_beat_seq_before = None
     _ledger_stale_before = 0
+    # Finding 6/7 (#1664): the S1b/S1c int-baseline comparison needs a turn-start beatSeq baseline for
+    # EVERY live game — owner=None (auth-off single-tenant, the owner's actual posture) included, so a
+    # SILENT advance is not miscounted as an unconverted stall. `last_beat_seq` keys via `_beat_seq_key`,
+    # resolving the canonical game-session token with no owner. This captures the ledger baseline VALUE
+    # ONLY; the OWNER-GATED observability block below (per-user telemetry, the nar1 source-pin keeps it
+    # owner-gated on purpose) is kept separate and unchanged.
+    if _is_live_game:
+        try:
+            from routes import chat_helpers as _ch_baseline
+            _ledger_beat_seq_before = _ch_baseline.last_beat_seq(owner)
+        except Exception:
+            pass
     if _is_live_game and owner:
         try:
             from routes import chat_helpers as _ch_ledger
-            _ledger_beat_seq_before = _ch_ledger.last_beat_seq(owner)
             _ledger_stale_before = _ch_ledger.stale_beat_rejections()
         except Exception:
             pass
@@ -6344,11 +6372,19 @@ async def _stream_agent_loop_impl(
                         _note_belt(owner, "advance-stall-nudge")  # gap #3 telemetry
                         _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
 
+                        # Finding 4 (#1664): a per-call flag that distinguishes a RECONCILED double-stale
+                        # (the beat moved under us — turn-terminating, never a second narration) from an
+                        # ordinary commit FAILURE (still returns False → the caller may re-prompt). A list
+                        # holder so the nested async def mutates it without a `nonlocal` declaration.
+                        _silent_advance_reconciled = [False]
+
                         async def _commit_advance_silently(_why: str) -> bool:
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
                             turn that already narrated a scene does not get a second one. Resets the
                             staleness clock on success. Fail-open: any hiccup just returns False so the
-                            caller can fall back to the (re-prompting) text nudge.
+                            caller can fall back to the (re-prompting) text nudge. On a RECONCILED
+                            double-stale it also sets ``_silent_advance_reconciled[0]`` so the visible-
+                            scene caller can END the turn instead of narrating a second scene (finding 4).
 
                             0065 Part A/B: this is an FE-ISSUED progression call, so it carries the
                             current last-seen `beatSeq` as the compare-and-swap token and a freshly-
@@ -6356,6 +6392,7 @@ async def _stream_agent_loop_impl(
                             `stale-beat` (the board moved under us) reconciles via the existing desync
                             spine — the re-ground fires next turn — and we report False so the caller
                             does NOT then blindly retry into a stomp."""
+                            _silent_advance_reconciled[0] = False  # reset per call (finding 4)
                             try:
                                 from src import orwell_engine as _oe3
                                 from routes import chat_helpers as _ch3
@@ -6391,8 +6428,14 @@ async def _stream_agent_loop_impl(
                                             _lr_adv2.record_soft_failure(
                                                 "progression:advance-double-stale", _stale_e2,
                                                 corrected="forced-advance-armed", user=owner)
-                                        except Exception:
-                                            pass
+                                        except Exception as _lr_adv2_err:
+                                            logger.debug("[orwell] double-stale soft-failure log "
+                                                         f"skipped: {_lr_adv2_err}")
+                                        # Finding 4: the board moved twice (a peer window advanced the
+                                        # beat) — RECONCILED + S1b armed. Flag it so the visible-scene
+                                        # caller ENDS the turn instead of falling through to a second
+                                        # narration. Still returns False (the other callers' contract).
+                                        _silent_advance_reconciled[0] = True
                                         return False  # board moved twice — reconciled, S1b picks it up
                                 _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
                                 # The beat moved — reset the staleness clock AND clear the
@@ -6429,7 +6472,15 @@ async def _stream_agent_loop_impl(
                                     else "decision-deliver" if _decision_undelivered
                                     else f"stall L{_level}"):
                                 break  # one scene shown, state committed — done this turn
-                            # else: silent commit failed — fall through to the re-prompt below.
+                            if _silent_advance_reconciled[0]:
+                                # Finding 4 (#1664): a double stale-409 RECONCILED the beat (a peer window
+                                # advanced it) and armed the S1b escalation — the board now agrees with the
+                                # one scene the player already saw. Do NOT fall through to the text nudge (a
+                                # SECOND narration): end the turn; the next real beat surfaces next turn.
+                                logger.info("[orwell] visible-scene turn ended after a reconciled double-"
+                                            f"stale advance (no second narration) round {round_num} user={owner}")
+                                break
+                            # else: silent commit genuinely failed — fall through to the re-prompt below.
 
                         # ── 0080 ACTIVE OVERSEER — the reasoning tier as the PRIMARY actor at the stall
                         # junction (Model D: primary + floor). STRICTLY ADDITIVE-IN-FRONT: when the
@@ -7604,19 +7655,39 @@ async def _stream_agent_loop_impl(
         # correction is durable). Closed-set only — a grounded outcome / a progression-tool turn stands
         # down (ADR 0005 #1). Fail-open: any hiccup leaves the turn exactly as it is.
         try:
-            from routes.chat_helpers import enforce_grounded_draft as _enforce_grounded
+            from routes.chat_helpers import (enforce_grounded_draft as _enforce_grounded,
+                                             strip_ungrounded_closed_set as _strip_cs)
             _s2a = await _enforce_grounded(owner, _turn_narration_full, _desync_tool_names)
             if _s2a.action == "replaced" and _s2a.text and _s2a.text.strip():
                 logger.warning("[orwell] S2a REALIGNED an ungrounded closed-set draft in-turn "
                                 "(engine-truth beat, body excised, not appended) user=%s", owner)
-                # Finding 1 (#1664): do NOT append the engine-truth beat AFTER the already-streamed
-                # fabrication — that leaves the false HOH/eviction claim in the persisted body followed
-                # by a correction. Emit a CONTROL event carrying only the beat; the chat route EXCISES
-                # the phantom closed-set sentence(s) from its own accumulated (persisted) `full_response`,
-                # appends the beat, and re-streams the corrected body. (This generator's own
-                # `full_response` diverges from the route's — it appends inter-round "\n\n" without
-                # yielding — so the excision MUST run on the route's buffer, not here.)
-                full_response += "\n\n" + _s2a.text  # keep THIS generator's buffer internally coherent
+                # Finding 1 (#1664): do NOT merely append the engine-truth beat AFTER the fabrication —
+                # that leaves the false HOH/eviction claim followed by a correction. EXCISE the phantom
+                # closed-set sentence(s) from the GENERATOR's OWN canonical buffers so every downstream
+                # consumer (the faith check, metrics, teacher escalation, history reload) sees ONLY the
+                # corrected body — the chat route repairs its OWN persisted buffer separately via the
+                # `realign_body` event below.
+                try:
+                    # (a) the merged `full_response` (feeds the empty-response fallback + student_reply).
+                    _fr_ex = await _strip_cs(owner, full_response, _desync_tool_names)
+                    full_response = ((_fr_ex.rstrip() + "\n\n" + _s2a.text).strip()
+                                     if _s2a.text else _fr_ex)
+                    # (b) `round_texts` — its join is `_turn_narration_full` (faith/roster) AND the
+                    #     history reload. Excise per round, append the beat to the last non-empty round.
+                    _rt_new = [(await _strip_cs(owner, _rt, _desync_tool_names) if _rt else _rt)
+                               for _rt in round_texts]
+                    _last_i = next((i for i in range(len(_rt_new) - 1, -1, -1)
+                                    if _rt_new[i] and _rt_new[i].strip()), None)
+                    if _last_i is not None:
+                        _rt_new[_last_i] = (_rt_new[_last_i].rstrip() + "\n\n" + _s2a.text).strip()
+                    else:
+                        _rt_new.append(_s2a.text)
+                    round_texts[:] = _rt_new  # in-place so later `round_texts` reads see the correction
+                    # refresh the narration the post-belt faith/roster checks read
+                    _turn_narration_full = "\n".join(t for t in round_texts if t)
+                except Exception as _s2a_rep_err:
+                    logger.warning(f"[orwell] S2a generator-buffer repair skipped: {_s2a_rep_err}")
+                    full_response += "\n\n" + _s2a.text  # at least keep this buffer internally coherent
                 yield f'data: {json.dumps({"type": "realign_body", "beat": _s2a.text})}\n\n'
         except Exception as _s2a_err:
             logger.warning(f"[orwell] S2a in-turn realignment belt skipped: {_s2a_err}")

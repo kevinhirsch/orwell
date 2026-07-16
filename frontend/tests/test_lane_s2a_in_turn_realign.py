@@ -157,13 +157,39 @@ def test_grounded_hoh_result_passes_when_board_has_the_event(monkeypatch):
     assert _USER not in chat_helpers._DESYNC_REGROUND
 
 
-def test_progression_tool_turn_stands_down(monkeypatch):
-    """When a PROGRESSION tool fired this turn the guard STANDS DOWN — the board may legitimately hold the
-    outcome, and the before/after identity guards own that case. Never re-block a grounded outcome."""
-    _premiere_board(monkeypatch)  # even on an empty board, a progression tool means "hands off"
-    res = _run(chat_helpers.enforce_grounded_draft(_USER, _HOH_FABRICATION, ["advanceGame"]))
+def _baseline_premiere():
+    """A turn-start baseline captured while the board was still in premiere (no HOH yet)."""
+    return {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None, "hohName": None,
+        "noms": [], "nomNames": [], "activeNames": ["Player", "Alpha"],
+        "vetoHolder": None, "vetoHolderName": None, "vetoUsed": False,
+        "playerIsHoh": None, "playerHasVeto": None, "evicted": 0, "finished": False,
+    }
+
+
+def test_progression_tool_committed_grounded_outcome_passes(monkeypatch):
+    """Findings 3+4: a progression tool fired AND the board actually COMMITTED the outcome (a fresh crown:
+    baseline had no HOH, the live board now does) → the grounded HOH claim PASSES. A progression tool is
+    not a blanket pass, but a board-backed outcome must never be re-blocked (ADR 0005 #1)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _baseline_premiere()
+    _hoh_committed_board(monkeypatch)  # phase moved premiere→hoh, a holder is now set
+    res = _run(chat_helpers.enforce_grounded_draft(
+        _USER, "The competition ends and a houseguest wins the Head of Household!", ["advanceGame"]))
     assert res.action == "pass"
-    assert res.text == _HOH_FABRICATION
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_progression_tool_does_not_license_an_ungrounded_sibling_claim(monkeypatch):
+    """Finding 3: a committed HOH crown (advanceGame fired, board moved) does NOT let an ungrounded
+    EVICTION claim in the SAME text pass — the per-claim verification still catches the sibling
+    fabrication even though a progression tool ran."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = _baseline_premiere()
+    _hoh_committed_board(monkeypatch)  # a crown really committed; NO eviction did (evicted stays 0)
+    text = ("A houseguest wins the Head of Household — and moments later the house votes to evict "
+            "another player, who is now out of the game.")
+    res = _run(chat_helpers.enforce_grounded_draft(_USER, text, ["advanceGame"]))
+    assert res.action != "pass"                 # the ungrounded eviction sibling is caught
+    assert res.text != text
 
 
 def test_creative_prose_passes_untouched_open_set(monkeypatch):
