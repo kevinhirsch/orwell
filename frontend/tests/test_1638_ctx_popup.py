@@ -113,10 +113,12 @@ def test_content_is_preserved():
     assert ">Message Stats</div>" in SRC
     for row in ("Input", "Output", "Total", "Speed", "Cost"):
         assert f'<span class="ctx-label">{row}</span>' in SRC, f"stats row lost: {row}"
-    # context-window: the bar chart + the Compact-context button survive.
-    assert ">Context Window</div>" in SRC
-    assert "ctx-bar-fill" in SRC
-    assert 'class="ctx-compact-btn"' in SRC
+    # context-window: the bar chart + the Compact-context button survive — scoped to THIS
+    # handler's region so preservation can't pass on markup that lives elsewhere.
+    ctx = _handler_region("ctxRing", "_owCtxPop")
+    assert ">Context Window</div>" in ctx
+    assert "ctx-bar-fill" in ctx
+    assert 'class="ctx-compact-btn"' in ctx
 
 
 # ── 4. the frame CSS folds to .ow-popover; inner-content rules survive (whitespace-safe) ─
