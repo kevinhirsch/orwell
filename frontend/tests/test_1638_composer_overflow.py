@@ -95,12 +95,15 @@ def test_update_plus_dot_recomputes_from_item_state():
     )
 
 
-def test_g13_empty_chevron_cascade_is_builder_driven():
+def test_g13_empty_chevron_cascade_is_builder_driven_and_reversible():
     assert "function refreshOverflowChevron()" in APP
     refresh = APP[APP.index("function refreshOverflowChevron()"):]
     refresh = refresh[: refresh.index("\n  window._updateOverflowPlusDot")]
-    assert "buildOverflowItems().length" in refresh and "plusBtn.style.display = 'none'" in refresh, (
-        "refreshOverflowChevron hides the '+' trigger (hide-only) when the builder yields zero items"
+    # REVERSIBLE, not hide-only: hide the '+' when the builder yields zero items AND restore it when
+    # the build is non-empty (a later settings-pass TTS enable / full-build responsive collapse must
+    # un-hide it, or the menu is permanently unreachable — the Greptile/CodeRabbit bug).
+    assert "buildOverflowItems().length" in refresh and "count === 0 ? 'none' : ''" in refresh, (
+        "refreshOverflowChevron must hide the '+' on an empty build and RESTORE it on a non-empty one"
     )
 
 

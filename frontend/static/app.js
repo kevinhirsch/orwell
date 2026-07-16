@@ -1964,7 +1964,12 @@ function initializeEventListeners() {
     if (!gameBuild) {
       _OVERFLOW_COLLAPSIBLE_IDS.forEach(id => {
         const btn = el(id);
-        if (!btn || !btn.classList.contains('toolbar-collapsed')) return;
+        // Only a button that is genuinely collapsed FOR SPACE folds in. A feature/Appearance-hidden
+        // button (inline display:none or [hidden]) can also carry .toolbar-collapsed — checkToolbarOverflow
+        // collapses by width and ignores visibility — but folding it in would advertise a dead lever AND
+        // wrongly inflate the empty-chevron count. `.toolbar-collapsed` hides via CSS (not inline style),
+        // so a normally-collapsed button keeps style.display==='' and is unaffected by this guard.
+        if (!btn || btn.hidden || btn.style.display === 'none' || !btn.classList.contains('toolbar-collapsed')) return;
         const svg = btn.querySelector('svg');
         items.push({
           id: 'ovf-mirror-' + id,
@@ -2017,16 +2022,19 @@ function initializeEventListeners() {
     try { anyActive = buildOverflowItems().some(it => it && it.checked); } catch (_) {}
     plusBtn.classList.toggle('has-active', anyActive);
   }
-  // G13 empty-chevron cascade (hide-only — the G3 Tools-chevron rule): a launcher whose menu builds
-  // ZERO items hides itself. Builder-driven now that the overflow menu has no static DOM (un-hiding
-  // stays the user's Appearance UI-vis toggle's job, which targets .overflow-wrapper — a different
-  // element — so this never fights it).
+  // G13 empty-chevron cascade (the G3 Tools-chevron rule), builder-driven now that the overflow menu
+  // has no static DOM: a launcher whose menu builds ZERO items hides; one that builds any RESTORES.
+  // It MUST be reversible — a later non-empty build (the settings pass enabling TTS, or a full-build
+  // responsive collapse folding in a mirror) has to un-hide the "+", or the menu becomes permanently
+  // unreachable. Setting the button's OWN inline display never fights the Appearance UI-vis toggle for
+  // the "+": that toggle targets `.overflow-wrapper` (the PARENT), a different element — a hidden
+  // wrapper hides the button regardless of the button's own display, and a visible wrapper defers to it.
   function refreshOverflowChevron() {
     const plusBtn = el('overflow-plus-btn');
     if (!plusBtn) return;
     let count = 0;
     try { count = buildOverflowItems().length; } catch (_) { count = 0; }
-    if (count === 0) plusBtn.style.display = 'none';
+    plusBtn.style.display = count === 0 ? 'none' : '';
   }
   window._updateOverflowPlusDot = updatePlusDot;
   window._refreshOverflowChevron = refreshOverflowChevron;

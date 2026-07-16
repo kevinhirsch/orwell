@@ -147,9 +147,10 @@ def test_menu_trigger_cascade_is_hide_only_and_rerun_after_async_passes():
     # trigger (hide-only) when buildOverflowItems() yields zero items.
     refresh = js[js.index("function refreshOverflowChevron()"):]
     refresh = refresh[: refresh.index("\n  window._updateOverflowPlusDot")]
-    assert "buildOverflowItems().length" in refresh and "plusBtn.style.display = 'none'" in refresh, (
-        "refreshOverflowChevron must hide the overflow '+' (hide-only) when the builder yields zero "
-        "items — the G13 empty-chevron cascade, driven by the builder."
+    assert "buildOverflowItems().length" in refresh and "count === 0 ? 'none' : ''" in refresh, (
+        "refreshOverflowChevron must be REVERSIBLE — hide the overflow '+' when the builder yields "
+        "zero items and RESTORE it when the build is non-empty (not hide-only, else a later non-empty "
+        "build leaves the menu permanently unreachable). The G13 empty-chevron cascade, builder-driven."
     )
     # Both async passes can hide entries — the cascade re-runs after each.
     feats = js[js.index("window._initFeaturesReady = ("):]
@@ -226,7 +227,9 @@ def test_browser_smoke_carries_the_g13_walk():
     assert "every game-trim'd launcher stays invisible" in smoke
     assert "is removed from the DOM" in smoke
     assert "hides its launcher for the player" in smoke
-    assert "the cascade is hide-only, never over-hides" in smoke
+    # #1638: the composer overflow "+" cascade is now builder-driven AND reversible (hide when the
+    # builder is empty, restore when non-empty) — the old "hide-only" phrasing no longer applies.
+    assert "emptiness-driven + reversible" in smoke
 
 
 def test_smoke_derives_the_dropped_list_from_the_builds_source():

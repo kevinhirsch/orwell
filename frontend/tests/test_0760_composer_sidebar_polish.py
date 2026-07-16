@@ -141,7 +141,8 @@ def test_cascade_hides_the_now_empty_chevron():
     cascade = cascade[: cascade.index("\n  window._updateOverflowPlusDot")]
     assert "overflow-plus-btn" in cascade
     assert "buildOverflowItems().length" in cascade
-    assert "plusBtn.style.display = 'none'" in cascade
+    # reversible hide/restore (not hide-only): a later non-empty build must un-hide the chevron.
+    assert "count === 0 ? 'none' : ''" in cascade
 
 
 def test_composer_first_class_paperclip_still_wired_to_file_input():
