@@ -99,9 +99,11 @@ AXE_OPTIONS = {
 # Populated from the first ENGINE-STAGED run on main (2026-07-11, engine-staged + FINISHED season).
 # Every entry below is a REAL rendered contrast finding for the lead to file — NOT a false positive.
 XFAIL = {
-    # The decision-card hint ("Select N houseguests to enable Confirm") renders as near-black text on
-    # the dark decision card — 1.30:1, effectively invisible. The worst finding; dark-on-dark.
-    "#1375-a": "contrast:orwell-decision-card-hint:span#orwell-decision-card-hint.odec-hint",
+    # #1375-a REMOVED (#1644): the decision-card disabled-Confirm hint no longer hard-codes white ink.
+    # It now follows its host surface (body.theme-frosted .odec .odec-hint { color: inherit } in
+    # orwellDecision.js) — DARK #16191f on the light OrwellNotice kit glass (the common path the
+    # engine-staged matrix renders), LIGHT over the bare-mount dark edge — so the finding clears AA
+    # and the gate ratchets it to a hard assertion. (Stale description had it as "dark-on-dark".)
     # The sidebar "New Chat" label — 3.43:1 dark text on the translucent sidebar glass.
     "#1375-e": "contrast:sidebar:span.grow",
     # The sidebar "Orwell" brand title — 3.48:1 dark text on the translucent sidebar glass.
