@@ -266,6 +266,10 @@ def _derive_fail_class(*, ok: bool, error: Any, text: str, tool_calls: Any,
         if m:
             return "4xx" if m.group(1)[0] == "4" else "5xx"
         return "error"
+    # No error payload, but the caller still reported failure (ok=False) — a failed call must
+    # always carry a machine-readable triage class, even with a non-empty / length-limited body.
+    if not ok:
+        return "error"
     # No error payload — but a vanished completion is NOT a success (the S6a core fix).
     if not (text or "").strip() and not tool_calls and str(finish_reason or "") != "length":
         try:
