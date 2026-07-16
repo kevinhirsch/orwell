@@ -441,17 +441,24 @@ def test_maximize_control_removed_from_all_windows():
     assert ".ow-max" not in CSS
 
 
-def test_green_dock_light_only_on_dockable_windows():
-    # #709: the GREEN macOS traffic light is the DOCK toggle, presented in the slot the
-    # removed maximize/zoom light used to hold — but it is a real, functional control
-    # (dock → control-room gadget, and back), NOT a maximize button. It exists ONLY on
-    # dockable windows: the kit builds the .ow-dock button solely under `if (this.o.dockable)`,
-    # so a non-dockable window renders red + yellow only (no green disc, no empty slot).
+def test_green_dock_light_always_rendered_greyed_when_not_dockable():
+    # #709 + 2026-07-16 (Apple Genius rendered-parity, the traffic-light-cluster nit): the
+    # GREEN macOS traffic light is the DOCK toggle, presented in the slot the removed
+    # maximize/zoom light used to hold — a real, functional control (dock -> control-room
+    # gadget, and back), NOT a maximize button, on dockable windows. Real macOS renders the
+    # CONSTANT 3-light cluster with inert lights GREYED, never omitted — so the kit now
+    # ALWAYS builds the .ow-dock button; on a non-dockable window it is disabled + greyed
+    # (no empty slot, no omission), mirroring the yellow minimize light's own disabled
+    # placeholder pattern.
     win = _read("static", "js", "orwellWindow.js")
-    # dockable-only gating: the .ow-dock button is created inside the dockable guard.
+    # the .ow-dock button is created UNCONDITIONALLY (not gated behind `if (this.o.dockable)`).
     # (the .ow-dock class may carry a trailing `tap-exempt` so the kit's coarse-pointer
     # sizing escapes the global 44px tap floor — mobile titlebar-control proportion fix.)
-    assert re.search(r"if \(this\.o\.dockable\)\s*\{[^}]*className = 'ow-dock\b", win, re.S)
+    assert re.search(r"className = 'ow-dock\b", win)
+    # dockable branches to the functional toggle; non-dockable disables the placeholder.
+    assert re.search(r"if \(this\.o\.dockable\)\s*\{[^}]*toggleDock", win, re.S)
+    assert re.search(r"aria-label',\s*'Zoom \(unavailable\)'", win)
+    assert re.search(r"else\s*\{[^}]*b\.disabled = true;", win, re.S)
     # green disc, focused, in the maximize slot (order 2, rightmost of the three lights).
     assert re.search(r"\.ow-window\.ow-focused .ow-controls \.ow-dock\s*\{[^}]*#28c840", CSS, re.S)
     assert re.search(r"\.ow-controls \.ow-dock\s*\{ order: 2", CSS)
@@ -468,19 +475,24 @@ def test_green_dock_light_only_on_dockable_windows():
     # a11y: the dock toggle carries an aria-label, and the lights get a focus-visible ring.
     assert "aria-label" in re.search(r"className = 'ow-dock[^']*';(.*?)controls\.appendChild", win, re.S).group(1)
     assert re.search(r"\.ow-controls \.ow-dock:focus-visible \{[^}]*outline:", CSS, re.S)
+    # the greyed/inert placeholder shares the SAME disabled-disc rule as the yellow light,
+    # and the legacy (non-frosted) chrome hides it (that 3-light treatment is frosted-only).
+    assert re.search(r"\.ow-controls \.ow-min\[disabled\],\s*body\.theme-frosted \.ow-controls \.ow-dock\[disabled\]", CSS, re.S)
+    assert re.search(r"body:not\(\.theme-frosted\) \.ow-controls \.ow-dock\[disabled\] \{ display: none; \}", win)
 
 
-def test_two_light_cluster_close_and_min():
-    # The cluster is close (red) + minimize (yellow) on every window, plus the GREEN dock
-    # light on dockable windows (see test_green_dock_light_only_on_dockable_windows). The min
-    # button is built unconditionally so a closable-only window (e.g. Settings) still shows
-    # red + greyed-yellow, not a lone red — the capability only gates enabled-ness.
+def test_three_light_cluster_close_min_dock():
+    # The cluster is close (red) + minimize (yellow) + dock/zoom (green) on EVERY window —
+    # the constant macOS 3-light cluster (2026-07-16). The min AND dock buttons are both
+    # built unconditionally so a closable-only, non-dockable window (e.g. Settings) still
+    # shows red + greyed-yellow + greyed-green, never a lone red or a 2-light cluster — the
+    # capability only gates enabled-ness, never presence.
     win = _read("static", "js", "orwellWindow.js")
     assert "const canMin = this.o.minimizable && !this._docked;" in win
     assert "if (!canMin) { b.disabled = true; }" in win
-    # the disabled yellow light is greyed/inert (a visible placeholder).
-    assert re.search(r"\.ow-controls \.ow-min\[disabled\]", CSS, re.S)
-    # close + min keep their traffic-light order; dock (green) takes the third slot.
+    # the disabled yellow AND green lights are greyed/inert (visible placeholders).
+    assert re.search(r"\.ow-controls \.ow-min\[disabled\],\s*body\.theme-frosted \.ow-controls \.ow-dock\[disabled\]", CSS, re.S)
+    # close + min + dock (green) keep their traffic-light order.
     assert re.search(r"\.ow-controls \.ow-close \{ order: 0", CSS)
     assert re.search(r"\.ow-controls \.ow-min   \{ order: 1", CSS)
     assert re.search(r"\.ow-controls \.ow-dock  \{ order: 2", CSS)

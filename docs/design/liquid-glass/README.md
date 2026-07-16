@@ -59,7 +59,9 @@ surface, read this first.
   white glyph (Apple's usage-correct ref); everything else colorless.
 - **Adaptive legibility (`adaptiveGlass.js`):** size-dependent, per Apple —
   - **Small** bars/tiles (composer, gadget cards, dock) stay **clear** and **flip the symbol** dark↔light
-    by backdrop luminance (linear Y, flip at 0.36).
+    by backdrop luminance (linear Y, flip at **0.22** — retuned from the reference doc's 0.36, which fired
+    far too late and washed out over a perceptually half-bright backdrop; see `adaptiveGlass.js`
+    `INK_THRESHOLD`).
   - **Large** surfaces (sidebars, windows, modals, menus) **don't flip** (too big — distracting);
     the glass **mutes** adaptively (a stronger veil over bright) to keep the light `--fg` symbols legible.
   - Only sanctioned darkening is the Clear variant's 35% dimmer over bright media (not used — our

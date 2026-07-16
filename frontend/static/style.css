@@ -21025,10 +21025,13 @@ body.theme-frosted .ow-controls .ow-dock:focus-visible {
 }
 /* the 44px hit region stays (inherited ::after); hover lift is gone (lights don't grow) */
 body.theme-frosted .ow-controls button:hover { transform: none; box-shadow: none; }
-/* A non-minimizable window's YELLOW light is greyed (dimmed, no glyph, not clickable —
-   the macOS greyed/inactive look): it's always rendered so the cluster keeps its shape,
-   so the disabled state shares this rule. (The green/maximize light was removed.) */
-body.theme-frosted .ow-controls .ow-min[disabled] {
+/* A non-minimizable window's YELLOW light, and a non-dockable window's GREEN/zoom light,
+   are both greyed (dimmed, no glyph, not clickable — the macOS greyed/inactive look):
+   each is always rendered so the cluster keeps its constant 3-light shape (2026-07-16,
+   Apple Genius rendered-parity — real macOS greys inert lights, never omits them), so the
+   disabled state shares this ONE rule for both slots. */
+body.theme-frosted .ow-controls .ow-min[disabled],
+body.theme-frosted .ow-controls .ow-dock[disabled] {
   background: color-mix(in srgb, var(--fg, #fff) 18%, transparent) !important;
   opacity: 0.5; cursor: default; pointer-events: none; color: transparent !important;
 }
@@ -24233,12 +24236,18 @@ body.theme-frosted .cp-popover {
    title + the ⠿ rearrange / ⇄ swap / × close controls) sits over the DARK app, NOT over
    light glass — so the earlier dark-ink fold rendered the whole header BLACK-on-black /
    illegible (owner report). The header takes the app's LIGHT --fg ink with a dark halo
-   (legible over the dark/transparent container), matching the rest of the dark chrome. */
+   (legible over the dark/transparent container), matching the rest of the dark chrome.
+   RAIL-HEAD HALO (Apple Genius rendered-parity, 2026-07-16): the halo was the heavy
+   `0 1px 2px .55` double-radius smudge — well past the corpus's own thin dark-backstop
+   floor (`--ow-glass-text-shadow`'s `prefers-reduced-motion` value, `0 1px 1px rgba(0,0,0,.4)`,
+   ~L20050; also ADAPTIVE_LEGIBILITY_REFERENCE.md §2c's "thin text-shadow… backstop"). Thin to
+   that same established floor value — same dark-under-light polarity (kept, per the header's
+   over-dark-app context above), just a lighter halo instead of a smudge. */
 body.theme-frosted .gadget-rail-head,
 body.theme-frosted .gadget-rail-head *,
 body.theme-frosted .gadget-rail-title {
   color: var(--fg, #e8eef2) !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.55) !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.4) !important;
 }
 /* the active "Rearrange" toggle was the theme ACCENT (red) — colorless glass chrome carries
    no accent hue; signal the pressed state with full-opacity light ink instead. */

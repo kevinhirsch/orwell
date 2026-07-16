@@ -68,7 +68,9 @@ Liquid Glass is **a single floating navigation/controls layer** above content. T
 ### 4. Adaptive legibility — ink polarity vs. background
 Per `ADAPTIVE_LEGIBILITY_REFERENCE.md`:
 - **Small** elements (bars, tiles, composer, dock) **flip light↔dark as a unit** by backdrop
-  luminance — symbols mirror the flip to maximize contrast (the FE flips at linear-Y ≈ **0.36**).
+  luminance — symbols mirror the flip to maximize contrast (the reference doc cites linear-Y ≈
+  0.36, but the shipped FE retuned this to **0.22** — `adaptiveGlass.js` `INK_THRESHOLD` — since
+  0.36 fired far too late and washed out over a perceptually half-bright backdrop).
 - **Large** surfaces (sidebars, windows, modals, menus) **do NOT flip** — too big, the
   transition would distract. They adapt the *material* (a stronger veil over bright content) to
   keep the light symbols legible.

@@ -28,7 +28,9 @@ transcripts). Web-replication sources are explicitly marked **[non-authoritative
   `feDisplacementMap` (refraction/lensing) + a rim-light specular. (2) **Legibility**: emulate
   vibrancy with `mix-blend-mode: luminosity` (or `plus-lighter` for the "frost") on the label layer,
   AND an adaptive black/white driver — `contrast-color()` where supported (Safari 26+), else a
-  measured backdrop-luminance JS flip (sRGB-linear Y, threshold ≈ 0.36) toggling a CSS class.
+  measured backdrop-luminance JS flip (sRGB-linear Y, threshold ≈ 0.36 in this reference — the
+  shipped `adaptiveGlass.js` retuned this to **0.22**; 0.36 fired far too late and washed out,
+  see the implementation note below §2b) toggling a CSS class.
 - **Accessibility is non-negotiable and overrides the optics**: Reduce Transparency → frostier/near
   opaque; Increase Contrast → elements go **predominantly black or white with a contrasting border**;
   Reduce Motion → kill the elastic/specular animation. Honor `prefers-reduced-transparency`,
@@ -212,7 +214,11 @@ bar.classList.toggle('on-dark',  relLuma(r,g,b) <= 0.36); // -> light symbols
 ```
 (`Y > 0.36` is the commonly-cited flip point; it aligns better with perception than 0.5. Source:
 `[WEB‡]` search synthesis re: luminance Y / APCA, and `[WEB‡]` Lea Verou / CSS-Tricks
-"Approximating contrast-color()", https://css-tricks.com/approximating-contrast-color-with-other-css-features/.)
+"Approximating contrast-color()", https://css-tricks.com/approximating-contrast-color-with-other-css-features/.
+**Implementation note (2026-07-16):** the shipped `frontend/static/js/adaptiveGlass.js` retuned
+this to `INK_THRESHOLD = 0.22` — 0.36 fired far too late in practice, so surfaces over a
+perceptually half-bright backdrop kept light ink and washed out. 0.22 is deliberate, not a
+regression to "fix" back to 0.36.)
 
 ### 2c. What the best web "liquid glass" builds actually do for legibility
 Honest answer from the field: **they mostly don't fully solve it** — the optics are easy, vibrancy is
