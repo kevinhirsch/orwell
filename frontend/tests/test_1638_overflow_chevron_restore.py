@@ -132,9 +132,13 @@ def test_overflow_chevron_empty_then_restored_then_reopens(_app):
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         page.goto(_app, wait_until="domcontentloaded")
+        # window.OrwellMenuKit can exist BEFORE attach() finishes wiring the trigger — require the
+        # trigger's aria-haspopup='menu' (which attach() sets last) before probing/clicking.
         page.wait_for_function(
             "() => document.getElementById('overflow-plus-btn') "
-            "&& typeof window._refreshOverflowChevron === 'function' && window.OrwellMenuKit"
+            "&& typeof window._refreshOverflowChevron === 'function' "
+            "&& window.OrwellMenuKit "
+            "&& document.getElementById('overflow-plus-btn').getAttribute('aria-haspopup') === 'menu'"
         )
         res = page.evaluate(_HARNESS)
         browser.close()

@@ -1846,15 +1846,24 @@ function initializeEventListeners() {
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
     const _PLAN_TOGGLE_ICON =
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+    // Track the live menu instance so _open() TOGGLES (close on re-click) instead of stacking a 2nd
+    // .ow-popover. The kit's outside-click seat treats the anchor (planBtn) as "inside", so re-clicking
+    // the toggle does NOT dismiss the open menu — the toggle must be owned here. (attach() has this
+    // built in, but the plan button has dual behavior — it opens the menu ONLY when _hasPlan(), else it
+    // falls through to the normal plan-mode toggle — so it can't use attach()'s always-toggle click.)
+    let _planMenu = null;
+    const _planMenuOpen = () => !!(_planMenu && typeof _planMenu.isOpen === 'function' && _planMenu.isOpen());
     function _open() {
       if (!(window.OrwellMenuKit && typeof window.OrwellMenuKit.open === 'function')) return;
+      if (_planMenuOpen()) { try { _planMenu.close('toggle'); } catch (_) {} _planMenu = null; return; }
       const planChk = el('plan-toggle');
       const on = !!(planChk && planChk.checked);
-      window.OrwellMenuKit.open({
+      _planMenu = window.OrwellMenuKit.open({
         anchor: planBtn,
         placement: 'top',
         align: 'start',
         ariaLabel: 'Plan options',
+        onClose: () => { _planMenu = null; },   // any close path (select / outside / Escape) clears it
         items: [
           { id: 'plan-show', label: 'Show plan', icon: _PLAN_SHOW_ICON, onSelect: () => {
               const txt = window._getStoredPlan ? window._getStoredPlan() : '';

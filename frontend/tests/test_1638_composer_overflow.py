@@ -133,3 +133,9 @@ def test_plan_menu_migrated_to_the_kit():
     assert "overflow-menu plan-menu" not in plan, (
         "the plan menu must no longer build bespoke .overflow-menu / .overflow-menu-item DOM"
     )
+    # It must TOGGLE, not stack: track the live instance + close it on re-open (the kit treats the
+    # anchor as "inside", so a re-click won't dismiss it — without this a 2nd .ow-popover stacks).
+    assert "_planMenu" in plan and "_planMenu.close(" in plan, (
+        "the plan menu must track its live instance and close it on re-click (toggle), never mint a "
+        "duplicate popover on the anchor's re-click"
+    )
