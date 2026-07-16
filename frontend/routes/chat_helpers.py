@@ -1162,6 +1162,18 @@ def _defer_fold(user, fn, args: tuple, kwargs: dict, desc: str) -> None:
         logger.error(
             "[orwell] deferred-fold queue overflow for user=%s -- dropped the OLDEST queued fold "
             "(%s); sustained contention is outrunning retry capacity", user, dropped.get("desc"))
+        # RC6 S6b (#1599): this is a REAL, uncounted fold-bearing drop — a recordInteraction/deal/trust
+        # belt whose only record of a hidden relationship impact just evaporated (mandate #4 / I4), and
+        # it showed staleRejections:0 because no `_handle_stale_beat` runs for a queue-overflow drop.
+        # Count it AND fire the RED-eligible `sync:dropped-fold` health event so the loss is never
+        # invisible. Fail-soft — telemetry never breaks the reconcile machinery.
+        try:
+            from src import orwell_sync_ledger as _sl
+            _sl.note_stale_rejection(
+                user, dropped_fold=True,
+                cause="deferred-fold queue overflow (retry capacity outrun)")
+        except Exception:
+            pass
     else:
         logger.info("[orwell] deferred a fold-bearing back-fill after a double stale-409 (%s) for "
                     "later retry user=%s", desc, user)
@@ -1190,6 +1202,16 @@ async def _drain_deferred_folds(user) -> None:
                 continue
             logger.warning("[orwell] deferred fold retry (%s) failed non-stale, dropping: %s user=%s",
                             entry.get("desc"), _exc_detail(e), user)
+            # RC6 S6b (#1599): a deferred fold that dies on a NON-stale error is dropped for good — the
+            # scene's only hidden-impact record is lost and nothing else will retry it. Count it + fire
+            # the RED-eligible `sync:dropped-fold` so the loss surfaces instead of a bare WARN. Fail-soft.
+            try:
+                from src import orwell_sync_ledger as _sl
+                _sl.note_stale_rejection(
+                    user, dropped_fold=True,
+                    cause="deferred-fold non-stale terminal drop (unretryable)")
+            except Exception:
+                pass
             continue
         _refresh_beat_seq(user, result if isinstance(result, dict) else {})
         logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)

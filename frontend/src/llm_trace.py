@@ -217,6 +217,75 @@ def _clip(s: str, cap: int = 2000) -> str:
     return s if len(s) <= cap else s[:cap] + f"… [+{len(s) - cap} chars]"
 
 
+# ── S6a (#1599 item 2): llmIo.ok must mean USABLE CONTENT, not HTTP 200 ──────────────
+# A record is a FAILURE — regardless of the ``ok`` the caller passed — when the completion
+# carries no usable content (empty text AND no tool/native call AND finish_reason != "length")
+# OR when the call errored / timed out. The judge's TimeoutError was logged ok:true with a
+# 12001ms duration and empty text precisely because the streaming record keyed ok solely on the
+# presence of an ``error`` event; a 200-but-vanished completion slipped through as a success. The
+# derived ``failClass`` (timeout | empty | 4xx | 5xx | error) is the machine-readable triage token.
+_TIMEOUT_MARKERS = ("timeout", "timed out", "readtimeout", "connecttimeout",
+                    "read timed out", "wait_for", "deadline")
+# An EMPTY completion that took this long was almost certainly a timeout that returned nothing,
+# not a fast empty "stop" — class it as a timeout so the judge's 12001ms empty record reads true.
+_SLOW_EMPTY_TIMEOUT_MS = 10000
+_STATUS_RE = re.compile(r"\b([45]\d\d)\b")
+
+
+def _derive_fail_class(*, ok: bool, error: Any, text: str, tool_calls: Any,
+                       finish_reason: Any, duration_ms: int,
+                       explicit: Optional[str]) -> Optional[str]:
+    """Return the failure class for a record, or ``None`` when it is a genuine success.
+
+    Precedence: an explicit class the caller derived (e.g. the timeout it caught) always wins.
+    Then an ``error`` payload is classified by shape (timeout / 4xx / 5xx / error). Finally a
+    200-but-unusable completion (empty text, no tool/native call, not a length cutoff) is a
+    failure — ``timeout`` if it was also slow, else ``empty``. A completion carrying real text,
+    a tool call, or a length cutoff is usable ⇒ ``None``."""
+    if explicit:
+        return str(explicit)
+    if error:
+        status = None
+        if isinstance(error, dict):
+            status = error.get("status") or error.get("status_code") or error.get("code")
+            msg = str(error.get("message") or error.get("type") or error)
+        else:
+            msg = str(error)
+        low = msg.lower()
+        # HTTP status is the MORE authoritative signal than a reason-phrase word — classify it FIRST so
+        # a "504 Gateway Timeout" (or any 5xx/4xx whose phrase happens to contain "timeout") reads as its
+        # HTTP class, not the blunt "timeout" (Greptile P1). Only when NO HTTP status is present anywhere
+        # (explicit field or in the message) does a transport/read-timeout word decide the class.
+        try:
+            s = int(status)
+            if 400 <= s < 500:
+                return "4xx"
+            if 500 <= s < 600:
+                return "5xx"
+        except (TypeError, ValueError):
+            pass
+        m = _STATUS_RE.search(low)
+        if m:
+            return "4xx" if m.group(1)[0] == "4" else "5xx"
+        if any(marker in low for marker in _TIMEOUT_MARKERS):
+            return "timeout"
+        return "error"
+    # No error payload — but a vanished completion is NOT a success (the S6a core fix). This runs
+    # BEFORE the generic ok=False fallback so a vanished completion classes as the more specific
+    # `empty` / `timeout`, even when the caller also flagged ok=False — never the blunt `error`.
+    if not (text or "").strip() and not tool_calls and str(finish_reason or "") != "length":
+        try:
+            slow = int(duration_ms) >= _SLOW_EMPTY_TIMEOUT_MS
+        except (TypeError, ValueError):
+            slow = False
+        return "timeout" if slow else "empty"
+    # No error payload and the body IS usable-ish, but the caller still reported failure (ok=False) —
+    # a failed call must always carry a machine-readable triage class (last-resort generic `error`).
+    if not ok:
+        return "error"
+    return None
+
+
 def _system_and_last_user(messages: List[Dict]) -> tuple[str, str]:
     sys_txt, last_user = "", ""
     for m in messages or []:
@@ -247,6 +316,7 @@ def record_llm_call(
     duration_ms: int = 0,
     call_class: Optional[str] = None,
     user: Optional[str] = None,
+    fail_class: Optional[str] = None,
 ) -> None:
     """Persist one full request→response record (ring + on-disk archive).
 
@@ -290,10 +360,20 @@ def record_llm_call(
         # context → obs context). None ⇒ userless/system ⇒ the shared "default" rollup bucket.
         eff_user = _resolve_call_user(user)
         ts = int(time.time() * 1000)
+        # S6a (#1599 item 2): ``ok`` must mean USABLE CONTENT — derive the true disposition from the
+        # response, never from HTTP-200-ness alone. A vanished/empty completion or a timeout flips a
+        # caller-passed ok=True to failed, and every failure carries a machine-readable ``failClass``.
+        _fail_class = _derive_fail_class(
+            ok=bool(ok), error=resp.get("error"), text=resp.get("text") or "",
+            tool_calls=resp.get("toolCalls") or [], finish_reason=resp.get("finishReason"),
+            duration_ms=int(duration_ms), explicit=fail_class)
+        eff_ok = bool(ok) and _fail_class is None
         record = {
             "ts": ts,
             "kind": kind,
-            "ok": bool(ok),
+            "ok": eff_ok,
+            # None on a genuine success; the triage token (timeout|empty|4xx|5xx|error) on a failure.
+            "failClass": _fail_class,
             "durationMs": int(duration_ms),
             "model": model,
             # Top-level triage fields (2026-07-13): the terminal stop reason (also inside
@@ -332,12 +412,16 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict, user: Optional[st
         kind_label = f"{record['kind']}[{cls}]" if cls else str(record["kind"])
         finish = record.get("finishReason") or resp.get("finishReason")
         finish_suffix = f" · finish={finish}" if finish else ""
+        # S6a: surface the failure class in the glanceable line so an operator sees WHY it failed
+        # (a 200-but-empty / timeout is no longer an indistinguishable "FAILED").
+        fail_class = record.get("failClass")
+        fail_suffix = f" · fail={fail_class}" if fail_class else ""
         log_rings.LLMIO.push({
             "ts": record["ts"],
             "level": "INFO" if record["ok"] else "ERROR",
             "logger": "llm-io",
             "msg": f"{kind_label} · {record['model']} {verb} {record['durationMs']}ms · "
-                   f"in {in_chars} out {out_chars} chars{finish_suffix}{tool_suffix}",
+                   f"in {in_chars} out {out_chars} chars{finish_suffix}{fail_suffix}{tool_suffix}",
             "args": req_summary,
             # #1599 WI2 — structured triage fields for the per-class health rollup (kept beside the
             # glanceable msg so the rollup never has to parse it): the call class, terminal stop
@@ -346,6 +430,7 @@ def _push_ring(record: dict, messages: List[Dict], resp: dict, user: Optional[st
             "kind": record["kind"],
             "callClass": cls,
             "finishReason": finish,
+            "failClass": fail_class,
             "ok": bool(record["ok"]),
             "user": user,
             "result": res_summary,

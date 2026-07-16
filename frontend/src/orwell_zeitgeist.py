@@ -142,6 +142,36 @@ async def capture_zeitgeist(research_fn: ResearchFn, llm_fn: LlmFn, write_fn: Wr
 
 # ── live wiring (best-effort, background; graceful no-op when no model) ─────────────
 
+# RC6 S6c: transport/provider signatures in a raw exception message — a CONFIRMED provider outage,
+# not a local bug. Kept narrow so a parsing/programming error never trips a false provider alarm.
+_SEARCH_TRANSPORT_MARKERS = (
+    "connection refused", "econnrefused", "connection reset", "connection aborted",
+    "timed out", "timeout", "read timed out", "network is unreachable", "no route to host",
+    "temporary failure in name resolution", "name or service not known", "max retries exceeded",
+    "failed to establish a new connection", "ssl", "certificate", "proxy",
+)
+
+
+def _classify_search_error(exc: BaseException) -> str:
+    """RC6 S6c: only a CONFIRMED transport/provider fault is a ``search-provider`` outage (the
+    threshold-1 provider RED alarm). A local parsing/programming bug is a ``search-runtime`` fault —
+    it must NOT raise a false provider-outage alarm. Keys on builtin + the search layer's typed
+    transport errors first (``NetworkError`` / ``RateLimitError``, but never ``ParseError``), then
+    falls back to a transport signature in the message. Anything else is ``search-runtime``."""
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return "search-provider"
+    try:  # the search layer's typed transport/provider errors — ParseError is deliberately excluded
+        from src.search import NetworkError, RateLimitError
+        if isinstance(exc, (NetworkError, RateLimitError)):
+            return "search-provider"
+    except ImportError:  # pragma: no cover - defensive: the typed errors may be unimportable in isolation
+        pass
+    low = str(exc).lower()
+    if any(m in low for m in _SEARCH_TRANSPORT_MARKERS):
+        return "search-provider"
+    return "search-runtime"
+
+
 async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
     """A research fn over the FE's real ``web_search`` (C32's provider). Returns an async fn that runs the
     bounded query set in an executor (the search is sync + network-bound) and concatenates the results.
@@ -162,6 +192,7 @@ async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
     async def _run() -> str:
         loop = asyncio.get_event_loop()
         chunks: list[str] = []
+        _provider_down_recorded = False  # RC6 S6c: record the outage ONCE per run, not per-query
         for q in _RESEARCH_QUERIES:
             try:
                 txt = await loop.run_in_executor(
@@ -170,6 +201,26 @@ async def _live_research_fn(owner: Optional[str]) -> ResearchFn:
                     chunks.append(f"## {q}\n{txt}")
             except Exception as e:
                 logger.warning("[zeitgeist] search failed for %r: %s", q, e)
+                # RC6 S6c (#1599): a web-search provider outage feeding the zeitgeist enrichment lane
+                # ("SearXNG search failed: [Errno 111] Connection refused") was recorded NOWHERE — it
+                # fell through this best-effort WARN with no failure row, and synthesis quietly stood on
+                # the model's framed knowledge. Land it in the admin-visible LOUD failure ledger + a
+                # RED-eligible health event. Classify TRUTHFULLY: only a confirmed transport/provider
+                # fault is `search-provider` (the threshold-1 provider alarm); a local parsing/programming
+                # bug is `search-runtime` so it can't raise a false provider-outage alarm. Once per run
+                # (a down provider fails every query). Fail-soft.
+                if not _provider_down_recorded:
+                    _provider_down_recorded = True
+                    try:
+                        from src import enrichment_policy as _ep
+                        _cls = _classify_search_error(e)
+                        _kind = ("provider unavailable" if _cls == "search-provider"
+                                 else "runtime error (not a provider outage)")
+                        _ep.record_runtime_failure(
+                            owner, _cls,
+                            f"web-search {_kind} for the move-in zeitgeist: {e}")
+                    except Exception:  # pragma: no cover - defensive: telemetry never breaks the lane
+                        pass
         return "\n\n".join(chunks)
 
     return _run

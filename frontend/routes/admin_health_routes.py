@@ -1253,7 +1253,7 @@ _WRITEBACK_TOOLS = frozenset({
 })
 # The soft-failure class namespaces record_soft_failure emits (log_rings) — the rollup buckets
 # OVERSEER-ring failures under these, distinct from ordinary 0079 overseer report entries.
-_SOFT_FAIL_PREFIXES = ("overseer:", "faith:", "enrichment:")
+_SOFT_FAIL_PREFIXES = ("overseer:", "faith:", "enrichment:", "sync:")
 _STORM_THRESHOLD = 3  # N failures in the window ⇒ a RED "storm/burst" alarm
 
 
@@ -1395,6 +1395,25 @@ def _alarm(code, label, count, detail, *, auto_corrected=False) -> dict:
             "detail": detail, "autoCorrected": bool(auto_corrected)}
 
 
+# S6d (#1599 item 4): a GUARD-DOWN (the guard/judge could not RUN — call-failed / timeout / gate
+# error) is NOT the same event as an auto-corrected faith SLIP (the guard ran fine, detected an
+# unfaithful narration, and the correction stood). The old ``guard-judge-failure`` alarm conflated
+# them — a bundle's count:15 was 14 corrected slips + 1 real guard-down. Only a true guard-down is
+# a coverage loss; the detected slips still surface RED via the ``auto-corrected`` alarm. The
+# discriminator is the class token: a guard-down carries a run-failure marker, a slip is
+# ``faith:<dimension>`` (persona / leak / omission …) with no such marker.
+_GUARD_DOWN_MARKERS = ("call-failed", "judge-call-failed", "gate-error", "gate-failed",
+                       "heuristic-error", "resolve-failed", "sync-in-async", "casting-gate-error",
+                       "-error", "-failed", "timeout")
+
+
+def _is_guard_down_class(kind: str) -> bool:
+    """True iff a ``faith:``/``overseer:`` soft-failure class is a GUARD-DOWN (the guard/judge could
+    not run) rather than a detected-and-corrected faith slip (``faith:<dimension>``)."""
+    k = str(kind or "").lower()
+    return any(m in k for m in _GUARD_DOWN_MARKERS)
+
+
 def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_totals=None,
                     sandbox=None) -> list:
     """WI3 — derive the RED alarms for game-breaking signals from the rollup + the snapshot reads.
@@ -1405,16 +1424,19 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
     llm = (rollup or {}).get("llm") or {}
     tools = (rollup or {}).get("tools") or {}
 
-    # 1) A guard / judge class failing AT ALL (grounding guard / overseer judge down).
+    # 1) A guard / judge class going DOWN (the guard/judge could not RUN). S6d: count ONLY true
+    #    guard-downs — a detected-and-corrected faith slip is NOT a guard-down and must not inflate
+    #    this alarm (it surfaces RED under `auto-corrected` instead).
     guard_classes = {k: v for k, v in guards.items() if k.startswith(("overseer:", "faith:"))}
-    if guard_classes:
-        total = sum(int(v.get("failed", 0)) for v in guard_classes.values())
-        auto = sum(int(v.get("autoCorrected", 0)) for v in guard_classes.values())
+    guard_down = {k: v for k, v in guard_classes.items() if _is_guard_down_class(k)}
+    if guard_down:
+        total = sum(int(v.get("failed", 0)) for v in guard_down.values())
+        auto = sum(int(v.get("autoCorrected", 0)) for v in guard_down.values())
         if total:
             alarms.append(_alarm(
                 "guard-judge-failure", "Guard/judge failure", total,
                 "a grounding guard or overseer judge could not run ("
-                + ", ".join(sorted(guard_classes)) + ")",
+                + ", ".join(sorted(guard_down)) + ")",
                 auto_corrected=(auto >= total)))
 
     # 2) Narration call failure (5xx / timeout / empty completion).
@@ -1425,9 +1447,14 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
             "narration LLM failed (5xx / timeout / empty completion) — "
             f"{nar['failed']}/{nar.get('total', '?')} in-window"))
 
-    # 3) Write-back / enrichment refusal STORM.
+    # 3) Write-back / enrichment refusal STORM. The provider/runtime classes (search-provider /
+    #    narrator-http / reasoning-misroute) have their OWN alarm (4c) and are excluded here so a
+    #    provider outage isn't miscounted as an enrichment write-back storm.
+    _provider_classes = ("enrichment:search-provider", "enrichment:narrator-http",
+                         "enrichment:reasoning-misroute")
     wb = sum(int(v.get("failed", 0)) for t, v in tools.items() if t in _WRITEBACK_TOOLS)
-    enr = sum(int(v.get("failed", 0)) for k, v in guards.items() if k.startswith("enrichment:"))
+    enr = sum(int(v.get("failed", 0)) for k, v in guards.items()
+              if k.startswith("enrichment:") and k not in _provider_classes)
     if (wb + enr) >= _STORM_THRESHOLD:
         alarms.append(_alarm(
             "writeback-storm", "Write-back / enrichment failure storm", wb + enr,
@@ -1450,6 +1477,30 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
         alarms.append(_alarm(
             "desync-burst", "Desync / stale-beat burst", stale + desync,
             f"{stale} stale-beat rejection(s) + {desync} desync(s) in recent turns"))
+
+    # 4b) Dropped fold (S6b — the A-S3 latent). A fold-bearing write (recordInteraction / a deal /
+    #     a trust belt) evaporated on a stale-beat 409, or an unaccounted beatSeq gap says the board
+    #     moved without this FE recording the write. ONE lost consequence fold is game-affecting (a
+    #     scene's only hidden-impact record gone), so this fires at threshold 1 — it was previously
+    #     completely invisible (staleRejections showed 0 next to a beatSeq gap of 46).
+    dropped = sum(int(v.get("failed", 0)) for k, v in guards.items() if k == "sync:dropped-fold")
+    if dropped:
+        alarms.append(_alarm(
+            "dropped-fold", "Dropped consequence fold", dropped,
+            f"{dropped} fold-bearing write(s) dropped on a stale-beat 409 / unaccounted beatSeq gap "
+            "— a scene's only hidden-impact record was lost"))
+
+    # 4c) Provider / runtime failure (S6c). A search-provider outage feeding enrichment, a narrator
+    #     HTTP 4xx, or a reasoning-channel misroute — each recorded via enrichment_policy's runtime
+    #     recorder. These were happening live but alarmed nowhere; fire at threshold 1.
+    provider = sum(int(v.get("failed", 0)) for k, v in guards.items()
+                   if k in ("enrichment:search-provider", "enrichment:narrator-http",
+                            "enrichment:reasoning-misroute"))
+    if provider:
+        alarms.append(_alarm(
+            "provider-failure", "Provider / runtime failure", provider,
+            f"{provider} provider/runtime failure(s) in-window (search-provider down / narrator "
+            "HTTP 4xx / reasoning-channel misroute)"))
 
     # 5) Embeddings degraded (semantic recall fell back).
     if isinstance(embeddings, dict) and embeddings.get("degraded"):
