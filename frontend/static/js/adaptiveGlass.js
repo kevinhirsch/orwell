@@ -28,7 +28,7 @@
     // — Chrome / large panels (no flip → mute) —
     ".ow-window", "#sidebar", ".icon-rail", ".modal-content", ".admin-card",
     ".chat-top-bar", ".og-card", ".on-card", ".toast",
-    ".orwell-chat-hint", ".attach-card", ".dropdown", ".overflow-menu", ".cp-popover",
+    ".orwell-chat-hint", ".attach-card", ".dropdown", ".cp-popover",
     // — Chat bubbles (large → mute, no flip) —
     ".msg-ai", ".msg-user", ".msg-ooc",
     // — Small bars / transient pills (flip ink) —
