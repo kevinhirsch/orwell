@@ -472,7 +472,25 @@
     // and B never mounts a fresh streaming container (mirror-parity `incrementalStream=false`). A DISTINCT
     // window event (not `orwell:gamechanged`), so the g15 single-dispatcher rule is untouched.
     _emitWindow("orwell:ws-run-boundary", { runId: runId != null ? runId : null });
-    _subscribeChat(0).catch(function () { _chatTailActive = false; });
+    // Ship-gate F2 ("right status") self-heal: the boundary emit above already mounted an observer
+    // holder + a "Responding" spinner in ANTICIPATION of a live run (chatWsSplice._onWsRunBoundary),
+    // before knowing whether one actually exists. Most of the time it does — but a `run-started` edge
+    // can also be a STALE ring replay (ADR 0012 §3.4b: session_events replays its ≤8-event invitation
+    // ring to every FRESH `state`-channel subscribe, e.g. every single page reload) for a run that has
+    // since been fully evicted from `agent_runs`. When that is the case, THIS re-attach's own ack comes
+    // back `hasRun:false` — there is no run to mirror, and since a dead run streams no further `event`
+    // frames (no delta, no `done`), the speculative spinner/holder would otherwise sit wedged FOREVER —
+    // the "stuck Production Responding after refresh" bug. Self-heal through the SAME teardown the
+    // reconnect-run-gone case already uses (`orwell:ws-resync`: destroy the spinner, remove the wedged
+    // holder, release the render-lock, reconcile from history — a cheap no-op if there is nothing to
+    // fix). Guarded on `!_chatTailActive` so a genuinely-new run-started that raced in behind this one
+    // (and is already being tailed) is never torn down by this stale ack's own resolution.
+    _subscribeChat(0).then(function (ack) {
+      if (ack && ack.d && ack.d.hasRun === false && !_chatTailActive) {
+        _emitWindow("orwell:ws-resync",
+          { canonicalId: _canonicalId, beatSeq: _beatSeq, reason: "run-started-empty" });
+      }
+    }).catch(function () { _chatTailActive = false; });
   }
 
   // ── the state/hud EDGE channels (§4) — the HUD push keystone ─────────────

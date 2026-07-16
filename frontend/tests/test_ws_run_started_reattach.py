@@ -225,6 +225,58 @@ async function handshake(hasRunFirst, runId) {
       "a stale replay of the run we just attached (same id) must be ignored (reconcile-by-id); got " + chatSubs().length);
   }
 
+  // ── scenario 8 (ship-gate F2 — the "stuck Production Responding after refresh" self-heal): a
+  // `run-started` edge (e.g. session_events' ADR 0012 §3.4b ring replaying a stale invitation to a
+  // freshly-connected socket on EVERY page reload) re-attaches chat exactly like a genuine new run —
+  // but when THIS re-attach's own ack reports `hasRun:false`, there is no run to mirror. Since a dead
+  // run streams no further `event` frames, the observer's speculative round + "Responding" spinner
+  // (mounted by the `orwell:ws-run-boundary` emit) would otherwise NEVER clear. Pin that the client
+  // self-heals by emitting `orwell:ws-resync` (the SAME teardown chatWsSplice already uses to tear
+  // down a wedged live holder + reconcile from history).
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);   // no live run at attach → not tailing
+    const before = chatSubs().length;   // just the initial subscribe
+
+    // A STALE ring-replayed run-started (id-less, mirroring an evicted run / older server — the
+    // client cannot distinguish it from a genuine new run at the point it decides to re-attach).
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const reattach = chatSubs()[before];
+    assert(reattach, "the run-started edge must trigger a re-attach subscribe");
+    assert(resyncEvents.length === 0, "no self-heal yet — the re-attach ack hasn't landed");
+
+    // The re-attach's OWN ack reveals the truth: there is no live run after all.
+    down({ t: "ack", ch: "chat", cid: reattach.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
+    await tick();
+    assert(resyncEvents.length === 1,
+      "a hasRun:false re-attach ack must self-heal via orwell:ws-resync (never leave the boundary's " +
+      "spinner/holder orphaned); got " + resyncEvents.length + " resync event(s)");
+    assert(resyncEvents[0].reason === "run-started-empty",
+      "the resync should identify the empty-re-attach cause; got " + JSON.stringify(resyncEvents[0]));
+  }
+
+  // ── scenario 9: a GENUINE run-started (hasRun:true on re-attach) must NEVER self-heal/resync — the
+  // fix must only fire on the empty case, not on every re-attach.
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);
+    const before = chatSubs().length;
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const reattach = chatSubs()[before];
+    down({ t: "ack", ch: "chat", cid: reattach.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "r9" } });
+    await tick();
+    assert(resyncEvents.length === 0,
+      "a genuine live re-attach (hasRun:true) must NOT emit orwell:ws-resync; got " + resyncEvents.length);
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -307,3 +359,22 @@ def test_new_run_signals_the_render_layer_for_a_fresh_observer_round():
     chat = _read("static", "js", "chat.js")
     assert "'orwell:ws-run-boundary', _onWsRunBoundary" in chat, \
         "chat.js must register the ws-run-boundary observer handler"
+
+
+def test_run_started_reattach_self_heals_when_hasrun_false():
+    # Ship-gate F2 ("right status") — the "stuck Production Responding after refresh" fix.
+    # `_onWsRunBoundary` mounts an observer holder + "Responding" spinner SPECULATIVELY, before
+    # knowing whether a run-started edge names a genuinely-live run — including a STALE ring-replayed
+    # edge (ADR 0012 §3.4b: session_events replays its invitation ring to every FRESH state-channel
+    # subscribe, i.e. every page reload) for a run that's already gone. When the re-attach's OWN chat
+    # subscribe ack then reports `hasRun:false`, there is no run to mirror — and since a dead run
+    # streams no further `event` frames, that speculative spinner/holder would otherwise NEVER clear.
+    # Pin that `_onRunStarted` self-heals by emitting the EXISTING `orwell:ws-resync` teardown (spinner
+    # destroy + holder removal + render-lock release + history reconcile) instead of orphaning it.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "hasRun === false" in body, \
+        "the run-started re-attach must inspect its OWN chat-subscribe ack for hasRun:false"
+    assert "orwell:ws-resync" in body, \
+        "a hasRun:false re-attach must emit orwell:ws-resync to tear down the speculative spinner/holder"
+    assert "_chatTailActive" in body.split("_subscribeChat(0).then")[1], \
+        "the self-heal must be guarded so a genuinely-new run racing in behind this one is never torn down"
