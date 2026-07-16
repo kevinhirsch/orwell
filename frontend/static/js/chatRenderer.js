@@ -695,8 +695,8 @@ export function applyModelColor(roleEl, modelName) {
       const logoHtml = providerLogo(modelName);
       let html = '<div style="font-weight:600;margin-bottom:6px;color:var(--fg);display:flex;align-items:center;gap:6px;">';
       if (logoHtml) html += '<span class="role-provider-logo" style="opacity:0.7">' + logoHtml + '</span>';
-      html += short + '</div>';
-      html += '<div><span class="ctx-label">Model</span> ' + modelName.split('/').pop() + '</div>';
+      html += uiModule.esc(short) + '</div>';
+      html += '<div><span class="ctx-label">Model</span> ' + uiModule.esc(modelName.split('/').pop()) + '</div>';
       // Provider = the serving endpoint, distinct from the model vendor/logo
       // (e.g. the same model via OpenRouter vs Copilot vs Anthropic direct).
       const _epUrl = (window.sessionModule && window.sessionModule.getCurrentEndpointUrl)
@@ -1798,7 +1798,7 @@ export function displayMetrics(messageElement, metrics) {
     popup.style.lineHeight = '1.7';
     popup.innerHTML = `
       <div style="font-weight:600;margin-bottom:6px;color:var(--fg);">Message Stats</div>
-      <div><span class="ctx-label">Model</span> ${model.split('/').pop()}</div>
+      <div><span class="ctx-label">Model</span> ${uiModule.esc(model.split('/').pop())}</div>
       <div><span class="ctx-label">Input</span> ${inputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</div>
       <div><span class="ctx-label">Output</span> ${outputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</div>
       <div><span class="ctx-label">Total</span> ${totalTok.toLocaleString()} tokens</div>
@@ -1865,7 +1865,7 @@ export function displayMetrics(messageElement, metrics) {
 
       const usedTokens = inputTokens || 0;
       const totalCtx = ctxLen || 0;
-      const modelShort = model.split('/').pop();
+      const modelShort = uiModule.esc(model.split('/').pop());
       const fmtNum = n => n ? n.toLocaleString() : '?';
 
       const popup = document.createElement('div');
