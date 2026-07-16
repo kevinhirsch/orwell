@@ -102,10 +102,8 @@ const EMOJI_GROUPS = [
 ];
 
 let _pickerEl = null;
-let _pickerOpenedAt = 0;
+let _pop = null;                   // the OrwellPopover kit instance
 let _targetEl = null;
-let _closeOnOutsideClick = null;
-let _closeOnEscape = null;
 // For contenteditable targets we snapshot the caret/selection when the picker
 // opens, since focusing the picker's search box collapses the live selection.
 let _savedRange = null;
@@ -133,14 +131,11 @@ export function createEmojiButton(target) {
 }
 
 function togglePicker(anchor, target) {
-  const now = Date.now();
-  if (_pickerEl) {
-    // Ignore the duplicate/ghost click mobile fires right after opening, which
-    // would otherwise re-toggle the picker shut the instant it appears.
-    if (now - _pickerOpenedAt < 400) return;
-    _closePicker();
-    return;
-  }
+  // Open ⇄ close toggle. The OrwellPopover kit owns dismissal — outside-click AND
+  // the Escape stack (bindMenuDismiss/escMenuStack), with a deferred-attach that
+  // covers the opening click — so there is no ad-hoc doc-click / Escape / position
+  // / ghost-click code here anymore.
+  if (_pop && _pop.isOpen()) { _closePicker(); return; }
   _targetEl = target;
   _savedRange = null;
   if (target.isContentEditable) {
@@ -150,62 +145,28 @@ function togglePicker(anchor, target) {
       if (target.contains(r.commonAncestorContainer)) _savedRange = r.cloneRange();
     }
   }
-  _pickerEl = _buildPicker();
-  _pickerOpenedAt = now;
-  document.body.appendChild(_pickerEl);
-
-  const rect = anchor.getBoundingClientRect();
-  _pickerEl.style.position = 'fixed';
-  _pickerEl.style.top = (rect.bottom + 4) + 'px';
-  _pickerEl.style.left = rect.left + 'px';
-  _pickerEl.style.zIndex = '10000';
-
-  requestAnimationFrame(() => {
-    const pr = _pickerEl.getBoundingClientRect();
-    if (pr.right > window.innerWidth - 8) {
-      _pickerEl.style.left = Math.max(8, window.innerWidth - pr.width - 8) + 'px';
-    }
-    // Always open downward. If it would run past the bottom, cap its height so
-    // it scrolls internally instead of flipping up (which got cut off at top).
-    const avail = window.innerHeight - rect.bottom - 12;
-    if (pr.height > avail) {
-      _pickerEl.style.maxHeight = Math.max(160, avail) + 'px';
-    }
+  const content = _buildPicker();
+  _pickerEl = content;
+  const Kit = window.OrwellPopoverKit;
+  if (!Kit) return;
+  _pop = Kit.open({
+    anchor,
+    content,
+    focusTrap: true,
+    ariaLabel: 'Emoji picker',
+    className: 'ow-popover-emoji',
+    onOpen: () => {
+      const s = content.querySelector('.emoji-picker-search');
+      if (s) { try { s.focus(); } catch (_) {} }
+    },
+    onClose: () => { _pop = null; _pickerEl = null; },
   });
-
-  const close = (e) => {
-    // Ignore the ghost/duplicate click mobile fires right after opening.
-    if (e && e.type === 'click' && Date.now() - _pickerOpenedAt < 400) return;
-    if (_pickerEl && !_pickerEl.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) {
-      _closePicker();
-    }
-  };
-  _closeOnOutsideClick = close;
-  setTimeout(() => document.addEventListener('click', close, true), 10);
-
-  _closeOnEscape = (e) => {
-    if (e.key !== 'Escape' || !_pickerEl) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
-    _closePicker();
-  };
-  document.addEventListener('keydown', _closeOnEscape, true);
 }
 
 function _closePicker() {
-  if (_pickerEl) {
-    _pickerEl.remove();
-    _pickerEl = null;
-  }
-  if (_closeOnOutsideClick) {
-    document.removeEventListener('click', _closeOnOutsideClick, true);
-    _closeOnOutsideClick = null;
-  }
-  if (_closeOnEscape) {
-    document.removeEventListener('keydown', _closeOnEscape, true);
-    _closeOnEscape = null;
-  }
+  if (_pop) { try { _pop.close('api'); } catch (_) {} }
+  _pop = null;
+  _pickerEl = null;
 }
 
 function _buildPicker() {
@@ -263,7 +224,7 @@ function _buildPicker() {
   render();
 
   search.addEventListener('input', () => render(search.value.trim()));
-  setTimeout(() => search.focus(), 50);
+  // The search input is focused by the popover kit's onOpen (see togglePicker).
 
   return el;
 }

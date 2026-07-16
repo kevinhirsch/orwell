@@ -7,11 +7,11 @@
 const LS_RECENT = 'orwell-recent-colors';
 const MAX_RECENT = 12;
 
-let _popover = null;
+let _popover = null;               // the built .cp-popover content node (mounted inside the kit surface)
+let _pop = null;                   // the OrwellPopover kit instance
 let _input = null;
 let _h = 0, _s = 100, _v = 100;   // HSV
 let _drag = null;                  // 'sl' | 'hue' | null
-let _onOutside = null;
 
 // ── Color math ────────────────────────────────────────────────────────
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -122,8 +122,9 @@ function buildPopover() {
     <div class="cp-section-label">Recent</div>
     <div class="cp-swatches cp-recent"></div>
   `;
-  document.body.appendChild(p);
   wireHandlers(p);
+  // NOTE: the OrwellPopover kit mounts this node inside its `.ow-popover` surface
+  // (see open()); we no longer append to <body> ourselves.
   return p;
 }
 
@@ -217,8 +218,9 @@ function wireHandlers(p) {
     }
   });
   hex.addEventListener('keydown', (e) => {
+    // Escape is owned by the popover kit (escMenuStack + the ui.js arbiter); only
+    // Enter is handled here (commit the value + close).
     if (e.key === 'Enter') { commitCurrent(); close(); }
-    if (e.key === 'Escape') { close(); }
   });
 
   p.addEventListener('click', (e) => {
@@ -232,12 +234,12 @@ function wireHandlers(p) {
 
   if (window.EyeDropper) {
     eye.addEventListener('click', async (ev) => {
+      // The eyedropper button lives INSIDE the popover, so the kit's outside-click
+      // dismissal treats it as "inside" and leaves the picker open; the native OS
+      // eyedropper overlay doesn't bleed a page click, so no suppression dance is
+      // needed anymore (the kit owns dismissal).
+      ev.preventDefault();
       ev.stopPropagation();
-      // Suppress the outside-click close while the OS eyedropper is open.
-      // Without this, the user's pixel-pick fires a window click that
-      // hits our document-capture listener and closes the popover.
-      const wasOnOutside = _onOutside;
-      _detachOutsideHandlers();
       try {
         const r = await new window.EyeDropper().open();
         if (r && r.sRGBHex) {
@@ -246,17 +248,6 @@ function wireHandlers(p) {
           commitCurrent();
         }
       } catch (_) { /* user cancelled */ }
-      // Re-arm outside-click handler after a frame so the eyedropper's
-      // own pick-click doesn't immediately re-close us.
-      if (wasOnOutside && _popover) {
-        requestAnimationFrame(() => {
-          if (!_popover) return;
-          _onOutside = wasOnOutside;
-          _onEsc = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
-          document.addEventListener('click', _onOutside, true);
-          document.addEventListener('keydown', _onEsc, true);
-        });
-      }
     });
   } else {
     eye.disabled = true;
@@ -290,102 +281,34 @@ function commitCurrent() {
 }
 
 // ── Open / close ──────────────────────────────────────────────────────
-function position(p, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const pRect = p.getBoundingClientRect();
-  let left = rect.left;
-  let top = rect.bottom + 6;
-  if (left + pRect.width > window.innerWidth - 8) left = window.innerWidth - pRect.width - 8;
-  if (top + pRect.height > window.innerHeight - 8) top = rect.top - pRect.height - 6;
-  if (left < 8) left = 8;
-  if (top < 8) top = 8;
-  p.style.left = left + 'px';
-  p.style.top = top + 'px';
-}
-
-let _onEsc = null;
-
-function _detachOutsideHandlers() {
-  if (_onOutside) {
-    document.removeEventListener('click', _onOutside, true);
-    document.removeEventListener('mousedown', _onOutside, true);
-    document.removeEventListener('pointerdown', _onOutside, true);
-    _onOutside = null;
-  }
-  if (_onEsc) {
-    document.removeEventListener('keydown', _onEsc, true);
-    _onEsc = null;
-  }
-}
-
-function _destroyPopover() {
-  _detachOutsideHandlers();
-  if (_popover && _popover.parentNode) {
-    _popover.parentNode.removeChild(_popover);
-  }
-  _popover = null;
-  _input = null;
-  _drag = null;
-}
-
+// Positioning (flip/shift, viewport-clamped) and dismissal (outside-click +
+// Escape, via bindMenuDismiss/escMenuStack) are OWNED by the OrwellPopover kit.
+// This module only builds the content and drives the HSV math; the kit mounts
+// `content` inside its `.ow-popover` surface and manages the lifecycle.
 function open(inputEl) {
-  // Always tear down any previous popover so we never inherit stale state
-  // (orphaned listeners, hidden-but-mispositioned div, etc.).
-  _destroyPopover();
-  _popover = buildPopover();
+  close();                                    // tear down any previous popover
+  const Kit = window.OrwellPopoverKit;
+  if (!Kit) return;
   _input = inputEl;
   setFromHex(inputEl.value || '#000000');
-  _popover.style.display = 'block';
-  _popover.style.visibility = 'visible';
-  _popover.style.opacity = '1';
-  _popover.style.pointerEvents = 'auto';
-  // Let it render with its natural size, then position
-  requestAnimationFrame(() => {
-    if (_popover && _input) position(_popover, _input);
+  const content = buildPopover();
+  _popover = content;
+  _pop = Kit.open({
+    anchor: inputEl,
+    content,
+    focusTrap: true,
+    ariaLabel: 'Color picker',
+    onClose: () => { _popover = null; _pop = null; _input = null; _drag = null; },
   });
   syncUI();
-
-  _onOutside = (e) => {
-    if (_drag) return;                        // ignore during drag
-    if (!_popover) return;
-    if (_popover.contains(e.target)) return;
-    if (e.target === _input) return;
-    // If the click landed on a modal close button (X), swallow it so the
-    // popover-close doesn't also dismiss the enclosing modal. The user
-    // wants their first click to just close the color picker.
-    const closeBtn = e.target.closest && e.target.closest('.close-btn, [aria-label*="lose" i]');
-    if (closeBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-    }
-    close();
-  };
-  _onEsc = (e) => {
-    if (e.key === 'Escape') {
-      // Same idea for the keyboard: Escape closes the picker first; the
-      // modal's own Esc handler only fires on the next press.
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-      close();
-    }
-  };
-  // Defer install so the click that opened us doesn't immediately close us.
-  // Use requestAnimationFrame instead of setTimeout(0) to be sure the current
-  // click event has fully bubbled before we register the listener.
-  requestAnimationFrame(() => {
-    document.addEventListener('click', _onOutside, true);
-    // pointerdown fires before click on touch devices, and reliably even
-    // when the tap target swallows the click. Catching it ensures
-    // outside-touches close the picker on mobile.
-    document.addEventListener('pointerdown', _onOutside, true);
-    document.addEventListener('keydown', _onEsc, true);
-  });
 }
 
 function close() {
-  _destroyPopover();
+  if (_pop) { try { _pop.close('api'); } catch (_) {} }
+  _popover = null;
+  _pop = null;
+  _input = null;
+  _drag = null;
 }
 
 // ── Attach to inputs ──────────────────────────────────────────────────
@@ -423,8 +346,9 @@ export function attachColorPicker(inputEl) {
   // Apply initial value so swatch shows color even before any programmatic set.
   inputEl.value = initial;
 
-  // Use mousedown so we fire BEFORE any document-level click handler
-  // (e.g. our own _onOutside listener) can decide to close.
+  // Use mousedown (fires before click) to drive the open/close toggle. The kit's
+  // dismissal treats the anchor input as "inside", so clicking it never auto-closes
+  // via outside-click — this toggle owns the close-on-reclick.
   inputEl.addEventListener('mousedown', (e) => {
     e.preventDefault();
     e.stopPropagation();
