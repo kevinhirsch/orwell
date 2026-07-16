@@ -16089,39 +16089,11 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
 .contact-row-edit { margin-top: 4px; }
 
 /* ── Sort Dropdown ── */
-
-.sort-dropdown {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 1000;
-  min-width: 120px !important;
-  width: max-content;
-  padding: 4px !important;
-  margin-top: 4px;
-  background: var(--panel) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
-  backdrop-filter: none !important;
-}
-.sort-dropdown-item {
-  cursor: pointer;
-  padding: 6px 8px !important;
-  font-size: var(--fs-xs) !important;
-  border-radius: 6px !important;
-  border-bottom: none !important;
-  white-space: nowrap;
-  transition: background 0.1s;
-}
-.sort-dropdown-item:hover {
-  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
-}
-.sort-dropdown-sep {
-  border-top: 1px solid var(--border);
-  margin-top: 2px;
-  padding-top: 6px;
-}
+/* #1638: the bespoke `.dropdown.sort-dropdown` trays (session-sort + model-sort) are retired.
+   Both sort menus now mount through OrwellMenuKit as `.ow-popover[role=menu]` surfaces, which
+   carry their own `.ow-menu` chrome (anchoring, tap targets, glass/a11y tiers). The dedicated
+   `.sort-dropdown` / `.sort-dropdown-item` / `.sort-dropdown-sep` rules are gone; a couple of
+   dead selector-list members survive in the shared `:is()` hover blocks below (harmless). */
 
 /* Mobile: bigger taps for the chats sort/funnel menu and the select-mode
    bulk-action bar. Also drop the "Rearrange" item — it's a touch-finicky
@@ -16130,15 +16102,9 @@ input.settings-select::placeholder { color: color-mix(in srgb, var(--fg) 35%, tr
   /* Nudge the funnel/sort button right on mobile so it doesn't hug the
      chevron next to it. */
   #session-sort-btn { transform: translateX(11px); }
-  #session-sort-dropdown.sort-dropdown {
-    min-width: 200px !important;
-    padding: 6px !important;
-  }
-  #session-sort-dropdown .sort-dropdown-item {
-    padding: 12px 14px !important;
-    font-size: var(--fs-md) !important;
-  }
-  #session-rearrange-toggle { display: none !important; }
+  /* #1638: the sort menu's mobile tap targets + the "hide Rearrange on mobile" rule moved off
+     CSS — the kit's `.ow-menu` owns coarse-pointer sizing, and buildSortItems omits the
+     Rearrange item on narrow viewports (window.matchMedia('(max-width: 768px)')). */
 
   /* Select-mode bar — make Archive / Delete / Cancel buttons + the
      Select-all toggle finger-sized. */

@@ -2638,20 +2638,33 @@ def main() -> int:
             # reveals the no-AI cleanup sub-row — and that sub-row must carry
             # its own distinct label, never a second bare "Tidy". A fresh boot
             # has zero chats (the section is hidden+collapsed), so un-hiding it
-            # is the setup; the dropdown + chevron clicks are real.
+            # is the setup; the chevron clicks are real.
+            #
+            # #1638: the session-sort menu migrated onto OrwellMenuKit — clicking
+            # #session-sort-btn body-appends a `.ow-popover[role=menu]` surface, and the
+            # Tidy split-control (its #auto-sort-sessions-more / #auto-sort-sessions-noai-btn
+            # children preserved) is re-parented into a menu row via the kit's render()
+            # escape hatch. The H6 dedupe intent is unchanged; the DOM anchor is the kit
+            # surface, not the retired #session-sort-dropdown tray.
             page.evaluate("""() => {
               const sec = document.getElementById('sessions-section');
               if (sec) sec.classList.remove('hidden', 'collapsed');
             }""")
+            # the kit wires the trigger asynchronously (orwellMenu.js loads after app.js) —
+            # attach() stamps aria-haspopup='menu' the moment it binds.
+            page.wait_for_function(
+                "() => { const b = document.getElementById('session-sort-btn');"
+                " return b && b.getAttribute('aria-haspopup') === 'menu'; }"
+            )
             page.click("#session-sort-btn")
-            page.wait_for_timeout(250)
+            page.wait_for_selector(".ow-popover[role='menu']", timeout=3000)
 
             def h6_visible_tidy_labels():
                 return page.evaluate("""() => {
                   const vis = el => el.getClientRects().length > 0 &&
                                     getComputedStyle(el).display !== 'none';
                   const out = [];
-                  document.querySelectorAll('#session-sort-dropdown *').forEach(el => {
+                  document.querySelectorAll('.ow-popover[role="menu"] *').forEach(el => {
                     if (!vis(el)) return;
                     const own = [...el.childNodes].filter(n => n.nodeType === 3)
                       .map(n => n.textContent).join(' ');
@@ -2660,16 +2673,27 @@ def main() -> int:
                   return out;
                 }""")
 
+            # the kit mounted exactly one menu surface carrying the Tidy split-control.
+            h6_mount = page.evaluate("""() => {
+              const surfaces = document.querySelectorAll('.ow-popover[role="menu"]');
+              return { count: surfaces.length,
+                       hasTidy: !!document.querySelector('.ow-popover[role="menu"] #auto-sort-sessions-btn'),
+                       hasMore: !!document.querySelector('.ow-popover[role="menu"] #auto-sort-sessions-more') };
+            }""")
+            check(h6_mount.get("count") == 1 and h6_mount.get("hasTidy") is True
+                  and h6_mount.get("hasMore") is True,
+                  f"#1638: the session-sort menu mounts one kit surface holding the Tidy control ({h6_mount})")
+
             h6_closed = h6_visible_tidy_labels()
             check(h6_closed == ["auto-sort-icon"],
                   f"H6: ONE visible Tidy affordance with the options sub-row closed ({h6_closed})")
-            page.click("#auto-sort-sessions-more")  # the chevron reveals the no-AI sub-row
+            page.click(".ow-popover[role='menu'] #auto-sort-sessions-more")  # the chevron reveals the no-AI sub-row
             page.wait_for_timeout(250)
             h6_open = h6_visible_tidy_labels()
             check(h6_open == ["auto-sort-icon"],
                   f"H6: STILL exactly one visible 'Tidy' with the sub-row expanded ({h6_open})")
             h6_noai = page.evaluate("""() => {
-              const el = document.getElementById('auto-sort-sessions-noai-btn');
+              const el = document.querySelector('.ow-popover[role="menu"] #auto-sort-sessions-noai-btn');
               if (!el) return { present: false };
               return { present: true,
                        visible: el.getClientRects().length > 0 && getComputedStyle(el).display !== 'none',
@@ -2678,8 +2702,9 @@ def main() -> int:
             check(h6_noai.get("visible") is True and h6_noai.get("text", "").startswith("Clean up"),
                   f"H6: the revealed sub-row is the distinctly-labeled no-AI cleanup ({h6_noai})")
             page.evaluate("""() => {
-              document.getElementById('session-sort-dropdown').style.display = 'none';
-              document.getElementById('auto-sort-sessions-noai-btn').style.display = 'none';
+              if (window.OrwellMenuKit) window.OrwellMenuKit.closeAll();
+              const noai = document.getElementById('auto-sort-sessions-noai-btn');
+              if (noai) noai.style.display = 'none';
               document.getElementById('sessions-section').classList.add('hidden', 'collapsed');
             }""")
 
