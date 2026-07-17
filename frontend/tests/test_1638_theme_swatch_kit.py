@@ -188,6 +188,34 @@ def test_delete_btn_renders_as_sibling_outside_the_option():
     )
 
 
+def test_delete_btn_is_not_a_phantom_tab_stop():
+    # #1658: the per-tile ✕ was a focusable <button> (implicit tabindex 0) inside the swatch grid, so
+    # Tab reached one delete control PER custom tile instead of the roving-tabindex/listbox model's ONE
+    # Tab stop per grid. Give the ✕ tabindex="-1", and expose delete as a keyboard action (Delete/
+    # Backspace) on the focused custom option — clicking the sibling ✕ so delete stays keyboard-reachable.
+    tmpl = THEME_JS[THEME_JS.index("ow-swatch ow-swatch--custom"):]
+    tmpl = tmpl[:tmpl.index(".join('')")]
+    btn = tmpl[tmpl.index("theme-delete-btn"):]
+    btn = btn[:btn.index(">") + 1]                    # the ✕ button's opening tag only
+    assert 'tabindex="-1"' in btn, (
+        'the per-tile delete ✕ must be tabindex="-1" so it is not a phantom Tab stop in the listbox'
+    )
+    # the roving-tabindex keydown handler exposes delete on the focused option via Delete/Backspace,
+    # clicking the sibling ✕ (reusing its styledConfirm flow) — so delete stays keyboard-reachable
+    # without a per-tile tab stop. A built-in preset has no ✕ ⇒ the action is a no-op there.
+    kd = THEME_JS[THEME_JS.index("function _onSwatchKeydown"):]
+    kd = kd[:kd.index("\nexport ")]
+    assert "'Delete'" in kd and "'Backspace'" in kd, (
+        "_onSwatchKeydown must handle Delete/Backspace to delete the focused custom theme"
+    )
+    # assert the SIBLING delete control is clicked specifically — a bare ".click()" would also match
+    # the Enter/Space `sw.click()` path, so it would pass even if Delete/Backspace stopped deleting
+    # (CodeRabbit #1691). Pin `delBtn.click()` (the resolved sibling button).
+    assert "querySelector('.theme-delete-btn')" in kd and "delBtn.click()" in kd, (
+        "the keyboard delete action must click the sibling .theme-delete-btn (delBtn.click(), reusing its confirm flow)"
+    )
+
+
 # ── 12. the reference demo instantiates the primitive ────────────────────────────────
 def test_demo_shows_swatch_grid():
     assert "Swatch grid" in DEMO, "the demo needs a labeled swatch-grid section"

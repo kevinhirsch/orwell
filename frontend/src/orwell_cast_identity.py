@@ -181,7 +181,7 @@ async def seed_cast_identity(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn)
         return 0
     try:
         text = await llm_fn(build_identity_messages(cast))
-    except Exception as e:  # the model can fail — carry on, the floor stands
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_identity records the seeded-nothing failure via enrichment_policy.record_failure RED under the default strict policy)
         logger.warning(f"[cast-identity] llm failed: {e}")
         return 0
     facets = parse_identity_facets(text or "", valid_ids)
@@ -190,7 +190,7 @@ async def seed_cast_identity(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn)
         return 0
     try:
         res = await write_fn(facets)
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_identity records the seeded-nothing failure via enrichment_policy.record_failure RED under the default strict policy)
         logger.warning(f"[cast-identity] write-back failed: {e}")
         return 0
     if not (isinstance(res, dict) and res.get("accepted")):
@@ -268,7 +268,16 @@ def kickoff_identity(cast: list[dict], owner: Optional[str],
         try:
             await run_identity(cast, owner, write=write)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: run_identity records its OWN failures + never expects to raise; if it DID
+            # (an un-wrapped resolver raise), the whole cast-identity seed silently degraded with
+            # no record — surface it RED. The engine's deterministic identity floor stands.
             logger.warning(f"[cast-identity] background run failed: {e}")
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("cast-identity:background-run-failed", e,
+                                              corrected="seeded-identity-floor", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         finally:
             if then is not None:
                 try:

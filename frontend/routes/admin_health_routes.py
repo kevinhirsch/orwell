@@ -285,6 +285,15 @@ async def _cast_authoring_state(user: str | None) -> dict | None:
             out["houseEntryHold"] = orwell_cast_authoring.house_entry_gate_status(user)
         except Exception:
             out["houseEntryHold"] = None
+        # The pre-warm pipeline's own run state (genesis → identity → author): authorStarted /
+        # authorDone / promptCount — the only pre-game completion signal (counts and flags only,
+        # no cast content). The golden driver waits on authorDone here so the cast is fully
+        # enriched BEFORE the season starts, in record and replay alike.
+        try:
+            from src import orwell_prewarm
+            out["prewarm"] = orwell_prewarm.warm_state(user)
+        except Exception:
+            out["prewarm"] = None
         return out
     try:
         from routes.orwell_routes import _roster_cards

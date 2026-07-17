@@ -1765,11 +1765,63 @@ def _effective_advance_grace(owner) -> int:
 # most one forced advance per finishing turn, only past the threshold, and a pending PLAYER decision is
 # never auto-resolved (the engine returns the pending unchanged — the model surfaces it as a choice).
 _ADVANCE_FORCE_LEVEL = len(_ADVANCE_NUDGES)  # past the last text rung (levels are 0-indexed)
+# R4 (#1659 seam 4) — the SESSION-cumulative counterpart of the force rung. The consecutive
+# ladder above (`_ADVANCE_STALL_LEVEL`) is reset to zero every time the FE force-commits a beat
+# for the model (`_commit_advance_silently`), so a model that CHRONICALLY under-calls advanceGame
+# is handed a fresh gentle ladder at each new beat and the L39b force keeps restarting from zero —
+# the "escalation rungs dead / forced-advanceGame never fired" symptom (issue #1659, bundle seam 4).
+# `_ADVANCE_STALL_FLAGS` (below) counts stall-nudges SINCE THE MODEL LAST PROGRESSED ON ITS OWN —
+# it is NOT cleared by an FE-forced commit — and once N of them accrue it arms the SAME L39b force
+# on the next lull. Pinned to `_ADVANCE_FORCE_LEVEL` so the session trigger can never fire BEFORE
+# the per-beat consecutive rung within a single beat (both reach threshold on the same turn): the
+# model always gets the full gentle→firmer→forceful ladder the FIRST time, and only a session that
+# keeps stalling past FE cover-ups escalates without a fresh ladder. N≈3 (owner ruling: "e.g. 3").
+_STALL_FLAGS_BEFORE_FORCE = _ADVANCE_FORCE_LEVEL
 _FORCED_ADVANCE_NUDGE = (
     "(Production note, not for the player.) The beat was stuck for several turns, so the game has been "
     "advanced for you. Call gameStatus / getGameState NOW to read the REAL new beat the engine just "
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
+
+# 0079/0080 ACTIVE OVERSEER — the CONTINUE-NEVER-REOPEN contract (the "stuttering narrator" fix,
+# 2026-07-16). The active overseer's re-prompting levers (nudge / force-advance / reinject-delta) can
+# fire AFTER a scene has ALREADY streamed to the player this turn — e.g. a desync/stale-409 gets
+# flagged mid-turn, past the silent-commit path above — and #829 turn-coalescing stacks EVERY round of
+# one turn into the SAME message bubble, so a bare re-prompt makes the model re-narrate the whole scene
+# from scratch and the two contradictory renditions land fused, often mid-line ("...What's on your
+# mind?You grab your bag..."). The correction must still land THIS turn (never deferred to a next-turn-
+# only reground, which the model would never re-read mid-stream) — so whenever `_emitted_visible` is
+# already True, the re-prompt directive is prefixed with this contract: continue from the scene already
+# shown, never reopen/restate/re-narrate it. Preserves each lever's correction power; removes only the
+# duplication.
+_CONTINUE_NEVER_REOPEN = (
+    "CONTINUE — DO NOT REOPEN. The scene above has ALREADY been shown to the player this turn. "
+    "Continue the narration from its final line onward; do NOT re-narrate, restate, replay, or repeat "
+    "any part of it — the player would see two contradictory takes of the same moment fused together. "
+    "Add only what is genuinely NEW, picking up exactly where the shown scene left off."
+)
+
+# 2026-07-17 — the PREMIERE-OPENER REFIRE (server-side twin of the FE `_orwellFinalizingActive` belt
+# from the 2026-07-16 audit's fix #3 — chat.js auto-refires a hidden cue when its `finally` block
+# still sees that flag true). That fix is CLIENT-side only, so a headless/API caller (the golden-path
+# driver chief among them — no chat.js in the loop) never gets it. The gap: whichever path finalized
+# casting THIS turn (model-driven at the tool-execution site, or the FE-forced wire/reactive fallback),
+# the round immediately AFTER the createCharacter tool result can come back EMPTY — a known GLM/
+# OpenRouter empty-completion class. With nothing to catch it the turn used to fall straight through to
+# the unconditional "no tools — done" break: no move-in narration, no retry affordance, the player (or
+# the driver) staring at total silence with the game already live underneath them. This is a bounded
+# (ONE per turn — `_premiere_opener_refire_used`) RE-PROMPT, never engine-authored narration: it asks
+# the model to do the job the prompt already gives it (voice the premiere move-in from the engine's own
+# state), it does not invent or narrate anything itself. `_CONTINUE_NEVER_REOPEN` prefixes it exactly
+# like every other mid-turn re-prompt when something has already streamed this turn (defensive; by
+# construction this fires only when nothing has, but the guard is kept symmetric with every sibling
+# site rather than assumed).
+_PREMIERE_OPENER_REFIRE = (
+    "(Production note, not for the player.) The game has started — casting just finalized. The scene "
+    "above has already been shown to the player; continue from it. Narrate the player's entry into the "
+    "house now: the premiere move-in, first impressions, the house reveal. Voice ONLY what the game's "
+    "own state shows — never invent it."
+)
 
 # LIVE-4 (#541) — the eviction-reveal is the season's peak beat, and the model reliably CONSUMES it
 # (advanceGame drips one anonymized ballot per call) while narrating UNRELATED scenes, so the player
@@ -1903,6 +1955,17 @@ _CASTING_FORCED_NOTE = (
 #      present in messages[0] on the same-turn continuation because the frame was built pre-game.
 _CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
 
+# 2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes the
+# player's own finalize line, which can leave the continuation context with NO user message
+# at all — [system, assistant(tool_calls), tool] — a conversation shape some GLM providers
+# (Novita) reject outright ("invalid request error", HTTP 400), so the premiere opener could
+# never be model-authored there (every round 400'd/emptied until the canned terminal fallback
+# spoke instead). When the purge leaves no user turn, this FIXED, disclosure-free bridge is
+# inserted as the player's voice: it carries the one thing the finalize turn legitimately
+# said (readiness) and nothing else, so the #1312 guarantee holds — the premiere context
+# still cannot carry a casting disclosure — while the provider sees a valid conversation.
+_PREGAME_PURGE_USER_BRIDGE = "I'm ready — send me into the house."
+
 
 def _strip_pregame_context(messages: List[Dict]) -> int:
     """Purge the pre-game casting interview from the in-game narration context, in place.
@@ -1932,6 +1995,17 @@ def _strip_pregame_context(messages: List[Dict]) -> int:
             pass
         kept.append(m)
     if dropped:
+        # Restore a valid conversation shape when the purge removed EVERY user turn (the
+        # finalize line was casting-stamped too): insert the fixed readiness bridge as the
+        # player's voice before the first non-system message. Without it the continuation
+        # request is [system, assistant(tool_calls), tool] and some providers 400 on it.
+        if not any(isinstance(m, dict) and m.get("role") == "user" for m in kept):
+            insert_at = len(kept)
+            for i, m in enumerate(kept):
+                if not (isinstance(m, dict) and m.get("role") == "system"):
+                    insert_at = i
+                    break
+            kept.insert(insert_at, {"role": "user", "content": _PREGAME_PURGE_USER_BRIDGE})
         messages[:] = kept
     return dropped
 
@@ -2994,6 +3068,197 @@ async def _faith_guard_down_p0(owner, narration) -> bool:
         return False
 
 
+# ── R5 (#1659) — guard-down fail-closed: judge-down llm-io record + the deferred RETRO-JUDGE queue ──
+# The faithfulness judge is the last grounding guard. When it cannot RUN on a turn (a timeout / 400 /
+# model-resolve failure — the bundle's "phantom-HOH" window: overseer seq 51 left that turn UNJUDGED,
+# and the timed-out call was logged ok:TRUE with empty text — a fail-soft INSIDE the failure telemetry),
+# two #1599 guarantees kick in:
+#   1) the judge's own failed call is recorded ok:FALSE on the llm-io ring (never ok:true on an
+#      empty/errored/timed-out judge result) — `_faith_record_judge_down_io`; and
+#   2) the turn is DEFERRED and RE-JUDGED on the next opportunity — `_faith_defer_retro` /
+#      `_faith_drain_retro`, mirroring the CON-11 deferred-fold queue — so a guard-down turn is never
+#      shipped PERMANENTLY unjudged. Bounded per queue; an overflow drop is itself a real
+#      permanently-unjudged turn, so it fires a RED-eligible health event, never a silent drop.
+#
+# The queue is keyed by the CANONICAL-SESSION key (`_faith_key` → `_desync_key`, #1695 finding A), NOT
+# the raw owner: an authed owner keys on itself (cross-user isolation unweakened), and an auth-off
+# owner=None keys on the canonical game-session id (`gs:<id>`) — the SAME key the rest of the faith
+# machinery (`_faith_queue_reground`) already uses — so distinct anon games never share one bucket.
+_DEFERRED_FAITH: dict = {}
+_DEFERRED_FAITH_MAX = 2
+
+
+def _faith_key(owner):
+    """The canonical-session retro-queue key. REUSE the faith machinery's `_desync_key` (exactly like
+    `_faith_queue_reground`): an authed owner keys on itself; an auth-off ``owner=None`` keys on the
+    canonical game-session id (``gs:<id>``), never a single shared raw-None bucket (the cross-session
+    bleed of #1695 finding A). Fail-soft: if the resolver is unavailable, fall back to the raw owner
+    (single-tenant stays internally consistent within a process)."""
+    try:
+        from routes.chat_helpers import _desync_key
+        return _desync_key(owner)
+    except Exception:
+        return owner
+
+
+def _faith_record_judge_down_io(owner, narration, err, duration_ms, fail_class) -> None:
+    """R5 part 1 — record the FAILED faithfulness-judge call on the llm-io ring as ok:FALSE (a
+    RED-eligible recorder — `llm_trace.record_llm_call`), so a judge timeout / 400 / resolve-failure is
+    never logged ok:true with empty text (the #1599 fail-soft-inside-failure-telemetry bug the bundle
+    caught: a 12001ms ok:true empty judge record). `record_llm_call` swallows its own errors, so this is
+    self-guarding and never hurts the turn. Vault-free: no narration body crosses — the record carries
+    only a marker + the error class."""
+    from src import llm_trace as _lt
+    _et = type(err).__name__ if isinstance(err, BaseException) else "error"
+    _lt.record_llm_call(
+        kind="faithfulness-judge", model="faithfulness-judge",
+        messages=[{"role": "user", "content": "faithfulness judge (guard-down record)"}],
+        response={"text": "", "error": {"type": _et, "message": str(err)}},
+        ok=False, duration_ms=int(duration_ms or 0),
+        call_class="faithfulness", user=owner, fail_class=fail_class)
+
+
+def _faith_record_retro_dropped(owner, beat_before) -> None:
+    """A dropped retro-queue entry is a permanently-unjudged turn — surface it RED (never a silent
+    drop). Shared by the defer-time overflow and the drain-time merge overflow, so both attribute the
+    DROPPED turn's own beat (not the surviving/appended one)."""
+    from src import log_rings as _lr_d
+    _lr_d.record_overseer(
+        "anomaly", "faith:retro-dropped",
+        "a guard-down turn was dropped from the retro-judge queue UNJUDGED — the judge outage is "
+        "outrunning retro capacity (permanently unjudged)",
+        lever=None, beat_before=beat_before, ok=False, user=owner)
+
+
+def _faith_defer_retro(owner, narration, projection, beat_before, context) -> None:
+    """R5 part 3 — queue a guard-down turn for a RE-JUDGE on the next opportunity. Bounded per canonical
+    session; an overflow drops the OLDEST — itself a permanently-unjudged turn, so it is surfaced RED
+    (never silently dropped). ``owner=None`` is a SUPPORTED auth-off case (CON-1) and MUST be admitted —
+    dropping it would silently leave every auth-off turn permanently unjudged; it is keyed by the
+    canonical session (`_faith_key`), never a shared raw-None bucket (#1695 finding A). Best-effort;
+    never raises into the loop."""
+    if not narration or not str(narration).strip():
+        return
+    key = _faith_key(owner)
+    q = _DEFERRED_FAITH.setdefault(key, [])
+    q.append({"narration": str(narration), "projection": projection,
+              "beat_before": beat_before, "context": context or "in-game"})
+    if len(q) > _DEFERRED_FAITH_MAX:
+        dropped = q.pop(0)                              # the OLDEST turn is the one lost…
+        _faith_record_retro_dropped(owner, dropped.get("beat_before"))   # …so attribute ITS beat, not the new one.
+
+
+async def _faith_drain_retro(owner, llm) -> None:
+    """R5 part 3 — on the next opportunity, RE-JUDGE the turns that shipped guard-down and surface the
+    verdict on the overseer ring, so a previously-UNJUDGED turn becomes judged-of-record: RED if it was
+    a real slip, a clean observation otherwise — never silently unjudged. A retro that STILL can't run
+    (the judge is down again) re-queues the entry (bounded) — bounded latency, never lost.
+
+    Deliberately re-JUDGES and SURFACES only; it does NOT apply a stale active-mode CORRECTION a turn
+    late (that would steer a DIFFERENT turn's narration — the R1/R6 in-turn emission path, out of R5's
+    scope). The guarantee R5 owns is that the turn gets JUDGED and any slip becomes VISIBLE. Fail-soft:
+    never hurts the current turn."""
+    key = _faith_key(owner)                             # canonical-session key (#1695 finding A)
+    pending = _DEFERRED_FAITH.pop(key, None)
+    if not pending:
+        return
+    from src import log_rings as _lr
+    from src.faithfulness import FaithfulnessJudge
+    import inspect as _insp
+    judge = FaithfulnessJudge(llm)
+    requeue = []
+    # #1695 finding B — EXCEPTION-SAFE DRAIN. `pending` is popped up front, so ANY error escaping the
+    # loop before the merge would LOSE the still-unprocessed entries. Two belts: (1) each entry's WHOLE
+    # body is exception-wrapped — any unexpected error treats it as still-down (RED-record + requeue), so
+    # nothing escapes the loop; (2) an index cursor + a top-level try/finally guarantee the merge/restore
+    # of (requeue + any UNREACHED entries + leftover) runs even if something truly unexpected escaped —
+    # popped entries are never lost.
+    _idx = 0
+    try:
+        while _idx < len(pending):
+            entry = pending[_idx]
+            _bb = entry.get("beat_before")
+            try:
+                _narr = entry.get("narration") or ""
+                _ctx = entry.get("context") or "in-game"
+                _proj = entry.get("projection")
+                if _proj is None:
+                    _proj = await _faith_build_projection(owner)
+                _t0 = time.monotonic()
+                try:
+                    _raw = llm(judge.build_prompt(_narr, _proj, _ctx))
+                    if _insp.isawaitable(_raw):
+                        _raw = await asyncio.wait_for(_raw, timeout=12)
+                except Exception as _retry_err:
+                    # the judge is STILL down. Record the retro judge's OWN failed call ok:FALSE on the
+                    # llm-io ring (part-1 consistency: a retro-path failure must be as loud there as the
+                    # primary path, not only on the overseer ring — #1695 finding 3), RED-record the
+                    # still-down state, and re-queue (bounded, never lost).
+                    _fc = "timeout" if isinstance(_retry_err, (asyncio.TimeoutError, TimeoutError)) else "error"
+                    _faith_record_judge_down_io(
+                        owner, _narr, _retry_err, int((time.monotonic() - _t0) * 1000), _fc)
+                    _lr.record_overseer(
+                        "anomaly", "faith:retro-still-down",
+                        f"retro-judge could not run either (guard still down): "
+                        f"{type(_retry_err).__name__}: {_retry_err}",
+                        lever=None, beat_before=_bb, ok=False, user=owner)
+                    requeue.append(entry)
+                else:
+                    _verdict = judge.verdict_from_reply(_raw, _narr, _proj)
+                    if _verdict is None:
+                        # #1695: the retro CALL landed but the REPLY was unparseable / out-of-contract.
+                        # verdict_from_reply returns None ONLY for an UNDECIDABLE reply (a legit no-slip
+                        # is a NON-None verdict with is_slip=False) — so this is NOT judged-clean; the
+                        # guard is effectively still down. Surface it RED and REQUEUE — never record it
+                        # clean, never discard it (which would leave the turn permanently unjudged).
+                        _lr.record_overseer(
+                            "anomaly", "faith:retro-unparsed",
+                            "retro-judge reply was unparseable / out-of-contract (guard effectively still "
+                            "down) — requeued, NOT recorded clean",
+                            lever=None, beat_before=_bb, ok=False, user=owner)
+                        requeue.append(entry)
+                    elif _verdict.is_slip:
+                        _lr.record_overseer(
+                            "anomaly", f"faith:retro:{_verdict.dimension}",
+                            f"RETRO-JUDGED a previously guard-down turn — {_verdict.classification}-set "
+                            f"slip ({_verdict.dimension}), lever '{_verdict.lever}': {_verdict.rationale}",
+                            lever=_verdict.lever, beat_before=_bb, ok=False, user=owner)
+                    else:
+                        # a CONCRETE non-slip verdict (in-contract, is_slip=False) — genuinely clean.
+                        _lr.record_overseer(
+                            "observation", "faith:retro-clean",
+                            "RETRO-JUDGED a previously guard-down turn — no slip found (now "
+                            "judged-of-record)", lever=None, beat_before=_bb, ok=True, user=owner)
+            except Exception as _entry_err:
+                # ANY unexpected error in this entry's processing (projection build / verdict parse /
+                # telemetry) — treat it as still-down: RED-record + requeue so it is never lost and no
+                # exception escapes the loop. record_overseer self-guards, so it will not re-raise.
+                _lr.record_overseer(
+                    "anomaly", "faith:retro-error",
+                    f"retro-judge processing errored (guard down, requeued): "
+                    f"{type(_entry_err).__name__}: {_entry_err}",
+                    lever=None, beat_before=_bb, ok=False, user=owner)
+                requeue.append(entry)
+            _idx += 1                                   # this entry is accounted for (judged or requeued)
+    finally:
+        # MERGE, don't clobber (#1695 finding 5) + restore even on a truly-unexpected escape (finding B).
+        # A concurrent _faith_check→_faith_defer_retro for THIS session may have created a fresh queue
+        # under `key` while we awaited; overwriting would silently lose it. Combine requeue (older/retried)
+        # + any UNREACHED entries (the escape backstop) + leftover (newest), bound to the cap, and emit the
+        # SAME RED drop event (attributing each DROPPED turn's own beat) for anything that overflows.
+        unreached = pending[_idx:]
+        leftover = _DEFERRED_FAITH.get(key, [])
+        combined = requeue + unreached + leftover
+        if len(combined) > _DEFERRED_FAITH_MAX:
+            for _d in combined[:-_DEFERRED_FAITH_MAX]:
+                _faith_record_retro_dropped(owner, _d.get("beat_before"))
+            combined = combined[-_DEFERRED_FAITH_MAX:]
+        if combined:
+            _DEFERRED_FAITH[key] = combined
+        else:
+            _DEFERRED_FAITH.pop(key, None)
+
+
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
                        endpoint_url=None, model=None, headers=None, last_user=None,
                        projection=None, context="in-game") -> None:
@@ -3018,7 +3283,13 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         mode = faithfulness_mode()
         if mode not in ("shadow", "active"):
             return
-        if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
+        # R5 (#1659): the current turn is judge-eligible on a board claim / engaged scene (the sparse
+        # trigger). A LULL turn still runs when this session has a guard-down turn queued for a
+        # retro-judge — the next opportunity to catch it up (never ship it permanently unjudged).
+        _eligible = should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene))
+        _key = _faith_key(owner)                        # canonical-session retro key (#1695 finding A)
+        _has_retro = bool(_DEFERRED_FAITH.get(_key))    # snapshot — the EARLY-RETURN gate only (#1695 C)
+        if not _eligible and not _has_retro:
             return
         # live-only carve-out (ruling D4): no model ⇒ nothing runs (seeded lanes unchanged). The judge
         # resolves the DEDICATED faithfulness model (Settings → Faithfulness judge model), which itself
@@ -3041,16 +3312,37 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:resolve-failed health-event write failed: {_rec_err}")
+            # R5 part 1: the judge's failed resolve is a guard-down — record it ok:FALSE on the llm-io
+            # ring (never ok:true on an errored judge), and (part 3) DEFER this turn for a retro-judge.
+            _faith_record_judge_down_io(owner, narration, _resolve_err, 0, "error")
+            if _eligible:
+                # PIN the emit-time projection (#1695 finding 4): the projection reads engine state,
+                # not the (failed) judge model, so it is available now — capturing it means the retro
+                # judges the turn against the board that existed when the narration was emitted, not a
+                # rebuilt next-turn board (which would judge stale narration against facts that hadn't
+                # happened yet). _faith_build_projection is fail-soft (returns a dict, never raises).
+                _retro_proj = projection if projection is not None else await _faith_build_projection(owner)
+                _faith_defer_retro(owner, narration, _retro_proj, beat_before, context)
             # S2b: the guard is DOWN — an ungrounded closed-set outcome draft must fail CLOSED, never
             # soft-pass (finding 5: a board-backed narration is left alone).
             await _faith_guard_down_p0(owner, narration)
             _llm = None
         if _llm is None:
             return
+        # R5 part 3: catch up any guard-down turns queued for a retro-judge (bounded, best-effort). Runs
+        # on the next opportunity a model resolves — even on a lull turn — so an unjudged turn never
+        # lingers. RE-READ the LIVE queue here (#1695 finding C): a concurrent same-session defer during
+        # the _resolve_llm_fn await above may have enqueued AFTER the _has_retro snapshot, so gate the
+        # drain on the live queue, not the stale snapshot. Fail-soft; the current turn's judge proceeds.
+        if _DEFERRED_FAITH.get(_key):
+            await _faith_drain_retro(owner, _llm)
+        if not _eligible:
+            return
         # the junction may pass its own Vault-free projection (e.g. casting); else build the in-game one.
         _proj = projection if projection is not None else await _faith_build_projection(owner)
         judge = FaithfulnessJudge(_llm)
         import inspect as _faith_insp
+        _faith_t0 = time.monotonic()
         try:
             _raw = _llm(judge.build_prompt(narration or "", _proj, context))
             if _faith_insp.isawaitable(_raw):
@@ -3070,6 +3362,14 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:call-failed health-event write failed: {_rec_err}")
+            # R5 part 1 (#1659): the bundle's core fault — a timed-out judge call recorded ok:TRUE (12001ms,
+            # empty text) on the llm-io ring, a fail-soft INSIDE the failure telemetry. Record the judge's
+            # own failed call ok:FALSE (timeout vs error), so it can never read as a success.
+            _fc = "timeout" if isinstance(_call_err, (asyncio.TimeoutError, TimeoutError)) else "error"
+            _faith_record_judge_down_io(
+                owner, narration, _call_err, int((time.monotonic() - _faith_t0) * 1000), _fc)
+            # R5 part 3: the turn shipped UNJUDGED — DEFER it for a retro-judge on the next opportunity.
+            _faith_defer_retro(owner, narration, _proj, beat_before, context)
             # S2b: the judge could not RUN (timeout / 400) — the exact msg53 hole. An ungrounded closed-
             # set outcome draft must fail CLOSED here, never soft-pass on the bare `return` (finding 5).
             await _faith_guard_down_p0(owner, narration)
@@ -4185,6 +4485,12 @@ def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
 # game actually advances (a progression tool fires).
 _ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+# R4 (#1659 seam 4): SESSION-cumulative stall-flag tally per game — the count of advance-stall
+# nudges fired SINCE THE MODEL LAST PROGRESSED ON ITS OWN. Unlike `_ADVANCE_STALL_LEVEL` (which the
+# FE-forced silent commit pops clean at each beat), this survives FE cover-ups and clears ONLY on a
+# genuine model-driven advance (or a peer advance), so a chronically under-calling model's L39b
+# force actually escalates instead of restarting from zero every beat. Keyed via `_belt_key`.
+_ADVANCE_STALL_FLAGS: Dict[str, int] = {}
 # Per-game staleness: live turns elapsed since the last progression tool fired. Climbs while the
 # night sits on one beat; resets to 0 the moment the game advances. The lull-nudge only fires once
 # this passes _ADVANCE_GRACE_TURNS, so good engaging play (and a fresh beat) is left to breathe.
@@ -4450,6 +4756,23 @@ def _empty_response_fallback(
                 f'data: {json.dumps({"delta": _EMPTY_PRODUCER_LINE})}\n\n',
                 True, False)
     return (_EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False, False)
+
+
+def _premiere_opener_terminal_net(casting_finalized_this_turn: bool, full_response: str,
+                                  fallback_chunk, fallback_retry: bool):
+    """2026-07-17 — premiere-opener resilience, the terminal net. `_empty_response_fallback`'s own
+    true-empty branch never fires when `tool_events` is non-empty (createCharacter, at minimum), so a
+    SECOND empty round in a row after a mid-turn finalize (even the bounded refire in the round loop
+    came back empty too) would otherwise leave `full_response` blank with no retry chunk. Reuse the
+    SAME established in-character recovery line + retry affordance the true-empty path uses elsewhere
+    (F2 #1017) — never new authored content. Pulled into its own function (not inlined at the call
+    site) so the callsite source-pin tests scanning a fixed char window after `_empty_response_fallback(`
+    keep finding their anchors regardless of how this comment grows."""
+    if casting_finalized_this_turn and not full_response.strip() and not fallback_chunk:
+        full_response = _EMPTY_PRODUCER_LINE
+        fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
+        fallback_retry = True
+    return full_response, fallback_chunk, fallback_retry
 
 
 PLAN_MODE_DIRECTIVE = (
@@ -5247,6 +5570,18 @@ async def _stream_agent_loop_impl(
     # createCharacter starts the season THIS turn (model-driven OR FE-forced); the purge runs once.
     _casting_finalized_this_turn = False
     _pregame_purged = False
+    # 2026-07-17 (headless premiere-opener resilience, server-side twin of the FE
+    # `_orwellFinalizingActive` belt): bounded to ONE refire per turn — see `_PREMIERE_OPENER_REFIRE`
+    # below, at the terminal "no tools — done" gate. `_visible_chars_at_finalize` snapshots
+    # `len(full_response.strip())` the INSTANT casting finalized (captured once, at whichever site
+    # sets `_casting_finalized_this_turn`) — `None` until then; `.strip()` so the inter-round "\n\n"
+    # separator (appended after every tool round regardless of content) never reads as narration.
+    # Comparing the CURRENT stripped length against this snapshot (not the monotonic `_emitted_visible`
+    # flag, which can't answer "did anything stream SINCE") is what lets the refire fire correctly even
+    # when an earlier pre-finalize round already narrated a beat (e.g. a nudge round) — the exact
+    # reported shape (visible round → force round → empty round).
+    _premiere_opener_refire_used = False
+    _visible_chars_at_finalize = None
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
@@ -6325,6 +6660,7 @@ async def _stream_agent_loop_impl(
                             # must reset the SAME belt state the single-tenant write path uses.
                             _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
                             _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                            _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a peer moved the beat — clear session stall pressure
                             logger.info(
                                 f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
                                 f"{_beat_key_at_read} with no progression this turn — suppressing "
@@ -6423,9 +6759,17 @@ async def _stream_agent_loop_impl(
                         # never climb single-tenant: every read saw the empty-key default).
                         _sl_key = _belt_key(owner)
                         _level = _ADVANCE_STALL_LEVEL.get(_sl_key, 0)
+                        # R4 (#1659 seam 4): the SESSION-cumulative stall-flag count, read BEFORE this
+                        # turn's bump. It arms the L39b force below once N flags have accrued since the
+                        # model last self-advanced — even when the per-beat consecutive ladder keeps
+                        # getting reset by FE-forced commits. `_stall_flags_prior` (this turn's count
+                        # excluded) keeps the session trigger in lock-step with the consecutive rung
+                        # within a clean beat, so the full text ladder always runs the first time.
+                        _stall_flags_prior = _ADVANCE_STALL_FLAGS.get(_sl_key, 0)
                         _turn_advance_nudges += 1
                         _note_belt(owner, "advance-stall-nudge")  # gap #3 telemetry
                         _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
+                        _ADVANCE_STALL_FLAGS[_sl_key] = _stall_flags_prior + 1
 
                         # Finding 4 (#1664): a per-call flag that distinguishes a RECONCILED double-stale
                         # (the beat moved under us — turn-terminating, never a second narration) from an
@@ -6630,7 +6974,12 @@ async def _stream_agent_loop_impl(
                                             _ov_applied_flags = {"force-advance": False,
                                                                  "propose-record": False}
 
-                                            async def _ov_do_force_advance() -> bool:
+                                            # Ruff B023: default-arg binding captures THIS iteration's
+                                            # _emitted_visible at def time (the closure is defined fresh
+                                            # every round-loop iteration and invoked immediately below, so
+                                            # the value is already correct — this just makes it explicit
+                                            # rather than an implicit loop-variable closure).
+                                            async def _ov_do_force_advance(_emitted_visible=_emitted_visible) -> bool:
                                                 _ok = False
                                                 _fok = True
                                                 try:
@@ -6651,8 +7000,13 @@ async def _stream_agent_loop_impl(
                                                         f"skipping: {type(_fe).__name__}: {_fe}".rstrip(': '))
                                                 if _fok and await _commit_advance_silently(
                                                         f"overseer force stall L{_level}"):
-                                                    messages.append({"role": "system",
-                                                                     "content": _FORCED_ADVANCE_NUDGE})
+                                                    _fa_txt = _FORCED_ADVANCE_NUDGE
+                                                    if _emitted_visible:
+                                                        # A scene already streamed THIS turn — do not let
+                                                        # the forced-advance re-prompt read as "narrate the
+                                                        # beat again" (the stuttering-narrator bug).
+                                                        _fa_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _fa_txt
+                                                    messages.append({"role": "system", "content": _fa_txt})
                                                     _ov_flow["act"] = "yield-continue"
                                                     _ok = True
                                                 return _ok
@@ -6682,6 +7036,12 @@ async def _stream_agent_loop_impl(
                                                 # re-prompt (the same rung the floor would pick for _level).
                                                 # Returns True ⇒ dispatch_lever reports it applied.
                                                 _txt = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
+                                                if _emitted_visible:
+                                                    # A scene already streamed THIS turn — the re-prompt
+                                                    # must not read as "narrate again" (the stuttering-
+                                                    # narrator bug). Carry the continue-never-reopen contract
+                                                    # ahead of the nudge so the correction still lands.
+                                                    _txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _txt
                                                 messages.append({"role": "system", "content": _txt})
                                                 _ov_flow["act"] = "yield-continue"
                                                 return True
@@ -6691,15 +7051,31 @@ async def _stream_agent_loop_impl(
                                                 # round (fix the INPUT, never the output). A flagged desync
                                                 # already has a RE-GROUND directive queued for the next turn,
                                                 # so re-prompt now to consume it; otherwise queue a re-ground.
+                                                _reground_txt = (
+                                                    "RE-GROUND ON THE BOARD — your view drifted from "
+                                                    "the engine. Read the current GAME CONTEXT before "
+                                                    "you narrate, and voice only what it states.")
                                                 try:
                                                     from routes import chat_helpers as _ov_chd
                                                     if owner not in getattr(_ov_chd, "_DESYNC_REGROUND", {}):
-                                                        _ov_chd._DESYNC_REGROUND[owner] = (
-                                                            "RE-GROUND ON THE BOARD — your view drifted from "
-                                                            "the engine. Read the current GAME CONTEXT before "
-                                                            "you narrate, and voice only what it states.")
+                                                        _ov_chd._DESYNC_REGROUND[owner] = _reground_txt
                                                 except Exception:
                                                     pass
+                                                if _emitted_visible:
+                                                    # A scene has ALREADY streamed to the player this turn —
+                                                    # a bare re-prompt would make the model re-narrate the
+                                                    # whole scene from scratch, and #829 turn-coalescing
+                                                    # stacks both renditions into the SAME message bubble
+                                                    # (the stuttering-narrator bug: two contradictory takes
+                                                    # of one moment fused, often mid-line). Carry the
+                                                    # reground directive straight INTO this round's messages
+                                                    # (not only the next-turn `_DESYNC_REGROUND` stash, which
+                                                    # the model never re-reads mid-stream) wrapped in the
+                                                    # continue-never-reopen contract, so the correction still
+                                                    # lands THIS turn without a duplicate narration.
+                                                    messages.append({"role": "system", "content":
+                                                                     _CONTINUE_NEVER_REOPEN + "\n\n"
+                                                                     + _reground_txt})
                                                 _ov_flow["act"] = "yield-continue"
                                                 return True
 
@@ -6798,7 +7174,8 @@ async def _stream_agent_loop_impl(
                             except Exception as _dr_e:
                                 logger.warning(f"[orwell] eviction-drain pending read skipped: {_dr_e}")
                                 _eviction_drain_force = False
-                        if ((_eviction_drain_force or _level >= _ADVANCE_FORCE_LEVEL)
+                        if ((_eviction_drain_force or _level >= _ADVANCE_FORCE_LEVEL
+                             or _stall_flags_prior >= _STALL_FLAGS_BEFORE_FORCE)
                                 and not _previewed_uncommitted and not _decision_undelivered):
                             # F7 DOUBLE-ADVANCE GUARD: between the state read at the top of this block and
                             # this forced POST, another device (or the model's own tool path) may have
@@ -6836,7 +7213,15 @@ async def _stream_agent_loop_impl(
                                         lever="force-advance", ok=True, user=owner)
                                 except Exception:
                                     pass
-                                messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
+                                _fa_txt = _FORCED_ADVANCE_NUDGE
+                                if _emitted_visible:
+                                    # A scene already streamed THIS turn (non-active-overseer path,
+                                    # mirroring _ov_do_force_advance above) — do not let the
+                                    # forced-advance re-prompt read as "narrate the beat again" (the
+                                    # stuttering-narrator bug: two contradictory takes of one moment
+                                    # fused into the SAME message bubble via #829 turn-coalescing).
+                                    _fa_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _fa_txt
+                                messages.append({"role": "system", "content": _fa_txt})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
                             # else: forced advance failed — fall through to the text nudge below.
@@ -6857,6 +7242,11 @@ async def _stream_agent_loop_impl(
                                 lever="nudge", ok=True, user=owner)
                         except Exception:
                             pass
+                        if _emitted_visible:
+                            # Same guard as above (mirroring _ov_nudge) — a scene already streamed
+                            # this turn, so carry the continue-never-reopen contract ahead of the
+                            # text nudge rather than re-prompting a bare "narrate/advance" line.
+                            _nudge = _CONTINUE_NEVER_REOPEN + "\n\n" + _nudge
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
@@ -7073,10 +7463,14 @@ async def _stream_agent_loop_impl(
                                         "[orwell] forced createCharacter REFUSED (no-model-wired, "
                                         f"classes={_cres.get('unwiredClasses')}) — surfacing the "
                                         f"operator fix, round {round_num} user={owner}")
-                                    messages.append({"role": "system",
-                                                     "content": _creation_no_model_steer(
-                                                         _cres.get("unwiredClasses") or [],
-                                                         str(_cres.get("error") or ""))})
+                                    _nmw_txt = _creation_no_model_steer(
+                                        _cres.get("unwiredClasses") or [], str(_cres.get("error") or ""))
+                                    if _emitted_visible:
+                                        # The interview reply already streamed THIS turn — the re-prompt
+                                        # must not read as "narrate again" (the stuttering-narrator bug,
+                                        # same family as the ACTIVE OVERSEER re-prompt levers above).
+                                        _nmw_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _nmw_txt
+                                    messages.append({"role": "system", "content": _nmw_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 # Fix B: do_create_character serializes the engine view (started /
@@ -7096,6 +7490,13 @@ async def _stream_agent_loop_impl(
                                     _note_belt(owner, "casting-finalize-force")  # gap #3 telemetry
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
+                                    # 2026-07-17: this is a finalize just like the model-driven site below
+                                    # (tool_execution.py dispatch) — mark it the same way so the premiere-
+                                    # opener refire covers this path too. Safe to set even though the purge
+                                    # below runs inline (guarded on `_pregame_purged`, already True next line).
+                                    _casting_finalized_this_turn = True
+                                    if _visible_chars_at_finalize is None:
+                                        _visible_chars_at_finalize = len(full_response.strip())
                                     # #1312 (Vault Wall): the season just went live THIS turn — purge the
                                     # OOC casting interview before the premiere continuation narrates the
                                     # move-in, so the houseguests' first impressions cannot carry a casting
@@ -7106,7 +7507,16 @@ async def _stream_agent_loop_impl(
                                     if _n_purged:
                                         logger.info("[orwell] #1312 purged %d casting turn(s) from the "
                                                     "premiere context (forced finalize) user=%s", _n_purged, owner)
-                                    messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
+                                    _cfn_txt = _CASTING_FORCED_NOTE
+                                    if _emitted_visible:
+                                        # The interview reply already streamed THIS turn (this is the
+                                        # casting->premiere seam — the msg-5-class duplication: the
+                                        # interview producer reply glued mid-line to the premiere walk-in,
+                                        # same family as the ACTIVE OVERSEER stuttering-narrator bug).
+                                        # Tell the model to CONTINUE into the premiere, never restate the
+                                        # interview reply already shown.
+                                        _cfn_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _cfn_txt
+                                    messages.append({"role": "system", "content": _cfn_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 # #529 — REFUSE-AND-SURFACE: the engine no longer fabricates player canon
@@ -7128,9 +7538,12 @@ async def _stream_agent_loop_impl(
                                         "[orwell] forced createCharacter REFUSED (casting-incomplete, "
                                         f"missing={_missing}, reason={_refused_reason!r}) — surfacing the "
                                         f"gap, round {round_num} user={owner}")
-                                    messages.append({"role": "system",
-                                                     "content": _casting_incomplete_steer(
-                                                         _missing, _refused_reason)})
+                                    _ci_txt = _casting_incomplete_steer(_missing, _refused_reason)
+                                    if _emitted_visible:
+                                        # Same family as above — don't let the re-prompt read as
+                                        # "narrate again" once the interview reply already streamed.
+                                        _ci_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _ci_txt
+                                    messages.append({"role": "system", "content": _ci_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 logger.warning("[orwell] forced createCharacter did not start the "
@@ -7142,6 +7555,9 @@ async def _stream_agent_loop_impl(
                         _turn_casting_nudge += 1  # casting finalize nudge fired
                         _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                         logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
+                        if _emitted_visible:
+                            # Same family as above — the interview reply already streamed THIS turn.
+                            _cn = _CONTINUE_NEVER_REOPEN + "\n\n" + _cn
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
@@ -7182,6 +7598,31 @@ async def _stream_agent_loop_impl(
                     elif owner is not None:
                         _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
                         _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+            # 2026-07-17 — PREMIERE-OPENER REFIRE (see `_PREMIERE_OPENER_REFIRE`). Casting finalized THIS
+            # turn (model-driven or FE-forced, either site above) but no narration has streamed since —
+            # this round came back with nothing new (a known GLM/OpenRouter empty-completion class, or
+            # the finalize round itself). Without this the turn fell straight through to the unconditional
+            # break below: no move-in narration, no retry affordance — the game is live underneath the
+            # player and nothing ever says so. ONE bounded retry (never two — `_premiere_opener_refire_used`
+            # latches immediately), then unconditionally falls through to the break either way, so this can
+            # never itself become a hang. The continue-never-reopen contract prefixes it when something
+            # already streamed earlier this turn (e.g. a pre-finalize nudge round) so the retry never
+            # reads as "narrate the whole thing again" — the same guard every sibling re-prompt in this
+            # block carries (see `test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate`).
+            if (_casting_finalized_this_turn and not _premiere_opener_refire_used
+                    and not (_visible_chars_at_finalize is not None
+                             and len(full_response.strip()) > _visible_chars_at_finalize)):
+                _premiere_opener_refire_used = True
+                _refire_txt = _PREMIERE_OPENER_REFIRE
+                if _emitted_visible:
+                    _refire_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _refire_txt
+                messages.append({"role": "system", "content": _refire_txt})
+                _note_belt(owner, "premiere-opener-refire")  # gap #3 telemetry
+                logger.info(
+                    f"[orwell] premiere-opener refire (no narration since createCharacter finalized) "
+                    f"round {round_num} user={owner}")
+                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -7558,6 +7999,8 @@ async def _stream_agent_loop_impl(
                     _cc_view = {}
                 if isinstance(_cc_view, dict) and _cc_view.get("started") and not _cc_view.get("createRefused"):
                     _casting_finalized_this_turn = True
+                    if _visible_chars_at_finalize is None:
+                        _visible_chars_at_finalize = len(full_response.strip())
             # The game advanced: clear any persisted stall escalation for this game so the
             # next stall (if any) starts gentle again. NAR-1: dropped the `and owner` gate + keyed
             # via _belt_key — this reset never fired single-tenant before (raw `owner=None` is a
@@ -7565,6 +8008,7 @@ async def _stream_agent_loop_impl(
             # resolved, feeding stale reads on the NEXT lull check.
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS:
                 _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a genuine MODEL advance clears the session stall tally
                 _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
@@ -8107,6 +8551,7 @@ async def _stream_agent_loop_impl(
         _fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
         if full_response == _EMPTY_PRODUCER_LINE:
             _fallback_retry = True  # nothing survived the scrub/guard → the in-character retry recovery
+    full_response, _fallback_chunk, _fallback_retry = _premiere_opener_terminal_net(_casting_finalized_this_turn, full_response, _fallback_chunk, _fallback_retry)
     if _fallback_chunk:
         yield _fallback_chunk
     # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap
