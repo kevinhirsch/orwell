@@ -2994,6 +2994,111 @@ async def _faith_guard_down_p0(owner, narration) -> bool:
         return False
 
 
+# ── R5 (#1659) — guard-down fail-closed: judge-down llm-io record + the deferred RETRO-JUDGE queue ──
+# The faithfulness judge is the last grounding guard. When it cannot RUN on a turn (a timeout / 400 /
+# model-resolve failure — the bundle's "phantom-HOH" window: overseer seq 51 left that turn UNJUDGED,
+# and the timed-out call was logged ok:TRUE with empty text — a fail-soft INSIDE the failure telemetry),
+# two #1599 guarantees kick in:
+#   1) the judge's own failed call is recorded ok:FALSE on the llm-io ring (never ok:true on an
+#      empty/errored/timed-out judge result) — `_faith_record_judge_down_io`; and
+#   2) the turn is DEFERRED and RE-JUDGED on the next opportunity — `_faith_defer_retro` /
+#      `_faith_drain_retro`, mirroring the CON-11 deferred-fold queue — so a guard-down turn is never
+#      shipped PERMANENTLY unjudged. Bounded per owner; an overflow drop is itself a real
+#      permanently-unjudged turn, so it fires a RED-eligible health event, never a silent drop.
+_DEFERRED_FAITH: dict = {}
+_DEFERRED_FAITH_MAX = 2
+
+
+def _faith_record_judge_down_io(owner, narration, err, duration_ms, fail_class) -> None:
+    """R5 part 1 — record the FAILED faithfulness-judge call on the llm-io ring as ok:FALSE (a
+    RED-eligible recorder — `llm_trace.record_llm_call`), so a judge timeout / 400 / resolve-failure is
+    never logged ok:true with empty text (the #1599 fail-soft-inside-failure-telemetry bug the bundle
+    caught: a 12001ms ok:true empty judge record). `record_llm_call` swallows its own errors, so this is
+    self-guarding and never hurts the turn. Vault-free: no narration body crosses — the record carries
+    only a marker + the error class."""
+    from src import llm_trace as _lt
+    _et = type(err).__name__ if isinstance(err, BaseException) else "error"
+    _lt.record_llm_call(
+        kind="faithfulness-judge", model="faithfulness-judge",
+        messages=[{"role": "user", "content": "faithfulness judge (guard-down record)"}],
+        response={"text": "", "error": {"type": _et, "message": str(err)}},
+        ok=False, duration_ms=int(duration_ms or 0),
+        call_class="faithfulness", user=owner, fail_class=fail_class)
+
+
+def _faith_defer_retro(owner, narration, projection, beat_before, context) -> None:
+    """R5 part 3 — queue a guard-down turn for a RE-JUDGE on the next opportunity. Bounded per owner; an
+    overflow drops the OLDEST — itself a permanently-unjudged turn, so it is surfaced RED (never silently
+    dropped). Best-effort; never raises into the loop."""
+    if not owner or not narration or not str(narration).strip():
+        return
+    q = _DEFERRED_FAITH.setdefault(owner, [])
+    q.append({"narration": str(narration), "projection": projection,
+              "beat_before": beat_before, "context": context or "in-game"})
+    if len(q) > _DEFERRED_FAITH_MAX:
+        q.pop(0)
+        from src import log_rings as _lr_of
+        _lr_of.record_overseer(
+            "anomaly", "faith:retro-dropped",
+            "a guard-down turn was dropped from the retro-judge queue UNJUDGED — the judge outage is "
+            "outrunning retro capacity (permanently unjudged)",
+            lever=None, beat_before=beat_before, ok=False, user=owner)
+
+
+async def _faith_drain_retro(owner, llm) -> None:
+    """R5 part 3 — on the next opportunity, RE-JUDGE the turns that shipped guard-down and surface the
+    verdict on the overseer ring, so a previously-UNJUDGED turn becomes judged-of-record: RED if it was
+    a real slip, a clean observation otherwise — never silently unjudged. A retro that STILL can't run
+    (the judge is down again) re-queues the entry (bounded) — bounded latency, never lost.
+
+    Deliberately re-JUDGES and SURFACES only; it does NOT apply a stale active-mode CORRECTION a turn
+    late (that would steer a DIFFERENT turn's narration — the R1/R6 in-turn emission path, out of R5's
+    scope). The guarantee R5 owns is that the turn gets JUDGED and any slip becomes VISIBLE. Fail-soft:
+    never hurts the current turn."""
+    pending = _DEFERRED_FAITH.pop(owner, None)
+    if not pending:
+        return
+    from src import log_rings as _lr
+    from src.faithfulness import FaithfulnessJudge
+    import inspect as _insp
+    judge = FaithfulnessJudge(llm)
+    requeue = []
+    for entry in pending:
+        _narr = entry.get("narration") or ""
+        _bb = entry.get("beat_before")
+        _ctx = entry.get("context") or "in-game"
+        _proj = entry.get("projection")
+        if _proj is None:
+            _proj = await _faith_build_projection(owner)
+        try:
+            _raw = llm(judge.build_prompt(_narr, _proj, _ctx))
+            if _insp.isawaitable(_raw):
+                _raw = await asyncio.wait_for(_raw, timeout=12)
+        except Exception as _retry_err:
+            # the judge is STILL down — re-queue (bounded) and RED-record (guard still down, not silent).
+            _lr.record_overseer(
+                "anomaly", "faith:retro-still-down",
+                f"retro-judge could not run either (guard still down): "
+                f"{type(_retry_err).__name__}: {_retry_err}",
+                lever=None, beat_before=_bb, ok=False, user=owner)
+            requeue.append(entry)
+            continue
+        _verdict = judge.verdict_from_reply(_raw, _narr, _proj)
+        if _verdict is not None and _verdict.is_slip:
+            _lr.record_overseer(
+                "anomaly", f"faith:retro:{_verdict.dimension}",
+                f"RETRO-JUDGED a previously guard-down turn — {_verdict.classification}-set slip "
+                f"({_verdict.dimension}), lever '{_verdict.lever}': {_verdict.rationale}",
+                lever=_verdict.lever, beat_before=_bb, ok=False, user=owner)
+        else:
+            _lr.record_overseer(
+                "observation", "faith:retro-clean",
+                "RETRO-JUDGED a previously guard-down turn — no slip found (now judged-of-record)",
+                lever=None, beat_before=_bb, ok=True, user=owner)
+    if requeue:
+        _DEFERRED_FAITH[owner] = requeue[-_DEFERRED_FAITH_MAX:]
+
+
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
                        endpoint_url=None, model=None, headers=None, last_user=None,
                        projection=None, context="in-game") -> None:
@@ -3018,7 +3123,12 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         mode = faithfulness_mode()
         if mode not in ("shadow", "active"):
             return
-        if not should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene)):
+        # R5 (#1659): the current turn is judge-eligible on a board claim / engaged scene (the sparse
+        # trigger). A LULL turn still runs when this owner has a guard-down turn queued for a retro-judge
+        # — the next opportunity to catch it up (never ship it permanently unjudged).
+        _eligible = should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene))
+        _has_retro = bool(_DEFERRED_FAITH.get(owner))
+        if not _eligible and not _has_retro:
             return
         # live-only carve-out (ruling D4): no model ⇒ nothing runs (seeded lanes unchanged). The judge
         # resolves the DEDICATED faithfulness model (Settings → Faithfulness judge model), which itself
@@ -3041,16 +3151,29 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:resolve-failed health-event write failed: {_rec_err}")
+            # R5 part 1: the judge's failed resolve is a guard-down — record it ok:FALSE on the llm-io
+            # ring (never ok:true on an errored judge), and (part 3) DEFER this turn for a retro-judge.
+            _faith_record_judge_down_io(owner, narration, _resolve_err, 0, "error")
+            if _eligible:
+                _faith_defer_retro(owner, narration, None, beat_before, context)
             # S2b: the guard is DOWN — an ungrounded closed-set outcome draft must fail CLOSED, never
             # soft-pass (finding 5: a board-backed narration is left alone).
             await _faith_guard_down_p0(owner, narration)
             _llm = None
         if _llm is None:
             return
+        # R5 part 3: catch up any guard-down turns queued for a retro-judge (bounded, best-effort). Runs
+        # on the next opportunity a model resolves — even on a lull turn — so an unjudged turn never
+        # lingers. Fail-soft inside the drain; the current turn's judge proceeds regardless.
+        if _has_retro:
+            await _faith_drain_retro(owner, _llm)
+        if not _eligible:
+            return
         # the junction may pass its own Vault-free projection (e.g. casting); else build the in-game one.
         _proj = projection if projection is not None else await _faith_build_projection(owner)
         judge = FaithfulnessJudge(_llm)
         import inspect as _faith_insp
+        _faith_t0 = time.monotonic()
         try:
             _raw = _llm(judge.build_prompt(narration or "", _proj, context))
             if _faith_insp.isawaitable(_raw):
@@ -3070,6 +3193,14 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
                     lever=None, beat_before=beat_before, ok=False, user=owner)
             except Exception as _rec_err:
                 logger.debug(f"[orwell] faith:call-failed health-event write failed: {_rec_err}")
+            # R5 part 1 (#1659): the bundle's core fault — a timed-out judge call recorded ok:TRUE (12001ms,
+            # empty text) on the llm-io ring, a fail-soft INSIDE the failure telemetry. Record the judge's
+            # own failed call ok:FALSE (timeout vs error), so it can never read as a success.
+            _fc = "timeout" if isinstance(_call_err, (asyncio.TimeoutError, TimeoutError)) else "error"
+            _faith_record_judge_down_io(
+                owner, narration, _call_err, int((time.monotonic() - _faith_t0) * 1000), _fc)
+            # R5 part 3: the turn shipped UNJUDGED — DEFER it for a retro-judge on the next opportunity.
+            _faith_defer_retro(owner, narration, _proj, beat_before, context)
             # S2b: the judge could not RUN (timeout / 400) — the exact msg53 hole. An ungrounded closed-
             # set outcome draft must fail CLOSED here, never soft-pass on the bare `return` (finding 5).
             await _faith_guard_down_p0(owner, narration)
