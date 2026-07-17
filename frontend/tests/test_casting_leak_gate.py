@@ -345,6 +345,51 @@ def test_strip_pregame_context_scrubs_the_engine_casting_status_disclosure():
     assert "You are the show's producer." in blob
 
 
+def test_purge_that_removes_every_user_turn_inserts_the_readiness_bridge():
+    """2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes
+    the player's own finalize line, leaving [system, assistant(tool_calls), tool] — a shape
+    some GLM providers (Novita) reject with HTTP 400, so the premiere opener could never be
+    model-authored there. The purge must restore a valid conversation shape with the FIXED,
+    disclosure-free readiness bridge as the player's voice — and nothing else."""
+    from src.agent_loop import _strip_pregame_context, _PREGAME_PURGE_USER_BRIDGE
+
+    messages = [
+        {"role": "system", "content": "GM frame"},
+        {"role": "user", "content": f"finalize me: {CASTING_SENTINEL}",
+         "metadata": {"phase": "casting"}},
+        {"role": "assistant", "content": "createCharacter tool_call",
+         "tool_calls": [{"id": "c1", "function": {"name": "createCharacter"}}]},
+        {"role": "tool", "content": "### createCharacter\nstarted", "tool_call_id": "c1"},
+    ]
+    dropped = _strip_pregame_context(messages)
+    assert dropped == 1
+    users = [m for m in messages if m.get("role") == "user"]
+    assert len(users) == 1, "the purge must leave exactly one user turn (the bridge)"
+    assert users[0]["content"] == _PREGAME_PURGE_USER_BRIDGE
+    assert CASTING_SENTINEL not in users[0]["content"]
+    # The bridge sits between the system frame and the assistant tool_call — a valid shape.
+    roles = [m.get("role") for m in messages]
+    assert roles == ["system", "user", "assistant", "tool"]
+
+
+def test_purge_keeps_a_surviving_live_user_turn_and_adds_no_bridge():
+    """A live (non-casting) user turn that survives the purge already gives the provider a
+    valid shape — the bridge must NOT be added on top of it."""
+    from src.agent_loop import _strip_pregame_context, _PREGAME_PURGE_USER_BRIDGE
+
+    messages = [
+        {"role": "system", "content": "GM frame"},
+        {"role": "user", "content": f"interview: {CASTING_SENTINEL}",
+         "metadata": {"phase": "casting"}},
+        {"role": "user", "content": INGAME_TOKEN, "metadata": {"phase": "game"}},
+        {"role": "assistant", "content": "createCharacter → house cast"},
+    ]
+    assert _strip_pregame_context(messages) == 1
+    contents = [m["content"] for m in messages if m.get("role") == "user"]
+    assert contents == [INGAME_TOKEN]
+    assert _PREGAME_PURGE_USER_BRIDGE not in " ".join(contents)
+
+
 def test_strip_pregame_context_is_idempotent_and_keeps_live_turns():
     from src.agent_loop import _strip_pregame_context
 

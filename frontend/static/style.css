@@ -3603,26 +3603,14 @@ body.bg-pattern-perlin-flow {
       height: 12px;
       opacity: 0.7;
     }
-    .model-picker-menu {
-      position: absolute;
-      bottom: calc(100% + 16px);
-      right: 0;
-      z-index: 300;
-      min-width: 260px;
-      max-width: 360px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
-      padding: 6px;
-      animation: picker-roll-up 0.2s ease-out;
-      transform-origin: bottom right;
-    }
-    .model-picker-menu.closing {
-      animation: picker-roll-down 0.15s ease-in forwards;
-    }
-    .model-picker-menu.hidden { display: none; }
+    /* #1638: the bespoke `.model-picker-menu` dropdown tray is retired — the picker now mounts
+       through OrwellPopoverKit as a `.ow-popover` surface (modelPicker.js), which owns the
+       positioning (flip/shift), chrome, animation, and glass material (its own `.ow-popover`
+       rules + the shared "CHROME surfaces" glass lists). Only the picker's `#model-picker-list`
+       CONTENT rows survive below (they are re-parented into the popover), plus the dark-ink fold
+       that keeps them legible on the light glass. */
     .model-picker-list {
+      padding: 6px;                    /* the tray's inner padding folds onto the content root */
       max-height: min(280px, 50dvh);
       overflow-y: auto;
     }
@@ -3822,14 +3810,13 @@ body.bg-pattern-perlin-flow {
 
        Ref menus/popovers: lg_hig_toolbar_after.png + lg_hig_ios_glass_over_light.png
        (a floating glass element with dark monochrome symbols over light content). */
-    body.theme-frosted .model-picker-menu {
-      /* Redefine --fg to the chrome dark ink WITHIN the popover so every inner control
+    body.theme-frosted .model-picker-list {
+      /* Redefine --fg to the chrome dark ink WITHIN the picker CONTENT so every inner control
          that paints `color: var(--fg)` / `color-mix(in srgb, var(--fg) N%, …)` resolves
          to dark / muted-dark on the light glass — full ink stays dark, the muted
-         secondary gradation is preserved (it just keys off dark ink). Mirrors the kit
-         dark-ink-on-glass treatment the other chrome popovers (.dropdown/.cp-popover)
-         already get, applied to the model picker so its inner rows/dots/buttons can't
-         be light-on-light. */
+         secondary gradation is preserved (it just keys off dark ink). The surface itself is
+         the shared kit `.ow-popover` (its own frosted rule sets the light glass + #16191f ink);
+         this fold keeps the re-parented `#model-picker-list` rows from going light-on-light. */
       --fg: #16191f;
     }
     /* The favorite dot is a sanctioned NON-text STATUS accent (a ●), not body
@@ -7041,15 +7028,12 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
        every width, load-bearing once the row wraps below. */
     .theme-fd-group { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
     .theme-fd-label { font-size: 12px; font-weight: 500; color: var(--fg); opacity: 0.6; }
-    .theme-fd-select {
-      padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
-      background: var(--bg); color: var(--fg); font-size: 12px;
-      font-family: inherit; cursor: pointer;
-    }
-    .theme-fd-select:focus { outline: none; border-color: var(--red); }
-    /* THM-05 (#1606): `.theme-fd-range` migrated to the `.ow-slider` kit primitive
-       (index.html) — the bespoke range styling (and its `var(--red)` accent leak) is
-       removed here. */
+    /* THM-05 (#1606): `.theme-fd-range` migrated to the `.ow-slider` kit primitive, and the
+       two Customize `.theme-fd-select` text inputs (the Google-font combobox + the bg-image
+       URL field) to the `.ow-field` kit primitive (both in index.html) — the bespoke range
+       + text-field styling (and its `var(--red)` accent leak) is removed here. The
+       `select.theme-fd-select` rules (below, ~23066) are a DIFFERENT, `<select>`-scoped legacy
+       fix retained on purpose (test_0765_admin_glass / test_1644_text_ink_polarity pin them). */
     /* THM-02: Customize never reflowed narrow — the Colors 2-col grid (.theme-custom)
        and the 4-across Font & Layout row (.theme-fd-row, no flex-wrap) both overflowed
        to a horizontal scrollbar at the kit window's 320px floor. #theme-popup already
@@ -15572,26 +15556,8 @@ body:not(.welcome-ready) #welcome-screen {
   }
 }
 
-@keyframes picker-roll-up {
-  from {
-    opacity: 0;
-    transform: scaleY(0.4) translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: scaleY(1) translateY(0);
-  }
-}
-@keyframes picker-roll-down {
-  from {
-    opacity: 1;
-    transform: scaleY(1) translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: scaleY(0.4) translateY(8px);
-  }
-}
+/* #1638: `picker-roll-up`/`picker-roll-down` retired with the bespoke `.model-picker-menu`
+   tray — the migrated `.ow-popover` picker uses the kit's own `ow-menu-in` open animation. */
 
 @keyframes modal-enter {
   from {
@@ -19112,7 +19078,6 @@ body.theme-frosted .cookbook-pane,
 body.theme-frosted .doc-pane,
 body.theme-frosted .doc-pane-floating,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .doc-tab-dropdown,
 body.theme-frosted .email-reader,
 body.theme-frosted .admin-card,
@@ -20051,7 +20016,6 @@ body.theme-frosted .on-card,
    glass, no dark veil; color comes through from the backdrop, lensed/blurred by tier. */
 body.theme-frosted .admin-card,
 body.theme-frosted .chat-top-bar,
-body.theme-frosted .model-picker-menu,
 body.theme-frosted .model-picker-btn,
 body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
@@ -20270,7 +20234,6 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
      Transparency frosts toward opaque — legibility is never load-bearing on glass) */
   body.theme-frosted .admin-card,
   body.theme-frosted .chat-top-bar,
-  body.theme-frosted .model-picker-menu,
   body.theme-frosted .model-picker-btn,
   body.theme-frosted .toast,
   body.theme-frosted .tool-indicator,
@@ -20306,7 +20269,6 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:last-child:not(:only-chi
      (Apple: elements go predominantly clear-edged with a contrasting border). */
   body.theme-frosted .admin-card,
   body.theme-frosted .chat-top-bar,
-  body.theme-frosted .model-picker-menu,
   body.theme-frosted .model-picker-btn,
   body.theme-frosted .toast,
   body.theme-frosted .tool-indicator,
@@ -20392,7 +20354,6 @@ body.theme-frosted .modal-content,
 /* CHROME — same blur + DIRECTIONAL luminous rim + soft float + very-rounded concentric
    corners as the windows (the Apple ios_glass_over_dark "tell"). One coherent material. */
 body.theme-frosted .admin-card,
-body.theme-frosted .model-picker-menu,
 body.theme-frosted .toast,
 body.theme-frosted .attach-image-skeleton {
   border-radius: var(--ow-glass-radius) !important;
@@ -23405,9 +23366,9 @@ body.theme-frosted .model-picker-btn { border-radius: var(--ow-radius-pill, 999p
 /* the tool indicator + attachment cards are small rounded chips */
 body.theme-frosted .tool-indicator,
 body.theme-frosted .attach-card { border-radius: var(--ow-radius-inner, 14px) !important; }
-/* the model-picker POPOVER + toast banner carry the stronger surface radius already
-   (in the rim group above); keep their menu/row internals legible with the shadow. */
-body.theme-frosted .model-picker-menu,
+/* the toast banner carries the stronger surface radius already (in the rim group above);
+   keep its internals legible with the shadow. (#1638: the model picker rides the shared
+   `.ow-popover` surface now, which carries its own kit shadow/border.) */
 body.theme-frosted .toast {
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.22),
@@ -23604,6 +23565,41 @@ body.theme-frosted .msg-ai i strong {
   color: inherit !important;
   -webkit-text-fill-color: inherit !important;
   text-shadow: inherit !important;
+}
+/* #1644 (rendered audit §2.2) — the AI received-bubble META: the role-line + footer timestamps and
+   the copy/retry/edit action glyphs kept their base muted grey var(--color-muted-alt) (#6b7280). The
+   #744 adaptiveGlass .msg-ai bubble flips its BODY ink per-wallpaper, but this fixed grey did NOT
+   follow → 2.1–2.5:1 (grey-on-glass, both polarities). Mirror the #1639 .msg-ai link/name fix: FOLLOW
+   the bubble's adaptive ink, muted to keep the meta role — a 62% blend toward transparent of the
+   already-adaptive currentColor reads dark-muted over a light wallpaper and light-muted over a dark
+   one, never a fixed cool grey. Hover brightens to the full adaptive ink (which also drops the cool
+   var(--accent) hover hue on the light glass — the same no-accent-on-text intent as #1639). */
+/* Mute the meta ONCE: the footer CONTAINER + the role-line timestamp + msg-time each blend the full
+   adaptive bubble ink to 62%. The footer's DESCENDANTS must NOT re-apply the color-mix — a second
+   mix on the already-muted `currentColor` compounds to ~0.62×0.62 ≈ 38% (Greptile #1690 double-mute).
+   They instead inherit the container's single-muted ink below. */
+body.theme-frosted .msg-ai .role-timestamp,
+body.theme-frosted .msg-ai .msg-footer,
+body.theme-frosted .msg-ai .msg-time {
+  color: color-mix(in srgb, currentColor 62%, transparent) !important;
+}
+/* Footer descendants INHERIT the container's already-muted 62% ink (single mute, no re-mix). The
+   explicit `inherit` is required for the <button> controls — a button does not inherit `color` by
+   default — and keeps the .timestamp span in lock-step. */
+body.theme-frosted .msg-ai .msg-footer .timestamp,
+body.theme-frosted .msg-ai .msg-action-btn,
+body.theme-frosted .msg-ai .footer-copy-btn,
+body.theme-frosted .msg-ai .regen-btn,
+body.theme-frosted .msg-ai .fork-btn {
+  color: inherit !important;
+}
+body.theme-frosted .msg-ai .msg-action-btn:hover,
+body.theme-frosted .msg-ai .footer-copy-btn:hover,
+body.theme-frosted .msg-ai .regen-btn:hover,
+body.theme-frosted .msg-ai .fork-btn:hover {
+  /* `color: inherit` would pull the muted color-mix() from .msg-footer above, so hover would NOT
+     brighten. Bind to the bubble's full adaptive ink token so hover reads at full strength. */
+  color: var(--fg) !important;
 }
 /* #1601 / OWN-3 (FOLLOW-UP, out of scope here): the pre-game cast-photo headshot dialog
    is the OTHER dark-veil-vs-light-glass surface the owner ruling names — it "follows the
@@ -24122,7 +24118,6 @@ body.theme-frosted .chat-top-bar,
 body.theme-frosted .ow-window,
 body.theme-frosted .modal-content,
 body.theme-frosted .admin-card,
-body.theme-frosted .model-picker-menu,
 body.theme-frosted .og-card,
 body.theme-frosted .on-card,
 body.theme-frosted .toast,
@@ -24130,7 +24125,6 @@ body.theme-frosted .tool-indicator,
 body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 /* #738 item 5: the chat-header export popover (Rename/Copy/PDF) + the per-message overflow
    menu still painted the dark `var(--panel)` opaque fill, reading as a dark box in the light
    glass theme. Fold BOTH onto the ONE shared light-glass material like every other chrome
@@ -24172,12 +24166,11 @@ body.theme-frosted #minimized-dock.ow-has-rows {
    displacement map's outer edge so it no longer samples beyond the surface, but a rounded
    corner still renders the rectangular filter region in the corner gap; clipping the backdrop
    to the element's border-radius removes any residual halo past the corners. Scoped to the
-   four transient popovers (leaf menus — no submenu/shadow to clip); the chrome panels +
-   gadget cards (owned elsewhere) are untouched. */
+   transient leaf popovers (`.dropdown` + the kit `.ow-popover` — no submenu/shadow to clip;
+   #1638 retired the dead `.overflow-menu` member here); the chrome panels + gadget cards
+   (owned elsewhere) are untouched. */
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
-body.theme-frosted .ow-popover,
-body.theme-frosted .model-picker-menu {
+body.theme-frosted .ow-popover {
   overflow: hidden;
 }
 }
@@ -24200,7 +24193,6 @@ body.theme-frosted .tool-indicator,
 body.theme-frosted .thinking-section,
 body.theme-frosted .thinking-section .thinking-header,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .export-dropdown-menu,
 body.theme-frosted .msg-overflow-menu,
 /* the jump-to-bottom FAB now carries the light glass (above), so its chevron takes the same
@@ -24382,7 +24374,6 @@ body.theme-frosted .ow-window .ow-body,
 body.theme-frosted .modal-content,
 body.theme-frosted .on-card,
 body.theme-frosted .dropdown,
-body.theme-frosted .overflow-menu,
 body.theme-frosted .export-dropdown-menu,
 body.theme-frosted .msg-overflow-menu,
 body.theme-frosted .cp-popover {
@@ -24392,6 +24383,13 @@ body.theme-frosted .cp-popover {
      muted DARK that's legible on the light glass and keeps the muted gradation (full vs.
      secondary), instead of the old light-on-light. */
   --fg: #16191f;
+  /* #1644 (rendered audit §1/§3): the muted META tokens are theme-MOVING (LIGHT #9aa0a8/#6b7280 in
+     the dark theme) and are NOT swept by the --fg remap — so a `var(--color-muted*)` label (the
+     settings inactive-nav labels, chat-meta timestamps, sub-headers) inside this light-glass chrome
+     stayed light-muted-on-light. Floor them to the same dark muted (#2f323a = --fg-muted). */
+  --color-muted: #2f323a;
+  --color-muted-alt: #2f323a;
+  --color-subheader: #2f323a;
 }
 
 /* ── W3 (#1644): remap --fg AT THE SOURCE on EVERY light-glass chrome container ────────
@@ -24446,7 +24444,6 @@ body.theme-frosted .toast,
 body.theme-frosted .tool-indicator,
 body.theme-frosted .thinking-section,
 body.theme-frosted #orwell-scroll-bottom,
-body.theme-frosted .model-picker-menu,
 body.theme-frosted .model-picker-btn,
 body.theme-frosted .attach-card,
 body.theme-frosted .attach-image-skeleton,
@@ -24463,6 +24460,12 @@ body.theme-frosted .doc-pane,
 body.theme-frosted .doc-pane-floating {
   --fg: #16191f;
   --fg-muted: #2f323a;
+  /* #1644 (rendered audit §1/§3): floor the theme-moving muted META tokens to the dark muted too, so
+     `var(--color-muted*)` secondary text (settings nav labels, chat-meta timestamps, sub-headers)
+     inside these light-glass chrome containers reads dark-muted, not light-muted-on-light. */
+  --color-muted: #2f323a;
+  --color-muted-alt: #2f323a;
+  --color-subheader: #2f323a;
 }
 
 /* ── #738 item 8 — gadget-card ROW legibility (contrast floor) ─────────────────
@@ -24548,12 +24551,11 @@ body.theme-frosted .chat-input-bar .input-icon-btn,
 body.theme-frosted .model-picker-btn,
 body.theme-frosted .model-picker-btn #model-picker-label,
 body.theme-frosted .model-picker-btn svg,
-body.theme-frosted .model-picker-menu,
-body.theme-frosted .model-picker-menu .mp-section-label,
-body.theme-frosted .model-picker-menu .model-switch-item,
-body.theme-frosted .model-picker-menu .mp-model-name,
-body.theme-frosted .model-picker-menu .model-switch-ep,
-body.theme-frosted .model-picker-menu .model-switch-empty {
+body.theme-frosted .model-picker-list .mp-section-label,
+body.theme-frosted .model-picker-list .model-switch-item,
+body.theme-frosted .model-picker-list .mp-model-name,
+body.theme-frosted .model-picker-list .model-switch-ep,
+body.theme-frosted .model-picker-list .model-switch-empty {
   color: #16191f !important;
 }
 body.theme-frosted .chat-input-bar textarea#message::placeholder {
@@ -24625,12 +24627,10 @@ body.theme-frosted .plan-window-content #plan-window-title {
   body.glass-full .ow-window,
   body.glass-full .modal-content,
   body.glass-full .admin-card,
-  body.glass-full .model-picker-menu,
   body.glass-full .og-card,
   body.glass-full .on-card,
   body.glass-full .toast,
   body.glass-full .dropdown,
-  body.glass-full .overflow-menu,
   body.glass-full .cp-popover,
   /* bubbles are content in BOTH tiers (consolidated above), so drop their scrim
      under reduced transparency for both, not just glass-full. */

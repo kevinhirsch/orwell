@@ -145,14 +145,20 @@ def test_advance_nudge_is_still_capped_to_once_per_turn():
 
 
 def test_silent_commit_does_not_append_the_forced_advance_narration_nudge():
-    """When a scene was already shown, the FORCED-ADVANCE re-prompt nudge (which makes the model
-    narrate AGAIN) is NOT appended — that path only runs when nothing visible was shown yet."""
+    """When a scene was already shown, the FORCED-ADVANCE re-prompt must not read as "narrate the
+    beat again" (the stuttering-narrator bug). The contract evolved with the reinject de-dup fix:
+    the nudge is still appended, but under `_emitted_visible` it is prefixed with the
+    `_CONTINUE_NEVER_REOPEN` directive so the model continues the shown scene instead of
+    re-opening it."""
     js = _read("src", "agent_loop.py")
-    # the forced re-prompt path is reached only when _emitted_visible is False (it sits AFTER the
-    # `if _emitted_visible: ... break` early-out)
-    visible_gate = js.index("if _emitted_visible:")
-    forced_nudge = js.index('messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})')
-    assert visible_gate < forced_nudge, "the visible-scene early-out must precede the forced re-prompt"
+    nudge_assign = js.index("_fa_txt = _FORCED_ADVANCE_NUDGE")
+    tail = js[nudge_assign:nudge_assign + 700]
+    assert "if _emitted_visible:" in tail, (
+        "the forced-advance nudge must carry a visible-scene guard")
+    assert '_fa_txt = _CONTINUE_NEVER_REOPEN + "\\n\\n" + _fa_txt' in tail, (
+        "a visible scene must wrap the forced re-prompt in the continue-never-reopen directive")
+    assert 'messages.append({"role": "system", "content": _fa_txt})' in tail, (
+        "the (possibly wrapped) nudge must still be appended")
 
 
 # ───────────────────────── Bug 3: auto-record reliably records ─────────────────────────

@@ -891,7 +891,7 @@
               <span id="theme-google-font-note" class="theme-fd-label" style="display:inline;opacity:0.45;font-weight:normal;" title="Loading a Google font fetches it from Google's CDN (fonts.googleapis.com), which sends your browser's IP address to Google. The four built-in fonts above stay fully offline.">&#9432; privacy</span>
             </label>
             <div style="display:flex;gap:6px;align-items:center;">
-              <input id="theme-google-font-input" class="theme-fd-select" list="theme-google-font-list" type="text" autocomplete="off" spellcheck="false" placeholder="Search or type a font name&hellip;" aria-label="Google font family" style="flex:1 1 0;min-width:0;" />
+              <input id="theme-google-font-input" class="ow-field" list="theme-google-font-list" type="text" autocomplete="off" spellcheck="false" placeholder="Search or type a font name&hellip;" aria-label="Google font family" style="flex:1 1 0;min-width:0;" />
               <datalist id="theme-google-font-list"></datalist>
               <button type="button" id="theme-google-font-apply" class="ow-btn ow-btn-secondary" style="flex:0 0 auto;" title="Apply this Google font">Apply</button>
               <button type="button" id="theme-google-font-clear" class="ow-btn ow-btn-secondary" style="flex:0 0 auto;" title="Use a built-in font instead">Clear</button>
@@ -942,7 +942,7 @@
           <div class="theme-fd-row">
             <div class="theme-fd-group" style="flex:1 1 0;min-width:0;">
               <label class="theme-fd-label" for="theme-bg-image-url">Image URL</label>
-              <input id="theme-bg-image-url" class="theme-fd-select" type="url" autocomplete="off" spellcheck="false" placeholder="https://&hellip; or paste a link" aria-label="Background image URL" />
+              <input id="theme-bg-image-url" class="ow-field" type="url" autocomplete="off" spellcheck="false" placeholder="https://&hellip; or paste a link" aria-label="Background image URL" />
             </div>
             <div class="theme-fd-group" style="flex:0 0 auto;">
               <label class="theme-fd-label" for="theme-bg-image-file">Upload</label>
@@ -1340,9 +1340,13 @@
         <!-- Model picker (inside chatbox, top-right) -->
         <div class="model-picker-wrap" id="model-picker-wrap">
           <button type="button" class="model-picker-btn ow-btn ow-btn-compact" id="model-picker-btn" title="Switch model"><span id="model-picker-label">Select model</span> <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></button>
-          <div class="model-picker-menu hidden" id="model-picker-menu" tabindex="-1">
-            <div class="model-picker-list" id="model-picker-list"></div>
-          </div>
+          <!-- #1638: the model-picker dropdown is now an OrwellPopoverKit surface (modelPicker.js).
+               The bespoke `.model-picker-menu` tray is retired — the kit body-appends a `.ow-popover`
+               and owns anchoring, escMenuStack dismissal, flip/shift positioning, and a11y. This
+               `#model-picker-list` node is a DETACHED template (hidden) the kit re-parents into the
+               popover on each open; the rich rows / provider groups / favorite dots render here
+               (modelPicker.js `_populate`). -->
+          <div class="model-picker-list" id="model-picker-list" hidden></div>
         </div>
       </div>
       <div id="pinned-tools-bar"></div>
@@ -2549,7 +2553,7 @@
                  live Producer's Vault section (?vault=1), behind an explicit confirm in admin.js. The plain
                  link above stays Vault-free; this one deliberately includes secret state. -->
             <div class="settings-row settings-row--end settings-gap-top">
-              <button class="ow-btn ow-btn-prominent" id="adm-health-bundle-vault" style="border-color:#7a3b3b;color:var(--color-danger)" title="DEBUG — download the debug bundle WITH the live Producer's Vault (off-screen scheming, NPC confessionals, hidden ties, sealed twists, the real eviction votes). SPOILERS — deliberately includes your in-progress game's secrets (owner override of mandate #2).">Download debug bundle + Producer's Vault (SPOILERS)</button>
+              <button class="ow-btn ow-btn-prominent" id="adm-health-bundle-vault" style="background:var(--color-danger-strong);border-color:var(--color-danger-strong);color:#fff" title="DEBUG — download the debug bundle WITH the live Producer's Vault (off-screen scheming, NPC confessionals, hidden ties, sealed twists, the real eviction votes). SPOILERS — deliberately includes your in-progress game's secrets (owner override of mandate #2).">Download debug bundle + Producer's Vault (SPOILERS)</button>
             </div>
             <div id="adm-health-msg" style="margin-top:6px;"></div>
           </div>

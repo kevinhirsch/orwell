@@ -81,13 +81,14 @@ def test_no_dark_opaque_menu_survives_in_light_theme():
 
 def test_folded_menus_stay_out_of_the_refraction_corner_clip():
     """The two folded menus share the light-glass MATERIAL but are deliberately NOT in the
-    JS SVG-refraction set (liquidGlass.js — only .dropdown/.overflow-menu/.cp-popover/
-    .model-picker-menu refract), so they have no corner halo to clip and must stay OUT of the
-    `overflow: hidden` corner-clip rule. That rule is a source-pinned 'exactly four refracted
-    popovers' intent (test_liquid_glass.py::test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect);
+    JS SVG-refraction set (liquidGlass.js — only .dropdown/.overflow-menu/.ow-popover refract;
+    the model picker folded from .model-picker-menu onto the shared .ow-popover in #1638), so
+    they have no corner halo to clip and must stay OUT of the `overflow: hidden` corner-clip
+    rule. That rule is a source-pinned 'exactly the refracted leaf popovers' intent
+    (test_liquid_glass.py::test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect);
     adding them would both break that gate and needlessly clip a non-refracted menu."""
     clip = [
-        (sel, body) for sel, body in _css_blocks(CSS, ".model-picker-menu")
+        (sel, body) for sel, body in _css_blocks(CSS, ".ow-popover")
         if "theme-frosted" in sel and "overflow: hidden" in body
     ]
     assert clip, "no body.theme-frosted overflow:hidden corner-clip rule for the leaf popovers"

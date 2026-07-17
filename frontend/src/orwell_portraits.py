@@ -159,7 +159,26 @@ def _note_image_budget_skip(user: Optional[str], houseguest_id: str) -> None:
             corrected="image-budget-precheck",
             user=user,
         )
-    except Exception:  # pragma: no cover - defensive: health logging must never break the run
+    except Exception:  # pragma: no cover — failsoft-ok: recorder-self (health logging must never break the run)
+        pass
+
+
+def _note_generation_failure(user: Optional[str], houseguest_id: str, reason: str,
+                             *, corrected: str = "placeholder-fallback") -> None:
+    """#1599: a portrait generation / persist FAILURE was the ORIGINAL silent-fail trigger — a
+    houseguest quietly ends up with the initials placeholder. Record a RED-eligible health event so
+    the failure shows RED on /admin/status (annotated auto-corrected: the placeholder floor stands),
+    beside the existing portrait-log attempt row + the reconciler's retry-budget stamp. Also carries
+    fal.ai transport failures — they surface UP through `_note_gen_error` to this terminal, so this is
+    the ONE place a portrait failure is RED-recorded (no double-record). Best-effort: health logging
+    must never break the run."""
+    try:
+        from src import log_rings
+        log_rings.record_soft_failure(
+            "portraits:generation-failed",
+            f"portrait generation failed for {_safe_id(houseguest_id)}: {reason}",
+            corrected=corrected, user=user)
+    except Exception:  # pragma: no cover — failsoft-ok: recorder-self (health logging must never break the run)
         pass
 
 # ── L17 distinctness: detect look-alike faces and regenerate the offenders ─────────────────
@@ -426,6 +445,10 @@ _TRANSIENT_TRANSPORT_MARKERS = (
     "timeout", "connecterror", "connecttimeout", "readtimeout", "writetimeout",
     "pooltimeout", "connectionerror", "networkerror", "protocolerror", "remoteprotocol",
     "transporterror", "proxyerror", "readerror", "writeerror",
+    # #1599 (CodeRabbit finding c): a network FETCH of the provider-returned image URL that raised — a
+    # host outage, distinct from an undecodable image ('image-decode-failed', permanent). Transient, so
+    # the G20 reconciler spares its permanent per-content retry budget.
+    "image-fetch-failed",
 )
 _TRANSIENT_HTTP_CODES = frozenset({401, 402, 403, 408, 429})
 
@@ -831,7 +854,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     # the transient failure (not a genuine absence) and generation should be allowed to TRY.
     try:
         return bool(has_image_capable_endpoint(user or None))
-    except Exception:
+    except Exception:  # failsoft-ok: capability-probe (unconfigured provider ⇒ unavailable; expected-empty)
         return False
 
 
@@ -894,16 +917,28 @@ def _data_url_png(png: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(png).decode()
 
 
-async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
-    """Decode a data: URL or fetch an https: URL to raw image bytes. None on any failure."""
-    try:
-        if url.startswith("data:"):
+async def _image_bytes_from_url(client, url: str) -> "tuple[Optional[bytes], Optional[str]]":
+    """Decode a data: URL or fetch an https: URL to raw image bytes. Returns ``(bytes, None)`` on
+    success, else ``(None, reason)``.
+
+    #1599 (CodeRabbit finding c): the reason DISTINGUISHES an UNDECODABLE inlined image
+    ('image-decode-failed', a permanent per-content fault) from a TRANSIENT network FETCH failure
+    ('image-fetch-failed' / 'image-fetch-http-<n>'), so an image-host outage never gets recorded as a
+    permanent decode failure that burns the reconciler's retry budget."""
+    if url.startswith("data:"):
+        try:
             b64 = url.split(",", 1)[1] if "," in url else ""
-            return base64.b64decode(b64) if b64 else None
+            png = base64.b64decode(b64) if b64 else None
+        except Exception:  # undecodable inlined base64 — a permanent decode fault
+            return None, "image-decode-failed"
+        return (png, None) if png else (None, "image-decode-failed")
+    try:
         r = await client.get(url)
-        return r.content if r.status_code == 200 else None
-    except Exception:
-        return None
+    except Exception:  # failsoft-ok: handled-by-caller (returns image-fetch-failed → caller records it at the terminal; a TRANSIENT reason, not image-decode-failed)
+        return None, "image-fetch-failed"
+    if r.status_code == 200:
+        return r.content, None
+    return None, f"image-fetch-http-{r.status_code}"
 
 
 # G26: prepended to the portrait prompt in 'reference' mode — the player wants their own
@@ -946,7 +981,7 @@ async def _generate_via_images_edit(client, base_url: str, model_id: str, prompt
             return ir.content if ir.status_code == 200 else None
         _note_gen_error("empty-response")
         return None
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (_note_gen_error stashes the reason → the generate_and_store terminal records it RED via _note_generation_failure)
         logger.info("[portraits] images/edits failed: %s", e)
         _note_gen_error(type(e).__name__)
         return None
@@ -992,7 +1027,7 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
         transport/JSON-level failure (no usable HTTP status), else the response's HTTP status."""
         try:
             resp = await client.post(chat_url, json=payload, headers=headers)
-        except Exception as e:  # transport error — no HTTP response at all
+        except Exception as e:  # transport error — no HTTP response at all; failsoft-ok: handled-by-caller (recorded at the terminal)
             return None, type(e).__name__, None, None
         if (resp.status_code != 200 and 400 <= resp.status_code < 500 and "image_config" in payload
                 and not _is_transient_gen_error(f"http-{resp.status_code}")):
@@ -1005,7 +1040,7 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
             stripped = {k: v for k, v in payload.items() if k != "image_config"}
             try:
                 resp = await client.post(chat_url, json=stripped, headers=headers)
-            except Exception as e:
+            except Exception as e:  # failsoft-ok: handled-by-caller (recorded at the terminal)
                 return None, type(e).__name__, None, None
         if resp.status_code != 200:
             logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
@@ -1017,10 +1052,10 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
         img_url = _extract_chat_image_url(data)
         if not img_url:
             return None, "no-image-in-response", _chat_text_hint(data), resp.status_code
-        png = await _image_bytes_from_url(client, img_url)
+        png, fetch_reason = await _image_bytes_from_url(client, img_url)
         if png:
             return png, None, None, resp.status_code
-        return None, "image-decode-failed", None, resp.status_code
+        return None, fetch_reason or "image-decode-failed", None, resp.status_code
 
     # Mechanism #1 — native image output. Its reason is the recorded cause on any failure.
     png, reason1, detail1, status1 = await _attempt(
@@ -1185,7 +1220,7 @@ async def _generate_one(prompt: str, user: Optional[str],
                 return None
             _note_gen_error("empty-response")
             return None
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (_note_gen_error stashes the reason → the generate_and_store terminal records it RED via _note_generation_failure)
         logger.info("[portraits] generation failed: %s", e)
         _note_gen_error(type(e).__name__)
         return None
@@ -1512,7 +1547,10 @@ def select_headshot(user: Optional[str], hid: str) -> bool:
     try:
         _write_portrait(user, PLAYER_PORTRAIT_ID, png, "", source="upload")  # live portrait, locked
     except Exception as e:  # pragma: no cover - defensive
+        # #1599: the account avatar landed but the live game portrait write failed — the chosen
+        # headshot didn't fully apply. Surface it RED (the next reconcile retries).
         logger.info("[portraits] select live-portrait write failed: %s", e)
+        _note_generation_failure(user, PLAYER_PORTRAIT_ID, f"select-live-portrait-write-failed: {e}")
     items = _load_lib_index(user)
     for i in items:
         i["current"] = (i.get("id") == hid)
@@ -1663,7 +1701,10 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 prepass_applied.add(_safe_id(str(hid)))  # counted here — the main loop must not re-count it
                 newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
             except Exception as e:
+                # #1599 (CodeRabbit finding b): a broken chosen-headshot fallback must show RED on
+                # /admin/status, not silently leave the player on a placeholder.
                 logger.info("[portraits] failed to persist chosen headshot: %s", e)
+                _note_generation_failure(user, str(hid), f"chosen-headshot-persist-failed: {e}")
             break
 
     # Graceful absence: don't even probe the API per houseguest if generation is off (the exact
@@ -1805,6 +1846,9 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 # Stamp the failure class so the G20 reconciler can spare a TRANSIENT failure
                 # (402 credits, 429, 5xx, transport) from the permanent retry budget.
                 _record_gen_result(user, str(hid), False, reason)
+                # #1599: surface the failure RED on /admin/status — a silent placeholder was the
+                # original trigger; the initials floor stands (auto-corrected), still RED.
+                _note_generation_failure(user, str(hid), reason)
                 skipped += 1
                 continue
             try:
@@ -1820,6 +1864,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 logger.info("[portraits] failed to persist %s: %s", hid, e)
                 log_attempt(str(hid), False, "persist-failed", duration_ms)
                 _record_gen_result(user, str(hid), False, "persist-failed")
+                _note_generation_failure(user, str(hid), f"persist-failed: {e}")  # #1599: RED, not silent
                 skipped += 1
         finally:
             _INFLIGHT.get(_safe_user(user), set()).discard(sid)
@@ -1839,7 +1884,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 for hid in dedup.get("regeneratedIds", []):
                     newly_shown.append((str(hid), f"/api/orwell/portrait/{_safe_id(hid)}"))
                     reshoot_ids.add(_safe_id(str(hid)))
-        except Exception as e:
+        except Exception as e:  # failsoft-ok: best-effort-enrichment (the L17 distinctness pass is a refinement; the as-generated cast portraits stand)
             logger.info("[portraits] L17 distinctness pass failed: %s", e)
 
     _progress_finish(user)  # L15: the run is done — the panel drops to the idle cadence
@@ -1973,7 +2018,7 @@ async def dedupe_lookalikes(prompts: list, user: Optional[str],
             existing = portrait_file(user, str(hid))
             if existing:
                 ref_png = existing.read_bytes()
-        except Exception:
+        except Exception:  # failsoft-ok: expected-empty (the current portrait is an OPTIONAL img2img reference; None ⇒ the variety regen still runs as text-to-image)
             ref_png = None
         _consume_gen_error(); _consume_gen_detail()
         t0 = time.monotonic()
@@ -1989,7 +2034,11 @@ async def dedupe_lookalikes(prompts: list, user: Optional[str],
             log_attempt(str(hid), True, None, duration_ms)
             regenerated_ids.append(str(hid))
         except Exception as e:
+            # #1599 (CodeRabbit finding b): a broken look-alike regen persist must show RED — the
+            # original face stands, but the distinctness fix silently failing is exactly the fail-soft
+            # #1599 bans (no upstream records this persist path, so no double-record).
             logger.info("[portraits] L17 regen persist failed for %s: %s", hid, e)
+            _note_generation_failure(user, str(hid), f"lookalike-regen-persist-failed: {e}")
     return {"regenerated": len(regenerated_ids), "regeneratedIds": regenerated_ids, "offenders": offenders}
 
 
@@ -2030,12 +2079,21 @@ async def _record_image_beats(shown: list, user: Optional[str],
         if fired and IMAGE_BEAT_SPACING_S > 0:
             try:
                 await asyncio.sleep(IMAGE_BEAT_SPACING_S)
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover — failsoft-ok: expected-empty (beat-spacing sleep; the real beat call below logs)
                 pass
         try:
             await orwell_engine.record_image_beat(hid, ref, user=user)
         except Exception as e:
+            # #1599: a budget REFUSAL is pre-checked above (_note_image_budget_skip), so a raise here is
+            # a genuine engine/transport fault — the portrait shows but its player-witnessed beat was lost.
+            # Surface it RED (not the raw IO tap's generic row — a classified beat-loss anomaly).
             logger.info("[portraits] record_image_beat(%s) failed: %s", hid, e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("portraits:image-beat-record-failed", e,
+                                              corrected="portrait-shown-beat-skipped", user=user)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         else:
             if is_metered:
                 # Only a beat the engine ACCEPTED consumes the metered budget (matches the engine,
@@ -2073,14 +2131,31 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
             try:
                 t.result()
             except Exception as e:  # pragma: no cover - defensive
+                # #1599 (CodeRabbit): the NORMAL async path — generate_and_store records each
+                # per-houseguest failure, but a raise OUT of the task is a whole-run crash that would
+                # otherwise only log. Surface it RED (same reason as the sync path; mutually exclusive).
                 logger.info("[portraits] background generation error: %s", e)
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("portraits:generation-run-failed", e,
+                                                  corrected="placeholder-floor", user=user)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
 
         task.add_done_callback(_done)
     else:  # pragma: no cover - non-async callers (tests call generate_and_store directly)
         try:
             asyncio.run(generate_and_store(prompts, user))
         except Exception as e:
+            # #1599: generate_and_store records each per-houseguest failure itself; a raise OUT of it is
+            # a whole-run crash that would otherwise leave the cast on placeholders silently — RED.
             logger.info("[portraits] sync generation error: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("portraits:generation-run-failed", e,
+                                              corrected="placeholder-floor", user=user)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
 
 
 # ── G9 backfill: portraits for seasons that predate 0051 (or whose generation failed) ─────
@@ -2167,7 +2242,7 @@ async def portrait_completeness(user: Optional[str]) -> Optional[dict]:
 
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (pre-game / engine-down ⇒ no completeness; also IO-recorded)
         return None
     if not isinstance(state, dict) or state.get("started") is False:
         return None
@@ -2205,14 +2280,14 @@ async def adr0013_allowed_ids(ids: list, user: Optional[str]) -> list:
     try:
         from src import orwell_cast_authoring
         gate_on = await orwell_cast_authoring.house_entry_gate_active(user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (fail-open gate — a gate-check hiccup passes every id through; the ADR 0013 floor is then the final cast, never a mismatch)
         gate_on = False
     if not gate_on:
         return ids
     from src import orwell_engine
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (the filter is itself fail-open; unknown state ⇒ keep ids)
         return ids
     if not isinstance(state, dict) or state.get("started") is False:
         return ids
@@ -2262,7 +2337,7 @@ def kickoff_authored_reshoot(hid, user: Optional[str]) -> bool:
                 from src import orwell_engine
                 try:
                     p = await orwell_engine.get_portrait_prompt(str(hid), user=user)
-                except Exception:
+                except Exception:  # failsoft-ok: handled-by-terminal (orwell_engine._call already recorded record_io(ok=False) RED; this is only a staleness probe — None skips the discard optimization, backfill_missing below re-fetches)
                     p = None
                 cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
                 if cur_fp and entry.get("fingerprint") != cur_fp:
@@ -2271,7 +2346,10 @@ def kickoff_authored_reshoot(hid, user: Optional[str]) -> bool:
                     discard_portraits(user, [str(hid)])
             await backfill_missing([str(hid)], user)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: backfill_missing records per-houseguest generation failures, but a raise BEFORE it
+            # (e.g. discard_portraits) crashes the authored re-shoot with no record — surface it RED.
             logger.info("[portraits] authored re-shoot for %s failed: %s", hid, e)
+            _note_generation_failure(user, str(hid), f"authored-reshoot-failed: {e}")
 
     # Stamp the lazy-path debounce like the other explicit kicks so an auto-poll seconds later
     # can't pile a second run onto the same provider.
@@ -2325,7 +2403,7 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
 
     try:
         missing_ids = await adr0013_allowed_ids(missing_ids, user)
-    except Exception as e:  # pragma: no cover - defensive (the filter is itself fail-open)
+    except Exception as e:  # pragma: no cover - defensive; failsoft-ok: expected-empty (the ADR 0013 filter is fail-open — a filter hiccup proceeds unfiltered, never blocks a shoot)
         logger.info("[portraits] ADR 0013 filter failed (proceeding unfiltered): %s", e)
 
     safe = _safe_user(user)
@@ -2338,7 +2416,7 @@ async def backfill_missing(missing_ids: list, user: Optional[str]) -> dict:
             continue
         try:
             p = await orwell_engine.get_portrait_prompt(str(hid), user=user)
-        except Exception as e:
+        except Exception as e:  # failsoft-ok: handled-by-terminal (orwell_engine._call already recorded record_io(ok=False) RED for the failed getPortraitPrompt; also logged to the attempt ring — no double-record)
             logger.info("[portraits] backfill prompt fetch failed for %s: %s", hid, e)
             log_attempt(str(hid), False, "prompt-fetch-failed", 0)
             continue
@@ -2392,14 +2470,31 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
             try:
                 t.result()
             except Exception as e:  # pragma: no cover - defensive
+                # #1599 (CodeRabbit): the NORMAL async path — backfill_missing records per-houseguest
+                # failures, but a raise OUT of the task is a whole-run crash that would otherwise only
+                # log. Surface it RED (same reason as the sync path; mutually exclusive).
                 logger.info("[portraits] background backfill error: %s", e)
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("portraits:backfill-run-failed", e,
+                                                  corrected="placeholder-floor", user=user)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
 
         task.add_done_callback(_done)
     else:  # non-async callers (tests drive backfill_missing directly)
         try:
             asyncio.run(backfill_missing(list(missing_ids), user))
         except Exception as e:
+            # #1599: backfill_missing records per-houseguest failures itself; a raise OUT of it is a
+            # whole-run crash that would silently leave portraits missing — surface it RED.
             logger.info("[portraits] sync backfill error: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("portraits:backfill-run-failed", e,
+                                              corrected="placeholder-floor", user=user)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
     return True
 
 
@@ -2525,7 +2620,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     # (a) an active game — cheap and fail-open.
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (engine-down ⇒ idle this cycle; also IO-recorded)
         return None
     if not isinstance(state, dict) or state.get("started") is False:
         return None
@@ -2543,13 +2638,13 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     cards = _roster_cards(state, user)
     try:
         await _apply_player_headshot_if_available(user, cards)
-    except Exception:  # pragma: no cover - defensive; enrichment, never the sweep
+    except Exception:  # pragma: no cover - defensive; failsoft-ok: best-effort-enrichment (player-headshot self-heal; the reconcile sweep continues and retries it next cycle, the existing portrait set stands)
         logger.debug("[portraits] player headshot apply failed (best-effort)", exc_info=True)
 
     # (b) the provider gate — absence idles WITHOUT consuming the budget.
     try:
         available = bool(image_generation_available(user))
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (an image-provider CAPABILITY probe; a probe hiccup ⇒ treat as unavailable and idle this cycle, never burning the retry budget)
         available = False
     was_available = _PROVIDER_SEEN.get(safe)
     _PROVIDER_SEEN[safe] = available
@@ -2568,7 +2663,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     healed = 0
     try:
         healed = await _heal_stale_authored_faces(user, cards)
-    except Exception as e:  # pragma: no cover - defensive; the heal is enrichment, never the sweep
+    except Exception as e:  # pragma: no cover - defensive; failsoft-ok: best-effort-enrichment (ADR 0013 staleness heal; the reconcile sweep continues and re-heals next sweep, the on-disk faces stand)
         logger.info("[portraits] staleness heal for %s failed: %s", safe, e)
 
     missing = missing_portrait_ids(user, cards)
@@ -2577,7 +2672,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     # authored re-shoot owns them the moment their write-back lands).
     try:
         missing = await adr0013_allowed_ids(missing, user)
-    except Exception:  # pragma: no cover - defensive (the filter is itself fail-open)
+    except Exception:  # pragma: no cover — failsoft-ok: expected-empty (the filter is itself fail-open)
         pass
     prev_missing = _LAST_MISSING.get(safe)
     _LAST_MISSING[safe] = len(missing)
@@ -2716,7 +2811,7 @@ async def _heal_stale_authored_faces(user: Optional[str], cards: list) -> int:
         for hid, stored_fp in fp_candidates:
             try:
                 p = await orwell_engine.get_portrait_prompt(hid, user=user)
-            except Exception:
+            except Exception:  # failsoft-ok: handled-by-terminal (orwell_engine._call already recorded record_io(ok=False) RED; the staleness verify simply defers — verify nothing this sweep, retry next)
                 engine_ok = False  # engine trouble — verify nothing this sweep, try again next
                 break
             cur_fp = _prompt_fingerprint(p.get("prompt")) if isinstance(p, dict) else None
@@ -2750,7 +2845,7 @@ async def reconcile_once() -> dict:
     for safe, raw in list(_SEEN_USERS.items()):
         try:
             results[safe] = await _reconcile_user(raw)
-        except Exception as e:
+        except Exception as e:  # failsoft-ok: best-effort-enrichment (per-user reconcile isolation — a user's sweep crash retries next interval; its engine reads are IO-tapped RED and the on-disk portraits stand)
             logger.info("[portraits] reconcile for %s failed: %s", safe, e)
             results[safe] = None
     return results
@@ -2765,7 +2860,7 @@ async def _reconcile_loop() -> None:
             await reconcile_once()
         except asyncio.CancelledError:  # pragma: no cover - loop teardown
             raise
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:  # pragma: no cover - defensive; failsoft-ok: best-effort-enrichment (reconcile-loop keepalive — reconcile_once already isolates+records per user; a cycle error is logged and the loop continues to the next sweep)
             logger.info("[portraits] reconcile sweep error: %s", e)
 
 

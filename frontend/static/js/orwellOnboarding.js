@@ -436,6 +436,25 @@
       const nb = document.getElementById("sidebar-new-chat-btn") || document.getElementById("rail-new-session");
       if (nb) nb.click();
     } catch (_) {}
+    // 2026-07-16 audit item 5 (producer-speaks-first hole) — nb.click() dispatches a click event
+    // whose real handler (app.js's sidebar-brand-btn listener) is ASYNC: it `await`s
+    // window._orwellConfirmLeaveGame()'s live-season probe (a real network round trip) BEFORE it
+    // actually arms the pending chat (sessionModule.createDirectChat → _pendingChat). nb.click()
+    // itself returns the instant the event dispatches, long before that await resolves — so this
+    // function used to return immediately with NO pending session armed yet. _orwellOpenGameAfterCasting
+    // fires right after and its cue backoff's FIRST attempt lands at 250ms: if the confirm probe is
+    // slower than that (a cold engine, a loaded host), the cue fires before _pendingChat exists,
+    // materializes into nothing, and is then silently wiped when the click handler's own chat-history
+    // clear finally runs — leaving a blank composer with no producers' opener (the exact "the player
+    // had to speak first" shape from the 2026-07-16 playthrough). Wait (bounded, best-effort) for the
+    // pending chat to actually arm before returning, so the backoff's first attempt lands on a
+    // materializable target. Fails open (falls through) if it never arms — never a hang.
+    try {
+      for (let i = 0; i < 15; i++) {
+        if (window.sessionModule && window.sessionModule.hasPendingChat && window.sessionModule.hasPendingChat()) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    } catch (_) {}
   }
 
   // L5 → P1 → OOBE re-sequence (2026-06-20): the casting cutover. The PRODUCERS open the show — the
@@ -719,6 +738,33 @@
     });
   };
 
+  // 2026-07-16 audit item 3 — the PREMIERE-CONTINUE resilience cue. A live playthrough hit a round
+  // where createCharacter finalized (the season started) but the follow-up move-in narration stream
+  // DIED silently (an errored/empty LLM round — the admin llmIo ring logged ok=False, no text): the
+  // turn just closed and the player had to speak first to get anything moving. chat.js already
+  // tracks this window via `_orwellFinalizingActive` — set true the instant createCharacter's tool
+  // result lands, cleared the moment the FIRST narration token (`json.delta`) arrives. If the
+  // stream's `finally` block is reached with that flag STILL true, no narration ever arrived. This
+  // is the belt: re-fire a hidden production cue through the SAME `_sendCueWithBackoff` kernel the
+  // opener/post-photo-resume already use (never fake narration content — only re-prompt for the
+  // real thing), so the house's welcome recovers automatically instead of the player pushing it.
+  const PREMIERE_CONTINUE_LINE =
+    "(Production cue — the character was just finalized and the house-entry narration did not come " +
+    "through. Welcome them into the house now, in character as the producers, and continue the season.)";
+  let _premiereContinueSent = false;
+  window._orwellPremiereContinueIfSilent = function () {
+    const gameBuild = document.body && document.body.hasAttribute("data-game-build");
+    if (!gameBuild || _premiereContinueSent) return;
+    _premiereContinueSent = true;  // claim it up front; the helper's own per-call latch governs the send
+    _sendCueWithBackoff({
+      line: PREMIERE_CONTINUE_LINE,
+      // Like the post-photo resume, this fires AFTER the conversation is already underway (the
+      // createCharacter beat rendered), so it does NOT abort on an existing assistant turn — only on
+      // the player already typing or a stream genuinely still in flight.
+      onGiveUp: () => { _premiereContinueSent = false; },
+    });
+  };
+
   // E65: a season RESTART (season 2+) opens a FRESH chat session so the dead season's transcript
   // never rides as narrator context (F7's page-load-only fence, now event-driven too). The seat
   // marker resets so a future pre-game state runs the casting flow again.
@@ -747,8 +793,8 @@
     // a season reset, because "Reset this season" / next-season is a SOFT SPA restart with NO page
     // reload. Left set, season 2+ never fires the opener OR the resume cue and the casting interview
     // HANGS. Clear both here (mirrors the _resetAuthorWarmGuard re-arm above) so the fresh season's
-    // cues fire again.
-    try { _openSent = false; _resumeSent = false; } catch (_) {}
+    // cues fire again. Same for the premiere-continue resilience cue (audit item 3).
+    try { _openSent = false; _resumeSent = false; _premiereContinueSent = false; } catch (_) {}
     // #874: a restart/new-season/reset begins a FRESH casting flow — clear any stale no-feed notice
     // so a subsequent route() re-evaluates cleanly for the new season (there is no "welcome seen"
     // marker anymore since the healthy case shows no gate/modal at all).
