@@ -1154,6 +1154,12 @@ async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
     one retry, never a loop; both the initial and the persistent-after-retry stale are counted (ledger-
     visible via ``stale_beat_rejections`` → the turn's ``staleRejections``)."""
     await _handle_stale_beat(owner, exc)          # reconcile the FIRST 409 (refresh last-seen + count → ledger-visible)
+    # Concurrency guard (CodeRabbit on #1694): the retry below is a NETWORK round-trip, during which a
+    # DIFFERENT same-owner flow (a two-window peer / the background pre-resolve — real per ship-gate F4)
+    # can advance `_LAST_BEAT_SEQ` and/or re-stash `_DESYNC_REGROUND[_dk]`. Capture WHAT OUR reconcile
+    # just stashed BEFORE we await, so on completion we can tell our own re-ground apart from a NEWER one.
+    _dk = _desync_key(owner)
+    _reground_ours = _DESYNC_REGROUND.get(_dk) if _dk is not None else None
     try:
         res = await retry_fn(last_beat_seq(owner))   # RE-FIRE once against the reconciled token, SAME idem key
     except Exception as _e2:
@@ -1170,12 +1176,21 @@ async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
         logger.warning("[orwell] %s double stale-409 for user=%s — progression un-applied, reconciled to "
                        "the live board (R3/#1659, RED-with-disposition)", action, owner)
         return None
-    # The retry LANDED: refresh last-seen from its response, and CLEAR the spurious re-ground the first
-    # reconcile stashed — we reconciled AND applied, so nothing diverges and the model must NOT be told
-    # "nothing changed / do not build on the outcome" next turn (it would discard the advance it just got).
-    _refresh_beat_seq(owner, res if isinstance(res, dict) else {})
-    _dk = _desync_key(owner)
-    if _dk is not None:
+    # The retry LANDED. Refresh last-seen MONOTONICALLY (localized to this helper — `_refresh_beat_seq`'s
+    # global last-write-wins semantics are unchanged): if a concurrent same-owner flow advanced beatSeq
+    # PAST `res` during our await, never REGRESS below it (a lower last-seen would self-inflict a future
+    # 409). No int beatSeq on `res` ⇒ fail-safe no-op, exactly like `_refresh_beat_seq`.
+    _bkey = _beat_seq_key(owner)
+    _new_seq = res.get("beatSeq") if isinstance(res, dict) else None
+    if isinstance(_new_seq, int) and not isinstance(_new_seq, bool):
+        _cur = _LAST_BEAT_SEQ.get(_bkey)
+        if not (isinstance(_cur, int) and not isinstance(_cur, bool)) or _new_seq >= _cur:
+            _LAST_BEAT_SEQ[_bkey] = _new_seq
+    # COMPARE-AND-CLEAR our reconcile's re-ground: we reconciled AND applied, so OUR directive is moot and
+    # the model must NOT be told "nothing changed / do not build on the outcome" next turn. But if a
+    # concurrent same-owner flow REPLACED it with a DIFFERENT directive during the await, PRESERVE that
+    # newer one — only pop when the stored value is STILL exactly what our reconcile stashed.
+    if _dk is not None and _DESYNC_REGROUND.get(_dk) == _reground_ours:
         _DESYNC_REGROUND.pop(_dk, None)
     return res
 

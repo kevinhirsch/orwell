@@ -215,6 +215,51 @@ def test_helper_returns_none_on_persistent_stale_and_reraises_non_stale(monkeypa
         _run(chat_helpers.retry_progression_after_stale("u", _stale_409(9), retry_boom, action="turnIn"))
 
 
+# ── concurrency guard (CodeRabbit on #1694): a same-owner flow interleaving the retry await ──────
+
+def test_landed_retry_does_not_regress_beatseq_or_drop_a_newer_reground(monkeypatch):
+    """While the retry await is in flight, a DIFFERENT same-owner flow (a two-window peer / the
+    background pre-resolve — ship-gate F4) advances `_LAST_BEAT_SEQ` to a HIGHER value AND re-stashes a
+    NEWER `_DESYNC_REGROUND` directive. On completion the helper must (a) NOT regress last-seen below the
+    concurrently-advanced value (a lower token self-inflicts a future 409), and (b) NOT drop the newer
+    directive (compare-and-clear only OUR own reconcile's re-ground). Without the guard this test fails:
+    the plain `_refresh_beat_seq` would last-write-wins `res` (12) over 20, and the unconditional pop
+    would drop the newer directive."""
+    _patch_reconcile_reads(monkeypatch, now=9)
+    chat_helpers._LAST_BEAT_SEQ["u"] = 4  # stale token
+    dk = chat_helpers._desync_key("u")
+    newer = "NEWER DIRECTIVE — a concurrent same-owner flow set this during the await"
+
+    async def retry_fn_with_concurrent_advance(_fresh):
+        # A peer advanced the board PAST our retry's beat and set its own re-ground while we were awaiting.
+        chat_helpers._LAST_BEAT_SEQ[chat_helpers._beat_seq_key("u")] = 20
+        chat_helpers._DESYNC_REGROUND[dk] = newer
+        return {"beatSeq": 12, "phase": "eviction"}   # our retry's own committed beat — now BEHIND the peer
+
+    res = _run(chat_helpers.retry_progression_after_stale(
+        "u", _stale_409(9), retry_fn_with_concurrent_advance, action="advanceGame"))
+    assert res == {"beatSeq": 12, "phase": "eviction"}          # the retry still LANDED (returned as-is)
+    assert chat_helpers.last_beat_seq("u") == 20, "(a) last-seen must NOT regress below the concurrent 20"
+    assert chat_helpers._DESYNC_REGROUND.get(dk) == newer, "(b) the newer concurrent re-ground is preserved"
+
+
+def test_landed_retry_no_interleave_clears_our_reground_and_refreshes(monkeypatch):
+    """The normal (no concurrent flow) case is unchanged: a landed retry refreshes last-seen from `res`
+    (monotonic ⇒ still applies a forward move) and clears OUR own reconcile's re-ground (we reconciled AND
+    applied, so it is moot)."""
+    _patch_reconcile_reads(monkeypatch, now=9)
+    chat_helpers._LAST_BEAT_SEQ["u"] = 4
+    dk = chat_helpers._desync_key("u")
+
+    async def retry_fn(_fresh):
+        return {"beatSeq": 12, "phase": "eviction"}
+
+    res = _run(chat_helpers.retry_progression_after_stale("u", _stale_409(9), retry_fn, action="advanceGame"))
+    assert res == {"beatSeq": 12, "phase": "eviction"}
+    assert chat_helpers.last_beat_seq("u") == 12, "a forward move still refreshes last-seen"
+    assert chat_helpers._DESYNC_REGROUND.get(dk) is None, "our own reconcile's re-ground is cleared"
+
+
 def test_submit_decision_stale_retries_once_then_succeeds(monkeypatch):
     _patch_reconcile_reads(monkeypatch, now=9)
     monkeypatch.setattr(orwell_engine, "remember_pending", lambda *a, **k: None)
@@ -278,5 +323,5 @@ def test_all_progression_tools_wired_through_the_shared_retry_helper():
     with open(os.path.join(base, "src", "tool_implementations.py"), encoding="utf-8") as fh:
         src = fh.read()
     for action in ("advanceGame", "submitDecision", "turnIn"):
-        assert f'retry_progression_after_stale(owner, _e, ' in src
+        assert 'retry_progression_after_stale(owner, _e, ' in src
         assert f'action="{action}"' in src, f"{action} must route its stale-beat through the R3 helper"
