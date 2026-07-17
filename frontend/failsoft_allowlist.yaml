@@ -420,6 +420,239 @@ allow:
     approved: 2026-07-17
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # --- GRANDFATHERED — INHERITED (non-game) workspace (Class-A burn-down; #1599) ---
+  # These 32 files are the INHERITED hermes workspace (email / caldav / cookbook / research / skills /
+  # tasks / notes / documents / RAG / etc.) — NOT orwell game surface. The game build strips them
+  # (ORWELL_GAME_BUILD, default on), so their fail-soft swallows never run in the shipped player tier.
+  # Grandfathered by file (consistent with the lint's per-file backlog design) so CI is GREEN on
+  # landing under the strict, game-only ruling; not enforced. Owner ruling 2026-07-16 (strict, game-only).
+  # ─────────────────────────────────────────────────────────────────────────────
+  - id: gf-inh-api-token-routes
+    site: frontend/routes/api_token_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-copilot-routes
+    site: frontend/routes/copilot_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-document-routes
+    site: frontend/routes/document_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-email-pollers
+    site: frontend/routes/email_pollers.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-emoji-routes
+    site: frontend/routes/emoji_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-mcp-routes
+    site: frontend/routes/mcp_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-memory-routes
+    site: frontend/routes/memory_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-note-routes
+    site: frontend/routes/note_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-personal-routes
+    site: frontend/routes/personal_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-preset-routes
+    site: frontend/routes/preset_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-skills-routes
+    site: frontend/routes/skills_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-task-routes
+    site: frontend/routes/task_routes.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-bg-monitor
+    site: frontend/src/bg_monitor.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-caldav-sync
+    site: frontend/src/caldav_sync.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-caldav-writeback
+    site: frontend/src/caldav_writeback.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-chat-processor
+    site: frontend/src/chat_processor.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-cleanup-service
+    site: frontend/src/cleanup_service.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-context-compactor
+    site: frontend/src/context_compactor.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-cookbook-serve-lifecycle
+    site: frontend/src/cookbook_serve_lifecycle.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-deep-research
+    site: frontend/src/deep_research.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-embeddings
+    site: frontend/src/embeddings.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-event-bus
+    site: frontend/src/event_bus.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-integrations
+    site: frontend/src/integrations.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-mcp-manager
+    site: frontend/src/mcp_manager.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-model-context
+    site: frontend/src/model_context.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-pdf-forms
+    site: frontend/src/pdf_forms.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-personal-docs
+    site: frontend/src/personal_docs.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-session-actions
+    site: frontend/src/session_actions.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-session-search
+    site: frontend/src/session_search.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-teacher-escalation
+    site: frontend/src/teacher_escalation.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-webhook-manager
+    site: frontend/src/webhook_manager.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+  - id: gf-inh-youtube-handler
+    site: frontend/src/youtube_handler.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "inherited non-game workspace; stripped by ORWELL_GAME_BUILD; #1599 Class-A burn-down (not enforced)"
+    approved_by: owner-ruling-2026-07-16 (strict, game-only)
+    approved: 2026-07-16
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # --- GRANDFATHERED — TS engine (Class-A / A1 burn-down; #1599) ---
   # The pure domain core uses typed errors + the orchestrator's fail-closed integrity
   # checkpoint; the swallow surface is small and concentrated in adapters. A1 (routing these

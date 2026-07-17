@@ -85,7 +85,7 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
             return False
         result = await write_fn(sk["eventId"], prose)
         return bool(result.get("ok"))
-    except Exception as exc:
+    except Exception as exc:  # failsoft-ok: best-effort-enrichment (per-scene voicing; the deterministic template stands, enrich_tick continues and its terminal ledgers a wholesale failure)
         logger.debug("[offscreen-texture] voice_scene failed for %s: %s", sk.get("eventId"), exc)
         return False
 
@@ -96,7 +96,16 @@ async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn:
     try:
         skeletons = await get_skeletons_fn()
     except Exception as exc:
+        # #1599: a skeleton READ that RAISES is a genuine engine/transport fault (an empty roster
+        # returns [], not a raise) — surface it RED; the deterministic templates stand. enrich_tick
+        # swallows-and-returns here (run_enrich's terminal only ledgers a RAISE), so record directly.
         logger.warning("[offscreen-texture] getOffscreenSceneSkeletons failed: %s", exc)
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("offscreen-texture:skeletons-read-failed", exc,
+                                          corrected="deterministic-templates")
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"voiced": 0, "total": 0, "error": str(exc)}
 
     if not isinstance(skeletons, list) or not skeletons:
@@ -203,7 +212,15 @@ def kickoff_enrich(owner: Optional[str] = None) -> None:
         try:
             await run_enrich(owner)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: run_enrich records its own failures but its resolver call is un-wrapped; a raise
+            # here means the whole tick silently degraded with no record — surface it RED. Templates stand.
             logger.warning("[offscreen-texture] background enrichment failed: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:background-run-failed", e,
+                                              corrected="deterministic-templates", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         finally:
             _IN_FLIGHT.discard(k)
 

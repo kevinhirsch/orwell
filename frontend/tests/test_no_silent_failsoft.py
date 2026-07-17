@@ -65,7 +65,18 @@ _RED_RECORDERS = ("record_soft_failure", "record_failure", "record_runtime_failu
                   "record_io", "record_llm_call", "record_overseer",
                   # verified module-local RED wrappers that themselves call a RED recorder (so a
                   # handler reaching one satisfies the log-AND-RED contract without double-recording):
-                  "_note_generation_failure")   # orwell_portraits → log_rings.record_soft_failure
+                  "_note_generation_failure",   # orwell_portraits → log_rings.record_soft_failure
+                  "_record_faith_guard_down")   # faithfulness → log_rings.record_overseer(ok=False)
+# The receivers a QUALIFIED `<recv>.<recorder>(...)` call must be dispatched on to count as a genuine
+# RED sink. Greptile P1 on #1689: `_call_name` strips the receiver, so a broad handler that swallows an
+# engine/LLM failure after calling an UNRELATED `attempt.record_failure()` / `stats.record_io()` on some
+# non-recorder object would FALSELY satisfy the log-AND-RED contract. Only these modules actually route
+# to the RED health ring (verified against the real frontend/src call sites): `log_rings` (the ring
+# itself + record_soft_failure/record_io/record_overseer), `enrichment_policy` (record_failure →
+# log_rings.record_overseer(ok=False)), and `llm_trace` (record_llm_call, the durable llm-io archive). A
+# BARE module-level recorder (`record_soft_failure(...)`, `_note_generation_failure(...)`) needs no
+# receiver — it is matched by name. An arbitrary object's `.record_failure()` is NOT a RED sink.
+_RED_RECEIVERS = ("log_rings", "enrichment_policy", "llm_trace")
 _LOG_ATTRS = ("debug", "info", "warning", "warn", "error", "exception", "critical", "log")
 # A call/attr in the guarded TRY body whose name carries one of these tokens ⇒ the guarded work
 # touches an LLM / engine / HTTP / write-back / generation surface (audit class-A). Deliberately
@@ -110,6 +121,28 @@ def _call_name(node: ast.Call) -> str:
     return ""
 
 
+def _is_red_recorder_call(node: ast.Call) -> bool:
+    """True only when `node` is a GENUINE RED-sink call — QUALIFIED so an unrelated helper of the same
+    method name cannot spoof it (Greptile P1 on #1689):
+      * a BARE module-level recorder in scope — ``record_soft_failure(...)`` / ``_note_generation_failure(...)``
+        / ``_record_faith_guard_down(...)`` (imported functions, ``ast.Name`` whose id ∈ _RED_RECORDERS); OR
+      * an ATTRIBUTE call ``<recv>.<name>(...)`` where ``name`` ∈ _RED_RECORDERS AND the receiver is a
+        recognized RED module (``log_rings`` / ``enrichment_policy`` / ``llm_trace``).
+    An arbitrary object's ``attempt.record_failure()`` / ``stats.record_io()`` is REJECTED — it is not a
+    RED sink, so swallowing an engine/LLM failure beside it is still a hit."""
+    f = node.func
+    if isinstance(f, ast.Name):
+        return f.id in _RED_RECORDERS
+    if isinstance(f, ast.Attribute):
+        if f.attr not in _RED_RECORDERS:
+            return False
+        recv = f.value
+        recv_name = (recv.id if isinstance(recv, ast.Name)
+                     else recv.attr if isinstance(recv, ast.Attribute) else "")
+        return recv_name in _RED_RECEIVERS
+    return False
+
+
 def _body_signals(body):
     """Does the handler RE-RAISE or reach a RED-eligible recorder?
 
@@ -120,12 +153,14 @@ def _body_signals(body):
     this). We drop both the `logs` exemption and the trivial-`silent` requirement: a handler is
     "handled" ONLY when it re-raises (the fault propagates) or reaches a RED recorder (which itself
     logs, so it satisfies the log-AND-RED contract). A log-then-return / log-then-continue is a HIT.
+    The recorder recognition is QUALIFIED by receiver (see :func:`_is_red_recorder_call`) so an
+    unrelated ``attempt.record_failure()`` cannot spoof compliance.
     """
     reraise = recorder = False
     for n in ast.walk(ast.Module(body=list(body), type_ignores=[])):
         if isinstance(n, ast.Raise):
             reraise = True
-        if isinstance(n, ast.Call) and _call_name(n) in _RED_RECORDERS:
+        if isinstance(n, ast.Call) and _is_red_recorder_call(n):
             recorder = True
     return reraise, recorder
 
@@ -265,12 +300,42 @@ def test_no_uncovered_python_failsoft():
 
 
 def test_no_uncovered_js_ts_failsoft():
-    """The lighter regex pass: an EMPTY `catch {}` / `catch (_) {}` in the browser JS
-    (`frontend/static/js/**`) or the TS engine (`src/**`) must be covered by a glob grant or a
-    `/* failsoft-ok */` pragma. (Both trees are currently glob-grandfathered — this holds the line
-    against a NEW empty catch appearing in a tree that is NOT covered.)"""
+    """The lighter pass: a SILENT-DEFAULT `catch` in the browser JS (`frontend/static/js/**`) or the
+    TS engine (`src/**`) must be covered by a glob grant or a `/* failsoft-ok */` pragma.
+
+    A silent-default catch is a broad `catch (…) { … }` whose body is EITHER empty (`catch {}` /
+    `catch (_) {}`) OR does nothing but return a default / continue / break (`catch { return null; }`,
+    `catch (e) { return undefined; }`, `catch { continue; }`, `catch { break; }`) — no re-raise, no
+    `throw`, no recorder call, no `console.error`+rethrow (CodeRabbit on #1689: the old scanner caught
+    only the empty shape and missed catch-and-default, the more common JS fail-soft). A catch that does
+    real work (rethrows, records, computes a non-trivial fallback) is NOT flagged.
+
+    Both trees are currently glob-grandfathered (`frontend/static/js/**` + `src/**`), so this holds the
+    line against a NEW silent-default catch appearing in a tree that is NOT covered — it does not
+    newly-break the grandfathered trees."""
     allow = _load_allowlist()
-    empty_catch = re.compile(r"catch\s*(?:\([^)]*\))?\s*\{\s*\}")
+    catch_head = re.compile(r"catch\s*(?:\([^)]*\))?\s*\{")
+    # A body that is ONLY whitespace, or ONLY a `return <literal-default>` / bare `return` / `continue`
+    # / `break` (optionally trailing `;`). Anything richer (a `throw`, a recorder call, a computed
+    # fallback like `return computeDefault()`) fails this match and is NOT a silent default.
+    trivial_default = re.compile(
+        r"^\s*(?:return(?:\s+(?:null|undefined|false|true|\{\}|\[\]|''|\"\"|``|0|-?\d+(?:\.\d+)?))?\s*;?"
+        r"|continue\s*;?|break\s*;?)?\s*$")
+
+    def _catch_body(text: str, brace_open: int) -> str:
+        """The `{…}` body text for the `{` at `brace_open` (naive brace matching — adequate for the
+        lighter JS pass; a false-positive only needs a pragma)."""
+        depth = 0
+        for i in range(brace_open, len(text)):
+            c = text[i]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[brace_open + 1:i]
+        return text[brace_open + 1:]
+
     trees = [
         (os.path.join(FE_ROOT, "static", "js"), ".js"),
         (os.path.join(REPO_ROOT, "src"), ".ts"),
@@ -288,11 +353,15 @@ def test_no_uncovered_js_ts_failsoft():
                 p = os.path.join(dirpath, f)
                 rel = _relpath(p)
                 src = open(p, encoding="utf-8", errors="replace").read()
-                for m in empty_catch.finditer(src):
+                for m in catch_head.finditer(src):
+                    brace_open = m.end() - 1  # the `{` of the catch body
+                    body = _catch_body(src, brace_open)
+                    if not trivial_default.match(body):
+                        continue  # the catch does real work (rethrow / record / real fallback)
                     # A pragma on the same or previous line exempts this catch.
                     upto = src[:m.start()]
                     line_start = upto.rfind("\n") + 1
-                    window = src[max(0, line_start - 200):m.end()]
+                    window = src[max(0, line_start - 200):brace_open + 1]
                     if _PRAGMA_RE.search(window):
                         continue
                     if _covered(rel, "<js>", allow):
@@ -300,29 +369,47 @@ def test_no_uncovered_js_ts_failsoft():
                     ln = upto.count("\n") + 1
                     uncovered.append(f"{rel}:{ln}")
     assert not uncovered, (
-        "#1599 no-silent-fail-soft (JS/TS): empty catch block(s) with no grant/pragma:\n  "
+        "#1599 no-silent-fail-soft (JS/TS): silent-default catch block(s) (empty / return-default / "
+        "continue / break) with no grant/pragma:\n  "
         + "\n  ".join(sorted(set(uncovered)))
     )
 
 
 def test_a2_files_are_enforced_not_grandfathered():
-    """The five A2-wired files must NOT carry a file-level grandfather grant — they are enforced,
-    so a regression (a NEW silent swallow) fails the lint instead of hiding behind a file grant."""
+    """The five A2-wired files must NOT carry a file-level OR glob grandfather grant — they are
+    enforced, so a regression (a NEW silent swallow) fails the lint instead of hiding behind a grant.
+    A GLOB grant that happens to match an A2 path (e.g. `frontend/src/orwell_*.py` or a broad `**`)
+    grandfathers the file just as surely as an exact-file entry, so reject both (CodeRabbit on #1689).
+    A narrow `<file>:<func>`-anchored grant is a per-SITE exemption, not a whole-file grandfather, and
+    is allowed."""
     allow = _load_allowlist()
     for f in A2_ENFORCED:
-        offenders = [e["id"] for e in allow if e.get("site") == f]
+        offenders = []
+        for e in allow:
+            site = e.get("site", "")
+            if "*" in site:
+                if fnmatch.fnmatch(f, site):
+                    offenders.append(e["id"])          # a glob that sweeps in the A2 file
+            elif ":" not in site:
+                if site == f:
+                    offenders.append(e["id"])          # an exact whole-file grant
+            # a `<file>:<func>` grant is per-site, not a whole-file grandfather — allowed
         assert not offenders, (
-            f"{f} is A2-enforced and must not be file-grandfathered (offending grants: "
+            f"{f} is A2-enforced and must not be file- or glob-grandfathered (offending grants: "
             f"{offenders}). Wire the real terminal to a RED recorder, or pragma an expected-empty "
             "site — do not grandfather the whole file.")
 
 
 def test_a2_terminals_reach_a_red_recorder():
     """Guard against a silent removal of the A2 wiring: each A2 driver whose live failure path is a
-    genuine fault must still reference the shared RED recorder in its source (portraits' terminal
-    generation/persist failure, the gen-comp / producer enrichment terminals, the tagline
-    fall-open). fal_image routes its transport failures UP to the portraits terminal, so it is
-    covered there (no double-record)."""
+    genuine fault must still make an ACTUAL `record_soft_failure` CALL in its source (portraits'
+    terminal generation/persist failure, the gen-comp / producer enrichment terminals, the tagline
+    fall-open). fal_image routes its transport failures UP to the portraits terminal, so it is covered
+    there (no double-record).
+
+    An AST check (a real `ast.Call` whose function name is the recorder), NOT a lexical `needle in src`
+    — so the token appearing only in a comment or a docstring can never satisfy the guard (CodeRabbit
+    on #1689)."""
     must_record = {
         "src/orwell_portraits.py": "record_soft_failure",
         "src/orwell_gen_competitions.py": "record_soft_failure",
@@ -331,6 +418,9 @@ def test_a2_terminals_reach_a_red_recorder():
     }
     for rel, needle in must_record.items():
         src = open(os.path.join(FE_ROOT, rel), encoding="utf-8").read()
-        assert needle in src, (
-            f"{rel} lost its #1599 RED-recorder wiring (expected a `{needle}` call on the terminal "
-            "failure path).")
+        tree = ast.parse(src)
+        found = any(isinstance(n, ast.Call) and _call_name(n) == needle
+                    for n in ast.walk(tree))
+        assert found, (
+            f"{rel} lost its #1599 RED-recorder wiring (expected a real `{needle}()` CALL on the "
+            "terminal failure path — an AST call, not merely the token in a comment or string).")
