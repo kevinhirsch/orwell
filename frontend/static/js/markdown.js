@@ -912,6 +912,39 @@ function _speakerChipHtml(id, name) {
     + `aria-label="${safe}" role="img">${face}</span>`;
 }
 
+// CodeRabbit fix: the speaker pass below runs on RAW markdown (before mdToHtml extracts fenced
+// blocks — see the file-header note above), so a roster name inside a ```fenced``` or 4-space/
+// tab-INDENTED code line (an example transcript, a quoted format sample) could otherwise get
+// chip-ified and corrupt the eventual `<pre><code>` render. Builds the set of zero-based line
+// indices that fall inside either kind of code region so both speaker passes below can skip
+// them, preserving detection in ordinary prose. A lone fence line toggling state counts as code
+// itself (never a speaker line). Pure; a plain ``` (no lang) or ~~~ fence both count, mirroring
+// common Markdown practice even though mdToHtml's own fence-extraction only handles backticks.
+function _codeLineIndices(text) {
+  const lines = String(text).split('\n');
+  const codeLines = new Set();
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].replace(/^ {0,3}/, '');
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
+      codeLines.add(i);
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) { codeLines.add(i); continue; }
+    if (/^(?: {4}|\t)/.test(lines[i]) && lines[i].trim()) codeLines.add(i);
+  }
+  return codeLines;
+}
+
+// The zero-based line index containing a given character offset into `str` (counts `\n` up to
+// offset). Used to test a regex match's position against `_codeLineIndices` above.
+function _lineIndexAtOffset(str, offset) {
+  let idx = 0;
+  for (let i = 0; i < offset; i++) if (str.charCodeAt(i) === 10) idx++;
+  return idx;
+}
+
 // Extract every complete, line-leading sanctioned speaker tag, replacing it with an inert
 // `___OWSPK_N___` placeholder (so downstream scrubs + mdToHtml can't mangle it) and returning
 // the parsed {id, name} chips in order. Also swallows a trailing INCOMPLETE tag so a tag split
@@ -919,7 +952,9 @@ function _speakerChipHtml(id, name) {
 export function extractSpeakerTags(text) {
   if (!text) return { text: text, chips: [] };
   const chips = [];
-  let out = String(text).replace(_SPEAKER_TAG_RE, (_m, lead, name, id) => {
+  const codeLines = _codeLineIndices(text);
+  let out = String(text).replace(_SPEAKER_TAG_RE, (_m, lead, name, id, offset) => {
+    if (codeLines.has(_lineIndexAtOffset(text, offset))) return _m;  // fenced/indented code — never chip-ify
     const nm = String(name || '').trim();
     if (!nm) return _m;                    // `@[]` — not a real speaker; leave it for the scrub
     const i = chips.length;
@@ -940,7 +975,8 @@ export function extractSpeakerTags(text) {
   // gutter chip and never rewrites/normalizes the prose (ADR 0005). A line already replaced
   // by the sanctioned-tag pass above starts with a placeholder, not `**`, so it can never
   // double-match here — the two paths are mutually exclusive per line.
-  out = out.replace(_SPEAKER_BOLD_LINE_RE, (m, lead, boldRun, nameRaw) => {
+  out = out.replace(_SPEAKER_BOLD_LINE_RE, (m, lead, boldRun, nameRaw, offset) => {
+    if (codeLines.has(_lineIndexAtOffset(out, offset))) return m;  // fenced/indented code — never chip-ify
     const nm = String(nameRaw || '').trim().replace(/:$/, '').trim();
     if (!nm || !_isKnownRosterName(nm)) return m; // not a confirmed roster name — untouched
     const i = chips.length;

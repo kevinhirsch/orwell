@@ -131,6 +131,8 @@ def _run_battery(cases):
       grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
       grabFn('function _scanTopLevelBlocks'),
       grabFn('function _extendSpeakerContinuations'),
+      grabFn('function _codeLineIndices'),
+      grabFn('function _lineIndexAtOffset'),
       grabFn('export function extractSpeakerTags'),
       grabFn('export function restoreSpeakerChips'),
       'const _DEGRADE = [' + degrade.join(',') + '];',
@@ -251,6 +253,8 @@ def _run_natural_battery(cases, roster):
       grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
       grabFn('function _scanTopLevelBlocks'),
       grabFn('function _extendSpeakerContinuations'),
+      grabFn('function _codeLineIndices'),
+      grabFn('function _lineIndexAtOffset'),
       grabFn('export function extractSpeakerTags'),
       grabFn('export function restoreSpeakerChips'),
     ].join('\n');
@@ -644,6 +648,119 @@ def test_natural_style_bold_roster_name_renders_a_speaker_row():
     # this is never a rewrite (ADR 0005). No text is dropped, no space silently eaten.
     assert '**Stephanie Briggs** leans against the counter.' in n["restored"]
     assert 'I trust no one this week' in n["restored"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_fenced_code_block_bold_roster_name_is_never_chip_ified():
+    """CodeRabbit fix: a roster name bolded INSIDE a fenced code block (e.g. an example format
+    the narrator is quoting) must never fire the bold-name fallback — chip-ifying it would
+    corrupt the eventual <pre><code> render. The bold line outside the fence must still chip."""
+    r = _run_natural_battery(
+        {
+            "fenced": (
+                "**Stephanie Briggs** leans in.\n"
+                "```\n"
+                "**Stephanie Briggs** is the format example.\n"
+                "```\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["fenced"]
+    assert len(n["chips"]) == 1
+    assert n["chips"][0]["name"] == "Stephanie Briggs"
+    # the line OUTSIDE the fence got the placeholder...
+    assert "___OWSPK_0___ **Stephanie Briggs** leans in." in n["text"]
+    # ...but the line INSIDE the fence stays completely untouched, verbatim.
+    assert "**Stephanie Briggs** is the format example." in n["text"]
+    assert n["text"].count("___OWSPK_") == 1
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_tilde_fenced_code_block_bold_roster_name_is_never_chip_ified():
+    r = _run_natural_battery(
+        {
+            "tilde": (
+                "~~~\n"
+                "**Stephanie Briggs** is the format example.\n"
+                "~~~\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["tilde"]
+    assert n["chips"] == []
+    assert "**Stephanie Briggs** is the format example." in n["text"]
+    assert "___OWSPK_" not in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_indented_code_block_bold_roster_name_is_never_chip_ified():
+    """A 4-space-indented code line (the other Markdown code-block convention) gets the same
+    protection as a fenced block."""
+    r = _run_natural_battery(
+        {
+            "indented": "    **Stephanie Briggs** is the format example.\n",
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["indented"]
+    assert n["chips"] == []
+    assert "**Stephanie Briggs** is the format example." in n["text"]
+    assert "___OWSPK_" not in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_tab_indented_code_block_bold_roster_name_is_never_chip_ified():
+    r = _run_natural_battery(
+        {
+            "tabbed": "\t**Stephanie Briggs** is the format example.\n",
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["tabbed"]
+    assert n["chips"] == []
+    assert "___OWSPK_" not in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_sanctioned_tag_inside_fenced_code_block_is_never_chip_ified():
+    """The same protection extends to the sanctioned @[Name] tag pass, not just the bold-name
+    fallback — belt-and-suspenders, since either regex scans the same raw markdown."""
+    r = _run_battery(
+        {
+            "fenced_tag": (
+                "```\n"
+                "@[Faith Willis] example line\n"
+                "```\n"
+            ),
+        }
+    )
+    n = r["fenced_tag"]
+    assert n["chips"] == []
+    assert "@[Faith Willis] example line" in n["text"]
+    assert "___OWSPK_" not in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_normal_prose_detection_still_works_alongside_a_code_block():
+    """Regression guard for the fix itself: excluding code regions must not degrade detection in
+    ordinary prose lines that happen to share a message with a code block."""
+    r = _run_natural_battery(
+        {
+            "mixed": (
+                "**Stephanie Briggs** paces the room.\n"
+                "```\n"
+                "some_code()\n"
+                "```\n"
+                "**Stephanie Briggs** speaks again.\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["mixed"]
+    assert len(n["chips"]) == 2
+    assert n["text"].count("___OWSPK_") == 2
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
