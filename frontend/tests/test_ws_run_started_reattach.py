@@ -225,6 +225,121 @@ async function handshake(hasRunFirst, runId) {
       "a stale replay of the run we just attached (same id) must be ignored (reconcile-by-id); got " + chatSubs().length);
   }
 
+  // ── scenario 8 (ship-gate F2 — the "stuck Production Responding after refresh" self-heal): a
+  // `run-started` edge (e.g. session_events' ADR 0012 §3.4b ring replaying a stale invitation to a
+  // freshly-connected socket on EVERY page reload) re-attaches chat exactly like a genuine new run —
+  // but when THIS re-attach's own ack reports `hasRun:false`, there is no run to mirror. Since a dead
+  // run streams no further `event` frames, the observer's speculative round + "Responding" spinner
+  // (mounted by the `orwell:ws-run-boundary` emit) would otherwise NEVER clear. Pin that the client
+  // self-heals by emitting `orwell:ws-resync` (the SAME teardown chatWsSplice already uses to tear
+  // down a wedged live holder + reconcile from history).
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);   // no live run at attach → not tailing
+    const before = chatSubs().length;   // just the initial subscribe
+
+    // A STALE ring-replayed run-started (id-less, mirroring an evicted run / older server — the
+    // client cannot distinguish it from a genuine new run at the point it decides to re-attach).
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const reattach = chatSubs()[before];
+    assert(reattach, "the run-started edge must trigger a re-attach subscribe");
+    assert(resyncEvents.length === 0, "no self-heal yet — the re-attach ack hasn't landed");
+
+    // The re-attach's OWN ack reveals the truth: there is no live run after all.
+    down({ t: "ack", ch: "chat", cid: reattach.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
+    await tick();
+    assert(resyncEvents.length === 1,
+      "a hasRun:false re-attach ack must self-heal via orwell:ws-resync (never leave the boundary's " +
+      "spinner/holder orphaned); got " + resyncEvents.length + " resync event(s)");
+    assert(resyncEvents[0].reason === "run-started-empty",
+      "the resync should identify the empty-re-attach cause; got " + JSON.stringify(resyncEvents[0]));
+  }
+
+  // ── scenario 9: a GENUINE run-started (hasRun:true on re-attach) must NEVER self-heal/resync — the
+  // fix must only fire on the empty case, not on every re-attach.
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);
+    const before = chatSubs().length;
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const reattach = chatSubs()[before];
+    down({ t: "ack", ch: "chat", cid: reattach.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "r9" } });
+    await tick();
+    assert(resyncEvents.length === 0,
+      "a genuine live re-attach (hasRun:true) must NOT emit orwell:ws-resync; got " + resyncEvents.length);
+  }
+
+  // ── scenario 10 (CodeRabbit fix, 2026-07-17): a STALE reattach A's `hasRun:false` ack must NOT
+  // resync/tear-down once a genuinely-new run B has SUPERSEDED it — even if A's ack lands AFTER B
+  // has fully streamed and finished (which clears `_chatTailActive` back to false, the exact
+  // condition the old single-boolean guard misread as "genuinely no live run"). A is a stale/id-less
+  // reattach (mirrors scenario 8); B is a genuine, DISTINCT-id run that starts, streams, and
+  // completes entirely BEFORE A's own ack finally resolves.
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);   // no live run at attach → not tailing
+    const before = chatSubs().length;   // just the initial subscribe
+
+    // Reattach A begins (id-less — indistinguishable from a genuine new run at subscribe time).
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const subA = chatSubs()[before];
+    assert(subA, "reattach A must have issued its own chat subscribe");
+
+    // BEFORE A's ack lands, a genuinely-NEW run B (distinct id) supersedes it.
+    down({ t: "state", ch: "state", d: { beatSeq: 3, reason: "run-started", runId: "B" } });
+    await tick();
+    const subB = chatSubs()[before + 1];
+    assert(subB, "run B must have issued its OWN re-attach subscribe, superseding A");
+
+    // B is live, streams, and finishes COMPLETELY — this clears `_chatTailActive` back to false,
+    // the exact state a naive single-boolean guard would misread on A's late ack.
+    down({ t: "ack", ch: "chat", cid: subB.cid, d: { fromSeq: 0, headSeq: 0, hasRun: true, runId: "B" } });
+    down({ t: "event", ch: "chat", seq: 0, d: { delta: "B streams and finishes" } });
+    down({ t: "event", ch: "chat", seq: 1, d: { done: true } });
+    await tick();
+    assert(resyncEvents.length === 0, "B's own live run must never trigger a resync");
+
+    // NOW A's stale ack FINALLY resolves, reporting hasRun:false (A really was empty at the time).
+    // Pre-fix: `_chatTailActive` is false here (B's done cleared it), so the old guard would
+    // misfire orwell:ws-resync and tear down B's already-rendered, already-finished content.
+    down({ t: "ack", ch: "chat", cid: subA.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
+    await tick();
+    assert(resyncEvents.length === 0,
+      "a superseded reattach A's late hasRun:false ack must NEVER resync once run B has taken over " +
+      "— got " + resyncEvents.length + " resync event(s): " + JSON.stringify(resyncEvents));
+  }
+
+  // ── scenario 11: the CONTRAST case — when NOTHING supersedes it, a genuinely-stale reattach's
+  // late `hasRun:false` ack must STILL self-heal (the fix must not silently disable scenario 8).
+  {
+    const WS = boot();
+    await tick();
+    const resyncEvents = [];
+    global.window.addEventListener('orwell:ws-resync', function (e) { resyncEvents.push(e.detail); });
+    await handshake(false);
+    const before = chatSubs().length;
+    down({ t: "state", ch: "state", d: { beatSeq: 2, reason: "run-started" } });
+    await tick();
+    const reattach = chatSubs()[before];
+    down({ t: "ack", ch: "chat", cid: reattach.cid, d: { fromSeq: 0, headSeq: -1, hasRun: false } });
+    await tick();
+    assert(resyncEvents.length === 1,
+      "an UNSUPERSEDED reattach's hasRun:false ack must still self-heal via orwell:ws-resync; got " +
+      resyncEvents.length);
+  }
+
   console.log("OK");
   process.exit(0);
 })();
@@ -307,3 +422,52 @@ def test_new_run_signals_the_render_layer_for_a_fresh_observer_round():
     chat = _read("static", "js", "chat.js")
     assert "'orwell:ws-run-boundary', _onWsRunBoundary" in chat, \
         "chat.js must register the ws-run-boundary observer handler"
+
+
+def test_run_started_reattach_self_heals_when_hasrun_false():
+    # Ship-gate F2 ("right status") — the "stuck Production Responding after refresh" fix.
+    # `_onWsRunBoundary` mounts an observer holder + "Responding" spinner SPECULATIVELY, before
+    # knowing whether a run-started edge names a genuinely-live run — including a STALE ring-replayed
+    # edge (ADR 0012 §3.4b: session_events replays its invitation ring to every FRESH state-channel
+    # subscribe, i.e. every page reload) for a run that's already gone. When the re-attach's OWN chat
+    # subscribe ack then reports `hasRun:false`, there is no run to mirror — and since a dead run
+    # streams no further `event` frames, that speculative spinner/holder would otherwise NEVER clear.
+    # Pin that `_onRunStarted` self-heals by emitting the EXISTING `orwell:ws-resync` teardown (spinner
+    # destroy + holder removal + render-lock release + history reconcile) instead of orphaning it.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "hasRun === false" in body, \
+        "the run-started re-attach must inspect its OWN chat-subscribe ack for hasRun:false"
+    assert "orwell:ws-resync" in body, \
+        "a hasRun:false re-attach must emit orwell:ws-resync to tear down the speculative spinner/holder"
+    assert "_chatTailActive" in body.split("_subscribeChat(0).then")[1], \
+        "the self-heal must be guarded so a genuinely-new run racing in behind this one is never torn down"
+
+
+def test_reattach_self_heal_is_generation_guarded():
+    # CodeRabbit fix (2026-07-17): `_chatTailActive` alone can't tell a STALE reattach A's late ack
+    # apart from the CURRENT state once an unrelated LATER event (a superseding run B's own re-attach,
+    # or B's own `done`) has already flipped that single shared boolean back to false — A's late
+    # `hasRun:false` ack would then misread as "genuinely no live run" and tear B down (scenario 10
+    # above). Pin the fix structurally: a monotonic generation is bumped once per `_onRunStarted`
+    # re-attach, captured locally BEFORE the subscribe call, and compared against the CURRENT value
+    # inside the ack callback — a superseded generation must short-circuit before the hasRun check.
+    body = WS.split("function _onRunStarted")[1].split("\n  function ")[0]
+    assert "_chatReattachGen" in body, \
+        "the re-attach must stamp/compare a generation counter, not rely on _chatTailActive alone"
+    # The generation must be bumped BEFORE `_subscribeChat(0)` is called (captured at subscribe-time,
+    # not read lazily later inside the callback where a newer reattach may have already moved it).
+    # Anchor on the ACTUAL increment (`++_chatReattachGen`), not the identifier's first textual
+    # occurrence — a comment or the declaration would satisfy a bare-name match even if the real
+    # capture moved after the subscribe call.
+    gen_capture_idx = body.index("++_chatReattachGen")
+    subscribe_idx = body.index("_subscribeChat(0)")
+    assert gen_capture_idx < subscribe_idx, \
+        "the generation must be captured BEFORE the subscribe call, not after"
+    # The ack callback must compare the captured generation against the CURRENT one and bail (a no-op)
+    # on mismatch, BEFORE the existing hasRun/resync logic runs.
+    then_block = body[body.index("_subscribeChat(0).then"):]
+    then_block = then_block[:then_block.index("}).catch")]
+    assert "!==" in then_block or "!=" in then_block, \
+        "the ack callback must compare the captured generation against the current one"
+    assert then_block.index("_chatReattachGen") < then_block.index("hasRun === false"), \
+        "the generation check must short-circuit BEFORE the hasRun:false resync logic runs"
