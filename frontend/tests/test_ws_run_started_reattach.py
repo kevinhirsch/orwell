@@ -456,7 +456,10 @@ def test_reattach_self_heal_is_generation_guarded():
         "the re-attach must stamp/compare a generation counter, not rely on _chatTailActive alone"
     # The generation must be bumped BEFORE `_subscribeChat(0)` is called (captured at subscribe-time,
     # not read lazily later inside the callback where a newer reattach may have already moved it).
-    gen_capture_idx = body.index("_chatReattachGen")
+    # Anchor on the ACTUAL increment (`++_chatReattachGen`), not the identifier's first textual
+    # occurrence — a comment or the declaration would satisfy a bare-name match even if the real
+    # capture moved after the subscribe call.
+    gen_capture_idx = body.index("++_chatReattachGen")
     subscribe_idx = body.index("_subscribeChat(0)")
     assert gen_capture_idx < subscribe_idx, \
         "the generation must be captured BEFORE the subscribe call, not after"
