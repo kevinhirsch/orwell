@@ -12,21 +12,23 @@ This lint is the structural enforcement (WI5). It is an AST scan of `frontend/sr
 `frontend/static/js/**`) for fail-soft shapes. It FAILS the build on an un-allowlisted swallow of
 a real error.
 
-The flag rule — tuned CONSERVATIVELY (better to grandfather a real site than to false-positive on
-expected-empty coercion): a handler is a HIT only when ALL hold —
+The flag rule — a handler is a HIT when ALL hold —
   (1) it catches a BROAD exception (`Exception` / `BaseException` / bare `except:`);
-  (2) its body is SILENT (only `pass` / `return <default>` / `continue` / `...` — it neither
-      re-raises nor logs nor reaches a RED recorder);
-  (3) the guarded `try` body touches a RISK surface (an LLM / engine / HTTP / write-back /
-      generation call — an `await` or a call whose name carries a risk token).
-Narrow-benign catches (`except (ValueError, TypeError): ...`), logging handlers, re-raising
-handlers, and broad-but-benign swallows (a `.get(default)` optional read, a capability probe,
-an `int()`/`json.loads()` coercion — no risk-surface call) are NOT hits.
+  (2) the guarded `try` body touches a RISK surface (an LLM / engine / HTTP / write-back /
+      generation call — an `await` or a call whose name carries a risk token);
+  (3) the handler NEITHER re-raises NOR reaches a RED-eligible recorder — i.e. it SWALLOWS the
+      fault, whether SILENTLY or after only LOGGING. Owner ruling #1599 requires a genuine fault
+      to LOG **and** reach a RED recorder, so logging alone is NOT compliance (Greptile P1 /
+      CodeRabbit on #1689 flagged the earlier logs-exempt / silent-only rule as under-enforcing;
+      a RED recorder itself logs, so reaching one satisfies the log-AND-RED contract).
+Narrow-benign catches (`except (ValueError, TypeError): ...`), re-raising handlers, handlers that
+reach a RED recorder, and broad-but-benign swallows over NO risk surface (a `.get(default)` optional
+read, a capability probe, an `int()`/`json.loads()` coercion) are NOT hits.
 
 A HIT PASSES iff:
-  (a) [its body reaches a RED-eligible recorder — then, by rule (2), it is not a hit at all];
-  (b) its function/class- or glob-anchored `site` is granted in the allowlist; OR
-  (c) it carries an inline `# failsoft-ok[: <id>]` (Python) / `/* failsoft-ok */` (JS/TS) pragma.
+  (a) its function/class- or glob-anchored `site` is granted in the allowlist; OR
+  (b) it carries an inline `# failsoft-ok[: <id>]` (Python) / `/* failsoft-ok */` (JS/TS) pragma.
+(Re-raising or reaching a RED recorder removes it from being a hit at all, per rule (3).)
 
 The companion behavioral coverage lives in `test_1599_failsoft.py` (the recorder + rollup + RED
 alarms). Roles only — every probe string here is generic, never cast material.
@@ -60,7 +62,10 @@ A2_ENFORCED = (
 
 # ── the flag-shape classifier (kept in lockstep with the WI1 scale-audit method) ──────────────
 _RED_RECORDERS = ("record_soft_failure", "record_failure", "record_runtime_failure",
-                  "record_io", "record_llm_call", "record_overseer")
+                  "record_io", "record_llm_call", "record_overseer",
+                  # verified module-local RED wrappers that themselves call a RED recorder (so a
+                  # handler reaching one satisfies the log-AND-RED contract without double-recording):
+                  "_note_generation_failure")   # orwell_portraits → log_rings.record_soft_failure
 _LOG_ATTRS = ("debug", "info", "warning", "warn", "error", "exception", "critical", "log")
 # A call/attr in the guarded TRY body whose name carries one of these tokens ⇒ the guarded work
 # touches an LLM / engine / HTTP / write-back / generation surface (audit class-A). Deliberately
@@ -106,31 +111,23 @@ def _call_name(node: ast.Call) -> str:
 
 
 def _body_signals(body):
-    """Does the handler body log / re-raise / reach a RED recorder, and is it 'silent'?"""
-    logs = reraise = recorder = False
+    """Does the handler RE-RAISE or reach a RED-eligible recorder?
+
+    Owner ruling #1599 (2026-07-14): a genuine failure must LOG **and** reach a RED-eligible
+    recorder. Logging ALONE is therefore NOT compliance — a broad handler that logs (or warns,
+    or prints) and then swallows on a risk surface is exactly the fail-soft the ruling forbids
+    (Greptile P1 / CodeRabbit on #1689: the old `logs`-exempts / silent-only rule under-enforced
+    this). We drop both the `logs` exemption and the trivial-`silent` requirement: a handler is
+    "handled" ONLY when it re-raises (the fault propagates) or reaches a RED recorder (which itself
+    logs, so it satisfies the log-AND-RED contract). A log-then-return / log-then-continue is a HIT.
+    """
+    reraise = recorder = False
     for n in ast.walk(ast.Module(body=list(body), type_ignores=[])):
         if isinstance(n, ast.Raise):
             reraise = True
-        if isinstance(n, ast.Call):
-            nm = _call_name(n)
-            if isinstance(n.func, ast.Attribute) and n.func.attr in _LOG_ATTRS:
-                logs = True
-            if nm == "print":
-                logs = True
-            if nm in _RED_RECORDERS:
-                recorder = True
-
-    def trivial(stmts):
-        for s in stmts:
-            if isinstance(s, (ast.Pass, ast.Continue)):
-                continue
-            if isinstance(s, ast.Return):
-                continue
-            if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant):
-                continue  # a bare docstring / `...`
-            return False
-        return True
-    return logs, reraise, recorder, trivial(body)
+        if isinstance(n, ast.Call) and _call_name(n) in _RED_RECORDERS:
+            recorder = True
+    return reraise, recorder
 
 
 def _try_touches_risk(try_body) -> bool:
@@ -170,16 +167,17 @@ def _scan_python(path: str):
         def visit_Try(self, n):
             risk = _try_touches_risk(n.body)
             for h in n.handlers:
-                logs, reraise, recorder, silent = _body_signals(h.body)
-                if recorder or reraise or logs:
-                    continue
                 if not _exc_is_broad(h):
-                    continue
-                if not silent:
-                    continue
+                    continue  # a narrow, benign catch (ValueError/TypeError/…) — never a hit
                 if not risk:
-                    continue  # broad-but-benign swallow: expected-empty, not a hit
-                # Pragma: anywhere within the handler's source span (its except line + body).
+                    continue  # no risk surface in the guarded body ⇒ expected-empty, not a hit
+                reraise, recorder = _body_signals(h.body)
+                if reraise or recorder:
+                    continue  # the fault propagates (re-raise) or is RED-recorded ⇒ handled
+                # A broad handler over a risk surface that neither re-raises nor reaches a RED
+                # recorder is a fail-soft swallow — logged OR silent (logging alone is NOT
+                # compliance, owner ruling #1599). It must carry a RED recorder, an allowlist
+                # grant, or a `# failsoft-ok` pragma.
                 start = h.lineno
                 end = getattr(h, "end_lineno", h.lineno) or h.lineno
                 span = "\n".join(lines[start - 1:end])
