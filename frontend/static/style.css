@@ -11952,9 +11952,18 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
      padding-top and left an oversized gap above each section title
      (Registration / Users / Add User). */
   margin-top: 0;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  /* Apple Genius rendered-pixel-parity (2026-07-16): this heading used to carry its OWN
+     border-bottom (a "short" hairline sitting immediately under the title text) INSIDE a
+     card that already has a full 4-sided box border (the base .admin-card rule's own
+     "border: 1px solid var(--border)") — every settings section (Chat Area, Sidebar, Account, …) sandwiched
+     its title between the card's own top edge and this second hairline, reading as a
+     double underline. Apple's System Settings groups sections with the boxed/inset card
+     alone — no separate title underline — so drop this rule's own divider and let the
+     card's box border (or, under the frosted Settings window where that box border is
+     stripped to transparent, spacing/typography alone) be the ONE grouping cue. The
+     margin-bottom absorbs the space the dropped padding-bottom used to add, so the visual
+     gap before the section's content is unchanged. */
+  margin-bottom: 14px;
 }
 /* SET-02 (2026-07-14 audit): a section header must never wrap to two lines when the
    window is resized to its narrow floor — truncate with an ellipsis instead, the same
@@ -20576,8 +20585,21 @@ body.theme-frosted .og-card [style*="font-weight:300"] {
    PLAIN buttons only; kit buttons ride their own kit rules. Exact-class deliberately, not
    [class*="ow-btn"] — every kit button carries the literal base .ow-btn beside its variant
    (verified across all composers), and an exact match can never accidentally exclude a
-   future non-kit "window-btn"/"arrow-btn"-style class. */
-body.theme-frosted .ow-window .ow-body button:not(.ow-btn),
+   future non-kit "window-btn"/"arrow-btn"-style class.
+   G-2 (Apple Genius rendered-parity, 2026-07-16): the SAME higher-specificity problem hit the
+   Theme window's `.theme-seg` segmented control — this rule's (0,4,2) beat `.theme-seg >
+   button[aria-pressed="true"]`'s (0,2,1) on `background-color` (but NOT `color`, which that
+   selected-pill rule still won), so the SELECTED pill kept its `color:#fff` label but lost its
+   `background: var(--ow-ios-blue)` fill to this rule's translucent `--fg`-tinted plate — on the
+   light glass (`--fg` remapped to `#16191f` dark ink inside `.ow-window .ow-body`, ~L24357) that
+   plate composites as light grey, so the selected pill measured white-on-light-grey at 1.55:1
+   (the FLAT tier, unscoped by `body.theme-frosted`, never hit this rule and kept the correct
+   blue-fill+white-label). Add the SAME `:not(.theme-seg-btn)` guard so `.theme-seg`'s own
+   base/hover/selected rules (~L23923) govern its buttons undisturbed — the inactive segment
+   reads dark-ink-on-transparent (already-correct 9.88:1) and the selected segment gets back its
+   sanctioned system-blue fill + white label, in both Frosted and Glass-full (glass-full layers on
+   top of theme-frosted, so this fix covers both tiers by construction; no separate rule needed). */
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn),
 body.theme-frosted .on-card button:not(.ow-btn),
 body.theme-frosted .og-card button:not(.ow-btn),
 /* #1638 KM-W2 completion: .og-act now composes .ow-btn ow-btn-plain (orwellGadget.js), so it is a
@@ -20621,12 +20643,12 @@ body.theme-frosted #minimized-dock .minimized-dock-chip {
   box-shadow: inset 0 1px 0 var(--ow-glass-rim),
               0 2px 8px rgba(0,0,0,0.18);
 }
-body.theme-frosted .ow-window .ow-body button:not(.ow-btn):hover,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn):hover,
 body.theme-frosted .on-card button:not(.ow-btn):hover,
 body.theme-frosted .og-card button:not(.ow-btn):hover,
 body.theme-frosted .og-card .og-act:not(.ow-btn):hover,
 body.theme-frosted #minimized-dock .minimized-dock-chip:hover,
-body.theme-frosted .ow-window .ow-body button:not(.ow-btn):focus-visible,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn):focus-visible,
 body.theme-frosted .on-card button:not(.ow-btn):focus-visible,
 body.theme-frosted .og-card button:not(.ow-btn):focus-visible,
 body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
@@ -20641,7 +20663,7 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:focus-visible {
   transform: translateY(-1px) scale(1.015);
   filter: brightness(1.08);
 }
-body.theme-frosted .ow-window .ow-body button:not(.ow-btn):active,
+body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn):active,
 body.theme-frosted .on-card button:not(.ow-btn):active,
 body.theme-frosted .og-card button:not(.ow-btn):active,
 body.theme-frosted .og-card .og-act:not(.ow-btn):active,
@@ -20651,14 +20673,14 @@ body.theme-frosted #minimized-dock .minimized-dock-chip:active {
   transition-duration: .08s;
 }
 @media (prefers-reduced-motion: reduce) {
-  body.theme-frosted .ow-window .ow-body button:not(.ow-btn),
+  body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn),
   body.theme-frosted .on-card button:not(.ow-btn),
   body.theme-frosted .og-card button:not(.ow-btn),
   body.theme-frosted .og-card .og-act:not(.ow-btn),
   body.theme-frosted #minimized-dock .minimized-dock-chip {
     transition: none;
   }
-  body.theme-frosted .ow-window .ow-body button:not(.ow-btn):hover,
+  body.theme-frosted .ow-window .ow-body button:not(.ow-btn):not(.theme-seg-btn):hover,
   body.theme-frosted .on-card button:not(.ow-btn):hover,
   body.theme-frosted .og-card button:not(.ow-btn):hover,
   body.theme-frosted #minimized-dock .minimized-dock-chip:hover {
@@ -21008,12 +21030,25 @@ body.theme-frosted .ow-controls .ow-dock:focus-visible {
 }
 /* the 44px hit region stays (inherited ::after); hover lift is gone (lights don't grow) */
 body.theme-frosted .ow-controls button:hover { transform: none; box-shadow: none; }
-/* A non-minimizable window's YELLOW light is greyed (dimmed, no glyph, not clickable —
-   the macOS greyed/inactive look): it's always rendered so the cluster keeps its shape,
-   so the disabled state shares this rule. (The green/maximize light was removed.) */
-body.theme-frosted .ow-controls .ow-min[disabled] {
+/* A non-minimizable window's YELLOW light, and a non-dockable window's GREEN/zoom light,
+   are both greyed (dimmed, no glyph, not clickable — the macOS greyed/inactive look):
+   each is always rendered so the cluster keeps its constant 3-light shape (2026-07-16,
+   Apple Genius rendered-parity — real macOS greys inert lights, never omits them), so the
+   disabled state shares this ONE rule for both slots. */
+body.theme-frosted .ow-controls .ow-min[disabled],
+body.theme-frosted .ow-controls .ow-dock[disabled] {
   background: color-mix(in srgb, var(--fg, #fff) 18%, transparent) !important;
   opacity: 0.5; cursor: default; pointer-events: none; color: transparent !important;
+}
+/* A greyed/inert light must stay GLYPHLESS even under titlebar-hover / focus-visible — the
+   `:hover …::before` reveal above sets the glyph color on the pseudo-element directly, which
+   beats the button's own `color: transparent` (a disabled non-dockable window would otherwise
+   flash an active-looking dock/undock arrow on hover). Suppress the ::before glyph on any
+   disabled disc regardless of hover/focus. */
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min[disabled]::before,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-dock[disabled]::before,
+body.theme-frosted .ow-controls button[disabled]:focus-visible::before {
+  color: transparent !important;
 }
 body.theme-frosted .ow-controls button {
   width: 30px; height: 30px; min-width: 30px; min-height: 30px;  /* uniform discs */
@@ -21288,6 +21323,20 @@ body.glass-full .cookbook-checkbox::after {
    a pill radius. Frosted-theme scoped. */
 body.theme-frosted .settings-nav-item {
   border-radius: var(--ow-radius-inner, 12px);
+}
+/* G-7 (Apple Genius rendered-parity, 2026-07-16): the INACTIVE nav-item ink was never
+   scoped for frosted — it fell back to the base (non-theme-scoped) `.settings-nav-item
+   {color: var(--color-muted)}` (~L15236), which resolves to the DARK theme's `--color-muted`
+   (#9aa0a8, tuned for a dark backdrop) regardless of the frosted material. The settings
+   sidebar (`.settings-sidebar`, a `color-mix(var(--fg) 2%, transparent)` wash over the light
+   glass) is a near-white surface here, so #9aa0a8 measured 2.50:1 — below the 4.5:1 floor.
+   `--color-muted` itself is a widely-shared token (chat timestamps, gadget captions, etc.)
+   that is NOT broken elsewhere, so this is scoped to the nav item only, not a global token
+   change. #5b6572 is a muted (still de-emphasized, not full dark-ink) grey that clears AA on
+   the light nav surface (~5.6:1) while staying visibly secondary next to the active pill's
+   white-on-blue. The `.active` rule below already sets its own AA-safe white — untouched. */
+body.theme-frosted .settings-nav-item:not(.active) {
+  color: #5b6572;
 }
 body.theme-frosted .settings-nav-item.active {
   /* #1375-c: the ACTIVE nav pill painted #0a84ff (Apple system blue) under white text is only
@@ -22949,6 +22998,13 @@ body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-dock::before,
 body:not(.theme-frosted) .ow-controls button:focus-visible::before {
   color: color-mix(in srgb, var(--fg, #fff) 75%, transparent);
 }
+/* Mirror the frosted rule: a disabled (non-dockable / non-minimizable) disc stays glyphless
+   under hover/focus — the reveal above sets the ::before color directly, so gate it out. */
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-min[disabled]::before,
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-dock[disabled]::before,
+body:not(.theme-frosted) .ow-controls button[disabled]:focus-visible::before {
+  color: transparent !important;
+}
 body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-close { background: #ff5f57; }
 body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-min   { background: #febc2e; }
 body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-dock  { background: #28c840; }
@@ -23564,6 +23620,33 @@ body.theme-frosted .msg-ai strong i,
 body.theme-frosted .msg-ai i strong {
   color: inherit !important;
   -webkit-text-fill-color: inherit !important;
+  text-shadow: inherit !important;
+}
+/* ── G-1 unfixed half (Apple Genius rendered-parity, 2026-07-16): the SENT bubble's bolded
+   houseguest-name accent must ALSO follow the bubble ink, exactly like #1644 above ─────────────
+   #1644 fixed `.msg-ai` (the RECEIVED bubble) but left `.msg-user` (the SENT bubble) on the same
+   base `.msg strong`/`.msg b` teal (`--hl-builtin`) — `.msg-user`'s own `color: #fff !important`
+   (~L23468) targets the bubble/`.body` element directly, so it does NOT cascade over an inner
+   `<strong>`'s own (non-!important but more specific) `.msg strong{color:var(--hl-builtin)}` rule;
+   a bolded name inside a sent message measured teal-on-system-blue at 2.18:1. Unlike `.msg-ai`,
+   the sent fill is a FIXED blue+white pairing (never adapts), so the fix is simpler: pin white,
+   not `inherit` (inherit would also resolve to white here, but pinning is explicit about the
+   fixed-pairing contract `.msg-user` already documents above). `font-weight`/`font-style` stay
+   untouched — only the cool COLOR is dropped. */
+body.theme-frosted .msg-user strong,
+body.theme-frosted .msg-user b,
+body.theme-frosted .msg-user em,
+body.theme-frosted .msg-user i,
+body.theme-frosted .msg-user strong em,
+body.theme-frosted .msg-user em strong,
+body.theme-frosted .msg-user b i,
+body.theme-frosted .msg-user i b,
+body.theme-frosted .msg-user b em,
+body.theme-frosted .msg-user em b,
+body.theme-frosted .msg-user strong i,
+body.theme-frosted .msg-user i strong {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
   text-shadow: inherit !important;
 }
 /* #1644 (rendered audit §2.2) — the AI received-bubble META: the role-line + footer timestamps and
@@ -24208,12 +24291,18 @@ body.theme-frosted .cp-popover {
    title + the ⠿ rearrange / ⇄ swap / × close controls) sits over the DARK app, NOT over
    light glass — so the earlier dark-ink fold rendered the whole header BLACK-on-black /
    illegible (owner report). The header takes the app's LIGHT --fg ink with a dark halo
-   (legible over the dark/transparent container), matching the rest of the dark chrome. */
+   (legible over the dark/transparent container), matching the rest of the dark chrome.
+   RAIL-HEAD HALO (Apple Genius rendered-parity, 2026-07-16): the halo was the heavy
+   `0 1px 2px .55` double-radius smudge — well past the corpus's own thin dark-backstop
+   floor (`--ow-glass-text-shadow`'s `prefers-reduced-motion` value, `0 1px 1px rgba(0,0,0,.4)`,
+   ~L20050; also ADAPTIVE_LEGIBILITY_REFERENCE.md §2c's "thin text-shadow… backstop"). Thin to
+   that same established floor value — same dark-under-light polarity (kept, per the header's
+   over-dark-app context above), just a lighter halo instead of a smudge. */
 body.theme-frosted .gadget-rail-head,
 body.theme-frosted .gadget-rail-head *,
 body.theme-frosted .gadget-rail-title {
   color: var(--fg, #e8eef2) !important;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.55) !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.4) !important;
 }
 /* the active "Rearrange" toggle was the theme ACCENT (red) — colorless glass chrome carries
    no accent hue; signal the pressed state with full-opacity light ink instead. */

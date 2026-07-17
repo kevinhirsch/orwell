@@ -287,6 +287,10 @@ function ensureCss() {
        (style.css); here the legacy fallback simply hides the disabled placeholder so only
        functional controls render. (Scoped :not(.theme-frosted) so the frosted disc still shows.) */
     body:not(.theme-frosted) .ow-controls .ow-min[disabled] { display: none; }
+    /* Same treatment for the (2026-07-16) greyed zoom/dock placeholder on a non-dockable
+       window: the legacy/flat chrome never grew the constant-3-light macOS cluster (that
+       treatment is frosted-only), so its disabled placeholder stays hidden too. */
+    body:not(.theme-frosted) .ow-controls .ow-dock[disabled] { display: none; }
     /* Coarse-pointer (touch) sizing — Apple-proportionate titlebar chrome. The kit
        controls carry the tap-exempt class (set where they're built) so they ESCAPE the
        global responsive-tokens.css coarse floor (button:not(.tap-exempt) -> 44px), which
@@ -851,30 +855,38 @@ export class OrwellWindow {
     title.textContent = this.o.title;
     const controls = document.createElement('div');
     controls.className = 'ow-controls';
-    // 0054 Phase 2: the dock/undock toggle (only on dockable windows). It flips the
-    // persisted flag and re-opens in the other mode — ONE position system, so a
-    // mode change is a teardown + rebuild, never a live geometry mutation.
-    if (this.o.dockable) {
+    // 0054 Phase 2: the dock/undock toggle. It flips the persisted flag and re-opens in
+    // the other mode — ONE position system, so a mode change is a teardown + rebuild,
+    // never a live geometry mutation.
+    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow + a THIRD
+    // (green) light, ALWAYS rendered so the cluster keeps its authentic constant 3-light
+    // shape (real macOS renders inert lights GREYED, never omits them — corpus README).
+    // On a DOCKABLE window the green light is the real, functional dock/undock toggle. On
+    // a NON-dockable window it is an inert, greyed, glyphless placeholder (the "zoom"
+    // slot — mirrors the yellow minimize light's own disabled-placeholder pattern below).
+    // The kit's non-frosted glyph fallback hides BOTH disabled placeholders via CSS
+    // (`body:not(.theme-frosted) .ow-controls button[disabled]`), so the legacy look
+    // still shows only functional controls — this three-light treatment is frosted-only.
+    {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'ow-dock tap-exempt';
-      const docked = this._docked;
-      b.setAttribute('aria-label', docked ? 'Float this window' : 'Dock to the control room');
-      b.title = docked ? 'Float (undock from the control room)' : 'Dock to the control room';
-      b.textContent = docked ? '⇱' : '⇲';  // undock (pop out) vs. dock (tuck in)
-      b.addEventListener('click', (e) => { e.stopPropagation(); this.toggleDock(); }, { signal: this.ac.signal });
+      if (this.o.dockable) {
+        const docked = this._docked;
+        b.setAttribute('aria-label', docked ? 'Float this window' : 'Dock to the control room');
+        b.title = docked ? 'Float (undock from the control room)' : 'Dock to the control room';
+        b.textContent = docked ? '⇱' : '⇲';  // undock (pop out) vs. dock (tuck in)
+        b.addEventListener('click', (e) => { e.stopPropagation(); this.toggleDock(); }, { signal: this.ac.signal });
+      } else {
+        b.setAttribute('aria-label', 'Zoom (unavailable)');
+        b.title = '';
+        b.disabled = true;
+      }
       controls.appendChild(b);
     }
     // Minimize-to-dock is a FLOATING affordance; a docked window lives in the rail
     // and never minimizes to the chip dock (the rail owns its visibility/collapse).
-    // macOS traffic-light cluster (frosted theme): close=red + minimize=yellow, plus
-    // the GREEN light — which is the DOCK toggle (built above) and exists ONLY on dockable
-    // windows (the green disc visually occupies the slot the inert maximize/zoom light used
-    // to). The YELLOW light is ALWAYS rendered so the cluster keeps its shape — a
-    // non-minimizable window just gets a greyed/inert yellow disc. The kit's non-frosted
-    // glyph fallback hides the disabled placeholder via CSS (`body:not(.theme-frosted)
-    // .ow-controls button[disabled]`), so the legacy look still shows only functional
-    // controls. A NON-dockable window has NO green disc (red + yellow only) — the dock
-    // dot's dockable-only gating IS the `if (this.o.dockable)` guard above.
+    // The YELLOW light is ALWAYS rendered so the cluster keeps its shape — a
+    // non-minimizable window just gets a greyed/inert yellow disc.
     const canMin = this.o.minimizable && !this._docked;
     {
       const b = document.createElement('button');
@@ -894,13 +906,13 @@ export class OrwellWindow {
       b.addEventListener('click', (e) => { e.stopPropagation(); this.close(); }, { signal: this.ac.signal });
       controls.appendChild(b);
     }
-    // NB: the maximize/zoom ("green light") control is DELIBERATELY GONE from every window
-    // (owner ruling): it only crowded the (centered) titlebar title when a window was resized
-    // thin, and it was inert everywhere anyway (no window ever opted it on). The macOS
-    // cluster reads as close (red) + minimize (yellow), plus — on DOCKABLE windows only —
-    // the dock toggle styled as the GREEN light in the maximize slot (built above; it is a
-    // real, functional control, not the removed inert zoom). Do NOT re-add an inert third
-    // light here.
+    // NB (superseded 2026-07-16, Apple Genius rendered-parity G-nit): the green/zoom light was
+    // PREVIOUSLY omitted entirely on non-dockable windows (owner ruling: it crowded the centered
+    // title at thin widths and was inert everywhere no window opted it on). Real macOS never
+    // omits an inert light — it greys it — so the cluster now ALWAYS renders three lights (built
+    // above): a functional green dock toggle on dockable windows, a greyed inert placeholder
+    // otherwise. The thin-width crowding concern doesn't reapply — the greyed disc carries no
+    // glyph text to widen the cluster, identical footprint to the functional green light.
     tb.appendChild(title); tb.appendChild(controls);
     const body = document.createElement('div');
     body.className = 'ow-body';
