@@ -479,6 +479,34 @@ def _hidden_model_ids(ep: Any) -> set:
     return set(_parse_model_list(getattr(ep, "hidden_models", None)))
 
 
+def _apply_refreshed_models(ep: Any, new_ids: List[str]) -> None:
+    """Replace an endpoint's ``cached_models`` with a fresh probe result WITHOUT silently
+    surfacing a model the owner never explicitly enabled (the "phantom model in the picker"
+    bug: a live refresh — background TTL, an admin's manual refresh, or the first post-restart
+    probe after a factory reset — used to fully REPLACE ``cached_models``, and any id the
+    provider started serving since the endpoint was last curated (the game-build trio pin, or
+    an admin's manual hide) was never in the OLD ``hidden_models`` snapshot, so it appeared
+    VISIBLE in the picker without the owner ever having added it.
+
+    When the endpoint carries an established curation signal (anything pinned OR anything
+    already hidden — i.e. it is NOT the "show the whole catalog" default shape), a newly
+    appeared id defaults to HIDDEN instead of silently joining the visible set — reversible any
+    time in the model manager, never lost. An uncurated endpoint (nothing pinned, nothing
+    hidden) is untouched: byte-identical to before this fix."""
+    new_ids = list(new_ids or [])
+    if not new_ids:
+        return
+    pinned = set(_normalize_model_ids(getattr(ep, "pinned_models", None)))
+    hidden = _hidden_model_ids(ep)
+    if pinned or hidden:
+        old_ids = set(_cached_model_ids(ep))
+        newly_appeared = [m for m in new_ids if m not in old_ids and m not in pinned]
+        if newly_appeared:
+            hidden |= set(newly_appeared)
+            ep.hidden_models = json.dumps(sorted(hidden))
+    ep.cached_models = json.dumps(new_ids)
+
+
 def _is_ollama_base(base_url: str) -> bool:
     try:
         parsed = urlparse(base_url)
@@ -1043,7 +1071,7 @@ def setup_model_routes(model_discovery):
                                     for ep_id in endpoint_ids:
                                         ep_obj = db.query(ModelEndpoint).filter(ModelEndpoint.id == ep_id).first()
                                         if ep_obj:
-                                            ep_obj.cached_models = json.dumps(ids)
+                                            _apply_refreshed_models(ep_obj, ids)
                                             changed = True
                                     st["last_success"] = _time.time()
                                     _MODELS_LIVE_REFRESH[key] = _time.time()
@@ -1382,7 +1410,7 @@ def setup_model_routes(model_discovery):
                     try:
                         ep_obj = db2.query(ModelEndpoint).filter(ModelEndpoint.id == ep["id"]).first()
                         if ep_obj:
-                            ep_obj.cached_models = json.dumps(all_models)
+                            _apply_refreshed_models(ep_obj, all_models)
                             db2.commit()
                     finally:
                         db2.close()
@@ -1591,7 +1619,7 @@ def setup_model_routes(model_discovery):
                         timeout=_explicit_model_list_timeout(base_url, existing_kind_for_probe, refresh_timeout),
                     )
                     if probed_models:
-                        existing.cached_models = json.dumps(probed_models)
+                        _apply_refreshed_models(existing, probed_models)
                         changed = True
                 if changed:
                     _db_dedup.commit()
@@ -1817,14 +1845,20 @@ def setup_model_routes(model_discovery):
                     failed.append(mid)
                 yield f"data: {json.dumps(result)}\n\n"
 
-            # Update hidden_models and cached_models in DB
+            # Update hidden_models and cached_models in DB. Route through the shared refresh
+            # policy (never a direct overwrite): the old shape REPLACED hidden_models with just
+            # this probe's failures, which both clobbered every admin-curated hide and let a
+            # newly discovered model that probes OK walk straight into the picker on a curated
+            # endpoint — the same phantom-model bug through the per-endpoint probe door. The
+            # probe's own failures then UNION into the policy's resulting hidden set.
             db2 = SessionLocal()
             try:
                 ep_obj = db2.query(ModelEndpoint).filter(ModelEndpoint.id == ep_id).first()
                 if ep_obj:
-                    ep_obj.hidden_models = json.dumps(failed) if failed else None
                     if all_models:
-                        ep_obj.cached_models = json.dumps(all_models)
+                        _apply_refreshed_models(ep_obj, all_models)
+                    hidden = _hidden_model_ids(ep_obj) | set(failed)
+                    ep_obj.hidden_models = json.dumps(sorted(hidden)) if hidden else None
                     db2.commit()
             finally:
                 db2.close()
@@ -1862,8 +1896,9 @@ def setup_model_routes(model_discovery):
                     logger.warning("Manual model refresh failed for endpoint %s at %s: %s", ep_id, base, exc)
                     probed = []
                 if probed:
-                    all_models = probed
-                    ep.cached_models = json.dumps(all_models)
+                    _apply_refreshed_models(ep, probed)
+                    all_models = _cached_model_ids(ep)
+                    hidden = _hidden_model_ids(ep)
                     db.commit()
                     _invalidate_models_cache()
                     response.headers["X-Model-Refresh-Status"] = "refreshed"
