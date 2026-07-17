@@ -1125,6 +1125,76 @@ async def _handle_stale_beat(user, exc) -> None:
         logger.warning("[orwell] stale-beat reconcile skipped for user=%s: %s", user, _exc_detail(e))
 
 
+# ── R3 / #1659 / audit A-S3 — bounded refresh+retry for a MODEL-DRIVEN progression call ──────────── #
+#
+# "StaleBeatError is a dead end" (owner ruling 2026-07-16, issue #1659, failure seam 3): the FE-issued
+# pre-resolve advance already re-fires once on a stale-409 (S1a/RC1, `_pre_resolve_npc_ceremony`), but
+# the MODEL-driven progression tools (`do_advance_game`/`do_submit_decision`/`do_turn_in`) reconciled and
+# RETURNED THE CURRENT BOARD WITHOUT RE-FIRING — so `advanceGame → StaleBeatError` left the beat
+# un-advanced and the model free-ran on a beat that never committed (the exact bundle evidence). This
+# helper promotes the pre-resolve's protocol to a shared seam those three tools call.
+#
+# The engine refuses a stale write BEFORE mutating (fail-closed) and dedups on `idempotencyKey`, so after
+# reconciling to the fresh beatSeq we RE-FIRE the SAME call ONCE (at-most-once preserved, at-least-once
+# gained — the retry can NEVER double-progress). EXACTLY one retry; a second consecutive stale is a
+# genuine sustained-concurrency loss, reconciled through the desync path and recorded RED-with-disposition
+# (#1599 — every rejection ledger-visible, never a silent dead-end).
+async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
+    """R3 (#1659) — reconcile a model-driven progression call's 409 `stale-beat` and RE-FIRE it ONCE.
+
+    ``retry_fn(fresh_beat)`` MUST re-issue the SAME engine call with ``expected_beat_seq=fresh_beat`` and
+    the SAME ``idempotency_key`` the original call carried, so the engine's 0065 Part B at-most-once dedups
+    a genuine double-apply.
+
+    Returns the engine result dict when the retry LANDS (the progression committed against the reconciled
+    board — the caller delivers the real next beat instead of a stale free-run); returns ``None`` when the
+    board moved AGAIN under the retry (the SECOND stale is reconciled + RED-with-disposition-recorded, and
+    the caller falls back to returning the live board — the existing desync-reconcile behavior). A NON-stale
+    error on the retry propagates unchanged (the caller's fail-closed handler owns it). Bounded — exactly
+    one retry, never a loop; both the initial and the persistent-after-retry stale are counted (ledger-
+    visible via ``stale_beat_rejections`` → the turn's ``staleRejections``)."""
+    await _handle_stale_beat(owner, exc)          # reconcile the FIRST 409 (refresh last-seen + count → ledger-visible)
+    # Concurrency guard (CodeRabbit on #1694): the retry below is a NETWORK round-trip, during which a
+    # DIFFERENT same-owner flow (a two-window peer / the background pre-resolve — real per ship-gate F4)
+    # can advance `_LAST_BEAT_SEQ` and/or re-stash `_DESYNC_REGROUND[_dk]`. Capture WHAT OUR reconcile
+    # just stashed BEFORE we await, so on completion we can tell our own re-ground apart from a NEWER one.
+    _dk = _desync_key(owner)
+    _reground_ours = _DESYNC_REGROUND.get(_dk) if _dk is not None else None
+    try:
+        res = await retry_fn(last_beat_seq(owner))   # RE-FIRE once against the reconciled token, SAME idem key
+    except Exception as _e2:
+        if not _is_stale_beat_error(_e2):
+            raise                                 # a non-stale error → the caller's fail-closed handler owns it
+        await _handle_stale_beat(owner, _e2)      # reconcile + count the SECOND 409 → ledger-visible
+        try:
+            from src import log_rings as _lr
+            _lr.record_soft_failure(
+                f"progression:{action}-double-stale", _e2,
+                corrected="desync-reground", user=owner)
+        except Exception as _lr_err:              # failsoft-ok: telemetry must never hurt the turn
+            logger.debug("[orwell] %s double-stale soft-failure log skipped: %s", action, _lr_err)
+        logger.warning("[orwell] %s double stale-409 for user=%s — progression un-applied, reconciled to "
+                       "the live board (R3/#1659, RED-with-disposition)", action, owner)
+        return None
+    # The retry LANDED. Refresh last-seen MONOTONICALLY (localized to this helper — `_refresh_beat_seq`'s
+    # global last-write-wins semantics are unchanged): if a concurrent same-owner flow advanced beatSeq
+    # PAST `res` during our await, never REGRESS below it (a lower last-seen would self-inflict a future
+    # 409). No int beatSeq on `res` ⇒ fail-safe no-op, exactly like `_refresh_beat_seq`.
+    _bkey = _beat_seq_key(owner)
+    _new_seq = res.get("beatSeq") if isinstance(res, dict) else None
+    if isinstance(_new_seq, int) and not isinstance(_new_seq, bool):
+        _cur = _LAST_BEAT_SEQ.get(_bkey)
+        if not (isinstance(_cur, int) and not isinstance(_cur, bool)) or _new_seq >= _cur:
+            _LAST_BEAT_SEQ[_bkey] = _new_seq
+    # COMPARE-AND-CLEAR our reconcile's re-ground: we reconciled AND applied, so OUR directive is moot and
+    # the model must NOT be told "nothing changed / do not build on the outcome" next turn. But if a
+    # concurrent same-owner flow REPLACED it with a DIFFERENT directive during the await, PRESERVE that
+    # newer one — only pop when the stored value is STILL exactly what our reconcile stashed.
+    if _dk is not None and _DESYNC_REGROUND.get(_dk) == _reground_ours:
+        _DESYNC_REGROUND.pop(_dk, None)
+    return res
+
+
 # ── R1c / audit A-S3 / CON-11 — durable retry for a fold that survives a DOUBLE stale-409 ────────── #
 #
 # `_backfill_with_cas` (agent_loop.py) already reconciles a SINGLE stale-409 by re-attempting the same
