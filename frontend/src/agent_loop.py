@@ -3026,23 +3026,32 @@ def _faith_record_judge_down_io(owner, narration, err, duration_ms, fail_class) 
         call_class="faithfulness", user=owner, fail_class=fail_class)
 
 
+def _faith_record_retro_dropped(owner, beat_before) -> None:
+    """A dropped retro-queue entry is a permanently-unjudged turn — surface it RED (never a silent
+    drop). Shared by the defer-time overflow and the drain-time merge overflow, so both attribute the
+    DROPPED turn's own beat (not the surviving/appended one)."""
+    from src import log_rings as _lr_d
+    _lr_d.record_overseer(
+        "anomaly", "faith:retro-dropped",
+        "a guard-down turn was dropped from the retro-judge queue UNJUDGED — the judge outage is "
+        "outrunning retro capacity (permanently unjudged)",
+        lever=None, beat_before=beat_before, ok=False, user=owner)
+
+
 def _faith_defer_retro(owner, narration, projection, beat_before, context) -> None:
     """R5 part 3 — queue a guard-down turn for a RE-JUDGE on the next opportunity. Bounded per owner; an
     overflow drops the OLDEST — itself a permanently-unjudged turn, so it is surfaced RED (never silently
-    dropped). Best-effort; never raises into the loop."""
-    if not owner or not narration or not str(narration).strip():
+    dropped). ``owner=None`` is a SUPPORTED auth-off case (CON-1: the beat-seq spine no longer bails on a
+    None user) and MUST be admitted — dropping it would silently leave every auth-off turn permanently
+    unjudged. Best-effort; never raises into the loop."""
+    if not narration or not str(narration).strip():
         return
     q = _DEFERRED_FAITH.setdefault(owner, [])
     q.append({"narration": str(narration), "projection": projection,
               "beat_before": beat_before, "context": context or "in-game"})
     if len(q) > _DEFERRED_FAITH_MAX:
-        q.pop(0)
-        from src import log_rings as _lr_of
-        _lr_of.record_overseer(
-            "anomaly", "faith:retro-dropped",
-            "a guard-down turn was dropped from the retro-judge queue UNJUDGED — the judge outage is "
-            "outrunning retro capacity (permanently unjudged)",
-            lever=None, beat_before=beat_before, ok=False, user=owner)
+        dropped = q.pop(0)                              # the OLDEST turn is the one lost…
+        _faith_record_retro_dropped(owner, dropped.get("beat_before"))   # …so attribute ITS beat, not the new one.
 
 
 async def _faith_drain_retro(owner, llm) -> None:
@@ -3070,12 +3079,19 @@ async def _faith_drain_retro(owner, llm) -> None:
         _proj = entry.get("projection")
         if _proj is None:
             _proj = await _faith_build_projection(owner)
+        _t0 = time.monotonic()
         try:
             _raw = llm(judge.build_prompt(_narr, _proj, _ctx))
             if _insp.isawaitable(_raw):
                 _raw = await asyncio.wait_for(_raw, timeout=12)
         except Exception as _retry_err:
-            # the judge is STILL down — re-queue (bounded) and RED-record (guard still down, not silent).
+            # the judge is STILL down. Record the retro judge's OWN failed call ok:FALSE on the llm-io
+            # ring (part-1 consistency: a retro-path failure must be as loud there as the primary path,
+            # not only on the overseer ring — #1695 finding 3), then RED-record the still-down state and
+            # re-queue (bounded, never lost).
+            _fc = "timeout" if isinstance(_retry_err, (asyncio.TimeoutError, TimeoutError)) else "error"
+            _faith_record_judge_down_io(
+                owner, _narr, _retry_err, int((time.monotonic() - _t0) * 1000), _fc)
             _lr.record_overseer(
                 "anomaly", "faith:retro-still-down",
                 f"retro-judge could not run either (guard still down): "
@@ -3095,8 +3111,21 @@ async def _faith_drain_retro(owner, llm) -> None:
                 "observation", "faith:retro-clean",
                 "RETRO-JUDGED a previously guard-down turn — no slip found (now judged-of-record)",
                 lever=None, beat_before=_bb, ok=True, user=owner)
-    if requeue:
-        _DEFERRED_FAITH[owner] = requeue[-_DEFERRED_FAITH_MAX:]
+    # MERGE, don't clobber (#1695 finding 5): a concurrent _faith_check→_faith_defer_retro for THIS owner
+    # can create a fresh _DEFERRED_FAITH[owner] while we were awaiting above; overwriting would silently
+    # lose those newly-deferred turns with no drop event. Combine requeue (older/retried, first) with the
+    # leftover (newer, last), bound to the cap, and emit the SAME RED drop event (attributing each
+    # DROPPED turn's own beat) for anything that overflows.
+    leftover = _DEFERRED_FAITH.get(owner, [])
+    combined = requeue + leftover
+    if len(combined) > _DEFERRED_FAITH_MAX:
+        for _d in combined[:-_DEFERRED_FAITH_MAX]:
+            _faith_record_retro_dropped(owner, _d.get("beat_before"))
+        combined = combined[-_DEFERRED_FAITH_MAX:]
+    if combined:
+        _DEFERRED_FAITH[owner] = combined
+    else:
+        _DEFERRED_FAITH.pop(owner, None)
 
 
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
@@ -3155,7 +3184,13 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
             # ring (never ok:true on an errored judge), and (part 3) DEFER this turn for a retro-judge.
             _faith_record_judge_down_io(owner, narration, _resolve_err, 0, "error")
             if _eligible:
-                _faith_defer_retro(owner, narration, None, beat_before, context)
+                # PIN the emit-time projection (#1695 finding 4): the projection reads engine state,
+                # not the (failed) judge model, so it is available now — capturing it means the retro
+                # judges the turn against the board that existed when the narration was emitted, not a
+                # rebuilt next-turn board (which would judge stale narration against facts that hadn't
+                # happened yet). _faith_build_projection is fail-soft (returns a dict, never raises).
+                _retro_proj = projection if projection is not None else await _faith_build_projection(owner)
+                _faith_defer_retro(owner, narration, _retro_proj, beat_before, context)
             # S2b: the guard is DOWN — an ungrounded closed-set outcome draft must fail CLOSED, never
             # soft-pass (finding 5: a board-backed narration is left alone).
             await _faith_guard_down_p0(owner, narration)

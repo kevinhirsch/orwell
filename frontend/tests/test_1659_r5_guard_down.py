@@ -241,6 +241,143 @@ def test_normal_judged_turn_is_unaffected(monkeypatch, tmp_path):
     assert logged == []                                                      # a clean verdict surfaces nothing
 
 
+# ── Adversarial-review hardening (#1695: CodeRabbit + Greptile) ──────────────────────────────────
+
+def test_owner_none_is_admitted_and_rejudged(monkeypatch, tmp_path):
+    """#1695 finding 1 — owner=None is a SUPPORTED auth-off case (CON-1); it must ENTER the retro queue
+    and get re-judged, never be silently dropped (which would leave auth-off turns permanently
+    unjudged)."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+
+    # turn 1 — auth-off (owner=None); the judge times out → the turn is queued under the None key.
+    _patch_resolve(monkeypatch, _timeout_llm)
+    _run(_faith_check("you strategize with a houseguest", claim_bearing=False,
+                      engaged_scene=True, owner=None))
+    assert len(q.get(None, [])) == 1                   # owner=None ADMITTED (not dropped)
+
+    logged.clear()
+    # turn 2 (a lull) — the judge is back; the auth-off deferred turn is re-judged on this opportunity.
+    slip = json.dumps({"dimension": "board", "classification": "closed", "lever": "reframe",
+                       "rationale": "contradicts the board"})
+    _patch_resolve(monkeypatch, lambda prompt: slip)
+    _run(_faith_check("the house is quiet", claim_bearing=False, engaged_scene=False, owner=None))
+    retro = [(a, k) for (a, k) in logged if len(a) > 1 and str(a[1]).startswith("faith:retro")]
+    assert len(retro) == 1 and retro[0][0][1] == "faith:retro:board"
+    assert not q.get(None)                             # drained
+
+
+def test_overflow_drop_attributes_the_dropped_beat(monkeypatch):
+    """#1695 finding 2 — an overflow must report the DROPPED (oldest) turn's beat, not the
+    newly-appended one, so the permanently-unjudged turn is attributed correctly."""
+    from src.agent_loop import _faith_defer_retro, _DEFERRED_FAITH_MAX
+    _isolate_queue(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    # append MAX+1 turns with DISTINCT beats; the first (beat 0) overflows out when the last is appended.
+    for i in range(_DEFERRED_FAITH_MAX + 1):
+        _faith_defer_retro("u1", f"turn {i}", {"board": {}}, i, "in-game")
+    dropped = [(a, k) for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-dropped"]
+    assert len(dropped) == 1
+    assert dropped[0][1].get("beat_before") == 0       # the OLDEST (dropped) beat, not the appended one
+    assert dropped[0][1].get("ok") is False
+
+
+def test_retro_still_down_records_llmio_ok_false(monkeypatch, tmp_path):
+    """#1695 finding 3 — a retro judge that is STILL down must record its own failed call ok:FALSE on
+    the llm-io ring (part-1 consistency), not only surface the overseer faith:retro-still-down event."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    io = _capture_llmio(monkeypatch)
+    _capture_overseer(monkeypatch)
+
+    _patch_resolve(monkeypatch, _timeout_llm)
+    _run(_faith_check("you swap intel with a houseguest", claim_bearing=False,
+                      engaged_scene=True, owner="u1"))
+    io.clear()
+    # turn 2 (a lull) — the judge is STILL down; the retro attempt itself fails.
+    _run(_faith_check("the yard is empty", claim_bearing=False, engaged_scene=False, owner="u1"))
+
+    judge_io = [k for k in io if k.get("kind") == "faithfulness-judge"]
+    assert len(judge_io) == 1                           # the retro's OWN failed call is on the llm-io ring…
+    assert judge_io[0]["ok"] is False                   # …ok:FALSE…
+    assert judge_io[0]["fail_class"] == "timeout"       # …classed as the retro timeout.
+    assert len(q.get("u1", [])) == 1                    # and it re-queues (never lost)
+
+
+def test_resolve_failure_defer_pins_emit_time_projection(monkeypatch, tmp_path):
+    """#1695 finding 4 — a RESOLVE-failure defer must PIN the emit-time projection, so the retro judges
+    the turn against the board that existed when it was emitted — not a rebuilt next-turn board."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    _capture_overseer(monkeypatch)
+
+    # turn 1 — engine at state A; the judge model RESOLVE raises → the turn defers with the PINNED proj A.
+    async def _state_a(*a, **k):
+        return {"phase": "veto", "vetoHolder": "npc:1"}
+
+    async def _visible(*a, **k):
+        return {"knows": ["a"]}
+    monkeypatch.setattr("src.orwell_engine.get_game_state", _state_a)
+    monkeypatch.setattr("src.orwell_engine.get_visible_state", _visible)
+
+    async def _resolve_raise(owner=None, **k):
+        raise RuntimeError("resolve boom")
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _resolve_raise)
+    _run(_faith_check("you count the votes with a houseguest", claim_bearing=False,
+                      engaged_scene=True, owner="u1"))
+    assert len(q.get("u1", [])) == 1
+
+    # turn 2 (a lull) — engine has MOVED to state B; the judge is back and captures the prompt it judges.
+    async def _state_b(*a, **k):
+        return {"phase": "eviction", "vetoHolder": "npc:9"}
+    monkeypatch.setattr("src.orwell_engine.get_game_state", _state_b)
+    captured = {}
+
+    def _cap_llm(prompt):
+        captured["prompt"] = prompt
+        return json.dumps({"dimension": "none", "classification": "none", "lever": "none", "rationale": ""})
+
+    async def _resolve_ok(owner=None, **k):
+        return _cap_llm
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _resolve_ok)
+    _run(_faith_check("the house is quiet", claim_bearing=False, engaged_scene=False, owner="u1"))
+
+    assert "npc:1" in captured["prompt"]                # judged against the PINNED emit-time board (A)…
+    assert "npc:9" not in captured["prompt"]            # …NOT the rebuilt next-turn board (B).
+
+
+def test_concurrent_defer_during_drain_is_preserved(monkeypatch, tmp_path):
+    """#1695 finding 5 — a turn deferred BY ANOTHER _faith_check for the same owner WHILE the drain is
+    awaiting must survive: the drain MERGES its requeue with the leftover instead of clobbering it."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    _capture_overseer(monkeypatch)
+    from src import agent_loop
+
+    # one guard-down turn already queued; projection None so the drain awaits _faith_build_projection
+    # (the await point where a concurrent defer lands).
+    q["u1"] = [{"narration": "old turn", "projection": None, "beat_before": 0, "context": "in-game"}]
+
+    async def _proj_then_concurrent_defer(owner):
+        # simulate a CONCURRENT _faith_check→_faith_defer_retro landing at this await point.
+        agent_loop._faith_defer_retro("u1", "new turn during drain", {"board": {}}, 5, "in-game")
+        return {"board": {}, "visible": {}}
+    monkeypatch.setattr("src.agent_loop._faith_build_projection", _proj_then_concurrent_defer)
+
+    # the retro judge is STILL down → the old entry re-queues; the concurrent one must NOT be clobbered.
+    _run(agent_loop._faith_drain_retro("u1", _timeout_llm))
+
+    narrs = {e.get("narration") for e in q.get("u1", [])}
+    assert "old turn" in narrs                          # the re-queued (still-down) turn survives…
+    assert "new turn during drain" in narrs             # …AND the concurrently-deferred turn is preserved.
+
+
 # ── SOURCE-PIN — the loop wires the R5 guard-down machinery ──────────────────────────────────────
 
 _AGENT_LOOP_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_loop.py"
@@ -252,3 +389,4 @@ def test_source_pin_r5_wiring():
     assert 'kind="faithfulness-judge"' in src          # …labeled as the judge on the llm-io ring
     assert "_faith_defer_retro" in src                 # part 3: defer the guard-down turn
     assert "_faith_drain_retro" in src                 # part 3: re-judge on the next opportunity
+    assert "_faith_record_retro_dropped" in src        # shared drop recorder (dropped-beat attribution)
