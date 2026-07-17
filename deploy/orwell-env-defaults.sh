@@ -43,6 +43,12 @@
 #   ORWELL_COMP_MECHANICS_PLUS  Expanded competition mechanics (0126) — 12 => 30 no-repeat pool.
 #   ORWELL_COMP_MIXED           Mixed-type/HYBRID competitions (0127) — secondary aptitude blended (65/35).
 #   ORWELL_COMP_INTENT          NPC competition intent (0006b) — derived compete/throw/play-safe.
+#   ORWELL_MYTH_MAKING          NPC myth-making (0101) — a rare notable player act becomes house folklore
+#       and diffuses NPC-to-NPC (owner ruling 2026-07-17: on). Hidden-knowledge layer only; own isolated
+#       rng, folds NO relationship edge — the seeded comp/vote spine is byte-identical even while ON.
+#   ORWELL_VOTE_DEDUCTION       Vote deduction (0110) — the jury grudge book reasons about who voted how
+#       (owner ruling 2026-07-17: on). Self-gated: absent/off ⇒ the grudge folds the true votes exactly
+#       as before (no deduction, no sub-rng) — the seeded jury spine is unmoved.
 
 # orwell_optin_env_defaults <data_dir>
 #   Prints the opt-in KEY=VALUE lines — ONLY bare KEY=VALUE, one per line, in the installer's historical
@@ -69,5 +75,7 @@ ORWELL_SOUL_DEPTH=1
 ORWELL_COMP_MECHANICS_PLUS=1
 ORWELL_COMP_MIXED=1
 ORWELL_COMP_INTENT=1
+ORWELL_MYTH_MAKING=1
+ORWELL_VOTE_DEDUCTION=1
 EOF
 }
