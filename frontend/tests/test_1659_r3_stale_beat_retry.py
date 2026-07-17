@@ -322,6 +322,21 @@ def test_all_progression_tools_wired_through_the_shared_retry_helper():
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     with open(os.path.join(base, "src", "tool_implementations.py"), encoding="utf-8") as fh:
         src = fh.read()
-    for action in ("advanceGame", "submitDecision", "turnIn"):
-        assert 'retry_progression_after_stale(owner, _e, ' in src
-        assert f'action="{action}"' in src, f"{action} must route its stale-beat through the R3 helper"
+    # Pin EACH tool's OWN body (not a whole-file scan, which could false-pass if the action string
+    # appeared elsewhere — e.g. a comment): slice from `def <func>(` to the next top-level `\ndef ` (or
+    # EOF) and assert that body BOTH routes through the R3 helper AND carries its OWN matching action.
+    for func_name, action in (("do_advance_game", "advanceGame"),
+                              ("do_submit_decision", "submitDecision"),
+                              ("do_turn_in", "turnIn")):
+        start = src.index(f"def {func_name}(")
+        # The next TOP-LEVEL function boundary — these impls are `async def`, so match BOTH a plain
+        # `\ndef ` and an `\nasync def ` (column 0) and take whichever comes first (nested closures like
+        # `async def _retry_advance` are INDENTED, so they never match). Slice to that boundary or EOF.
+        cands = [i for i in (src.find("\ndef ", start + 1), src.find("\nasync def ", start + 1)) if i != -1]
+        nxt = min(cands) if cands else -1
+        body = src[start:] if nxt == -1 else src[start:nxt]
+        assert "retry_progression_after_stale(owner, _e, " in body, (
+            f"{func_name} must route its stale-beat through retry_progression_after_stale")
+        assert f'action="{action}"' in body, (
+            f"{func_name} must route its stale-beat through retry_progression_after_stale "
+            f"with action={action}")
