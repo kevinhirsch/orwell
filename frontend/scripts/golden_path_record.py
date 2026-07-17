@@ -127,7 +127,12 @@ def main() -> int:
                     entry = _json.loads(line)
                 except Exception:
                     entry = {"reason": "unparseable", "raw": line[:200]}
-                (benign if entry.get("key") and entry["key"] in keys else fatal).append(entry)
+                if not isinstance(entry, dict):
+                    # json.loads can return null/list/str without raising — normalize so the
+                    # classification below never crashes, and never counts it as benign.
+                    entry = {"reason": "unparseable", "raw": line[:200]}
+                _k = entry.get("key")
+                (benign if isinstance(_k, str) and _k in keys else fatal).append(entry)
         for entry in benign:
             print(f"note: dropped stream recovered by a same-key retry "
                   f"(replayable): {entry.get('reason')} model={entry.get('model')}")

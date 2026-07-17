@@ -39,6 +39,10 @@ def _isolate_settings(monkeypatch, tmp_path):
 
 def _clear_env(monkeypatch):
     monkeypatch.delenv("ORWELL_FAITHFULNESS_MODE", raising=False)
+    # Golden mode structurally pins the dial off (step 0) — an inherited env from the
+    # process running the suite must never leak into the resolution under test.
+    monkeypatch.delenv("ORWELL_GOLDEN_RECORD", raising=False)
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
 
 
 # ── the contract surface ──────────────────────────────────────────────────────────
