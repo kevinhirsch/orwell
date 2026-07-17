@@ -1619,9 +1619,12 @@ _CLAIM_PLAYER_EXPULSION_RE = re.compile(
     # (b) you're being / you've been … expelled/ejected/disqualified (game-terminal verbs, no qualifier needed)
     r"|\byou(?:'|’)?(?:re|\s+are|(?:'|’)?ve|\s+have)\s+(?:being|been|now|just|officially|hereby)\s+"
     r"(?:expelled|ejected|disqualified)\b"
-    # (c) production / we are removing/expelling/ejecting YOU (agent-form committed removal)
+    # (c) production / we are removing/expelling/ejecting YOU "from the game/house/competition/BB" — the
+    #     game qualifier is REQUIRED (as in (a)) so a veto save ("we're removing you from the block") or a
+    #     room move ("we're removing you from the kitchen") is not mistaken for an expulsion.
     r"|\b(?:we(?:'|’)?re|production\s+(?:is|are)|the\s+producers?\s+(?:are|is))\s+(?:now\s+)?"
-    r"(?:removing|expelling|ejecting|eliminating|disqualifying)\s+you\b"
+    r"(?:removing|expelling|ejecting|eliminating|disqualifying)\s+you\s+(?:from\s+)?(?:the\s+)?"
+    r"(?:game|house|competition|big\s+brother)\b"
     # (d) you're no longer in the game/house — a committed removal
     r"|\byou(?:'|’)?re\s+no\s+longer\s+in\s+the\s+(?:game|house)\b",
     re.IGNORECASE,

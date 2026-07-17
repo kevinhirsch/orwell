@@ -250,6 +250,30 @@ def test_pre_filter_matches_player_expulsion_and_ignores_conditional():
         "You worry that one wrong move could get you expelled someday.")
     # A room move is never a game removal.
     assert not chat_helpers._sentence_has_closed_set_claim("You're leaving the kitchen for the yard.")
+    # The agent-form ("we're/production is removing you …") requires the GAME qualifier, so a veto SAVE
+    # ("removing you from the block") or a room move is not mistaken for an expulsion.
+    assert not chat_helpers._sentence_has_closed_set_claim(
+        "We're removing you from the block during the veto ceremony.")
+    assert not chat_helpers._sentence_has_closed_set_claim("Production is removing you from the kitchen.")
+    # … but the real agent-form expulsion (game/house/BB qualifier) still trips.
+    assert chat_helpers._sentence_has_closed_set_claim("Production is now removing you from the game.")
+
+
+def test_veto_save_removing_you_from_the_block_emits(monkeypatch):
+    """A veto ceremony line that saves a nominee ("we're removing you from the block") is legitimate
+    closed-set-adjacent narration, NOT a player expulsion — the guard stands down and EMITs even while
+    the player is active (Greptile P1: the agent-form must not drop non-expulsion game narration)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 3, "phase": "veto-ceremony", "pending": None, "hoh": "npc:1",
+        "noms": ["player", "npc:3"], "vetoHolder": "npc:2", "vetoUsed": False,
+        "evicted": 2, "finished": False, "playerStatus": "active",
+    }
+    _board_fakes(monkeypatch, phase="veto-ceremony", evicted=2, veto_holder="npc:2",
+                 player_status="active")
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "With the veto, we're removing you from the block."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
 
 
 def test_phantom_player_expulsion_is_held_and_reground_stashed(monkeypatch):
