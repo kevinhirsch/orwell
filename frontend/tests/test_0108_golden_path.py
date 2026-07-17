@@ -423,6 +423,17 @@ def test_errored_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):
     assert os.path.exists(side) and os.path.getsize(side) > 0
     entry = json.loads(open(side).read().splitlines()[0])
     assert entry["reason"] == "error-chunk"
+    # The sidecar entry carries the request KEY so the record script can tell a benign
+    # drop (a same-key retry succeeded and was persisted — replay consumes the success)
+    # from a poisoned take (no persisted twin — replay hard-misses there).
+    assert entry["key"] == gp.request_key(
+        "stream", MSGS, None, {"temperature": 0.7, "model": "narrator-model"})
+    # Triage primitive: once a successful same-key retry lands in the fixture,
+    # fixture_keys() contains the dropped key — the drop is benign.
+    assert entry["key"] not in gp.fixture_keys(str(fix))
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"delta": "recovered"}\n\n', "data: [DONE]\n\n"])
+    assert entry["key"] in gp.fixture_keys(str(fix))
 
 
 def test_vetoed_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):

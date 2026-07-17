@@ -97,16 +97,34 @@ def main() -> int:
             print("  -", v)
         return 1
     print("leak scan: clean (no Vault keys, no secret-shaped material)")
-    # A non-empty dropped-stream sidecar means at least one live stream (an errored or
-    # caller-vetoed one) could not be persisted as replayable — replay would hard-miss at
-    # that request, so the take is structurally unreplayable. Fail loudly; re-run the record.
+    # Dropped-stream triage: an errored/vetoed stream is never persisted, but that is only
+    # fatal when NO persisted record shares its request key. If the FE transparently retried
+    # the same request and the retry succeeded, the success IS in the fixture under the same
+    # key and replay simply consumes it — a benign drop (noted, not fatal). A drop with no
+    # persisted twin means replay hard-misses there: the take is structurally unreplayable.
     if os.path.exists(_sidecar) and os.path.getsize(_sidecar) > 0:
-        print("\nFAIL: this take dropped stream(s) that replay cannot reproduce "
-              "(fixture NOT replayable — re-run the record):")
+        import json as _json
+        keys = gp.fixture_keys(args.fixture)
+        benign, fatal = [], []
         with open(_sidecar, encoding="utf-8") as fh:
-            for line in list(fh)[:20]:
-                print("  -", line.rstrip())
-        return 1
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = _json.loads(line)
+                except Exception:
+                    entry = {"reason": "unparseable", "raw": line[:200]}
+                (benign if entry.get("key") and entry["key"] in keys else fatal).append(entry)
+        for entry in benign:
+            print(f"note: dropped stream recovered by a same-key retry "
+                  f"(replayable): {entry.get('reason')} model={entry.get('model')}")
+        if fatal:
+            print("\nFAIL: this take dropped stream(s) with no persisted same-key retry — "
+                  "replay would hard-miss there (fixture NOT replayable — re-run the record):")
+            for entry in fatal[:20]:
+                print("  -", _json.dumps(entry, ensure_ascii=False)[:400])
+            return 1
     if d.inv.failed:
         print(f"\nFAIL: {len(d.inv.failed)} invariant(s) failed on the LIVE run — "
               "fix the seam (or the driver) before committing this fixture.")

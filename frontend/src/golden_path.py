@@ -408,13 +408,18 @@ def dropped_sidecar_path(path: Optional[str] = None) -> str:
 
 
 def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
-                    resp: Dict[str, Any], chunks: List[str]) -> None:
+                    resp: Dict[str, Any], chunks: List[str], key: str) -> None:
     """Best-effort diagnostics for a stream the record run dropped (never fixture content —
-    key/model/shape only, so the sidecar can be printed verbatim in the record report)."""
+    key/model/shape only, so the sidecar can be printed verbatim in the record report).
+    The request key lets the record script tell a BENIGN drop (the FE transparently
+    retried the same request and the retry's success was persisted under this key — replay
+    just consumes the success) from a POISONED take (no persisted record shares the key,
+    so replay hard-misses there)."""
     try:
         with open(dropped_sidecar_path(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
                 "reason": reason,
+                "key": key,
                 "model": candidates_model,
                 "call_class": kwargs.get("call_class") or "narration",
                 "finish_reason": resp.get("finishReason"),
@@ -425,6 +430,28 @@ def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
     except Exception:
         import logging
         logging.getLogger(__name__).exception("golden-record: failed to append dropped-stream sidecar")
+
+
+def fixture_keys(path: Optional[str] = None) -> set:
+    """Every replayable request key the fixture holds (record-script helper for the
+    benign-vs-poisoned dropped-stream triage)."""
+    keys = set()
+    p = path or fixture_path()
+    try:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(rec, dict) and rec.get("key"):
+                    keys.add(rec["key"])
+    except OSError:
+        pass
+    return keys
 
 
 def record_stream(candidates_model: str, messages: List[Dict],
@@ -452,8 +479,11 @@ def record_stream(candidates_model: str, messages: List[Dict],
         acc.observe(c)
     resp = acc.response()
     if completed is False or resp.get("error"):
+        params = dict(kwargs)
+        params["model"] = candidates_model
         _append_dropped("vetoed" if completed is False else "error-chunk",
-                        candidates_model, kwargs, resp, chunks)
+                        candidates_model, kwargs, resp, chunks,
+                        request_key("stream", messages, kwargs.get("tools"), params))
         return
     completed_normally = (
         bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
