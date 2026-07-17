@@ -1626,6 +1626,28 @@ _CLAIM_PLAYER_EXPULSION_RE = re.compile(
     r"|\byou(?:'|’)?re\s+no\s+longer\s+in\s+the\s+(?:game|house)\b",
     re.IGNORECASE,
 )
+# A conditional / hypothetical lead-in makes even a committed-tense removal clause non-committal
+# ("If you've been disqualified…", "Should you have been expelled…", "you might be removed…"). The
+# committed-marker gate alone can't catch a PAST-PERFECT conditional (been/have + verb), so the branch
+# below also stands down when the claim's OWN clause is conditional-led — keeping the guard closed-set
+# and off open-set flavor (ADR 0005 #1).
+_CONDITIONAL_LEAD_RE = re.compile(
+    r"\b(?:if|unless|whether|suppose|imagine|assuming|in\s+case|what\s+if|were\s+you|"
+    r"should|could|would|might|may)\b",
+    re.IGNORECASE,
+)
+
+
+def _expulsion_claim_is_conditional(text: str) -> bool:
+    """True when the matched player-removal claim is governed by a conditional lead-in in its OWN clause
+    (cut at the last sentence/clause boundary before the claim), so it is hypothetical flavor, not a
+    committed removal — the guard must stand down. A conditional elsewhere in a multi-sentence draft is
+    irrelevant (only the claim's clause governs it)."""
+    m = _CLAIM_PLAYER_EXPULSION_RE.search(text)
+    if not m:
+        return False
+    clause = re.split(r"[.!?;\n]", text[:m.start()])[-1]
+    return bool(_CONDITIONAL_LEAD_RE.search(clause))
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
 # which we don't police here — the eviction claim does that).
 _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
@@ -1944,6 +1966,7 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #     against `playerStatus` (a real player eviction — playerStatus != "active" — never trips it, and an
     #     unknown player identity — playerStatus None — stands down, mirroring the self-HOH branch).
     if (not desync and _CLAIM_PLAYER_EXPULSION_RE.search(text)
+          and not _expulsion_claim_is_conditional(text)
           and after.get("playerStatus") == "active"
           and not after.get("finished")):
         desync = "your own REMOVAL / EXPULSION from the game (the engine shows you are STILL in the game)"

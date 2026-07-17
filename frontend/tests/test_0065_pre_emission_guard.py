@@ -298,6 +298,26 @@ def test_player_expulsion_stands_down_when_identity_unknown(monkeypatch):
     assert _USER not in chat_helpers._DESYNC_REGROUND
 
 
+@pytest.mark.parametrize("sentence", [
+    "If you've been disqualified, your votes would go to the jury.",
+    "Should you have been expelled, the house would vote again.",
+    "You might be removed from the game if the votes swing.",
+])
+def test_conditional_past_perfect_expulsion_is_flavor_and_emits(monkeypatch, sentence):
+    """A committed-tense removal clause governed by a CONDITIONAL lead-in ("If you've been
+    disqualified", "Should you have been expelled", "you might be removed") is hypothetical open-set
+    flavor — the guard stands down and EMITs even while the player is active (ADR 0005 #1)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None,
+        "noms": [], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False, "playerStatus": "active",
+    }
+    _board_fakes(monkeypatch, phase="premiere", evicted=0, hoh=None, noms=(), player_status="active")
+    emit = _run(chat_helpers.screen_streamed_outcome(_USER, sentence))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
 def test_uncertain_no_before_signature_emits(monkeypatch):
     """No BEFORE baseline this turn (a fresh process / framing hiccup) → cannot tell phantom from
     real → EMIT (conservatism), and no re-ground is stashed."""
