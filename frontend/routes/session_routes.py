@@ -12,6 +12,7 @@ from core.models import ChatMessage
 from src.request_models import SessionResponse
 from core.database import Session as DbSession, SessionLocal, Document, GalleryImage
 from src.auth_helpers import get_current_user, effective_user, _auth_disabled
+from src.settings import game_build_enabled
 
 
 def _sanitize_export_filename(name: str) -> str:
@@ -343,6 +344,33 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                     if not s.archived
                     and (s.name or "").strip() not in ("Nobody", "Incognito")
                     and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
+
+        # Owner ruling 2026-07-17: once a game-build user's game is STARTED, the drawer must show
+        # exactly ONE conversation — the canonical game session (0064) — not every casting/per-tab
+        # scaffolding row that accumulated getting there (ADR 0008/0012: casting is deliberately
+        # per-tab, so a multi-device or multi-tab casting attempt leaves extra chat rows behind).
+        # DISPLAY-ONLY: this trims what /api/sessions returns for the drawer list, nothing else —
+        # the canonical binding, the mirror stream, and every hidden row's own
+        # history/delete/archive endpoints are completely untouched, so a hidden session stays
+        # fully addressable by id under the hood (a stale tab can still resolve/select it).
+        #
+        # "Started" is read the same way `rename_canonical_session_for_season_start`
+        # (chat_helpers.py) WRITES it: that function renames the canonical session from the literal
+        # "Casting interview" placeholder to "Season {N}" the instant `createCharacter` succeeds, and
+        # never touches it again. Reusing that as the started-signal costs no engine round-trip (pure
+        # local session-manager state, same as the rest of this route) and can never disagree with
+        # what the player's own tab already renamed to.
+        try:
+            if game_build_enabled():
+                from src import orwell_game_session
+                canonical_id = orwell_game_session.get_game_session(user)
+                if canonical_id:
+                    canonical_session = user_sessions.get(canonical_id)
+                    canonical_name = (getattr(canonical_session, "name", "") or "").strip()
+                    if canonical_name.lower().startswith("season "):
+                        sessions = [s for s in sessions if s["id"] == canonical_id]
+        except Exception:
+            logger.debug("[orwell] drawer game-session filter skipped", exc_info=True)
 
         return sessions
     
