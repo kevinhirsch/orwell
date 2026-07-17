@@ -60,6 +60,7 @@ def test_beat_signature_shape_from_sample_dicts():
         "vetoUsed": True,
         "playerIsHoh": None,           # A2 — no player card in this sample → unknown, never judged
         "playerHasVeto": None,
+        "playerStatus": None,          # #1659 R2 — no player card ⇒ unknown status, the removal guard stands down
         "evicted": 1,                  # count of non-active house members
         "evictedNames": [],            # ADR 0009 D3 Part B — names of those out of the house (none named here)
         "finished": False,
