@@ -58,6 +58,9 @@ def main() -> int:
         return 2
     if os.path.exists(args.fixture):
         os.remove(args.fixture)  # a recording always starts a FRESH fixture
+    _sidecar = gp.dropped_sidecar_path(args.fixture)
+    if os.path.exists(_sidecar):
+        os.remove(_sidecar)  # stale drop diagnostics belong to a previous take
     # Resolve the utility tier ONCE (empty ⇒ same as narration) so the declared meta, the
     # integrity scan, and the ACTUAL run all agree — passing the raw empty value to the run
     # while meta/integrity resolve it would make them describe a model the run didn't use.
@@ -94,6 +97,16 @@ def main() -> int:
             print("  -", v)
         return 1
     print("leak scan: clean (no Vault keys, no secret-shaped material)")
+    # A non-empty dropped-stream sidecar means at least one live stream (an errored or
+    # caller-vetoed one) could not be persisted as replayable — replay would hard-miss at
+    # that request, so the take is structurally unreplayable. Fail loudly; re-run the record.
+    if os.path.exists(_sidecar) and os.path.getsize(_sidecar) > 0:
+        print("\nFAIL: this take dropped stream(s) that replay cannot reproduce "
+              "(fixture NOT replayable — re-run the record):")
+        with open(_sidecar, encoding="utf-8") as fh:
+            for line in list(fh)[:20]:
+                print("  -", line.rstrip())
+        return 1
     if d.inv.failed:
         print(f"\nFAIL: {len(d.inv.failed)} invariant(s) failed on the LIVE run — "
               "fix the seam (or the driver) before committing this fixture.")

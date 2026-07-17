@@ -382,6 +382,66 @@ def test_record_scrubs_secret_shapes_before_write(golden, tmp_path, monkeypatch)
 
 # ── byte-identical when off + in-process roundtrip through the REAL chokepoint ─────
 
+def test_finishless_clean_stream_is_persisted_as_replayable(tmp_path, monkeypatch):
+    """GLM-4.7 sometimes ends a live stream empty-handed — no finish chunk, no [DONE], no
+    error. The FE's refire belts handle that live, so replay must re-emit the same stream
+    to walk the same belt path. The old finish-marker requirement silently dropped these
+    and made the take unreplayable (the 2026-07-17 finalize-turn replay miss)."""
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7}, [])
+    recs = [json.loads(l) for l in fix.read_text().splitlines() if l.strip()]
+    streams = [r for r in recs if r.get("kind") == "stream"]
+    assert len(streams) == 1, "a clean finish-less (even empty) stream must be persisted"
+    assert streams[0]["meta"]["completed_normally"] is False
+    assert not os.path.exists(gp.dropped_sidecar_path(str(fix))), \
+        "a persisted stream is not a drop"
+
+
+def test_errored_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):
+    """An errored stream stays unpersisted (the FE's live retry/fallback reaction cannot be
+    reproduced from a poisoned record) — but it must land in the dropped-stream sidecar so
+    the record script fails the take loudly instead of printing RECORD OK over a fixture
+    replay cannot walk."""
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"error": {"message": "provider 502"}}\n\n'])
+    assert not fix.exists() or not any(
+        json.loads(l).get("kind") == "stream"
+        for l in fix.read_text().splitlines() if l.strip()), \
+        "an errored stream must never be persisted as replayable"
+    side = gp.dropped_sidecar_path(str(fix))
+    assert os.path.exists(side) and os.path.getsize(side) > 0
+    entry = json.loads(open(side).read().splitlines()[0])
+    assert entry["reason"] == "error-chunk"
+
+
+def test_vetoed_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"delta": "half a"}\n\n'], completed=False)
+    assert not fix.exists() or not any(
+        json.loads(l).get("kind") == "stream"
+        for l in fix.read_text().splitlines() if l.strip())
+    side = gp.dropped_sidecar_path(str(fix))
+    assert os.path.exists(side) and os.path.getsize(side) > 0
+    assert json.loads(open(side).read().splitlines()[0])["reason"] == "vetoed"
+
+
 def test_chokepoint_never_imports_golden_when_disabled(monkeypatch):
     monkeypatch.delenv("ORWELL_GOLDEN_RECORD", raising=False)
     monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)

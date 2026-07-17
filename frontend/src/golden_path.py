@@ -399,29 +399,64 @@ def _append_record(rec: Dict[str, Any]) -> None:
         logging.getLogger(__name__).exception("golden-record: failed to append record")
 
 
+def dropped_sidecar_path(path: Optional[str] = None) -> str:
+    """The sidecar file beside the fixture that records every stream the record run
+    could NOT persist as replayable. A non-empty sidecar means the take is structurally
+    unreplayable (replay would hard-miss at that request), so the record script fails
+    loudly on it instead of printing RECORD OK over a poisoned fixture."""
+    return (path or fixture_path()) + ".dropped.jsonl"
+
+
+def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
+                    resp: Dict[str, Any], chunks: List[str]) -> None:
+    """Best-effort diagnostics for a stream the record run dropped (never fixture content —
+    key/model/shape only, so the sidecar can be printed verbatim in the record report)."""
+    try:
+        with open(dropped_sidecar_path(), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "reason": reason,
+                "model": candidates_model,
+                "call_class": kwargs.get("call_class") or "narration",
+                "finish_reason": resp.get("finishReason"),
+                "error": resp.get("error"),
+                "chunk_count": len(chunks),
+                "output_chars": len(resp.get("text") or ""),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("golden-record: failed to append dropped-stream sidecar")
+
+
 def record_stream(candidates_model: str, messages: List[Dict],
                   kwargs: Dict[str, Any], chunks: List[str],
                   *, completed: Optional[bool] = None) -> None:
-    """Append one NORMALLY-completed streamed call to the fixture (called from the
-    chokepoint's ``finally`` with the full ordered chunk list).
+    """Append one streamed call to the fixture (called from the chokepoint's ``finally``
+    with the full ordered chunk list).
 
-    The ``finally`` also fires on an upstream exception or an async-generator close/cancel,
-    so a partial/failed live stream would otherwise be persisted as a replayable fixture and
-    poison replay. Only a stream that terminated normally is persisted: no error chunk was
-    seen AND the stream reached its end (a ``finish`` chunk set finishReason, or the SSE
-    ``[DONE]`` sentinel arrived). A caller may veto explicitly with ``completed=False``."""
+    Persistence rule (2026-07-17 — the finalize-turn replay miss): a stream is persisted
+    whenever it carried NO error chunk and the caller did not veto it (``completed=False``).
+    That deliberately INCLUDES a clean stream with no finishReason and no ``[DONE]`` — the
+    live model (GLM-4.7) really does end a stream empty-handed sometimes, the FE's refire
+    belts handle it live, and replay must re-emit the same empty stream to walk the same
+    belt path; the old finish-marker requirement silently dropped those streams and made
+    the take unreplayable (replay hard-missed at the finalize turn). ``meta.completed_normally``
+    still records whether finish markers were seen, for diagnosis.
+
+    An ERRORED or caller-vetoed stream is still never persisted — the FE's live reaction
+    (retry / model fallback) can't be reproduced from a poisoned record — but it is now
+    logged to the dropped-stream sidecar so the record script FAILS the take loudly
+    instead of shipping a fixture that replay cannot walk."""
     from src import llm_trace
     acc = llm_trace.StreamAccumulator()
     for c in chunks:
         acc.observe(c)
     resp = acc.response()
-    completed_normally = (
-        completed is not False
-        and not resp.get("error")
-        and (bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
-    )
-    if not completed_normally:
+    if completed is False or resp.get("error"):
+        _append_dropped("vetoed" if completed is False else "error-chunk",
+                        candidates_model, kwargs, resp, chunks)
         return
+    completed_normally = (
+        bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
     params = dict(kwargs)
     params["model"] = candidates_model
     _append_record({
@@ -437,6 +472,7 @@ def record_stream(candidates_model: str, messages: List[Dict],
             "reasoning_chars": len(resp.get("reasoning") or ""),
             "tool_call_seen": bool(resp.get("toolCalls")),
             "error": resp.get("error"),
+            "completed_normally": completed_normally,
         },
     })
 
