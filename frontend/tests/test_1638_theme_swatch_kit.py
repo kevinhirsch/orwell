@@ -208,8 +208,11 @@ def test_delete_btn_is_not_a_phantom_tab_stop():
     assert "'Delete'" in kd and "'Backspace'" in kd, (
         "_onSwatchKeydown must handle Delete/Backspace to delete the focused custom theme"
     )
-    assert "querySelector('.theme-delete-btn')" in kd and ".click()" in kd, (
-        "the keyboard delete action must click the sibling .theme-delete-btn (reusing its confirm flow)"
+    # assert the SIBLING delete control is clicked specifically — a bare ".click()" would also match
+    # the Enter/Space `sw.click()` path, so it would pass even if Delete/Backspace stopped deleting
+    # (CodeRabbit #1691). Pin `delBtn.click()` (the resolved sibling button).
+    assert "querySelector('.theme-delete-btn')" in kd and "delBtn.click()" in kd, (
+        "the keyboard delete action must click the sibling .theme-delete-btn (delBtn.click(), reusing its confirm flow)"
     )
 
 
