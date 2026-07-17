@@ -23577,15 +23577,24 @@ body.theme-frosted .msg-ai i strong {
    already-adaptive currentColor reads dark-muted over a light wallpaper and light-muted over a dark
    one, never a fixed cool grey. Hover brightens to the full adaptive ink (which also drops the cool
    var(--accent) hover hue on the light glass — the same no-accent-on-text intent as #1639). */
+/* Mute the meta ONCE: the footer CONTAINER + the role-line timestamp + msg-time each blend the full
+   adaptive bubble ink to 62%. The footer's DESCENDANTS must NOT re-apply the color-mix — a second
+   mix on the already-muted `currentColor` compounds to ~0.62×0.62 ≈ 38% (Greptile #1690 double-mute).
+   They instead inherit the container's single-muted ink below. */
 body.theme-frosted .msg-ai .role-timestamp,
 body.theme-frosted .msg-ai .msg-footer,
+body.theme-frosted .msg-ai .msg-time {
+  color: color-mix(in srgb, currentColor 62%, transparent) !important;
+}
+/* Footer descendants INHERIT the container's already-muted 62% ink (single mute, no re-mix). The
+   explicit `inherit` is required for the <button> controls — a button does not inherit `color` by
+   default — and keeps the .timestamp span in lock-step. */
 body.theme-frosted .msg-ai .msg-footer .timestamp,
-body.theme-frosted .msg-ai .msg-time,
 body.theme-frosted .msg-ai .msg-action-btn,
 body.theme-frosted .msg-ai .footer-copy-btn,
 body.theme-frosted .msg-ai .regen-btn,
 body.theme-frosted .msg-ai .fork-btn {
-  color: color-mix(in srgb, currentColor 62%, transparent) !important;
+  color: inherit !important;
 }
 body.theme-frosted .msg-ai .msg-action-btn:hover,
 body.theme-frosted .msg-ai .footer-copy-btn:hover,
