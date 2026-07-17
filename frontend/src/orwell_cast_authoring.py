@@ -468,6 +468,10 @@ _VOCATION_STOPWORDS = frozenset({
     "part", "time", "full", "certified", "licensed",
 })
 _VOCATION_WORD = re.compile(r"[a-z]{3,}")
+# The RAW matcher keeps SHORT tokens too (2+ letters) so a 2-letter vocation ("IT", "DJ") still yields
+# a comparable token in the raw fallback below — the distinctive matcher stays at {3,} (2-letter tokens
+# fall through to this raw fallback, which now handles them; no 2-letter stopword exists, so no conflict).
+_VOCATION_RAW_WORD = re.compile(r"[a-z]{2,}")
 
 
 def _vocation_tokens(vocation) -> set:
@@ -480,13 +484,14 @@ def _vocation_tokens(vocation) -> set:
 
 
 def _vocation_raw_tokens(vocation) -> set:
-    """ALL >=3-letter word tokens of a vocation phrase, stopwords INCLUDED — the fallback signal when
-    a committed occupation is a single GENERIC word ("manager", "director") whose distinctive-token set
-    is empty. "senior manager" -> {"senior", "manager"}. Used on BOTH sides together (never mixed with
-    the distinctive set) so containment still judges refinements ("manager" ⊆ "senior manager")."""
+    """ALL >=2-letter word tokens of a vocation phrase, stopwords INCLUDED — the fallback signal when a
+    committed occupation is a single GENERIC word ("manager", "director") or a SHORT one ("IT", "DJ")
+    whose distinctive-token set is empty. "senior manager" -> {"senior", "manager"}; "IT" -> {"it"}.
+    Used on BOTH sides together (never mixed with the distinctive set) so containment still judges
+    refinements ("manager" ⊆ "senior manager")."""
     if not isinstance(vocation, str):
         return set()
-    return set(_VOCATION_WORD.findall(vocation.lower()))
+    return set(_VOCATION_RAW_WORD.findall(vocation.lower()))
 
 
 def identity_contradictions(profile: dict, npc: dict) -> list:
@@ -503,13 +508,16 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
         stands (the engine also refuses renaming an already-introduced houseguest; this is the earlier
         FE complement).
       • vocation — the committed roster owns the occupation (genesis-authored; the engine keys the hidden
-        stakes off it). When BOTH sides carry a distinctive token, the authored vocation is coherent ONLY
-        when one distinctive-token set CONTAINS the other (a refinement — "reporter" ⊆ "court reporter");
-        otherwise it names a DIFFERENT job (a crosswire — "software engineer" vs "civil engineer" share
-        only the generic "engineer" but neither contains the other) and "vocation" is dropped. When one
-        side is ALL-GENERIC (no distinctive token, e.g. a committed "manager"), containment can't judge
-        it — fall back to RAW tokens (stopwords included) on BOTH sides, so "manager" vs "bartender" is
-        still a crosswire (dropped) while "manager" vs "senior manager" stays a refinement (kept).
+        stakes off it). A three-rung ladder judges coherence, so an empty-token phrase can never skip the
+        guard (the "empty-token → guard-skip" class): (1) when BOTH sides carry a distinctive token, judge
+        by distinctive-token CONTAINMENT — a refinement ("reporter" ⊆ "court reporter") is kept, a shared
+        GENERIC token with neither containing the other ("software engineer" vs "civil engineer") is a
+        crosswire dropped; (2) when one side is ALL-GENERIC / SHORT (no distinctive token, e.g. "manager"
+        or "IT"), fall back to RAW tokens (>=2 letters, stopwords included) on BOTH sides and apply the
+        same containment — "manager" vs "bartender" / "IT" vs "DJ" are crosswires, "manager" vs "senior
+        manager" a refinement kept; (3) when NEITHER side yields comparable tokens (1-letter / digits /
+        non-latin script), the terminal fallback keeps it coherent ONLY on a normalized substring/equality
+        match, else drops "vocation" (a different job).
       • genderPresentation / age — DEFENSIVE: `parse_authored_profile` does not forward these today (the
         pin is engine-owned), so this only fires if a future parse path forwarded a value that differs
         from the committed pin. Kept so the guard is complete + directly unit-testable."""
@@ -526,12 +534,22 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
         # Both sides carry a distinctive signal — judge by distinctive-token containment (existing path).
         c, a = committed_voc, authored_voc
     else:
-        # One side is ALL-GENERIC (no distinctive token, e.g. a committed "manager") — distinctive-token
-        # containment can't judge it; fall back to RAW tokens (stopwords included) on BOTH sides. Never
-        # mix distinctive-one-side with raw-the-other (that wrongly drops "manager" -> "project manager").
+        # One side is ALL-GENERIC / SHORT (no distinctive token, e.g. a committed "manager" or "IT") —
+        # distinctive-token containment can't judge it; fall back to RAW tokens (>=2 letters, stopwords
+        # included) on BOTH sides. Never mix distinctive-one-side with raw-the-other (that wrongly drops
+        # "manager" -> "project manager").
         c, a = _vocation_raw_tokens(cv), _vocation_raw_tokens(av)
-    # Coherent ONLY when one token set CONTAINS the other (a refinement); otherwise a crosswire — drop.
-    if c and a and not (c <= a or a <= c):
+    if c and a:
+        # Coherent ONLY when one token set CONTAINS the other (a refinement); otherwise a crosswire.
+        crosswire = not (c <= a or a <= c)
+    else:
+        # Terminal fallback: NEITHER side yields comparable tokens (1-letter / digits-only / non-latin
+        # script) — an empty-token phrase must NEVER silently skip the guard. Coherent only on a
+        # normalized substring/equality match, else treat it as a different job and drop.
+        cv_n = " ".join(str(cv or "").lower().split())
+        av_n = " ".join(str(av or "").lower().split())
+        crosswire = bool(cv_n) and bool(av_n) and (cv_n not in av_n and av_n not in cv_n)
+    if crosswire:
         drop.append("vocation")
     pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
     authored_gp = str((profile or {}).get("genderPresentation") or "").strip().lower()

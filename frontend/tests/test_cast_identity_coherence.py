@@ -605,3 +605,58 @@ def test_stopword_only_committed_vocation_f5_mirror():
     # A refinement of the generic vocation keeps the secrets.
     assert ca.secret_vocation_conflicts(
         {"vocation": "senior manager", "secrets": ["a real secret here"]}, npc) == []
+
+
+# ══════════ F1/F5 — SHORT-TOKEN + terminal fallbacks close the empty-token guard-skip class ══════════
+#
+# A 2-letter vocation ("IT", "DJ") yielded an empty raw-token set under the old {3,} raw matcher — the
+# same empty-token → guard-skip pattern. The raw matcher now keeps 2+ letter tokens, and a terminal
+# normalized-string fallback covers exotic phrases (1-letter / digits-only / non-latin) that yield no
+# comparable token on either side (CodeRabbit on #1692).
+
+
+def test_short_token_vocation_is_guarded():
+    # 2-letter tokens now compare via the raw fallback.
+    assert ca.identity_contradictions({"vocation": "IT"}, {"vocation": "manager"}) == ["vocation"]
+    assert ca.identity_contradictions({"vocation": "IT"}, {"vocation": "IT"}) == []
+    assert ca.identity_contradictions({"vocation": "DJ"}, {"vocation": "IT"}) == ["vocation"]
+    # a short-token refinement of a short committed vocation is kept ("IT" ⊆ "IT support").
+    assert ca.identity_contradictions({"vocation": "IT support"}, {"vocation": "IT"}) == []
+
+
+def test_exotic_no_comparable_token_falls_back_to_normalized_string():
+    # NEITHER side yields comparable tokens (1-letter / non-latin) — the terminal normalized fallback
+    # keeps it coherent ONLY on a substring/equality match, else drops.
+    assert ca.identity_contradictions({"vocation": "y"}, {"vocation": "х"}) == ["vocation"]  # cyrillic vs latin
+    assert ca.identity_contradictions({"vocation": "х"}, {"vocation": "х"}) == []            # identical exotic
+    # a normalized substring of an exotic committed vocation is a refinement (kept).
+    assert ca.identity_contradictions({"vocation": "х y"}, {"vocation": "х"}) == []
+
+
+def test_short_token_crosswire_dropped_and_red_end_to_end(_clean_ledger):
+    # END TO END with a committed short vocation "IT" and an authored "manager" crosswire.
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "manager",  # crosswires the committed short "IT"
+            "biography": _MASC_BIO,
+            "secrets": ["reroutes the payroll system to a shell account"],
+            "trueGoals": ["cover the theft before audit"],
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "IT"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    committed = written_profiles[0]
+    assert "vocation" not in committed, "a crosswire off a short committed vocation is dropped"
+    for k in ("secrets", "trueGoals"):
+        assert k not in committed, f"the hidden thread {k!r} grounded in the wrong job must be dropped"
+    failed = _overseer_kinds_failed_for("probe-user")
+    assert "cast-authoring:identity-contradiction" in failed
+    assert "cast-authoring:secret-identity-contradiction" in failed
