@@ -76,12 +76,24 @@ def test_archive_deselects_and_skips_autoselect_when_active():
 
 
 def test_active_session_cleanup_runs_before_the_archive_request():
-    # the deselect/abort must precede loadSessions() (which runs after the fetch) or the archived
-    # chat gets re-attached — the whole point of #1669.
-    deselect_at = ARCHIVE.index("_deselectCurrentSession(s.id)")
-    load_at = ARCHIVE.index("await loadSessions()")  # the real call site, not the comment mention
-    assert deselect_at < load_at, \
-        "the active-session cleanup must run BEFORE loadSessions() so the archived chat isn't re-attached"
-    # cleanup is gated behind the active-session check — a non-active archive is untouched.
+    # the abort/deselect/skip must precede the archive fetch() itself (which in turn precedes
+    # loadSessions()) — cleanup moved after the fetch could let a lost-response retry or the
+    # post-archive reload re-attach the archived chat, defeating #1669.
+    fetch_at = ARCHIVE.index("/api/session/")   # the archive POST URL
+    load_at = ARCHIVE.index("await loadSessions()")
+    assert fetch_at < load_at, "sanity: the archive fetch() must precede loadSessions()"
+    for op in ("window.chatModule.abortCurrentRequest()",
+               "_deselectCurrentSession(s.id)",
+               "_skipAutoSelect = true"):
+        assert ARCHIVE.index(op) < fetch_at, \
+            f"`{op}` must run BEFORE the archive fetch() so the archived chat isn't re-attached"
+    # …and each cleanup op stays gated inside an active-session (wasCurrentSession) conditional —
+    # a non-active archive must leave the current session untouched. Brace-matched, not "exists somewhere".
     assert re.search(r"const wasCurrentSession = currentSessionId === s\.id;", ARCHIVE), \
         "_doArchive must capture wasCurrentSession and gate the cleanup on it"
+    guard_block = _fn_body(ARCHIVE, "if (wasCurrentSession) {")
+    for op in ("_deselectCurrentSession(s.id)", "_skipAutoSelect = true"):
+        assert op in guard_block, f"`{op}` must be gated inside the `if (wasCurrentSession)` block"
+    abort_block = _fn_body(ARCHIVE, "if (wasCurrentSession &&")
+    assert "abortCurrentRequest()" in abort_block, \
+        "the in-flight stream abort must be gated on wasCurrentSession"
