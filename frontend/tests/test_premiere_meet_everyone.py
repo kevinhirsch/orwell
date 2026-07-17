@@ -17,8 +17,21 @@ tool_schemas = importlib.import_module("src.tool_schemas")
 
 
 def _run(coro):
+    # Robust loop handling (mirrors the canonical helper in conftest.py, lines ~122-129): create a
+    # pristine loop, run the coroutine, close it, then reinstall a fresh OPEN loop. The old
+    # `asyncio.get_event_loop().run_until_complete(coro)` form inherited whatever loop the current
+    # thread had — which, under `pytest-xdist -n 4`, could be a CLOSED loop left by another test's
+    # bare `asyncio.run()` on the same worker, giving an intermittent order-dependent
+    # "Event loop is closed" failure (unrelated to the code under test). A private loop per call is
+    # deterministic. (These tests await only monkeypatched fakes, so a fresh loop is always safe.)
     import asyncio
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def _schema_names():

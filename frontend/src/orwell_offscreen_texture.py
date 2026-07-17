@@ -85,7 +85,7 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
             return False
         result = await write_fn(sk["eventId"], prose)
         return bool(result.get("ok"))
-    except Exception as exc:
+    except Exception as exc:  # failsoft-ok: handled-by-terminal (per-scene fault returned as False; run_enrich AGGREGATES the failed count and RED-records ONCE per tick when failed>0 — one record per tick, not per scene; the deterministic template stands)
         logger.debug("[offscreen-texture] voice_scene failed for %s: %s", sk.get("eventId"), exc)
         return False
 
@@ -96,7 +96,16 @@ async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn:
     try:
         skeletons = await get_skeletons_fn()
     except Exception as exc:
+        # #1599: a skeleton READ that RAISES is a genuine engine/transport fault (an empty roster
+        # returns [], not a raise) — surface it RED; the deterministic templates stand. enrich_tick
+        # swallows-and-returns here (run_enrich's terminal only ledgers a RAISE), so record directly.
         logger.warning("[offscreen-texture] getOffscreenSceneSkeletons failed: %s", exc)
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("offscreen-texture:skeletons-read-failed", exc,
+                                          corrected="deterministic-templates")
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"voiced": 0, "total": 0, "error": str(exc)}
 
     if not isinstance(skeletons, list) or not skeletons:
@@ -158,11 +167,40 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     try:
         result = await enrich_tick(get_skeletons, llm_fn, write_back)
     except Exception as exc:
+        # #1599 (CodeRabbit): a whole-tick enrichment CRASH must show RED regardless of policy. The
+        # strict branch already RED-records via enrichment_policy.record_failure → record_overseer(ok=False);
+        # under the DEFAULT (non-strict) policy the crash would otherwise only LOG, so record it RED here.
+        # Split by policy (exactly one RED record per policy — never a double). enrich_tick's OWN skeleton-read
+        # failure is already recorded inside it and returns a dict WITHOUT raising, so it never reaches here.
         logger.warning("[offscreen-texture] run_enrich failed: %s", exc)
         if strict:
             enrichment_policy.record_failure(
                 owner, "offscreen-texture", "off-screen texture enrichment failed", detail=str(exc))
+        else:
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:enrich-run-failed", str(exc),
+                                              corrected="deterministic-templates", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         return {"voiced": 0, "total": 0, "error": str(exc)}
+    # #1599 (Greptile P1): ANY per-scene voicing fault must show RED — voice_scene absorbs each LLM/write
+    # fault as False, so a PARTIAL run (some voiced, some failed) would otherwise reach no recorder. Record
+    # ONE RED per tick when failed>0 (aggregated, not per-scene); this SUBSUMES the 0/N complete-failure
+    # case (voiced==0 ⇒ failed==total). RED-but-auto-corrected: the deterministic templates stand. The
+    # except/crash path above returns total=0 ⇒ failed=0, so it stays covered there (no double-record).
+    failed = 0
+    if isinstance(result, dict):
+        failed = int(result.get("total") or 0) - int(result.get("voiced") or 0)
+    if failed > 0:
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "offscreen-texture:enrich-run-failed",
+                f"{failed} of {result.get('total')} off-screen scene(s) failed to voice this tick",
+                corrected="deterministic-templates", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
     # #617: voiced texture landed on the live game — push a server-side "game-updated" so open
     # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
     if isinstance(result, dict) and result.get("voiced"):
@@ -203,7 +241,15 @@ def kickoff_enrich(owner: Optional[str] = None) -> None:
         try:
             await run_enrich(owner)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: run_enrich records its own failures but its resolver call is un-wrapped; a raise
+            # here means the whole tick silently degraded with no record — surface it RED. Templates stand.
             logger.warning("[offscreen-texture] background enrichment failed: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:background-run-failed", e,
+                                              corrected="deterministic-templates", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         finally:
             _IN_FLIGHT.discard(k)
 

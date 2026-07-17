@@ -52,15 +52,14 @@ _SYSTEM = (
     "You are a Big Brother CASTING PRODUCER building the secret bible for ONE houseguest. "
     "Write a rich, believable, reality-TV-plausible person with real depth and a life that exists "
     "ENTIRELY on its own. Output STRICT JSON only (no prose around it), with these keys:\n"
-    '  "name": a realistic, common, pronounceable FIRST and LAST name (two words) for a reality-TV '
-    "contestant — diverse and ordinary, NEVER invented/fantasy/gibberish; do not reuse the houseguest's "
-    "current name.\n"
+    '  "name": KEEP the houseguest\'s CURRENT name from the skeleton EXACTLY — their identity is already '
+    "cast; do NOT rename or re-invent them. ONLY when the skeleton carries no name, supply a realistic, "
+    "common, pronounceable FIRST and LAST name (two words), diverse and ordinary, NEVER invented/fantasy/"
+    "gibberish.\n"
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
-    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter"). KEEP the skeleton\'s '
-    "occupation by default; ONLY change it if your biography genuinely gives this person a different "
-    "job — and then set vocation to MATCH the biography. The public occupation and the biography must "
-    "name the SAME job, and the secrets must be grounded in THAT job (the engine keys the hidden stakes "
-    "off vocation),\n"
+    '  "vocation": echo the skeleton\'s occupation EXACTLY — it is already cast and IMMUTABLE; do NOT '
+    "change it, and do NOT adopt a different job from the biography. The biography and the secrets must "
+    "name the SAME job as the committed occupation (the engine keys the hidden stakes off vocation),\n"
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
     "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
@@ -365,6 +364,225 @@ def _biography_meets_floor(bio: str) -> bool:
     return len(bio) >= _BIO_MIN_CHARS and len(_SENTENCE_TERMINATORS.findall(bio)) >= _BIO_MIN_SENTENCES
 
 
+# ── F2 (#1660): the author-time WRITE-BACK coherence lint ──────────────────────────────────────
+#
+# The engine's RC5 belt (`enforceCastCoherence`/`validateDossierCoherence` in GameSessionAdapter +
+# castingIntake.ts) is the airtight net — it validates every committed dossier against its pinned
+# `genderPresentation` at SEASON START and strips/floors any contradicting field. This lint is the
+# EARLIER, per-NPC complement, at the ONE seam the issue names (the deep-authoring `recordCastProfile`
+# write-back): the moment a profile is parsed, BEFORE it commits, drop any self-referential field whose
+# prose contradicts the houseguest's PINNED identity (the `genderPresentation` set upstream by identity
+# seeding, and the pinned age — both authoritative here) and record a RED-eligible `identity-incoherence`
+# health event (#1599 — a real fault is surfaced even when auto-corrected). The dropped field then falls
+# to the engine's coherent seeded floor. This catches the bundle's gender-flip six (Lily/Jasmine/Veronica/
+# Bradley/Liam) + the age-flip (Donna) at authoring time instead of at game start. It is FE-only — it
+# touches no narrator prompt / tool schema / casting-finalize flow, so it does NOT stale the golden
+# fixture, and it fires ONLY on a genuine contradiction (a coherent cast ⇒ byte-identical no-op).
+#
+# Vault-free by construction: the recorded event names only the houseguest id + the dropped FIELD names,
+# never the prose or any hidden value.
+#
+# Pronoun scan (whole-word, case-insensitive). A biography legitimately names OTHER people (a spouse,
+# a parent), so the flip signal is deliberately conservative — a field is a "flip" only when the OPPOSITE
+# gender's pronouns appear AND the pinned gender's are ABSENT (the houseguest's own pronoun missing
+# entirely). A bio that merely mentions an opposite-gender relative still carries the subject's own
+# pronoun, so it never trips. `nonbinary` is skipped (they/them yields no clean binary signal).
+_MASC_PRONOUN = re.compile(r"\b(he|him|his|himself)\b", re.I)
+_FEM_PRONOUN = re.compile(r"\b(she|her|hers|herself)\b", re.I)
+# A young pinned age beside an elder self-descriptor in the biography (Donna: age 22 vs "retired
+# principal" / "thirty years"). Conservative markers: `retired`/`retiree` (rarely about others in a
+# self-bio) and a multi-decade career span (spelled thirty+ or a numeric 30+ years).
+_YOUNG_AGE_CEILING = 35
+_ELDER_LIFE_STAGE = re.compile(r"\b(retired|retiree)\b", re.I)
+_LONG_CAREER = re.compile(
+    r"\b(thirty|forty|fifty|sixty|seventy)\b[\s-]+years?\b|\b([3-9]\d)\s*[\s-]*years?\b", re.I)
+
+
+def _gender_flip(text: str, pin: str) -> bool:
+    """True iff `text` self-refers ONLY in the OPPOSITE gender to the pinned `genderPresentation`
+    (the opposite pronoun present AND the pinned-gender pronoun absent). Conservative to avoid a
+    false positive on a bio that merely mentions an opposite-gender relative."""
+    if not text:
+        return False
+    masc = bool(_MASC_PRONOUN.search(text))
+    fem = bool(_FEM_PRONOUN.search(text))
+    if pin == "man":
+        return fem and not masc
+    if pin == "woman":
+        return masc and not fem
+    return False
+
+
+def coherence_conflicts(profile: dict, npc: dict) -> list[str]:
+    """Return the TOP-LEVEL profile keys whose authored prose contradicts the houseguest's PINNED
+    identity in `npc` (`genderPresentation` + `age`, authoritative here) — the set the caller drops
+    before the `recordCastProfile` write-back so they fall to the coherent seeded floor. Empty list ⇒
+    coherent (the common case; a byte-identical no-op). Vault-free: returns field NAMES only.
+
+    Checks (cheap, in-object):
+      • biography — a self-referential gender flip, OR a young pinned age beside an elder self-descriptor;
+      • physicalCharacteristics — a distinguishingMark gender flip (the facet folds whole, so the WHOLE
+        facet is dropped to keep the engine's whole-or-nothing contract)."""
+    drop: set[str] = set()
+    pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
+    bio = profile.get("biography") if isinstance(profile.get("biography"), str) else ""
+    phys = profile.get("physicalCharacteristics")
+    mark = str(phys.get("distinguishingMark") or "") if isinstance(phys, dict) else ""
+
+    if pin in ("man", "woman"):
+        if _gender_flip(bio, pin):
+            drop.add("biography")
+        if _gender_flip(mark, pin):
+            drop.add("physicalCharacteristics")
+
+    age = (npc or {}).get("age")
+    if isinstance(age, (int, float)) and not isinstance(age, bool) and int(age) < _YOUNG_AGE_CEILING:
+        if bio and (_ELDER_LIFE_STAGE.search(bio) or _LONG_CAREER.search(bio)):
+            drop.add("biography")
+    return sorted(drop)
+
+
+# ── F1 / F5 (#1660): roster-constrained authoring — the committed roster is IMMUTABLE ───────────────
+#
+# The pipeline commits each houseguest's IDENTITY before deep authoring runs (genesis SKELETON → 0063
+# identity → deep author → shoot): name + vocation land at genesis, `genderPresentation` + age at the
+# 0063 identity seed. Deep authoring must therefore EXTEND that person (depth, look, voice, secrets),
+# NEVER re-invent them into a DIFFERENT one — the issue's "occupation-crosswired" (a concierge authored
+# as a bartender) and "gender-flipped" houseguests.
+#
+# F2's `coherence_conflicts` (above) lints the authored PROSE (biography / distinguishingMark) for a
+# pronoun/age FLIP. These two guards are the COMPLEMENT at the STRUCTURED-field level: `identity_
+# contradictions` compares the authored VALUE of an immutable field (vocation / genderPresentation /
+# age) against the committed roster, and `secret_vocation_conflicts` drops the hidden threads that were
+# authored around a crosswired job. Both fire ONLY on a genuine contradiction (a coherent dossier ⇒ a
+# byte-identical no-op) and are FE-only (no narrator prompt / tool schema / casting-finalize touch).
+# Vault-free by construction: they return field NAMES only, never the prose or any hidden value.
+_GENDERS_KNOWN = ("man", "woman", "nonbinary")
+
+# Occupation stopwords that carry NO distinctive job signal — so a refinement that shares only these
+# ("senior manager" ~ "project manager") never reads as a crosswire, but two genuinely different jobs
+# ("concierge" vs "bartender") share no distinctive token and DO.
+_VOCATION_STOPWORDS = frozenset({
+    "the", "and", "for", "senior", "junior", "assistant", "associate", "lead", "chief", "head",
+    "manager", "director", "specialist", "worker", "professional", "freelance", "former", "retired",
+    "part", "time", "full", "certified", "licensed",
+})
+_VOCATION_WORD = re.compile(r"[a-z]{3,}")
+# The RAW matcher keeps SHORT tokens too (2+ letters) so a 2-letter vocation ("IT", "DJ") still yields
+# a comparable token in the raw fallback below — the distinctive matcher stays at {3,} (2-letter tokens
+# fall through to this raw fallback, which now handles them; no 2-letter stopword exists, so no conflict).
+_VOCATION_RAW_WORD = re.compile(r"[a-z]{2,}")
+
+
+def _vocation_tokens(vocation) -> set:
+    """The distinctive lower-case word tokens of a vocation noun phrase (>=3 letters, non-stopword) —
+    the signal that tells one job from another. "court reporter" -> {"court", "reporter"}; a shared
+    token means the same job family (a refinement), a disjoint set means a different job (a crosswire)."""
+    if not isinstance(vocation, str):
+        return set()
+    return {t for t in _VOCATION_WORD.findall(vocation.lower()) if t not in _VOCATION_STOPWORDS}
+
+
+def _vocation_raw_tokens(vocation) -> set:
+    """ALL >=2-letter word tokens of a vocation phrase, stopwords INCLUDED — the fallback signal when a
+    committed occupation is a single GENERIC word ("manager", "director") or a SHORT one ("IT", "DJ")
+    whose distinctive-token set is empty. "senior manager" -> {"senior", "manager"}; "IT" -> {"it"}.
+    Used on BOTH sides together (never mixed with the distinctive set) so containment still judges
+    refinements ("manager" ⊆ "senior manager")."""
+    if not isinstance(vocation, str):
+        return set()
+    return set(_VOCATION_RAW_WORD.findall(vocation.lower()))
+
+
+def identity_contradictions(profile: dict, npc: dict) -> list:
+    """F1 (#1660): return the authored STRUCTURED identity fields that CONTRADICT the committed roster's
+    IMMUTABLE identity — the set the caller drops before the `recordCastProfile` write-back so the
+    committed value STANDS (authored fields EXTEND identity, never OVERWRITE it). Empty ⇒ coherent (the
+    common case; a byte-identical no-op). Vault-free: returns field NAMES only.
+
+    Checks:
+      • name — `parse_authored_profile` DOES forward an authored `name` (it passes the reasonable-name
+        guard), so a model reply that RENAMES a rostered houseguest would overwrite the committed
+        identity. A committed name and an authored name that DIFFER (normalized: strip + casefold, so a
+        trivial case/whitespace echo of the SAME name is not flagged) drop "name" — the committed name
+        stands (the engine also refuses renaming an already-introduced houseguest; this is the earlier
+        FE complement).
+      • vocation — the committed roster owns the occupation (genesis-authored; the engine keys the hidden
+        stakes off it). A three-rung ladder judges coherence, so an empty-token phrase can never skip the
+        guard (the "empty-token → guard-skip" class): (1) when BOTH sides carry a distinctive token, judge
+        by distinctive-token CONTAINMENT — a refinement ("reporter" ⊆ "court reporter") is kept, a shared
+        GENERIC token with neither containing the other ("software engineer" vs "civil engineer") is a
+        crosswire dropped; (2) when one side is ALL-GENERIC / SHORT (no distinctive token, e.g. "manager"
+        or "IT"), fall back to RAW tokens (>=2 letters, stopwords included) on BOTH sides and apply the
+        same containment — "manager" vs "bartender" / "IT" vs "DJ" are crosswires, "manager" vs "senior
+        manager" a refinement kept; (3) when NEITHER side yields comparable tokens (1-letter / digits /
+        non-latin script), the terminal fallback keeps it coherent ONLY on a WHOLE-TOKEN/phrase substring
+        or equality match (space-padded, so a 1-letter "x" can't match INSIDE "taxi driver"), else drops
+        "vocation" (a different job).
+      • genderPresentation / age — DEFENSIVE: `parse_authored_profile` does not forward these today (the
+        pin is engine-owned), so this only fires if a future parse path forwarded a value that differs
+        from the committed pin. Kept so the guard is complete + directly unit-testable."""
+    drop: list = []
+    committed_name = str((npc or {}).get("name") or "").strip()
+    authored_name = str((profile or {}).get("name") or "").strip()
+    if committed_name and authored_name and committed_name.casefold() != authored_name.casefold():
+        drop.append("name")
+    cv = (npc or {}).get("vocation")
+    av = (profile or {}).get("vocation")
+    committed_voc = _vocation_tokens(cv)
+    authored_voc = _vocation_tokens(av)
+    if committed_voc and authored_voc:
+        # Both sides carry a distinctive signal — judge by distinctive-token containment (existing path).
+        c, a = committed_voc, authored_voc
+    else:
+        # One side is ALL-GENERIC / SHORT (no distinctive token, e.g. a committed "manager" or "IT") —
+        # distinctive-token containment can't judge it; fall back to RAW tokens (>=2 letters, stopwords
+        # included) on BOTH sides. Never mix distinctive-one-side with raw-the-other (that wrongly drops
+        # "manager" -> "project manager").
+        c, a = _vocation_raw_tokens(cv), _vocation_raw_tokens(av)
+    if c and a:
+        # Coherent ONLY when one token set CONTAINS the other (a refinement); otherwise a crosswire.
+        crosswire = not (c <= a or a <= c)
+    else:
+        # Terminal fallback: NEITHER side yields comparable tokens (1-letter / digits-only / non-latin
+        # script) — an empty-token phrase must NEVER silently skip the guard. Coherent only on a
+        # WHOLE-TOKEN/phrase substring or equality match (space-pad both so "x" can't match INSIDE
+        # "taxi driver" — the containment must be a whole word/phrase, not an arbitrary substring),
+        # else treat it as a different job and drop.
+        cv_n = " ".join(str(cv or "").lower().split())
+        av_n = " ".join(str(av or "").lower().split())
+        cv_phrase = f" {cv_n} "
+        av_phrase = f" {av_n} "
+        crosswire = bool(cv_n) and bool(av_n) and (cv_phrase not in av_phrase and av_phrase not in cv_phrase)
+    if crosswire:
+        drop.append("vocation")
+    pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
+    authored_gp = str((profile or {}).get("genderPresentation") or "").strip().lower()
+    if pin in _GENDERS_KNOWN and authored_gp in _GENDERS_KNOWN and authored_gp != pin:
+        drop.append("genderPresentation")
+    c_age = (npc or {}).get("age")
+    a_age = (profile or {}).get("age")
+    if isinstance(c_age, (int, float)) and not isinstance(c_age, bool) \
+            and isinstance(a_age, (int, float)) and not isinstance(a_age, bool) \
+            and int(c_age) != int(a_age):
+        drop.append("age")
+    return drop
+
+
+def secret_vocation_conflicts(profile: dict, npc: dict) -> list:
+    """F5 (#1660): the hidden-thread field names (`secrets` / `trueGoals` / `weakness`) to drop because
+    the profile's authored VOCATION crosswires the committed roster. The hidden bible is authored in the
+    SAME call as the vocation, so a crosswired job means the secrets were grounded in the WRONG identity
+    — they must not commit against the (correct) committed vocation. Returns the PRESENT hidden-thread
+    fields when the authored vocation is a different job from the committed one, else []. Dropping them
+    lets the engine re-derive the hidden stakes off the committed vocation (non-degradation: the engine
+    holds a seeded hidden floor keyed to the committed job). Reuses the F1 crosswire signal so the two
+    guards can never disagree. Vault-free: returns field NAMES only."""
+    if "vocation" not in identity_contradictions(profile, npc):
+        return []
+    return [k for k in _HIDDEN_KEYS if k in (profile or {})]
+
+
 def build_authoring_messages(npc: dict) -> list[dict]:
     """The producer prompt for ONE houseguest. Seeds the LLM with the houseguest's PUBLIC skeleton
     (name + whatever public facets the engine already exposes) and NOTHING about the player — the
@@ -396,11 +614,28 @@ def build_authoring_messages(npc: dict) -> list[dict]:
         f"pinned identity is immutable, do not re-gender {name}."
         if gp in ("man", "woman", "nonbinary") else ""
     )
+    # F1/F5 (#1660): the committed roster's IMMUTABLE identity — name, gender presentation, vocation, age
+    # are already CAST (genesis + the 0063 identity seed). The authored bible EXTENDS this exact person
+    # (adds depth, look, voice, secrets) but must NEVER contradict or replace these fixed facts: the SAME
+    # occupation, gender, age, and name throughout the biography, secrets, goals, and weakness. This pins
+    # the hidden threads to the committed vocation (F5) at the SOURCE — the engine keys the hidden stakes
+    # off it, and a crosswired job / re-gendered secret is dropped at write-back and re-grounded.
+    immutable = {k: npc.get(k) for k in ("name", "genderPresentation", "vocation", "age")
+                 if npc.get(k) is not None}
+    immutable_rule = (
+        f" FIXED IDENTITY (IMMUTABLE — do NOT contradict or replace any of these): "
+        f"{json.dumps(immutable, ensure_ascii=False)}. Keep {name}'s name, gender, occupation, and age "
+        f"EXACTLY as given; your authored fields EXTEND this exact person. Every secret, true goal, and "
+        f"weakness must belong to THIS occupation and this person — never imply a different job, a "
+        f"different gender, or a different life-stage/age."
+        if immutable else ""
+    )
     user = (
         f"Houseguest to flesh out: {name}.\n"
         f"Public skeleton (build FROM this, never contradict it): {json.dumps(skeleton, ensure_ascii=False)}\n"
         f"Ground {name}'s secrets, true goals, and weakness in THIS skeleton — their specific occupation, "
         f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else."
+        f"{immutable_rule}"
         f"{pronoun_rule}\n"
         f"Write {name}'s secret bible as JSON now — their own independent life, no protagonist."
     )
@@ -698,6 +933,9 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     floor_below = 0       # JSON parsed but nothing cleared the quality floor (seeded floor is richer)
     floor_gaveup = 0      # M1-10: the per-season attempt cap is spent — give up loudly, stop calling
     floor_call_failed = 0  # RC6 S6c: the provider call RAISED (timeout/HTTP/network) — no completion body
+    coherence_stripped = 0  # F2 (#1660): NPCs whose authored dossier PROSE contradicted the pinned identity
+    identity_pinned = 0     # F1 (#1660): NPCs whose authored STRUCTURED field crosswired the committed roster
+    secret_pinned = 0       # F5 (#1660): NPCs whose hidden threads were dropped (authored around a crosswired job)
     ukey = _safe_user(user)  # M1-10: the give-up ledger scope
 
     async def _call_with_retries(npc: dict, hid: str):
@@ -829,7 +1067,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     async def _author_one(npc: dict) -> int:
         nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below, \
-            floor_gaveup, floor_call_failed
+            floor_gaveup, floor_call_failed, coherence_stripped, identity_pinned, secret_pinned
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
@@ -891,6 +1129,82 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                         f"[cast-authoring] JSON parsed but all fields below the quality floor for {hid} "
                         "— keeping the seeded floor")
                 return 0
+            # F2 (#1660): author-time COHERENCE LINT — drop any field whose self-referential prose
+            # contradicts the pinned identity BEFORE the write-back, so the contradiction never
+            # commits (it falls to the engine's coherent seeded floor, which the RC5 belt then
+            # guarantees at game start). Record a RED-eligible `identity-incoherence` health event —
+            # a genuine fault surfaced even though auto-corrected (#1599). Vault-free: the id + the
+            # dropped FIELD names only, never the prose. A coherent dossier ⇒ no-op (byte-identical).
+            dropped = coherence_conflicts(profile, npc)
+            if dropped:
+                for k in dropped:
+                    profile.pop(k, None)
+                coherence_stripped += 1
+                logger.warning(
+                    f"[cast-authoring] authored dossier for {hid} contradicts the pinned identity "
+                    f"(dropped {', '.join(dropped)} to the coherent floor) — identity-incoherence")
+                try:
+                    from src import enrichment_policy
+                    enrichment_policy.record_runtime_failure(
+                        user, "identity-incoherence",
+                        f"authored dossier for {hid} contradicts the pinned identity — dropped "
+                        f"{', '.join(dropped)} to the coherent seeded floor before write-back")
+                except Exception:  # pragma: no cover - the health record must never break authoring
+                    pass
+                # Only the houseguestId survived the strip — nothing coherent left to write; the whole
+                # NPC falls to the seeded floor (already RED-recorded above).
+                if len(profile) <= 1:
+                    floor_below += 1
+                    return 0
+            # F1 (#1660): roster-constrained authoring — drop any authored STRUCTURED identity field
+            # (vocation / genderPresentation / age) that CONTRADICTS the committed roster's immutable
+            # value, so the committed identity STANDS (authored fields EXTEND, never OVERWRITE). This is
+            # the "occupation-crosswired" complement to F2's prose lint. RED-recorded via log_rings
+            # (#1599 — a real fault surfaced even when auto-corrected), Vault-free (field names only).
+            id_drop = identity_contradictions(profile, npc)
+            if id_drop:
+                # F5 (#1660): a crosswired vocation means the hidden threads (secrets/goals/weakness),
+                # authored in the SAME call, were grounded in the WRONG job — compute them BEFORE the
+                # vocation is popped so they are re-derived by the engine off the committed vocation.
+                secret_drop = secret_vocation_conflicts(profile, npc)
+                for k in id_drop:
+                    profile.pop(k, None)
+                identity_pinned += 1
+                logger.warning(
+                    f"[cast-authoring] authored dossier for {hid} contradicts the committed roster "
+                    f"(dropped {', '.join(id_drop)} — the committed identity stands) — identity-contradiction")
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure(
+                        "cast-authoring:identity-contradiction",
+                        f"authored dossier for {hid} contradicts the committed roster — dropped "
+                        f"{', '.join(id_drop)} so the committed identity stands (authored fields extend, "
+                        f"never overwrite)",
+                        corrected="committed-roster-identity", user=user, houseguest=hid)
+                except Exception:  # pragma: no cover - the health record must never break authoring
+                    pass
+                if secret_drop:
+                    for k in secret_drop:
+                        profile.pop(k, None)
+                    secret_pinned += 1
+                    logger.warning(
+                        f"[cast-authoring] hidden threads for {hid} were authored around a crosswired "
+                        f"vocation (dropped {', '.join(secret_drop)}) — the engine re-grounds the hidden "
+                        f"stakes off the committed job — secret-identity-contradiction")
+                    try:
+                        from src import log_rings
+                        log_rings.record_soft_failure(
+                            "cast-authoring:secret-identity-contradiction",
+                            f"hidden threads for {hid} were authored around a crosswired vocation — "
+                            f"dropped {', '.join(secret_drop)} so the engine re-grounds the hidden stakes "
+                            f"off the committed vocation",
+                            corrected="committed-roster-vocation", user=user, houseguest=hid)
+                    except Exception:  # pragma: no cover - the health record must never break authoring
+                        pass
+                # Nothing coherent left after the identity strip — the whole NPC falls to the seeded floor.
+                if len(profile) <= 1:
+                    floor_below += 1
+                    return 0
             # #1057: the write-back is SERIALIZED + degradation-retried (it must not run concurrently
             # against the orchestrator integrity checkpoint).
             res = await _write_with_retries(profile, hid)
@@ -922,7 +1236,10 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         f"[cast-authoring] cast authoring: authored {written}/{total} houseguests "
         f"(floor fallback for {floor}: {floor_no_json} no-JSON, {floor_empty} empty, "
         f"{floor_truncated} truncated, {floor_degradation} degradation, {floor_below} below-floor, "
-        f"{floor_gaveup} given-up, {floor_call_failed} call-failed)")
+        f"{floor_gaveup} given-up, {floor_call_failed} call-failed; "
+        f"{coherence_stripped} identity-incoherent prose-strip(s), "
+        f"{identity_pinned} roster-contradiction field-strip(s), "
+        f"{secret_pinned} crosswired-vocation secret-strip(s))")
     # STRICT enrichment policy (owner directive 2026-07-11): any houseguest left on the deterministic
     # floor after the bounded retry ladder is a LOUD failure — an ERROR + an admin-visible ledger
     # entry (the #1313 house-entry gate is what blocks the flow itself). Under `soft` the tally above

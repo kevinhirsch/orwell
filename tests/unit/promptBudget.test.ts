@@ -43,8 +43,13 @@ const LIVE_VIEW = (() => {
 describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   // ── The FIXED instruction budget: BASE is injected on EVERY turn, so it is the single biggest
   //    fixed cost and the truest target of finding 12. Measured post-dedup: 44,321 chars (~11.1k tok).
+  // 2026-07-16 re-baseline: the owner-mandated prompt-discipline batch (QUESTION DISCIPLINE — the
+  // headline "hold for a direct player-facing question" hard stop — + its PACING cross-reference, the
+  // NO OUTSIDE CONTACT world-texture line, and the SPEAKER TAGS MAY→ALWAYS upgrade) grew BASE to
+  // 46,056 chars. Consciously bumped, not widened to sneak past — this is exactly the class of addition
+  // the gate exists to make visible.
   it("BASE_GAME_MASTER_PROMPT stays under its fixed-instruction budget", () => {
-    const BUDGET = 45_200; // ~11.3k tok — ≈2.0% over the 44,321-char post-dedup size
+    const BUDGET = 47_000; // ~11.75k tok — ≈2.0% over the 46,056-char post-2026-07-16 size
     expect(BASE_GAME_MASTER_PROMPT.length).toBeLessThanOrEqual(BUDGET);
   });
 
@@ -66,7 +71,8 @@ describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   //    / worldContext / surfacedFacts, which vary by turn). The roster DATA dominates the in-game
   //    sizes, so a bump here can also mean a legitimately richer cast — re-baseline consciously.
   it("the assembled character-creation prompt stays under its budget", () => {
-    const BUDGET = 55_000; // ~13.75k tok — over the 53,932-char size (pre-game, no cast)
+    // 2026-07-16 re-baseline (same BASE growth as above): now 55,990 chars (pre-game, no cast).
+    const BUDGET = 57_100; // ~14.3k tok — ≈2.0% over the 55,990-char post-2026-07-16 size
     expect(buildSystemPrompt("character-creation", PRE_GAME_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 
@@ -76,7 +82,8 @@ describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   });
 
   it("the assembled in-game (social) prompt stays under its budget", () => {
-    const BUDGET = 66_300; // ~16.5k tok — over the 65,022-char size (full 16-cast roster)
+    // 2026-07-16 re-baseline (same BASE growth as above): now 66,605 chars (full 16-cast roster).
+    const BUDGET = 68_000; // ~17k tok — ≈2.0% over the 66,605-char post-2026-07-16 size
     expect(buildSystemPrompt("social", LIVE_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 

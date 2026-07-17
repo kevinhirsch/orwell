@@ -1633,7 +1633,10 @@ async def execute_tool_block(
         result = await do_accuse_tie(content, owner=owner)
     elif tool == "createCharacter":
         desc = "createCharacter"
-        result = await do_create_character(content, owner=owner)
+        # 2026-07-16 audit item 4 — forward the SAME progress_cb bash/python long-running tools use
+        # (see the docstring above) so the inline genesis fallback's blocking wait can surface a
+        # single production-hold status line instead of a bare spinner.
+        result = await do_create_character(content, owner=owner, progress_cb=progress_cb)
     elif tool == "updateCasting":
         desc = "updateCasting"
         result = await do_update_casting(content, owner=owner)

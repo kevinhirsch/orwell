@@ -152,6 +152,13 @@ _TIMEOUT_EXEMPT_PREFIXES = (
     "/api/cookbook/setup",  # remote pacman/apt installs
     "/api/upload",          # large files
     "/api/image",           # diffusion proxies (inpaint/harmonize/upscale/etc.) — own 120s httpx timeout
+    # 2026-07-17 — the casting-open cast pre-warm runs genesis + identity INLINE (minutes on a
+    # live model) before backgrounding deep authoring. wait_for CANCELS the handler on timeout,
+    # so the 45s cap didn't just 504 the fetch — it ABORTED genesis mid-flight and threw the
+    # enrichment away, forcing create-time to redo it inline (the multi-minute finalize spinner
+    # the 2026-07-16 playtest audit flagged). The route is fail-open and fire-and-forget from
+    # the browser; letting it run to completion is the whole point.
+    "/api/orwell/prewarm-cast",
 )
 
 

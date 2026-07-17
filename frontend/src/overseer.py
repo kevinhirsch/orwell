@@ -76,6 +76,15 @@ def overseer_mode() -> str:
 
     A broken settings read degrades to the env path (steps 3–4) and NEVER raises into the loop —
     config must never crash the turn."""
+    # 0) 0108 golden record/replay — STRUCTURALLY off, ahead of settings (2026-07-17). The golden
+    #    fixture is recorded overseer-off, so an overseer LLM leg firing under replay is an
+    #    un-recorded call and a guaranteed fixture miss. The driver's ORWELL_OVERSEER_MODE=off pin
+    #    proved insufficient: a settings round-trip (a full merged-defaults save) can land
+    #    `overseer_mode: "active"` in settings.json mid-run, and settings outrank env — the CI
+    #    replay fired 57 un-recorded overseer calls exactly this way. Same pattern as the portrait/
+    #    zeitgeist golden quiesce; env check inline so the disabled path never imports golden_path.
+    if os.environ.get("ORWELL_GOLDEN_RECORD") == "1" or os.environ.get("ORWELL_GOLDEN_REPLAY"):
+        return "off"
     # 1) + 2) — the settings tier (the admin UI control). A broken read drops to the env path.
     try:
         from src.settings import get_setting, is_setting_overridden

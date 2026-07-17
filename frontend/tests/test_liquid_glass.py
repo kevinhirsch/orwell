@@ -129,10 +129,11 @@ def test_edge_bleed_clamp_menus_clip_backdrop_to_rounded_rect():
     # SVG-refraction backdrop to their OWN rounded-rect (overflow:hidden under the frosted
     # theme) so any residual corner halo past the border-radius is clipped away. Scoped to the
     # leaf popovers only (no submenu/shadow to clip); chrome panels are untouched. (#1638: the
-    # model picker folded from `.model-picker-menu` onto the shared `.ow-popover` kit surface.)
+    # model picker folded from `.model-picker-menu` onto the shared `.ow-popover` kit surface, and
+    # the dead `.overflow-menu` member was retired from this clip in the dead-CSS sweep — no element
+    # carries `.overflow-menu` anymore, so the refracted leaf popovers are `.dropdown` + `.ow-popover`.)
     block = re.search(
         r"body\.theme-frosted \.dropdown,\s*"
-        r"body\.theme-frosted \.overflow-menu,\s*"
         r"body\.theme-frosted \.ow-popover \{([^}]*)\}",
         CSS, re.S)
     assert block, "the transient leaf popovers must share a frosted clip rule"

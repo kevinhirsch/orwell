@@ -1256,7 +1256,7 @@ async def engine_health_detail() -> dict:
         try:
             detail = await _probe_health_once()
             break
-        except Exception as e:
+        except Exception as e:  # failsoft-ok: expected-empty (this IS the health reporter — a probe failure is REPORTED as {ok:False,error} to the FE banner, not swallowed)
             last_exc = e
             if attempt < _RETRY_ATTEMPTS and _is_transient(e):
                 _mark_reconnecting()

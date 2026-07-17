@@ -95,13 +95,17 @@ def test_extract_none_when_no_image():
 # ── url → bytes ─────────────────────────────────────────────────────────────────
 
 def test_image_bytes_from_data_url():
-    out = _run(op._image_bytes_from_url(_Client(), _data_url(b"PNGDATA")))
+    # #1599 (finding c): now returns (bytes, reason) so a transient fetch failure is distinguishable.
+    out, reason = _run(op._image_bytes_from_url(_Client(), _data_url(b"PNGDATA")))
     assert out == b"PNGDATA"
+    assert reason is None
 
 
 def test_image_bytes_from_https_url():
     client = _Client(get=_Resp(200, content=b"FETCHED"))
-    assert _run(op._image_bytes_from_url(client, "https://x/y.png")) == b"FETCHED"
+    out, reason = _run(op._image_bytes_from_url(client, "https://x/y.png"))
+    assert out == b"FETCHED"
+    assert reason is None
 
 
 # ── the chat-completions transport ──────────────────────────────────────────────
