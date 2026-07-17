@@ -172,7 +172,7 @@ def test_chat_js_refires_premiere_continue_only_when_recovery_latch_survived_to_
     or miss a genuine reasoning-then-nothing silent death."""
     js = _read("static", "js", "chat.js")
     anchor = js.index('safety net — never leave the "finalizing" indicator stuck')
-    seg = js[anchor: anchor + 1600]
+    seg = js[anchor: anchor + 2200]
     assert "if (_orwellPremiereRecoveryArmed) {" in seg
     assert "_orwellPremiereContinueIfSilent" in seg
     # the refire call must be INSIDE the dedicated-latch-still-armed branch, not unconditional,
@@ -218,6 +218,48 @@ def test_premiere_recovery_latch_clears_only_on_non_thinking_delta():
     anchor = js.index("clear the premiere-recovery latch only on a real reply token")
     seg = js[anchor: anchor + 300]
     assert "if (!json.thinking && _orwellPremiereRecoveryArmed) _orwellPremiereRecoveryArmed = false;" in seg
+
+
+def test_premiere_recovery_is_suppressed_on_an_intentional_user_stop():
+    """CodeRabbit follow-up (2026-07-17): the premiere-recovery latch surviving to the finally
+    block is not by itself enough to auto-refire — an intentional user Stop (or a browser
+    navigation abort) right after createCharacter succeeds but before any narration streamed must
+    NOT enqueue a hidden continuation the player never asked for. A dedicated
+    `_orwellUserStoppedThisTurn` flag, set ONLY in the catch block's genuine user-stop branch, must
+    gate the refire — while the latch itself is still always cleared (no stale re-arm carrying
+    into the next turn)."""
+    js = _read("static", "js", "chat.js")
+    assert "let _orwellUserStoppedThisTurn = false;" in js
+
+    # Set ONLY inside the catch block's genuine "User-initiated stop" branch — never at the
+    # timeout/offline/tab-recovery abort branches above it (those are system interruptions the
+    # player did not ask for, so the silent-death recovery still legitimately applies to them).
+    stop_anchor = js.index("// User-initiated stop (or browser navigation abort).")
+    stop_seg = js[stop_anchor: stop_anchor + 500]
+    assert "_orwellUserStoppedThisTurn = true;" in stop_seg
+
+    # The other abort-reason branches (timeout / offline / recovery) must NOT set the flag — only
+    # the plain user-stop fallthrough may.
+    catch_anchor = js.index("} catch (err) {")
+    pre_stop_seg = js[catch_anchor:stop_anchor]
+    assert "_orwellUserStoppedThisTurn = true;" not in pre_stop_seg, (
+        "the user-stopped flag must be set ONLY on a genuine user-initiated stop, never on a "
+        "timeout/offline/tab-recovery abort"
+    )
+
+    # The finally block's refire must be gated on the flag, nested inside the still-armed latch
+    # check (so the latch is unconditionally cleared either way — no stale re-arm survives).
+    anchor = js.index('safety net — never leave the "finalizing" indicator stuck')
+    seg = js[anchor: anchor + 2000]
+    guard_idx = seg.index("if (_orwellPremiereRecoveryArmed) {")
+    clear_idx = seg.index("_orwellPremiereRecoveryArmed = false;", guard_idx)
+    stop_guard_idx = seg.index("if (!_orwellUserStoppedThisTurn) {", clear_idx)
+    refire_idx = seg.index("_orwellPremiereContinueIfSilent", stop_guard_idx)
+    close_idx = seg.index("\n      }", guard_idx)
+    assert guard_idx < clear_idx < stop_guard_idx < refire_idx < close_idx, (
+        "the refire must be nested inside BOTH the still-armed latch check AND the "
+        "not-user-stopped guard, with the latch itself cleared unconditionally"
+    )
 
 
 def test_restart_reset_rearms_the_premiere_continue_latch():

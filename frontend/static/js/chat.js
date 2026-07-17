@@ -1056,6 +1056,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // arms ONLY once a createCharacter tool result confirms `started && !createRefused`, and clears
     // ONLY on a real (non-thinking) reply delta.
     let _orwellPremiereRecoveryArmed = false;
+    // CodeRabbit follow-up (2026-07-17): set true ONLY in the catch block's genuine "User-initiated
+    // stop" branch (an explicit Stop-button abort, never a timeout/offline/tab-recovery abort — those
+    // are system interruptions the player did NOT ask for, so the silent-death recovery still applies
+    // to them). An intentional Stop right after createCharacter succeeds but before any narration
+    // streamed must NOT auto-refire a hidden continuation the player never asked for — that would
+    // silently override their explicit cancel. Read by the finally block alongside
+    // `_orwellPremiereRecoveryArmed`.
+    let _orwellUserStoppedThisTurn = false;
     // Are we currently inside an unclosed <think> block? Toggled per think/answer
     // cycle so a multi-round agent response (one reasoning phase PER round) wraps each
     // round's reasoning in its own <think>…</think> instead of leaking rounds 2+ as text.
@@ -4091,6 +4099,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           }
 
           // User-initiated stop (or browser navigation abort).
+          // CodeRabbit fix: mark the turn as intentionally cancelled BEFORE the finally block runs,
+          // so the premiere-recovery safety net (below) never auto-refires a hidden continuation the
+          // player explicitly stopped (or that a closing/navigating tab can no longer show anyway).
+          _orwellUserStoppedThisTurn = true;
           // Stopped before any text arrived — keep the bubble as a
           // "Cancelled by user" record (so it survives a refresh).
           if (holder && !accumulated) {
@@ -4235,9 +4247,16 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       // #967/#969 already use, rather than leaving the player to speak first. Rides its own
       // `_orwellPremiereRecoveryArmed` latch (see declaration) rather than `_orwellFinalizingActive`
       // above, so a failed/refused creation never fires it and a reasoning-only completion still does.
+      // CodeRabbit follow-up: EXCEPT when the player themselves stopped this turn (or a browser
+      // navigation aborted it) — `_orwellUserStoppedThisTurn`, set in the catch block's genuine
+      // user-stop branch. An intentional cancel must never enqueue a hidden continuation the player
+      // never asked for; the latch is still cleared so a later, unrelated silent-death turn starts
+      // from a clean slate.
       if (_orwellPremiereRecoveryArmed) {
         _orwellPremiereRecoveryArmed = false;
-        try { if (window._orwellPremiereContinueIfSilent) window._orwellPremiereContinueIfSilent(); } catch (_) {}
+        if (!_orwellUserStoppedThisTurn) {
+          try { if (window._orwellPremiereContinueIfSilent) window._orwellPremiereContinueIfSilent(); } catch (_) {}
+        }
       }
       // Streaming done — let screen readers announce the settled response.
       const _chatLogDone = document.getElementById('chat-history');
