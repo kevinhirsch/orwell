@@ -167,10 +167,22 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     try:
         result = await enrich_tick(get_skeletons, llm_fn, write_back)
     except Exception as exc:
+        # #1599 (CodeRabbit): a whole-tick enrichment CRASH must show RED regardless of policy. The
+        # strict branch already RED-records via enrichment_policy.record_failure → record_overseer(ok=False);
+        # under the DEFAULT (non-strict) policy the crash would otherwise only LOG, so record it RED here.
+        # Split by policy (exactly one RED record per policy — never a double). enrich_tick's OWN skeleton-read
+        # failure is already recorded inside it and returns a dict WITHOUT raising, so it never reaches here.
         logger.warning("[offscreen-texture] run_enrich failed: %s", exc)
         if strict:
             enrichment_policy.record_failure(
                 owner, "offscreen-texture", "off-screen texture enrichment failed", detail=str(exc))
+        else:
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:enrich-run-failed", str(exc),
+                                              corrected="deterministic-templates", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         return {"voiced": 0, "total": 0, "error": str(exc)}
     # #1599 (CodeRabbit): a COMPLETE 0/N run — skeletons existed but every scene failed to voice
     # (voice_scene absorbs each per-scene LLM/write fault as False) — reaches no other recorder. Surface
