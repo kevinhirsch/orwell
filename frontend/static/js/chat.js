@@ -1047,6 +1047,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     // P1 (OOBE cutover): set when createCharacter paints the inline "finalizing" indicator this
     // turn, so the first house-entry narration token can clear it (and the finally can safety-net).
     let _orwellFinalizingActive = false;
+    // 2026-07-16 CodeRabbit fix (premiere-recovery seam): a DEDICATED latch for the
+    // silent-death auto-refire (`_orwellPremiereContinueIfSilent`), decoupled from the UI-only
+    // `_orwellFinalizingActive` above. `_orwellFinalizingActive` arms at tool_start (before success
+    // is known) and clears on ANY delta including reasoning-only output — fine for a visual
+    // indicator, but wrong for recovery: it could fire after a FAILED/refused creation, or fail to
+    // fire after a reasoning-only completion (cleared before the finally ever sees it). This latch
+    // arms ONLY once a createCharacter tool result confirms `started && !createRefused`, and clears
+    // ONLY on a real (non-thinking) reply delta.
+    let _orwellPremiereRecoveryArmed = false;
     // Are we currently inside an unclosed <think> block? Toggled per think/answer
     // cycle so a multi-round agent response (one reasoning phase PER round) wraps each
     // round's reasoning in its own <think>…</think> instead of leaking rounds 2+ as text.
@@ -2074,6 +2083,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // reasoning. The BODY render reads roundReplyText → reasoning can't leak into it.
                 if (json.thinking) roundReasoningText += json.delta;
                 else               roundReplyText += json.delta;
+                // CodeRabbit fix: clear the premiere-recovery latch only on a real reply token —
+                // a reasoning-only delta must NOT clear it (see declaration comment above).
+                if (!json.thinking && _orwellPremiereRecoveryArmed) _orwellPremiereRecoveryArmed = false;
                 if (json.thinking) {
                   if (!_thinkOpen) { _delta = '<think>' + _delta; _thinkOpen = true; }
                 } else if (_thinkOpen) {
@@ -3049,6 +3061,12 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                       // → house-entry is a heavy beat that must never read as frozen (cleared by the
                       // first narration token in the json.delta path, with a finally-block safety net).
                       try { if (window._orwellFinalizing) { _orwellFinalizingActive = true; window._orwellFinalizing.begin(); } } catch (_) {}
+                      // CodeRabbit fix: arm the DEDICATED recovery latch only once the engine result
+                      // confirms the season actually started (never on a failed/refused creation).
+                      try {
+                        const _cc = JSON.parse(json.output || '{}');
+                        if (_cc && _cc.started && !_cc.createRefused) _orwellPremiereRecoveryArmed = true;
+                      } catch (_) {}
                     }
                   }
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
@@ -4208,12 +4226,17 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       if (_orwellFinalizingActive) {
         _orwellFinalizingActive = false;
         try { if (window._orwellFinalizing) window._orwellFinalizing.end(); } catch (_) {}
-        // 2026-07-16 audit item 3 (premiere-opener resilience): reaching here means createCharacter
-        // finalized THIS turn but the stream ended (normally, on error, or dropped) without a single
-        // narration token ever landing to clear the flag above — the exact silent-death shape a live
-        // playthrough hit (llmIo: ok=False, no text). Auto-refire the move-in narration through the
-        // robust cue-backoff kernel #967/#969 already use, rather than leaving the player to speak
-        // first.
+      }
+      // 2026-07-16 audit item 3 (premiere-opener resilience), CodeRabbit-fixed 2026-07-17: reaching
+      // here armed means createCharacter finalized THIS turn (confirmed `started && !createRefused`)
+      // but the stream ended (normally, on error, or dropped) without a single REPLY token ever
+      // landing to clear the latch — the exact silent-death shape a live playthrough hit (llmIo:
+      // ok=False, no text). Auto-refire the move-in narration through the robust cue-backoff kernel
+      // #967/#969 already use, rather than leaving the player to speak first. Rides its own
+      // `_orwellPremiereRecoveryArmed` latch (see declaration) rather than `_orwellFinalizingActive`
+      // above, so a failed/refused creation never fires it and a reasoning-only completion still does.
+      if (_orwellPremiereRecoveryArmed) {
+        _orwellPremiereRecoveryArmed = false;
         try { if (window._orwellPremiereContinueIfSilent) window._orwellPremiereContinueIfSilent(); } catch (_) {}
       }
       // Streaming done — let screen readers announce the settled response.

@@ -164,20 +164,60 @@ def test_premiere_continue_line_is_a_cue_never_authored_narration():
     assert "Production cue" in line_decl
 
 
-def test_chat_js_refires_premiere_continue_only_when_finalizing_flag_survived_to_finally():
+def test_chat_js_refires_premiere_continue_only_when_recovery_latch_survived_to_finally():
+    """CodeRabbit fix (2026-07-17): the refire now rides a DEDICATED
+    `_orwellPremiereRecoveryArmed` latch, not the UI-only `_orwellFinalizingActive` flag — the
+    latter arms at tool_start (before success is known) and clears on ANY delta including
+    reasoning-only output, so reusing it for recovery could fire after a failed/refused creation
+    or miss a genuine reasoning-then-nothing silent death."""
     js = _read("static", "js", "chat.js")
     anchor = js.index('safety net — never leave the "finalizing" indicator stuck')
-    seg = js[anchor: anchor + 1400]
-    assert "if (_orwellFinalizingActive) {" in seg
+    seg = js[anchor: anchor + 1600]
+    assert "if (_orwellPremiereRecoveryArmed) {" in seg
     assert "_orwellPremiereContinueIfSilent" in seg
-    # the refire call must be INSIDE the flag-still-true branch, not unconditional
-    guard_idx = seg.index("if (_orwellFinalizingActive) {")
+    # the refire call must be INSIDE the dedicated-latch-still-armed branch, not unconditional,
+    # and NOT nested inside the UI-only _orwellFinalizingActive branch.
+    guard_idx = seg.index("if (_orwellPremiereRecoveryArmed) {")
     refire_idx = seg.index("_orwellPremiereContinueIfSilent")
     close_idx = seg.index("\n      }", guard_idx)
     assert guard_idx < refire_idx < close_idx, (
-        "the premiere-continue refire must be nested inside the still-finalizing branch, so it "
-        "never fires on the happy path where narration already cleared the flag"
+        "the premiere-continue refire must be nested inside the still-armed recovery-latch "
+        "branch, so it never fires on the happy path where a reply token already cleared it"
     )
+
+
+def test_premiere_recovery_latch_is_dedicated_and_declared():
+    """The recovery latch must be its own variable, separate from `_orwellFinalizingActive`."""
+    js = _read("static", "js", "chat.js")
+    assert "let _orwellPremiereRecoveryArmed = false;" in js
+
+
+def test_premiere_recovery_latch_arms_only_on_confirmed_started_not_refused():
+    """The latch must arm from the createCharacter tool RESULT (json.output), gated on
+    `started && !createRefused` — never unconditionally at tool_start, and never on a
+    failed/refused creation."""
+    js = _read("static", "js", "chat.js")
+    anchor = js.index("arm the DEDICATED recovery latch only once the engine result")
+    seg = js[anchor: anchor + 400]
+    assert "_cc.started && !_cc.createRefused" in seg
+    assert "_orwellPremiereRecoveryArmed = true" in seg
+    # It must NOT be armed at the tool_start (createCharacter begin) site, only at the
+    # tool-result site — search the earlier createCharacter tool_start block for the absence.
+    start_anchor = js.index("if (json.tool === 'createCharacter') {")
+    start_seg = js[start_anchor: start_anchor + 300]
+    assert "_orwellPremiereRecoveryArmed = true" not in start_seg, (
+        "the recovery latch must not arm at tool_start, before success is known"
+    )
+
+
+def test_premiere_recovery_latch_clears_only_on_non_thinking_delta():
+    """Reasoning-only deltas (json.thinking truthy) must NOT clear the recovery latch — only a
+    real reply token may, so a reasoning-then-silent-death turn still triggers the finally-block
+    auto-refire."""
+    js = _read("static", "js", "chat.js")
+    anchor = js.index("clear the premiere-recovery latch only on a real reply token")
+    seg = js[anchor: anchor + 300]
+    assert "if (!json.thinking && _orwellPremiereRecoveryArmed) _orwellPremiereRecoveryArmed = false;" in seg
 
 
 def test_restart_reset_rearms_the_premiere_continue_latch():
