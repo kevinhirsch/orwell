@@ -807,6 +807,29 @@ def test_sanctioned_tag_inside_fenced_code_block_is_never_chip_ified():
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_matching_fence_with_trailing_text_does_not_close_the_block():
+    """Per CommonMark a CLOSING fence takes no info string — a line like ```js inside an open
+    ``` block is a quoted example, not a close. The old delimiter-aware check closed on any
+    same-char equal-or-longer run, so extraction resumed while still inside the code block and
+    a bold roster name in the quoted example got chip-ified."""
+    r = _run_natural_battery(
+        {
+            "fence_with_info": (
+                "```\n"
+                "```js\n"
+                "**Stephanie Briggs** inside the still-open block\n"
+                "```\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["fence_with_info"]
+    assert n["chips"] == []
+    assert "___OWSPK_" not in n["text"]
+    assert "**Stephanie Briggs** inside the still-open block" in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
 def test_normal_prose_detection_still_works_alongside_a_code_block():
     """Regression guard for the fix itself: excluding code regions must not degrade detection in
     ordinary prose lines that happen to share a message with a code block."""

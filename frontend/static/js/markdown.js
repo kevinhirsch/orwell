@@ -948,9 +948,13 @@ function _codeLineIndices(text) {
     }
     // Inside a fence: every line counts as code, including a would-be marker that doesn't
     // qualify to close it (retain the opening delimiter + run length; close only on the SAME
-    // character with an equal-or-longer run).
+    // character with an equal-or-longer run, followed by NOTHING but whitespace — per
+    // CommonMark a CLOSING fence takes no info string, so "```js" inside an open block is a
+    // quoted example, not a close; treating it as one would resume speaker extraction while
+    // still genuinely inside the code block).
     codeLines.add(i);
-    if (m && m[1][0] === fenceChar && m[1].length >= fenceLen) {
+    if (m && m[1][0] === fenceChar && m[1].length >= fenceLen
+        && lines[i].slice(lines[i].indexOf(m[1]) + m[1].length).trim() === '') {
       inFence = false;
       fenceChar = null;
       fenceLen = 0;
