@@ -1438,9 +1438,14 @@ def _beat_signature(status: dict, state: dict) -> dict:
     if player_id is None:
         player_is_hoh = None       # unknown player identity → the guard must not judge a self-win
         player_has_veto = None
+        player_status = None       # unknown identity → the removal guard (R2) must not judge either
     else:
         player_is_hoh = (hoh is not None and hoh == player_id)
         player_has_veto = (veto_holder_id is not None and veto_holder_id == player_id)
+        # #1659 R2: the player's live board status ("active" while in the game; "evicted"/"jury"/… once
+        # out). A committed player REMOVAL/EXPULSION claim is a fabrication while this reads "active"
+        # (the 2026-07-16 incident's phantom expulsion, narrated with playerStatus=active).
+        player_status = (player.get("status") if isinstance(player, dict) else None) or "active"
     return {
         "week": status.get("week"),
         "phase": (status.get("phase") or state.get("phase")),
@@ -1455,6 +1460,7 @@ def _beat_signature(status: dict, state: dict) -> dict:
         "vetoUsed": bool(veto.get("used")),
         "playerIsHoh": player_is_hoh,
         "playerHasVeto": player_has_veto,
+        "playerStatus": player_status,
         "evicted": evicted,
         "evictedNames": evicted_names,
         "finished": bool(state.get("finished")),
@@ -1591,6 +1597,33 @@ _CLAIM_NOMINATED_RE = re.compile(
 # veto holder"). Paired with the `vetoHolder` signature field.
 _CLAIM_VETO_WINNER_RE = re.compile(
     r"\bwins (?:the )?(?:power of veto|veto|pov)\b|\b(?:new )?veto (?:holder|winner)\b",
+    re.IGNORECASE,
+)
+# #1659 R2 — a committed PLAYER REMOVAL / EXPULSION narrated at the player ("you're being removed from
+# the game", "you've been expelled", "production is removing you"). The 2026-07-16 debug-bundle incident
+# shipped exactly this (msg63: "You're being removed from the game… You're done here") while the engine
+# sat at playerStatus=active / pending=null / toolsCalled=[] — a fabricated end-of-game the player LIVED.
+# Unlike an HOH/veto win, a player expulsion has NO legitimate phase; it is verified DIRECTLY against the
+# board's `playerStatus` (so a real player eviction — playerStatus != "active" — never trips it). Only the
+# COMMITTED second-person forms; a conditional ("if you're removed") or a room move ("you're leaving the
+# kitchen") never matches. Bare "removed" is deliberately excluded (too generic) — it needs the
+# game/house qualifier, while the game-specific verbs (expelled/ejected/disqualified) may stand alone.
+# COMMITTED forms only — a marker (being/been/now/just/officially/hereby) gates every "you …" form so a
+# bare conditional ("if you're removed from the game", "should you be expelled") reads as flavor and never
+# trips (the same committed-tense discipline the eviction regex uses). Jurisdiction is closed-set (ADR 0005).
+_CLAIM_PLAYER_EXPULSION_RE = re.compile(
+    # (a) you're being / you've been / you are now … removed/expelled/… "from the game/house/competition/BB"
+    r"\byou(?:'|’)?(?:re|\s+are|(?:'|’)?ve|\s+have)\s+(?:being|been|now|just|officially|hereby)\s+"
+    r"(?:removed|expelled|ejected|eliminated|disqualified|kicked\s+out)\s+(?:from\s+)?(?:the\s+)?"
+    r"(?:game|house|competition|big\s+brother)\b"
+    # (b) you're being / you've been … expelled/ejected/disqualified (game-terminal verbs, no qualifier needed)
+    r"|\byou(?:'|’)?(?:re|\s+are|(?:'|’)?ve|\s+have)\s+(?:being|been|now|just|officially|hereby)\s+"
+    r"(?:expelled|ejected|disqualified)\b"
+    # (c) production / we are removing/expelling/ejecting YOU (agent-form committed removal)
+    r"|\b(?:we(?:'|’)?re|production\s+(?:is|are)|the\s+producers?\s+(?:are|is))\s+(?:now\s+)?"
+    r"(?:removing|expelling|ejecting|eliminating|disqualifying)\s+you\b"
+    # (d) you're no longer in the game/house — a committed removal
+    r"|\byou(?:'|’)?re\s+no\s+longer\s+in\s+the\s+(?:game|house)\b",
     re.IGNORECASE,
 )
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
@@ -1902,6 +1935,18 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and after.get("vetoHolder") == before.get("vetoHolder")
           and not (before.get("vetoHolder") is None and after.get("vetoHolder") is not None)):
         desync = "the POWER OF VETO being won"
+    # (7) #1659 R2: a phantom PLAYER REMOVAL / EXPULSION. Production-removal / expulsion language directed
+    #     at the player is a COMMITTED closed-set outcome (the player is OUT of the game). It is a
+    #     fabrication when the board shows the player is STILL ACTIVE and the season is not finished — the
+    #     2026-07-16 debug-bundle incident's msg63 ("You're being removed from the game… You're done here"),
+    #     narrated with playerStatus=active / pending=null / toolsCalled=[]. Unlike the HOH/veto/nom branches
+    #     this is NOT phase-scoped: a player expulsion has no legitimate phase, so it is verified DIRECTLY
+    #     against `playerStatus` (a real player eviction — playerStatus != "active" — never trips it, and an
+    #     unknown player identity — playerStatus None — stands down, mirroring the self-HOH branch).
+    if (not desync and _CLAIM_PLAYER_EXPULSION_RE.search(text)
+          and after.get("playerStatus") == "active"
+          and not after.get("finished")):
+        desync = "your own REMOVAL / EXPULSION from the game (the engine shows you are STILL in the game)"
 
     if not desync:
         return None
@@ -2519,6 +2564,7 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
         or _CLAIM_EVICT_RESULT_RE.search(text)  # LIVE-7 (#540): self-counted majority/short
         or _CLAIM_NOMINATED_RE.search(text)
         or _CLAIM_VETO_WINNER_RE.search(text)
+        or _CLAIM_PLAYER_EXPULSION_RE.search(text)  # #1659 R2: "you're being removed/expelled from the game"
     )
 
 

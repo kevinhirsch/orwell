@@ -50,7 +50,7 @@ def _clean_state():
 # Board fakes. `evicted_status` controls how many house members read non-active; `finished` /
 # `hoh` let each test move (or not move) exactly the field its claim is checked against.
 def _board_fakes(monkeypatch, *, phase, evicted, finished=False, hoh="npc:1", week=4,
-                 noms=("npc:2", "npc:3"), veto_holder=None):
+                 noms=("npc:2", "npc:3"), veto_holder=None, player_status=None):
     house = [{"id": "player", "status": "active"}]
     for i in range(evicted):
         house.append({"id": f"npc:{100 + i}", "status": "evicted"})
@@ -67,7 +67,12 @@ def _board_fakes(monkeypatch, *, phase, evicted, finished=False, hoh="npc:1", we
         }
 
     async def fake_state(user=None, **kw):
-        return {"week": week, "phase": phase, "finished": finished, "house": house, "beatSeq": 7}
+        state = {"week": week, "phase": phase, "finished": finished, "house": house, "beatSeq": 7}
+        # #1659 R2: the top-level `player` dict carries the player's live status; only set it when a test
+        # opts in, so every existing test keeps its unknown-identity posture (playerStatus None) untouched.
+        if player_status is not None:
+            state["player"] = {"id": "player", "status": player_status}
+        return state
 
     monkeypatch.setattr(orwell_engine, "game_status", fake_status)
     monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
@@ -225,6 +230,70 @@ def test_real_veto_winner_emits(monkeypatch):
     _board_fakes(monkeypatch, phase="veto", evicted=2, veto_holder="npc:2")  # a winner committed
     emit = _run(chat_helpers.screen_streamed_outcome(
         _USER, "After the comp, the underdog wins the Power of Veto."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+# ── #1659 R2: the phantom PLAYER REMOVAL / EXPULSION (the 2026-07-16 incident's msg63) ─ #
+
+def test_pre_filter_matches_player_expulsion_and_ignores_conditional():
+    # COMMITTED player-removal language reaches the async verify …
+    assert chat_helpers._sentence_has_closed_set_claim("You're being removed from the game.")
+    assert chat_helpers._sentence_has_closed_set_claim("You have been expelled from the house.")
+    assert chat_helpers._sentence_has_closed_set_claim("Production is now removing you from Big Brother.")
+    assert chat_helpers._sentence_has_closed_set_claim("You've been disqualified.")
+    assert chat_helpers._sentence_has_closed_set_claim("You're no longer in the game.")
+    # … but a CONDITIONAL / hypothetical (no committed marker) is open-set flavor and never trips.
+    assert not chat_helpers._sentence_has_closed_set_claim(
+        "If you're removed from the game, your votes would go to the jury.")
+    assert not chat_helpers._sentence_has_closed_set_claim(
+        "You worry that one wrong move could get you expelled someday.")
+    # A room move is never a game removal.
+    assert not chat_helpers._sentence_has_closed_set_claim("You're leaving the kitchen for the yard.")
+
+
+def test_phantom_player_expulsion_is_held_and_reground_stashed(monkeypatch):
+    """The exact 2026-07-16 fabrication: a committed player expulsion narrated while the board shows the
+    player is STILL active and the season is not finished → HOLD (False) + a next-turn re-ground stashed."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None,
+        "noms": [], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False, "playerStatus": "active",
+    }
+    _board_fakes(monkeypatch, phase="premiere", evicted=0, hoh=None, noms=(), player_status="active")
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "You're being removed from the game — you're done here."))
+    assert emit is False
+    assert _USER in chat_helpers._DESYNC_REGROUND
+    assert "RE-GROUND" in chat_helpers._DESYNC_REGROUND[_USER]
+
+
+def test_real_player_removal_when_status_not_active_emits(monkeypatch):
+    """A player who is legitimately OUT (playerStatus != 'active') is not a fabrication — the guard stands
+    down and EMITs (mirrors a real eviction emitting)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 6, "phase": "eviction", "pending": None, "hoh": "npc:1",
+        "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 5, "finished": False, "playerStatus": "active",
+    }
+    _board_fakes(monkeypatch, phase="eviction", evicted=5, player_status="evicted")  # player really left
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "You have been removed from the game."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_player_expulsion_stands_down_when_identity_unknown(monkeypatch):
+    """No top-level player identity on the board (playerStatus None) → the guard cannot prove a fabrication
+    and EMITs conservatively (mirrors the self-HOH-win branch's unknown-identity stand-down)."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 1, "phase": "premiere", "pending": None, "hoh": None,
+        "noms": [], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 0, "finished": False, "playerStatus": None,
+    }
+    _board_fakes(monkeypatch, phase="premiere", evicted=0, hoh=None, noms=())  # no player_status → None
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "You're being removed from the game."))
     assert emit is True
     assert _USER not in chat_helpers._DESYNC_REGROUND
 
