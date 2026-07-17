@@ -6648,7 +6648,12 @@ async def _stream_agent_loop_impl(
                                             _ov_applied_flags = {"force-advance": False,
                                                                  "propose-record": False}
 
-                                            async def _ov_do_force_advance() -> bool:
+                                            # Ruff B023: default-arg binding captures THIS iteration's
+                                            # _emitted_visible at def time (the closure is defined fresh
+                                            # every round-loop iteration and invoked immediately below, so
+                                            # the value is already correct — this just makes it explicit
+                                            # rather than an implicit loop-variable closure).
+                                            async def _ov_do_force_advance(_emitted_visible=_emitted_visible) -> bool:
                                                 _ok = False
                                                 _fok = True
                                                 try:
@@ -6881,7 +6886,15 @@ async def _stream_agent_loop_impl(
                                         lever="force-advance", ok=True, user=owner)
                                 except Exception:
                                     pass
-                                messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
+                                _fa_txt = _FORCED_ADVANCE_NUDGE
+                                if _emitted_visible:
+                                    # A scene already streamed THIS turn (non-active-overseer path,
+                                    # mirroring _ov_do_force_advance above) — do not let the
+                                    # forced-advance re-prompt read as "narrate the beat again" (the
+                                    # stuttering-narrator bug: two contradictory takes of one moment
+                                    # fused into the SAME message bubble via #829 turn-coalescing).
+                                    _fa_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _fa_txt
+                                messages.append({"role": "system", "content": _fa_txt})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
                             # else: forced advance failed — fall through to the text nudge below.
@@ -6902,6 +6915,11 @@ async def _stream_agent_loop_impl(
                                 lever="nudge", ok=True, user=owner)
                         except Exception:
                             pass
+                        if _emitted_visible:
+                            # Same guard as above (mirroring _ov_nudge) — a scene already streamed
+                            # this turn, so carry the continue-never-reopen contract ahead of the
+                            # text nudge rather than re-prompting a bare "narrate/advance" line.
+                            _nudge = _CONTINUE_NEVER_REOPEN + "\n\n" + _nudge
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue

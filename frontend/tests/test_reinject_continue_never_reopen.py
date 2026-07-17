@@ -21,10 +21,14 @@ This is the TEST lane for that fix:
     the round-2 context the model receives carries the continue-never-reopen contract;
   * a CONTRAST behavior test proving the gate is conditional — when NOTHING has been shown yet,
     the reinject-delta re-prompt is unchanged (no continue-never-reopen wrapper needed);
+  * a second BEHAVIOR test (CodeRabbit finding, 2026-07-17) driving the L39(b) safety-net's two
+    BARE fallback re-prompt sites — reached with the overseer disabled/unavailable, past a FAILED
+    ``_commit_advance_silently()`` — which previously carried no ``_emitted_visible`` guard at all;
   * SOURCE-PIN tests (the established convention for this giant, not-independently-unit-testable
     streaming function — see test_npc_approach_nudge.py / test_lane_a_advance_atleastonce.py) that
     the ``nudge`` / ``force-advance`` overseer levers AND the four casting finalize-force re-prompt
-    sites carry the SAME gate.
+    sites carry the SAME gate — strengthened (CodeRabbit) to prove each guard is LOCALLY nested
+    around its own wrap assignment, not merely co-occurring somewhere in a large block.
 
 Roles only — no houseguest names.
 """
@@ -190,6 +194,20 @@ def test_reinject_delta_after_visible_scene_carries_continue_never_reopen(monkey
     )
     assert "already been shown to the player" in combined.lower()
     assert "do not re-narrate" in combined.lower()
+    # CodeRabbit strengthening: the source builds this as EXACTLY
+    # `_CONTINUE_NEVER_REOPEN + "\n\n" + _reground_txt` — assert the prefix is the very START of
+    # the injected message and the reground directive follows IMMEDIATELY after the "\n\n" join,
+    # not merely that both substrings appear somewhere in the combined text (which would also
+    # pass if some OTHER, unrelated content sat between them).
+    assert combined.startswith(al._CONTINUE_NEVER_REOPEN), (
+        "the continue-never-reopen contract must be the very start of the injected message"
+    )
+    reground_idx = combined.index("RE-GROUND ON THE BOARD")
+    assert reground_idx == len(al._CONTINUE_NEVER_REOPEN) + 2, (
+        "the reground directive must immediately follow the continue-never-reopen prefix, "
+        "separated by nothing but the single '\\n\\n' join — never interleaved with other content"
+    )
+    assert combined[len(al._CONTINUE_NEVER_REOPEN):reground_idx] == "\n\n"
 
 
 def test_reinject_delta_before_any_visible_scene_is_unchanged(monkeypatch, tmp_path):
@@ -218,7 +236,141 @@ def test_reinject_delta_before_any_visible_scene_is_unchanged(monkeypatch, tmp_p
     )
 
 
+# ── behavior: the L39(b) safety-net fallback, OVERSEER DISABLED, _commit_advance_silently FAILS ──
+
+def _drive_forced_advance_fallback_after_visible(monkeypatch, tmp_path, *, max_rounds=2):
+    """CodeRabbit coverage: the two BARE fallback re-prompt sites this PR fixed (the
+    `_FORCED_ADVANCE_NUDGE` force-attempt site and the plain graduated `_nudge` site, both past the
+    L39(b) safety net) live in the code path reached ONLY when the overseer is disabled/unavailable
+    AND `_commit_advance_silently()` itself has already failed once (round 1's own silent-commit
+    attempt at the `if _emitted_visible:` fork). Drive that exact shape for real: overseer_mode is
+    explicitly `off`, `advance_game` ALWAYS raises (so every `_commit_advance_silently()` call —
+    both the round-1 attempt and the L39(b) forced-attempt — fails), and the stall level is
+    pre-seeded to `_ADVANCE_FORCE_LEVEL` so the L39(b) force branch is actually entered (and then
+    itself fails, falling through to the plain text nudge — the literal "forced advance failed —
+    fall through to the text nudge below" comment in the source). Round 1 narrates a full visible
+    scene with no tool call, so `_emitted_visible` is True when the fallback fires.
+
+    Returns the list of `messages` snapshots captured on each `fake_stream` invocation."""
+    _isolate_settings(monkeypatch, tmp_path)
+    from src.settings import save_settings
+    save_settings({"overseer_mode": "off"})   # deterministic — the overseer must never engage here
+
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+    monkeypatch.setattr(al, "get_setting", lambda key, default=None: default)
+    import src.tool_index as ti
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)
+
+    monkeypatch.setattr(al, "_player_turn_is_lull", lambda messages: True)
+    monkeypatch.setattr(al, "_effective_advance_grace", lambda owner: 0)
+
+    # Pre-seed the persisted stall level to the force threshold so THIS turn enters the L39(b)
+    # force-attempt branch (not just the graduated text rungs) — exercising both fixed sites.
+    al._ADVANCE_STALL_LEVEL[al._belt_key(OWNER)] = al._ADVANCE_FORCE_LEVEL
+
+    async def fake_state(user=None, **kw):
+        return {"phase": "premiere", "moment": "premiere", "week": 1, "finished": False, "house": []}
+    monkeypatch.setattr(orwell_engine, "get_game_state", fake_state)
+
+    async def fake_advance(expected_beat_seq=None, idempotency_key=None, user=None):
+        # ALWAYS fails — so every _commit_advance_silently() call this turn fails cleanly, both
+        # the round-1 silent-commit attempt and the L39(b) forced re-attempt.
+        raise RuntimeError("engine unavailable")
+    monkeypatch.setattr(orwell_engine, "advance_game", fake_advance)
+
+    round_payloads = ["The living room settles into a quiet hush as the night winds down.",
+                       "A houseguest offers a small nod from across the room."]
+    _round = {"n": 0}
+    captured_messages = []
+
+    async def fake_stream(candidates, messages, **kwargs):
+        i = min(_round["n"], len(round_payloads) - 1)
+        text = round_payloads[i]
+        _round["n"] += 1
+        captured_messages.append(list(messages))
+        if text:
+            yield 'data: ' + json.dumps({"delta": text}) + '\n\n'
+        yield 'data: ' + json.dumps({"type": "finish", "reason": "stop"}) + '\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    async def drive():
+        gen = al.stream_agent_loop(
+            "https://api.openai.com/v1/chat/completions",
+            "deepseek/deepseek-v4-pro",
+            [{"role": "system", "content": "You are Big Brother, the narrator."},
+             {"role": "user", "content": "I take a slow lap around the house."}],
+            max_rounds=max_rounds,
+            game_mode="game",
+            owner=OWNER,
+        )
+        async for _chunk in gen:
+            pass
+
+    _run(drive())
+    return captured_messages
+
+
+def test_forced_advance_fallback_after_failed_silent_commit_carries_continue_never_reopen(
+        monkeypatch, tmp_path):
+    """CodeRabbit finding (a): the two BARE fallback re-prompts at the L39(b) safety net (reached
+    when the overseer is off/unavailable, past a FAILED `_commit_advance_silently()`) previously
+    injected their directive with no `_emitted_visible` guard at all — unlike the ACTIVE overseer's
+    `nudge`/`force-advance` levers, which already carried it. Drive the real fallback shape (overseer
+    off, `advance_game` always raising, the stall level pre-seeded past the force threshold) and
+    assert round 2's injected system message carries the continue-never-reopen contract."""
+    captured = _drive_forced_advance_fallback_after_visible(monkeypatch, tmp_path)
+    assert len(captured) >= 2, "the L39(b) fallback must still re-prompt a second round"
+
+    round2_messages = captured[1]
+    system_msgs = [m for m in round2_messages if m.get("role") == "system"]
+    # The forced-advance attempt itself failed (advance_game always raises), so the
+    # `_FORCED_ADVANCE_NUDGE` branch never appends — this turn falls all the way through to the
+    # plain graduated `_nudge` site. Either way, whichever fired must carry the wrap.
+    wrapped = [m for m in system_msgs
+               if "CONTINUE" in str(m.get("content", "")) and "DO NOT REOPEN" in str(m.get("content", ""))]
+    assert wrapped, (
+        "a re-prompt firing at the L39(b) safety net AFTER a scene already streamed (overseer "
+        "disabled, silent-commit failed) must carry the continue-never-reopen contract — this is "
+        "the exact bare-fallback gap CodeRabbit flagged"
+    )
+    combined = wrapped[-1]["content"]
+    assert combined.startswith(al._CONTINUE_NEVER_REOPEN), (
+        "the continue-never-reopen contract must prefix the fallback nudge, matching the same "
+        "shape as the overseer levers"
+    )
+    # Never the RAW forced-advance-nudge text or a raw graduated nudge with no prefix.
+    assert not any(
+        (m.get("content") == al._FORCED_ADVANCE_NUDGE
+         or m.get("content") in al._ADVANCE_NUDGES)
+        for m in system_msgs
+    ), "the fallback nudge must never be injected bare once a scene already streamed this turn"
+
+
 # ── source-pin: the SAME contract on the sibling overseer levers (nudge / force-advance) ─────────
+
+def _assert_wrap_nested_inside_guard(block: str, assign_marker: str, label: str):
+    """CodeRabbit strengthening: prove the `_CONTINUE_NEVER_REOPEN` wrap-assignment is textually
+    NESTED inside its OWN `if _emitted_visible:` guard — not merely that both strings appear
+    somewhere in the (potentially large) surrounding function block, which would also pass if the
+    wrap sat in a dead/unrelated branch or the guard belonged to some other conditional entirely."""
+    assign_idx = block.index(assign_marker)
+    guard_idx = block.rindex("if _emitted_visible:", 0, assign_idx)
+    assert guard_idx != -1, f"{label}: no `if _emitted_visible:` guard precedes the wrap assignment"
+    guarded_slice = block[guard_idx:assign_idx]
+    # Nothing but the guard's own comment lines may sit between the `if` and the assignment —
+    # bound the gap tightly so a guard belonging to some earlier/unrelated branch can't satisfy it.
+    assert len(guarded_slice) < 700, (
+        f"{label}: the `if _emitted_visible:` guard is too far from the wrap assignment to be "
+        f"the one gating it — {len(guarded_slice)} chars apart"
+    )
+    # No unrelated `def`/`return` boundary between the guard and the assignment (i.e. we're still
+    # inside the SAME function, the SAME conditional body).
+    assert "\ndef " not in guarded_slice and "\nasync def " not in guarded_slice, (
+        f"{label}: the guard and the wrap assignment straddle a function boundary"
+    )
+
 
 def test_source_pin_overseer_nudge_and_force_advance_carry_the_same_gate():
     src = _src()
@@ -230,13 +382,24 @@ def test_source_pin_overseer_nudge_and_force_advance_carry_the_same_gate():
     nudge_block = src[nudge_start:nudge_end]
     assert "if _emitted_visible:" in nudge_block
     assert "_CONTINUE_NEVER_REOPEN" in nudge_block
+    _assert_wrap_nested_inside_guard(nudge_block, "_txt = _CONTINUE_NEVER_REOPEN", "_ov_nudge")
 
-    # `_ov_do_force_advance` — the forced-advance re-prompt:
-    fa_start = src.index("async def _ov_do_force_advance() -> bool:")
+    # `_ov_do_force_advance` — the forced-advance re-prompt. CodeRabbit fix: the function now binds
+    # `_emitted_visible` as an explicit default-arg (Ruff B023 — a closure defined fresh every
+    # round-loop iteration must not rely on an implicit loop-variable capture), so the signature
+    # changed from the bare `()` this pin used to anchor on.
+    fa_start = src.index("async def _ov_do_force_advance(")
+    fa_sig_end = src.index(") -> bool:", fa_start) + len(") -> bool:")
+    fa_sig = src[fa_start:fa_sig_end]
+    assert "_emitted_visible=_emitted_visible" in fa_sig, (
+        "the Ruff B023 fix must bind _emitted_visible as an explicit default-arg, not an "
+        "implicit closure over the enclosing loop's variable"
+    )
     fa_end = src.index("def _ov_nudge() -> bool:", fa_start)
     fa_block = src[fa_start:fa_end]
     assert "if _emitted_visible:" in fa_block
     assert "_CONTINUE_NEVER_REOPEN" in fa_block
+    _assert_wrap_nested_inside_guard(fa_block, "_fa_txt = _CONTINUE_NEVER_REOPEN", "_ov_do_force_advance")
 
     # `_ov_reinject_delta` — the lever this bug report named directly:
     ri_start = src.index("def _ov_reinject_delta() -> bool:")
@@ -244,6 +407,18 @@ def test_source_pin_overseer_nudge_and_force_advance_carry_the_same_gate():
     ri_block = src[ri_start:ri_end]
     assert "if _emitted_visible:" in ri_block
     assert "_CONTINUE_NEVER_REOPEN" in ri_block
+    # `_ov_reinject_delta` wraps the message INLINE in the `messages.append` call itself (no
+    # intermediate variable — see the source), so pin the guard immediately precedes THAT append
+    # (nothing but its own explanatory comment lines between them — no other code, no function
+    # boundary — proving the append is INSIDE this specific guard, not some other one).
+    guard_idx = ri_block.index("if _emitted_visible:")
+    append_idx = ri_block.index('messages.append({"role": "system", "content":\n', guard_idx)
+    between = ri_block[guard_idx:append_idx]
+    assert "\ndef " not in between and "\nasync def " not in between and "\nreturn" not in between, (
+        "_ov_reinject_delta: the guard and its guarded messages.append are not directly nested "
+        "(something else — another function, an early return — sits between them)"
+    )
+    assert "_CONTINUE_NEVER_REOPEN" in ri_block[guard_idx:append_idx + 200]
 
 
 # ── source-pin: the SAME family fix in the CASTING finalize-force belt (the msg-5-class seam) ────
@@ -267,6 +442,36 @@ def test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate():
         "casting-incomplete refusal / the generic finalize nudge)"
     )
     assert casting_block.count("if _emitted_visible:") >= 4
+
+    # CodeRabbit strengthening: the two counts above only prove 4-and-4 occur SOMEWHERE in this
+    # (large) block — not that each of the four re-prompt sites carries its OWN LOCAL guard
+    # immediately ahead of its own assignment. Pin each of the four sites individually: the wrap
+    # assignment must be preceded by an `if _emitted_visible:` with nothing but that guard's own
+    # comment lines between them (no other code, no function/branch boundary crossed), i.e. the
+    # guard actually gates THAT assignment and not some other one.
+    for var_name, label in (
+        ("_nmw_txt", "no-model-wired steer"),
+        ("_cfn_txt", "forced finalize->premiere note"),
+        ("_ci_txt", "casting-incomplete refusal steer"),
+        ("_cn", "generic finalize nudge"),
+    ):
+        assign_marker = f"{var_name} = _CONTINUE_NEVER_REOPEN"
+        assign_idx = casting_block.index(assign_marker)
+        guard_idx = casting_block.rindex("if _emitted_visible:", 0, assign_idx)
+        between_guard_and_assign = casting_block[guard_idx:assign_idx]
+        assert len(between_guard_and_assign) < 700, (
+            f"{label} ({var_name}): the nearest `if _emitted_visible:` guard is too far from the "
+            f"wrap assignment to be the one gating it"
+        )
+        assert "\ndef " not in between_guard_and_assign and "\nelif " not in between_guard_and_assign, (
+            f"{label} ({var_name}): the guard and the wrap assignment straddle a branch/function "
+            f"boundary — not actually the SAME local `if`"
+        )
+        append_marker = f'"content": {var_name}}})'
+        append_idx = casting_block.index(append_marker, assign_idx)
+        assert append_idx - assign_idx < 300, (
+            f"{label} ({var_name}): the wrap assignment and its messages.append are too far apart"
+        )
 
     # The forced finalize->premiere transition specifically — the msg-5-class seam (interview reply
     # glued to the premiere walk-in) — must be one of the wrapped sites.
