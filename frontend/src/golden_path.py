@@ -205,12 +205,34 @@ def _neutralize_offscreen_society(s: str) -> str:
     return s
 
 
+# The SAME per-committed-turn presence-tenure counter neutralized above in the rendered "Your
+# room:"/"With you:" PROMPT TEXT (`_neutralize_presence_lines`) is ALSO echoed RAW into a tool
+# RESULT a round can hand back to the model on the very next round — e.g. `createCharacter`'s
+# response nests a full `whereabouts` snapshot (`{"turnsHere": N, "companions": [{"turnsHere": N},
+# …]}`) at season start. That JSON leaf is a distinct code path from the humanized prompt lines
+# (it reaches the key via `_canon_messages`' `tool`-role content, not `momentPrompts.ts`), so the
+# line-scoped presence subs above never touch it — the exact gap the fresh 2026-07-17 GLM
+# recording surfaced: the finalize turn's round-2 request (built from round-1's replayed
+# `createCharacter` tool result) keys on the LIVE-recorded tenure snapshot, which the deterministic
+# replay reconstruction cannot reproduce bit-for-bit (a real, otherwise-harmless value baked into
+# ONE recording run). Neutralized narrowly — the numeric LEAF only, by JSON key name, wherever it
+# appears — so every other detail in the same tool-result payload (room assignment, roster, names)
+# still drifts the key on a real change.
+_TURNSHERE_JSON_RE = _re.compile(r'("turnsHere"\s*:\s*)\d+')
+
+
+def _neutralize_presence_tenure_json(s: str) -> str:
+    return _TURNSHERE_JSON_RE.sub(r"\g<1>0", s)
+
+
 def _neutralize_volatile(s: str) -> str:
     # Dwell counters/labels are neutralized only on the presence lines that render them.
     s = _neutralize_presence_lines(s)
     # The off-screen-society gossip-drift hedge + the movement-in-the-room cue (#1355) —
     # both tick-timing-volatile framing, narrowly neutralized (see the module notes above).
     s = _neutralize_offscreen_society(s)
+    # The same tenure counter, echoed RAW as JSON inside a tool result (see the note above).
+    s = _neutralize_presence_tenure_json(s)
     # Date/time shapes are neutralized ONLY inside the wall-clock context section, so a real
     # date/time embedded in game content or a tool result still drifts the key.
     idx = s.find(_WALLCLOCK_HEADER)
@@ -377,33 +399,142 @@ def _append_record(rec: Dict[str, Any]) -> None:
         logging.getLogger(__name__).exception("golden-record: failed to append record")
 
 
+def dropped_sidecar_path(path: Optional[str] = None) -> str:
+    """The sidecar file beside the fixture that records every stream the record run
+    could NOT persist as replayable. The record script triages each entry by request
+    key: a drop whose key also has a PERSISTED fixture record (the FE transparently
+    retried the same request and the retry succeeded) is benign — replay just consumes
+    the success — while a drop with no persisted same-key twin means replay would
+    hard-miss there, and the script fails the take instead of printing RECORD OK."""
+    return (path or fixture_path()) + ".dropped.jsonl"
+
+
+#: Set when a dropped-stream sidecar write itself failed. The record script treats this as
+#: fatal: with the diagnostics lost, a dropped stream could otherwise slip past the triage
+#: and bless an unreplayable take. Kept as a flag (not a raise) because record_stream runs
+#: in the live chokepoint's ``finally`` — recording must never break the run it rides.
+_sidecar_write_failed = False
+
+
+def sidecar_write_failed() -> bool:
+    """True if any dropped-stream sidecar append failed this process (record script gate)."""
+    return _sidecar_write_failed
+
+
+def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
+                    resp: Dict[str, Any], chunks: List[str], key: str) -> None:
+    """Diagnostics for a stream the record run dropped (never fixture content — key/model/
+    shape only, 0107-scrubbed, so the sidecar can be printed verbatim in the record report).
+    The request key lets the record script tell a BENIGN drop (a persisted same-key retry)
+    from a POISONED take (no persisted twin ⇒ replay hard-misses there). A write failure
+    latches ``_sidecar_write_failed`` so the record script fails the take rather than
+    accepting one whose drop diagnostics were lost."""
+    global _sidecar_write_failed
+    try:
+        with open(dropped_sidecar_path(), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "reason": reason,
+                "key": key,
+                "model": candidates_model,
+                "call_class": kwargs.get("call_class") or "narration",
+                "finish_reason": resp.get("finishReason"),
+                "error": _scrub(resp.get("error")),
+                "chunk_count": len(chunks),
+                "output_chars": len(resp.get("text") or ""),
+            }, ensure_ascii=False) + "\n")
+    except Exception:
+        _sidecar_write_failed = True
+        import logging
+        logging.getLogger(__name__).exception("golden-record: failed to append dropped-stream sidecar")
+
+
+def fixture_keys(path: Optional[str] = None) -> set:
+    """Every replayable request key the fixture holds (record-script helper for the
+    benign-vs-poisoned dropped-stream triage)."""
+    keys = set()
+    p = path or fixture_path()
+    try:
+        with open(p, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(rec, dict) and rec.get("key"):
+                    keys.add(rec["key"])
+    except OSError:
+        pass
+    return keys
+
+
+def _debug_dump_request(kind: str, key: str, digest: Optional[Dict[str, Any]],
+                        params: Dict[str, Any], messages: Optional[List[Dict]]) -> None:
+    """Opt-in drift forensics (``ORWELL_GOLDEN_DEBUG_DUMP=<path>``): append this request's
+    CANONICAL form (key + digest + neutralized messages). On the replay side the miss path
+    calls this so a drifted prompt can be diffed instead of guessed at from the sha; on the
+    record side record_stream/record_call call it for EVERY persisted request so the two
+    dumps can be byte-diffed turn-by-turn. Best-effort, never raises, off by default."""
+    dump = os.environ.get("ORWELL_GOLDEN_DEBUG_DUMP")
+    if not dump:
+        return
+    try:
+        # noqa: the dump path is an operator/CI-controlled env var (opt-in drift
+        # diagnosis), never user input — not an untrusted-path traversal.
+        with open(dump, "a", encoding="utf-8") as fh:  # nosec B108
+            fh.write(json.dumps(_scrub({
+                "kind": kind, "key": key, "digest": digest,
+                "params": _canon_params(params),
+                "messages": _canon_messages(messages),
+            }), ensure_ascii=False) + "\n")
+    except OSError:
+        # Best-effort diagnostic only — a write failure must never affect the run.
+        pass
+
+
 def record_stream(candidates_model: str, messages: List[Dict],
                   kwargs: Dict[str, Any], chunks: List[str],
                   *, completed: Optional[bool] = None) -> None:
-    """Append one NORMALLY-completed streamed call to the fixture (called from the
-    chokepoint's ``finally`` with the full ordered chunk list).
+    """Append one streamed call to the fixture (called from the chokepoint's ``finally``
+    with the full ordered chunk list).
 
-    The ``finally`` also fires on an upstream exception or an async-generator close/cancel,
-    so a partial/failed live stream would otherwise be persisted as a replayable fixture and
-    poison replay. Only a stream that terminated normally is persisted: no error chunk was
-    seen AND the stream reached its end (a ``finish`` chunk set finishReason, or the SSE
-    ``[DONE]`` sentinel arrived). A caller may veto explicitly with ``completed=False``."""
+    Persistence rule (2026-07-17 — the finalize-turn replay miss): a stream is persisted
+    whenever it carried NO error chunk and the caller did not veto it (``completed=False``).
+    That deliberately INCLUDES a clean stream with no finishReason and no ``[DONE]`` — the
+    live model (GLM-4.7) really does end a stream empty-handed sometimes, the FE's refire
+    belts handle it live, and replay must re-emit the same empty stream to walk the same
+    belt path; the old finish-marker requirement silently dropped those streams and made
+    the take unreplayable (replay hard-missed at the finalize turn). ``meta.completed_normally``
+    still records whether finish markers were seen, for diagnosis.
+
+    An ERRORED or caller-vetoed stream is still never persisted — the FE's live reaction
+    (retry / model fallback) can't be reproduced from a poisoned record — but it is now
+    logged to the dropped-stream sidecar so the record script FAILS the take loudly
+    instead of shipping a fixture that replay cannot walk."""
     from src import llm_trace
     acc = llm_trace.StreamAccumulator()
     for c in chunks:
         acc.observe(c)
     resp = acc.response()
-    completed_normally = (
-        completed is not False
-        and not resp.get("error")
-        and (bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
-    )
-    if not completed_normally:
+    if completed is False or resp.get("error"):
+        params = dict(kwargs)
+        params["model"] = candidates_model
+        _append_dropped("vetoed" if completed is False else "error-chunk",
+                        candidates_model, kwargs, resp, chunks,
+                        request_key("stream", messages, kwargs.get("tools"), params))
         return
+    completed_normally = (
+        bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
     params = dict(kwargs)
     params["model"] = candidates_model
+    _key = request_key("stream", messages, kwargs.get("tools"), params)
+    _debug_dump_request("stream", _key,
+                        request_digest(messages, kwargs.get("tools"), params),
+                        params, messages)
     _append_record({
-        "key": request_key("stream", messages, kwargs.get("tools"), params),
+        "key": _key,
         "call_class": kwargs.get("call_class") or "narration",
         "model": candidates_model,
         "request_digest": request_digest(messages, kwargs.get("tools"), params),
@@ -415,6 +546,7 @@ def record_stream(candidates_model: str, messages: List[Dict],
             "reasoning_chars": len(resp.get("reasoning") or ""),
             "tool_call_seen": bool(resp.get("toolCalls")),
             "error": resp.get("error"),
+            "completed_normally": completed_normally,
         },
     })
 
@@ -424,8 +556,11 @@ def record_call(model: str, messages: List[Dict], params: Dict[str, Any],
     """Append one completed utility (non-streaming) call to the fixture."""
     params = dict(params)
     params["model"] = model
+    _key = request_key("call", messages, None, params)
+    _debug_dump_request("call", _key, request_digest(messages, None, params),
+                        params, messages)
     _append_record({
-        "key": request_key("call", messages, None, params),
+        "key": _key,
         "call_class": params.get("call_class") or "utility",
         "model": model,
         "request_digest": request_digest(messages, None, params),
@@ -600,21 +735,7 @@ def _lookup(key: str, kind: str, params: Dict[str, Any],
         # Diagnosis aid: with ORWELL_GOLDEN_DEBUG_DUMP=<path>, append the full live
         # request (scrubbed) so a drifted prompt can be diffed against the recording
         # instead of guessed at from the sha alone.
-        dump = os.environ.get("ORWELL_GOLDEN_DEBUG_DUMP")
-        if dump:
-            try:
-                # noqa: the dump path is an operator/CI-controlled env var (opt-in drift
-                # diagnosis), never user input — not an untrusted-path traversal.
-                with open(dump, "a", encoding="utf-8") as fh:  # nosec B108
-                    fh.write(json.dumps(_scrub({
-                        "kind": kind, "key": key, "digest": digest,
-                        "params": _canon_params(params),
-                        "messages": _canon_messages(messages),
-                    }), ensure_ascii=False) + "\n")
-            except OSError:
-                # Best-effort diagnostic only — a write failure must never mask the drift
-                # miss we are about to raise. Narrow to I/O errors so real bugs still surface.
-                pass
+        _debug_dump_request(kind, key, digest, params, messages)
         raise GoldenReplayMiss(
             f"{MISS_SENTINEL}: no fixture entry for {kind} request key {key[:16]}… "
             f"(model={params.get('model')}, call_class={params.get('call_class')}, "

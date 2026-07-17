@@ -184,7 +184,11 @@
       .ow-headshot-studio .hs-libdel { position: absolute; top: 1px; right: 1px; width: 20px; height: 20px; line-height: 18px;
         border-radius: 50%; border: none; cursor: pointer; font-size: 13px; padding: 0; z-index: 1;
         display: inline-flex; align-items: center; justify-content: center;
-        background: rgba(0,0,0,.6); color: #fff; opacity: 0; transition: opacity .12s; }
+        /* #1644 (rendered audit §2): white × over a LIGHT portrait thumbnail through the old .6
+           scrim composited to ~2.55:1 (white-on-grey). Deepen the scrim + add a dark glyph halo so
+           the × clears AA over ANY thumbnail (light face or dark). */
+        background: rgba(0,0,0,.78); color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.9);
+        opacity: 0; transition: opacity .12s; }
       /* keyboard/touch users have no hover — reveal the delete on focus-within too. */
       .ow-headshot-studio .hs-libitem:hover .hs-libdel,
       .ow-headshot-studio .hs-libitem:focus-within .hs-libdel { opacity: 1; }
@@ -193,7 +197,7 @@
          touch since there's no hover to reveal it) without bloating the compact desktop UI. */
       @media (hover: none) and (pointer: coarse) {
         .ow-headshot-studio .hs-libdel { width: 44px; height: 44px; line-height: 42px;
-          font-size: 18px; opacity: 1; background: rgba(0,0,0,.72); }
+          font-size: 18px; opacity: 1; background: rgba(0,0,0,.82); }
       }
       @media (prefers-reduced-motion: reduce) { .ow-headshot-studio .hs-libdel { transition: none; } }
       /* "Choose Your Character" pill — a competition-style CTA. #913: it is now PINNED above the

@@ -1395,6 +1395,18 @@ function _onSwatchKeydown(e) {
     sw.click();
     return;
   }
+  // AXE-1 / #1658: the per-tile ✕ delete control is tabindex="-1" (so the listbox stays ONE Tab stop
+  // per grid, not one-per-delete-button), so expose delete as a keyboard action on the focused custom
+  // option — Delete or Backspace clicks the sibling ✕ (reusing its styledConfirm + delete flow). A
+  // built-in preset swatch has no ✕ (no .ow-swatch-cell wrapper) ⇒ delBtn is null ⇒ no-op.
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    const delBtn = sw.parentElement && sw.parentElement.querySelector('.theme-delete-btn');
+    if (delBtn) {
+      e.preventDefault();
+      delBtn.click();
+    }
+    return;
+  }
   const NAV_KEYS = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'];
   if (NAV_KEYS.indexOf(e.key) === -1) return;
   const gridEl = sw.closest('.ow-swatch-grid');
@@ -1644,7 +1656,7 @@ export function initThemeUI() {
           </div>
           <span class="ow-swatch__name">${name}</span>
         </div>
-        <button type="button" class="theme-delete-btn" data-delete="${name}" title="Delete theme" aria-label="Delete theme ${name}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="theme-delete-btn" data-delete="${name}" tabindex="-1" title="Delete theme" aria-label="Delete theme ${name}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     `).join('');
   } else if (userCard) {

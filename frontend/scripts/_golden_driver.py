@@ -464,6 +464,48 @@ class GoldenDriver:
             raise RuntimeError(f"preSeedCast failed: {r}")
         self._quiesce_beats("post-preseed")
 
+    def prewarm(self) -> None:
+        """Mirror the browser's casting-open pre-warm, then wait for the WHOLE enrichment
+        pipeline (genesis → identity → deep authoring) to land BEFORE the interview starts.
+
+        Why this is load-bearing for determinism (the attempt-9 walk-turn miss): the premiere
+        frame's champagne-circle block freezes the cast's descriptive identity at season
+        start. Without the pre-warm, enrichment only starts at create-time — in a live
+        record it is still mid-flight when the season starts (the circle freezes the seeded
+        FLOOR descriptions), while replay's fixture-fed enrichment lands instantly (the
+        circle freezes the AUTHORED ones) — so every started-game frame differs and replay
+        misses. Kicking the browser-parity pre-warm and waiting for `authorDone` here puts
+        the fully-authored cast in front of createCharacter in BOTH modes. Replay is fast:
+        the same calls replay from the fixture in seconds."""
+        budget = (CAST_AUTHORING_WAIT_RECORD_S if self.mode == "record"
+                  else CAST_AUTHORING_WAIT_REPLAY_S)
+        # ONE monotonic deadline covers the POST and the poll loop together (the POST runs
+        # genesis + identity inline — minutes on a live record — and the whole step must
+        # still bound at `budget`, not 2×budget).
+        started_at = time.monotonic()
+        deadline = started_at + budget
+        r = self._post_json(self.fe, "/api/orwell/prewarm-cast", {}, timeout=budget)
+        if not r.get("warmed"):
+            raise RuntimeError(f"prewarm-cast did not warm the cast: {r}")
+        last: dict = {}
+        while time.monotonic() < deadline:
+            try:
+                health = self._get(self.fe, "/api/admin/health")
+                ca = (health.get("castAuthoring") or {})
+                last = ca.get("prewarm") or {}
+            except Exception:  # noqa: BLE001 — a transient health-read blip must not kill the wait
+                last = last or {}
+            if last.get("authorDone"):
+                print(f"  prewarm: enrichment landed (authorDone) "
+                      f"({int(time.monotonic() - started_at)}s elapsed)", flush=True)
+                self._quiesce_beats("post-prewarm")
+                return
+            time.sleep(min(CAST_AUTHORING_POLL_S, max(0.1, deadline - time.monotonic())))
+        raise RuntimeError(
+            f"prewarm enrichment did not finish within {int(budget)}s (state: {last}) — "
+            "the cast would enter the house on the floor and every started-game frame "
+            "would be record/replay-divergent")
+
     def _quiesce_beats(self, label: str, stable_polls: int = 3, budget_s: int | None = None,
                        poll_s: float = 1.0, quiet: bool = False) -> None:
         """Wait until the engine's beatSeq stops moving — a serialization barrier so the
@@ -962,6 +1004,7 @@ def run_once(**kw) -> GoldenDriver:
         d.boot()
         d.configure_model()
         d.preseed()
+        d.prewarm()
         d.walk()
         if d.mode == "replay":
             d.assert_replay_contract()

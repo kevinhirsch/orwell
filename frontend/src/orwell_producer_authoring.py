@@ -202,7 +202,7 @@ async def author_producer(llm_fn: LlmFn, write_fn: WriteFn, *,
     messages = build_authoring_messages(producer)
     try:
         text = await llm_fn(messages)
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_authoring records llm-failed RED via log_rings.record_soft_failure)
         logger.warning("[producer-authoring] synthesis failed: %s", e)
         return {"accepted": False, "reason": "llm-failed"}
     overlay = parse_authored_producer(text or "")
@@ -212,7 +212,7 @@ async def author_producer(llm_fn: LlmFn, write_fn: WriteFn, *,
             logger.info("[producer-authoring] no JSON in reply — retrying once with a strict JSON-only instruction")
             try:
                 text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
-            except Exception as e:
+            except Exception as e:  # failsoft-ok: handled-by-terminal (run_authoring records llm-failed RED via log_rings.record_soft_failure)
                 logger.warning("[producer-authoring] strict-JSON retry failed: %s", e)
                 return {"accepted": False, "reason": "llm-failed"}
             overlay = parse_authored_producer(text or "")
@@ -220,7 +220,7 @@ async def author_producer(llm_fn: LlmFn, write_fn: WriteFn, *,
         return {"accepted": False, "reason": "no-fields"}
     try:
         return await write_fn(overlay)
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_authoring records write-failed RED via log_rings.record_soft_failure)
         logger.warning("[producer-authoring] write-back failed: %s", e)
         return {"accepted": False, "reason": "write-failed"}
 
@@ -242,6 +242,14 @@ async def run_authoring(owner: Optional[str]) -> dict:
         llm_fn = await _resolve_llm_fn(owner)
     except Exception as e:  # noqa: BLE001 — fail-soft background driver: never raise
         logger.warning("[producer-authoring] utility-model resolution failed: %s", e)
+        # #1599: a RAISED resolver is a genuine fault (distinct from a resolved None = expected
+        # no-model) — surface it RED; the seeded producer floor stands (auto-corrected).
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("producer:resolver-failed", e,
+                                          corrected="seeded-producer-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"accepted": False, "reason": "resolver-failed"}
     if llm_fn is None:
         logger.debug("[producer-authoring] no utility model — keeping the seeded producer floor")
@@ -251,7 +259,20 @@ async def run_authoring(owner: Optional[str]) -> dict:
     async def _write(overlay: dict) -> dict:
         return await orwell_engine.record_producer_profile(overlay, user=owner)
 
-    return await author_producer(llm_fn, _write)
+    result = await author_producer(llm_fn, _write)
+    # #1599: a GENUINE producer-authoring failure (the model call RAISED, or the engine REFUSED the
+    # write-back) shows RED on /admin/status — the seeded producer floor stands (auto-corrected),
+    # never a silent skip. Expected-empty reasons (no-model / no-fields) are normal flow, no alarm.
+    if isinstance(result, dict) and not result.get("accepted") \
+            and result.get("reason") in ("llm-failed", "write-failed"):
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "producer:authoring-failed", str(result.get("reason")),
+                corrected="seeded-producer-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
+    return result
 
 
 def kickoff_producer_authoring(owner: Optional[str]) -> None:
@@ -273,7 +294,15 @@ def kickoff_producer_authoring(owner: Optional[str]) -> None:
         try:
             await run_authoring(owner)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: run_authoring records its own failures and is not expected to raise; a raise here
+            # means the producer deepening silently degraded with no record — surface it RED. Seeded floor stands.
             logger.warning("[producer-authoring] background run failed: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("producer:background-run-failed", e,
+                                              corrected="seeded-producer-floor", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         finally:
             _IN_FLIGHT.discard(k)
 
