@@ -15,6 +15,11 @@ let _recentlyAddedEpId = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) { return uiModule.esc(s); }
+// #1644: shared admin status-badge — opaque pastel fill + dark ink, theme-independent (the pastel/dark
+// pairs are contrast-critical; one shared source stops the three init* copies from drifting apart).
+function _adminStatusBadge(ok, text, failBg = '#f5c2c2', failFg = '#842029') {
+  return `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : failBg};color:${ok ? '#0f5132' : failFg};">${esc(text)}</span>`;
+}
 
 /* ═══════════════════════════════════════════
    USERS TAB
@@ -2463,8 +2468,7 @@ function initHealthLogs() {
   // TEXT on a faint 16%-tint fill measured ~2.1:1. Convey status via an OPAQUE pastel status fill +
   // a DARK ink on it — reads ≥7:1 on ANY theme (the flat presets carry no polarity class to scope a
   // light-only fix), and colour still signals ok/fail through the fill.
-  const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#f5c2c2'};color:${ok ? '#0f5132' : '#842029'};">${esc(text)}</span>`;
+  const badge = (ok, text) => _adminStatusBadge(ok, text);
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
@@ -2576,8 +2580,7 @@ function initPublicDeployment() {
   // #1644 (rendered audit §2 / HIG): status via an OPAQUE pastel fill + DARK ink (green ok / amber
   // not-ok) — theme-independent, ≥6:1, colour still carried by the fill (the flat presets have no
   // polarity class for a light-only ink fix).
-  const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#ffe2b3'};color:${ok ? '#0f5132' : '#7a4f00'};">${esc(text)}</span>`;
+  const badge = (ok, text) => _adminStatusBadge(ok, text, '#ffe2b3', '#7a4f00');
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
@@ -2752,8 +2755,7 @@ function initLocalTls() {
   // #1644 (rendered audit §2 / HIG): status via an OPAQUE pastel fill + DARK ink (green ok / amber
   // not-ok) — theme-independent, ≥6:1, colour still carried by the fill (the flat presets have no
   // polarity class for a light-only ink fix).
-  const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#ffe2b3'};color:${ok ? '#0f5132' : '#7a4f00'};">${esc(text)}</span>`;
+  const badge = (ok, text) => _adminStatusBadge(ok, text, '#ffe2b3', '#7a4f00');
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">

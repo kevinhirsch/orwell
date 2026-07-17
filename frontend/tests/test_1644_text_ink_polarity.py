@@ -458,6 +458,15 @@ COOL_REGISTRY = {
     # adaptive primitive, legible in BOTH contexts — the sanctioned adaptive-wallpaper pattern.
     'body.theme-frosted .ow-btn-icon': ("adaptive-wallpaper", "compact chrome icon button; adaptive over wallpaper (#1638)"),
     'body.theme-frosted .ow-btn-compact': ("adaptive-wallpaper", "compact chrome text button; adaptive over wallpaper (#1638)"),
+
+    # #1690: the .msg-ai footer meta controls float over the chat wallpaper. Their DEFAULT ink is a
+    # muted color-mix(currentColor…) (follows-surface); on HOVER they brighten to the FULL adaptive
+    # ink var(--fg) — dark over a light frosted wallpaper (W3 --fg remap), light over a dark one. The
+    # prior `color: inherit` pulled the muted footer value and never brightened (CodeRabbit #1690).
+    'body.theme-frosted .msg-ai .msg-action-btn:hover': ("adaptive-wallpaper", "footer action btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .footer-copy-btn:hover': ("adaptive-wallpaper", "footer copy btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .regen-btn:hover': ("adaptive-wallpaper", "footer regen btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .fork-btn:hover': ("adaptive-wallpaper", "footer fork btn hover; full adaptive ink (#1690)"),
 }
 
 
@@ -836,6 +845,22 @@ def _bg_is_solid_fill(style):
     return "var(" in bg or bool(_BARE_HEX.match(bg)) or bg in ("black", "red")
 
 
+def _bg_is_danger_fill(style):
+    """The paired background is a DANGER-colored fill (the raw danger hue, a `-strong` danger plate,
+    or a red/crimson literal) — the ONLY fill on which the raw danger *ink* is an intended, legible
+    treatment. A neutral/light literal fill (e.g. `#fff`) does NOT qualify: raw-danger-on-white is
+    the exact ~3.9:1 normal-body failure class this gate exists to catch, so `_bg_is_solid_fill`
+    (which accepts any non-theme fill, light literals included) is too permissive for the danger
+    branch. Enforces the "danger fill OR `-strong` ink" rule the widened gate is meant to hold."""
+    bm = _INLINE_BG.search(style)
+    if not bm:
+        return False
+    bg = _norm(bm.group(1))
+    if re.search(r"var\(\s*--color-(?:danger|error)\b", bg):
+        return True
+    return bg in ("red", "crimson", "darkred", "firebrick", "maroon")
+
+
 def test_index_html_inline_closed_world():
     """Genuinely closed-world (finding #6): EVERY inline color value must classify as an accepted
     family (inherit / decorative / theme-consistent / dark-ink / on-fill) or a tracked residual."""
@@ -857,7 +882,7 @@ def test_index_html_inline_closed_world():
             # audit: the vault BUTTON @ ~3.4:1). Accept it only on a large-bold HEADING or a colored
             # danger FILL; a normal-size control / body label must ink -strong (dark red) or move the
             # red onto a fill (white-on-danger-strong).
-            if tag in _LARGE_TAGS or _bg_is_solid_fill(style):
+            if tag in _LARGE_TAGS or _bg_is_danger_fill(style):
                 continue
             risky.append((file, line, color, style[:70]))
             continue

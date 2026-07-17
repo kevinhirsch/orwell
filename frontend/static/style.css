@@ -23591,7 +23591,9 @@ body.theme-frosted .msg-ai .msg-action-btn:hover,
 body.theme-frosted .msg-ai .footer-copy-btn:hover,
 body.theme-frosted .msg-ai .regen-btn:hover,
 body.theme-frosted .msg-ai .fork-btn:hover {
-  color: inherit !important;
+  /* `color: inherit` would pull the muted color-mix() from .msg-footer above, so hover would NOT
+     brighten. Bind to the bubble's full adaptive ink token so hover reads at full strength. */
+  color: var(--fg) !important;
 }
 /* #1601 / OWN-3 (FOLLOW-UP, out of scope here): the pre-game cast-photo headshot dialog
    is the OTHER dark-veil-vs-light-glass surface the owner ruling names — it "follows the
