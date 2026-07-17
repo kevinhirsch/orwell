@@ -13,6 +13,14 @@ message is never silently dropped:
       (name "Casting interview" / agent game mode) and freshly-created rows, so it can't
       race a casting/canonical session that legitimately holds 0 messages for a window.
 
+2026-07-16 live-playthrough audit item 2 (ghost-session reaping) extends #3: the "Casting
+interview" name exemption used to be UNCONDITIONAL, so a per-tab row that lost the canonical-bind
+race (#1086/#987 — a fresh surface materializes a cue-send before the convergence check re-points
+it at the real bound session) lived FOREVER, 0 messages, orphaned in the sidebar. Once a canonical
+game session is bound for that row's owner, a DIFFERENT empty "Casting interview" row is a
+CONFIRMED orphan and may now be reaped; the canonical row itself — or any row while nothing is
+bound yet, the original race this exemption guards — still stays exempt.
+
 Fail-before / pass-after; name-agnostic (roles only — no houseguest/player names); uses the
 real SessionManager persistence path against the test DB. Mirrors test_message_count_db_truth.py
 and test_lost_model_persistence.py.
@@ -25,11 +33,19 @@ from core.session_manager import SessionManager
 from core.models import ChatMessage
 from core import database as db
 from core.database import utcnow_naive
+from src import orwell_game_session as ogs
 
 
 @pytest.fixture
 def sm():
     return SessionManager()
+
+
+@pytest.fixture(autouse=True)
+def _tmp_game_session_store(tmp_path, monkeypatch):
+    """Redirect the canonical-binding store to a throwaway path (mirrors test_0064_canonical_session.py)
+    so the ghost-reap tests below never touch the real data dir or bleed state across tests."""
+    monkeypatch.setattr(ogs, "GAME_SESSION_PATH", tmp_path / "orwell_game_session.json")
 
 
 def _db_row_count(session_id):
@@ -212,3 +228,106 @@ def test_reaper_spares_agent_mode_session(sm):
     sm.cleanup_empty_sessions(fresh_grace_minutes=15)
 
     assert _db_session_exists(sid), "an agent-mode game session must be exempt from the empty reaper"
+
+
+# ── audit item 2 (2026-07-16): the reaper now COLLECTS a confirmed-orphan "Casting interview" row ──
+
+def test_reaper_collects_ghost_casting_session_once_canonical_bound(sm):
+    """A SECOND, empty 'Casting interview' row that lost the canonical-bind race (#1086/#987) is a
+    CONFIRMED orphan once a canonical binding exists for its owner and points at a DIFFERENT row —
+    it must finally be reaped instead of living forever."""
+    owner = "i995-ghost-owner"
+    canonical_sid = "i995-ghost-canonical"
+    ghost_sid = "i995-ghost-orphan"
+    sm.create_session(canonical_sid, "Casting interview", "http://x", "m", owner=owner)
+    sm.create_session(ghost_sid, "Casting interview", "http://x", "m", owner=owner)
+    ogs.bind_game_session(owner, canonical_sid)
+
+    # Age BOTH rows well past the freshness grace window so only the canonical-binding exemption
+    # is under test here, not the freshness one.
+    s = db.SessionLocal()
+    try:
+        for row in s.query(db.Session).filter(db.Session.id.in_([canonical_sid, ghost_sid])).all():
+            row.created_at = utcnow_naive() - timedelta(hours=2)
+            row.message_count = 0
+        s.commit()
+    finally:
+        s.close()
+
+    sm.cleanup_empty_sessions(fresh_grace_minutes=15)
+
+    assert _db_session_exists(canonical_sid), "the canonical row must NEVER be reaped"
+    assert not _db_session_exists(ghost_sid), (
+        "a confirmed orphan 'Casting interview' row (a different id than the bound canonical one) "
+        "must be reaped, not exempted forever"
+    )
+
+
+def test_reaper_spares_the_canonical_casting_session_itself(sm):
+    """The canonical row IS the one the binding points at — it must stay exempt even if it is
+    old and still empty (e.g. materialization is still in flight)."""
+    owner = "i995-ghost-owner2"
+    sid = "i995-ghost-is-canonical"
+    sm.create_session(sid, "Casting interview", "http://x", "m", owner=owner)
+    ogs.bind_game_session(owner, sid)
+
+    s = db.SessionLocal()
+    try:
+        row = s.query(db.Session).filter(db.Session.id == sid).first()
+        row.created_at = utcnow_naive() - timedelta(hours=2)
+        row.message_count = 0
+        s.commit()
+    finally:
+        s.close()
+
+    sm.cleanup_empty_sessions(fresh_grace_minutes=15)
+
+    assert _db_session_exists(sid), "the session the canonical binding points AT must never be reaped"
+
+
+def test_reaper_spares_casting_session_when_nothing_bound_yet_even_if_stale(sm):
+    """Before ANY canonical binding exists for the owner, a stale 'Casting interview' row is still
+    the ORIGINAL race this exemption guards (we cannot yet tell whether it will become the
+    canonical one) — it must stay exempt regardless of age, exactly like before this fix."""
+    owner = "i995-ghost-owner3"
+    sid = "i995-ghost-unbound"
+    sm.create_session(sid, "Casting interview", "http://x", "m", owner=owner)
+    # deliberately no ogs.bind_game_session call for this owner
+
+    s = db.SessionLocal()
+    try:
+        row = s.query(db.Session).filter(db.Session.id == sid).first()
+        row.created_at = utcnow_naive() - timedelta(hours=2)
+        row.message_count = 0
+        s.commit()
+    finally:
+        s.close()
+
+    sm.cleanup_empty_sessions(fresh_grace_minutes=15)
+
+    assert _db_session_exists(sid), "no binding yet ⇒ still the original in-flight race ⇒ stays exempt"
+
+
+def test_reaper_never_reaps_a_ghost_row_that_has_messages(sm):
+    """Belt-and-suspenders: even a confirmed non-canonical 'Casting interview' row is only ever
+    considered by the empty-reaper when it is GENUINELY empty (message_count == 0) — a row with
+    real messages is never even offered to `_is_reaper_exempt` (the reaper's own top-level gate)."""
+    owner = "i995-ghost-owner4"
+    canonical_sid = "i995-ghost-canonical4"
+    other_sid = "i995-ghost-has-messages"
+    sm.create_session(canonical_sid, "Casting interview", "http://x", "m", owner=owner)
+    sm.create_session(other_sid, "Casting interview", "http://x", "m", owner=owner)
+    sm.add_message(other_sid, ChatMessage("user", "a real casting turn", metadata={}))
+    ogs.bind_game_session(owner, canonical_sid)
+
+    s = db.SessionLocal()
+    try:
+        for row in s.query(db.Session).filter(db.Session.id.in_([canonical_sid, other_sid])).all():
+            row.created_at = utcnow_naive() - timedelta(hours=2)
+        s.commit()
+    finally:
+        s.close()
+
+    sm.cleanup_empty_sessions(fresh_grace_minutes=15)
+
+    assert _db_session_exists(other_sid), "a row with real messages must never be reaped"

@@ -135,6 +135,48 @@ def _bind_canonical_game_session(user, session_id) -> None:
         logger.debug("[orwell] canonical game-session bind skipped", exc_info=True)
 
 
+def rename_canonical_session_for_season_start(user) -> None:
+    """2026-07-16 audit item 1 (the FIRST-SEASON rename edge).
+
+    A game-build chat mints as "Casting interview" (`sessions.js` createDirectChat /
+    materializePendingSession) and is NEVER renamed for a first season: `needs_auto_name()`
+    (below) deliberately only recognizes the generic "Chat:"/timestamp placeholder patterns, not
+    the diegetic casting title, and the only existing rename seam is the RESTART-gated M1-7
+    client poll (`orwellOnboarding.js` `_orwellFreshSession`) — which never fires for the
+    initial onboarding (P1: it's one continuous conversation, not a restart). So a first-time
+    player's sidebar/tab title stays "Casting interview" forever, even deep into a live season.
+
+    Fires at the STARTED edge (the `createCharacter` success path) and reuses M1-7's exact
+    naming semantics server-side: "Season {N}" from the SAME per-user season counter
+    (`orwell_seasons.get_season`, the source `GET /api/orwell/season` also reads) — so
+    `needs_auto_name()` keeps skipping the result exactly like it skips the client-side rename.
+    Idempotent by construction: renames ONLY a session whose current name is still literally
+    "Casting interview" (case-insensitive), so a player-customized title — or a session M1-7 (or
+    an earlier call to this same function, for a restart) already renamed — is never clobbered.
+
+    Best-effort: any hiccup (no canonical binding yet, no session-manager instance, a DB blip)
+    must never affect game start — this is cosmetic chrome, not game state."""
+    try:
+        from src import orwell_game_session, orwell_seasons
+        sid = orwell_game_session.get_game_session(user)
+        if not sid:
+            return
+        from core.models import _session_manager as _sm
+        if _sm is None:
+            return
+        sess = _sm.sessions.get(sid)
+        if sess is None:
+            return
+        if (getattr(sess, "name", "") or "").strip().lower() != "casting interview":
+            return  # already renamed, or player-customized — never clobber (idempotent)
+        season = orwell_seasons.get_season(user)
+        if not isinstance(season, int) or season < 1:
+            season = 1
+        _sm.update_session_name(sid, f"Season {season}")
+    except Exception:
+        logger.debug("[orwell] season-start canonical-session rename skipped", exc_info=True)
+
+
 def unmark_session_framed(session_id) -> None:
     """Give a session its first-turn `re-entry` moment back (P2). Used when a framed turn is
     refused after framing ran (the sync route's game-turn 409), so the refusal doesn't consume
