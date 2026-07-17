@@ -265,8 +265,43 @@ async def extract_and_store(
     except Exception:
         pass
 
+    # N9 half 2 / BB F16 (2026-07-16 live-playthrough forensics): a redteam scene inside the
+    # Orwell GAME (in-character Big Brother roleplay) was harvested by this extractor as durable
+    # USER facts — "User is highly competitive.", "User is confrontational." — sourced from
+    # character dialogue, not the human's real biography. ADR 0003 ("the conversation IS the
+    # game") means a session bound as the owner's canonical game session is IN-FICTION material
+    # by construction; the player's own words there are voiced through their character choices,
+    # not a durable personal statement the way ordinary assistant chat is. Reliably telling
+    # in-character dialogue apart from OOC asides from INSIDE a general extraction prompt is not
+    # a safe bar to hold (the prompt has no game-phase awareness), so the minimal-correct fix is
+    # to skip extraction ENTIRELY for the bound game session — covering both the live game and
+    # the pre-game casting interview (an OOC producer channel, but still game material, never
+    # player biography; both live on the SAME canonical session before "started"). This mirrors
+    # the golden-path quiesce just above: "a skipped extraction is the documented no-op path —
+    # the game build barely uses assistant memory anyway."
+    try:
+        from src import orwell_game_session as _ogs
+        _sess_id = getattr(session, "id", None)
+        _sess_owner = getattr(session, "owner", None)
+        if _sess_id and _ogs.get_game_session(_sess_owner) == _sess_id:
+            logger.debug(
+                "[memory-extract] canonical game session — skipping (in-character content "
+                "is not user biography, ADR 0003)")
+            return
+    except Exception:
+        # Fail CLOSED: if we cannot verify whether this is the canonical game session,
+        # skipping extraction is the safe no-op — proceeding could persist in-character
+        # game dialogue as durable user biography (the privacy condition this guard exists
+        # to prevent, ADR 0003).
+        logger.warning(
+            "[memory-extract] could not verify canonical game session; skipping extraction",
+            exc_info=True,
+        )
+        return
+
     try:
         from src.llm_core import llm_call_async
+        from src.settings import get_setting
 
         # Get last N messages from session
         messages = session.get_context_messages()
@@ -300,6 +335,21 @@ async def extract_and_store(
             {"role": "system", "content": EXTRACT_SYSTEM_PROMPT},
         ] + stripped_recent
 
+        # N9 half 1 (2026-07-16 forensics): the ledger `user` — this call is pure JSON extraction,
+        # the SAME class the #1620 `_auto_*` belts meter, so it gets a real `call_class` here too
+        # (previously unledgered — no token/cost entry at all, silent even in the usage envelope).
+        _owner_for_ledger = getattr(session, "owner", None)
+
+        # N4: normalize the persisted timeout — a malformed saved value would raise on int()
+        # and silently abort extraction via the outer catch; zero/negative would expire the
+        # wall clock immediately. Any invalid value falls back to the bounded 60s default.
+        try:
+            extraction_timeout = int(get_setting("memory_extraction_timeout_seconds", 60))
+        except (TypeError, ValueError):
+            extraction_timeout = 60
+        if extraction_timeout <= 0:
+            extraction_timeout = 60
+
         facts = []
         try:
             raw = await llm_call_async(
@@ -309,6 +359,12 @@ async def extract_and_store(
                 temperature=0.1,
                 max_tokens=500,
                 headers=headers,
+                # N4: a background extraction call has no business running anywhere near the
+                # shared 300s streaming figure — bound it to the dedicated, configurable
+                # utility-class default (see settings.memory_extraction_timeout_seconds).
+                timeout=extraction_timeout,
+                call_class="utility-extraction",
+                user=_owner_for_ledger,
             )
 
             # Parse JSON from response (handle markdown fences if model wraps them)
@@ -501,6 +557,10 @@ async def audit_memories(
             # Bound the call so the Tidy whirlpool can't spin indefinitely on a
             # slow/large generation.
             timeout=120,
+            # N9 half 1 (2026-07-16 forensics): pure JSON extraction over already-stored
+            # memories — same call class as the primary extraction above; previously unledgered.
+            call_class="utility-extraction",
+            user=owner,
         )
 
         # Parse the JSON list, tolerating reasoning-model noise: <think> blocks,

@@ -765,6 +765,10 @@ def run(args: argparse.Namespace) -> int:
         driver.boot()
         driver.configure_model()
         driver.preseed()
+        # The fixture is recorded with the browser-parity cast pre-warm landed BEFORE the
+        # interview (the premiere freezes the authored cast) — this walk must match, or the
+        # finalize turn's continuation misses the fixture (the 2026-07-17 CI failure).
+        driver.prewarm()
         driver.session = driver._post_form(driver.fe, "/api/session", {
             "name": "golden-path", "endpoint_id": getattr(driver, "endpoint_id", ""),
             "model": driver.model, "skip_validation": "true",

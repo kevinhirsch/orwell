@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from src.constants import MAX_OUTPUT_CHARS, MAX_READ_CHARS
 from src.orwell_sync_ledger import note_belt as _sync_ledger_note_belt  # gap #3 telemetry (never raises)
@@ -4621,7 +4621,10 @@ async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
 
 
-async def do_create_character(content: str, owner: Optional[str] = None) -> Dict:
+async def do_create_character(
+    content: str, owner: Optional[str] = None,
+    progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
+) -> Dict:
     from src import orwell_engine
     try:
         args = _parse_tool_args(content)
@@ -4695,6 +4698,23 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
     # route was never hit, e.g. the HTTP/golden flow). Ensure the cast is warmed first (idempotent). Best-
     # effort + fail-soft: no model ⇒ the deterministic floor stands byte-identically; under strict a failure
     # latches the loud gate below. Never blocks start on a hiccup (the outer try/except owns that).
+    #
+    # 2026-07-16 audit item 4 (production-hold beat) — this inline genesis fallback (15 sequential
+    # LLM calls when the interview-open pre-warm never ran, e.g. the HTTP/golden flow) can block
+    # ~70s with NOTHING but a spinner on the "🎬 Casting" tool-beat chip — a live playthrough reads
+    # that as the app having died, not "production is working". `progress_cb` is the SAME seam
+    # `execute_tool_block` already threads to bash/python for its `tool_progress` SSE events (see
+    # `tool_execution.py`); reuse it here for ONE short, diegetic, producer-register status line
+    # BEFORE the blocking await — never narration content, just a status beat riding the existing
+    # tool-beat chip machinery (chat.js renders `tail` under the running beat). Best-effort: a
+    # progress push failing must never affect creation.
+    if progress_cb:
+        try:
+            await progress_cb({
+                "tail": "The house is being prepped for your arrival — hold tight, we're rolling cameras.",
+            })
+        except Exception:
+            pass
     try:
         from src import orwell_cast_genesis as _genesis_kick
         _warm = await orwell_engine.pre_seed_cast(seed=args.get("seed"), user=owner)
@@ -4795,6 +4815,17 @@ async def do_create_character(content: str, owner: Optional[str] = None) -> Dict
                 orwell_seasons.increment_season(owner)
             except Exception:
                 pass  # the counter is best-effort meta-progression; never fail the restart over it
+        # 2026-07-16 audit item 1 — the FIRST-SEASON session-rename edge (see
+        # chat_helpers.rename_canonical_session_for_season_start's docstring). Placed AFTER the
+        # restart-path season increment just above so a season-2+ restart reads the FRESH number,
+        # matching what the client-side M1-7 rename would compute. Best-effort/idempotent; a
+        # hiccup here must never affect game start.
+        if isinstance(res, dict) and res.get("started") and not res.get("createRefused"):
+            try:
+                from routes import chat_helpers as _ch_rename
+                _ch_rename.rename_canonical_session_for_season_start(owner)
+            except Exception:
+                pass
         # L28b → 0051 pipeline. The cast is KNOWN the instant createCharacter returns — which,
         # in the chat-driven flow, is DURING the casting interview (the player still picks their
         # own headshot before house entry). So portraits must start generating in the BACKGROUND

@@ -135,6 +135,48 @@ def _bind_canonical_game_session(user, session_id) -> None:
         logger.debug("[orwell] canonical game-session bind skipped", exc_info=True)
 
 
+def rename_canonical_session_for_season_start(user) -> None:
+    """2026-07-16 audit item 1 (the FIRST-SEASON rename edge).
+
+    A game-build chat mints as "Casting interview" (`sessions.js` createDirectChat /
+    materializePendingSession) and is NEVER renamed for a first season: `needs_auto_name()`
+    (below) deliberately only recognizes the generic "Chat:"/timestamp placeholder patterns, not
+    the diegetic casting title, and the only existing rename seam is the RESTART-gated M1-7
+    client poll (`orwellOnboarding.js` `_orwellFreshSession`) — which never fires for the
+    initial onboarding (P1: it's one continuous conversation, not a restart). So a first-time
+    player's sidebar/tab title stays "Casting interview" forever, even deep into a live season.
+
+    Fires at the STARTED edge (the `createCharacter` success path) and reuses M1-7's exact
+    naming semantics server-side: "Season {N}" from the SAME per-user season counter
+    (`orwell_seasons.get_season`, the source `GET /api/orwell/season` also reads) — so
+    `needs_auto_name()` keeps skipping the result exactly like it skips the client-side rename.
+    Idempotent by construction: renames ONLY a session whose current name is still literally
+    "Casting interview" (case-insensitive), so a player-customized title — or a session M1-7 (or
+    an earlier call to this same function, for a restart) already renamed — is never clobbered.
+
+    Best-effort: any hiccup (no canonical binding yet, no session-manager instance, a DB blip)
+    must never affect game start — this is cosmetic chrome, not game state."""
+    try:
+        from src import orwell_game_session, orwell_seasons
+        sid = orwell_game_session.get_game_session(user)
+        if not sid:
+            return
+        from core.models import _session_manager as _sm
+        if _sm is None:
+            return
+        sess = _sm.sessions.get(sid)
+        if sess is None:
+            return
+        if (getattr(sess, "name", "") or "").strip().lower() != "casting interview":
+            return  # already renamed, or player-customized — never clobber (idempotent)
+        season = orwell_seasons.get_season(user)
+        if not isinstance(season, int) or season < 1:
+            season = 1
+        _sm.update_session_name(sid, f"Season {season}")
+    except Exception:
+        logger.debug("[orwell] season-start canonical-session rename skipped", exc_info=True)
+
+
 def unmark_session_framed(session_id) -> None:
     """Give a session its first-turn `re-entry` moment back (P2). Used when a framed turn is
     refused after framing ran (the sync route's game-turn 409), so the refusal doesn't consume
@@ -5417,9 +5459,24 @@ def run_post_response_tasks(
     if allow_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
         from services.memory.memory_extractor import extract_and_store
         from src.task_endpoint import resolve_task_endpoint
-        t_url, t_model, t_headers = resolve_task_endpoint(
-            sess.endpoint_url, sess.model, sess.headers, owner=owner,
-        )
+        # N9 half 1 (2026-07-16 live-playthrough forensics): memory extraction is pure JSON
+        # extraction — the SAME class of call the #1620 `_auto_*` belts route onto the cheap
+        # UTILITY tier (see agent_loop._resolve_belt_endpoint). It was instead resolved through
+        # the "task" tier, whose default (unconfigured `task_endpoint_id`) short-circuits
+        # straight to the caller-supplied fallback — the session's EXPENSIVE narration model
+        # (endpoint_resolver.resolve_endpoint's early `if not ep_id and fallback_url and
+        # fallback_model: return fallback_url, ...` branch) — so extraction silently ran on the
+        # narrator (13 calls observed live). Resolve the utility tier FIRST, with NO fallback
+        # args, so `resolve_endpoint` tries the configured/default utility model instead of
+        # short-circuiting past it; fall through to the existing task-tier resolution (itself
+        # falling back to the session's own model) only on a genuine miss, so extraction never
+        # silently stops firing.
+        from src.endpoint_resolver import resolve_endpoint
+        t_url, t_model, t_headers = resolve_endpoint("utility", owner=owner)
+        if not (t_url and t_model):
+            t_url, t_model, t_headers = resolve_task_endpoint(
+                sess.endpoint_url, sess.model, sess.headers, owner=owner,
+            )
         asyncio.create_task(extract_and_store(
             sess, memory_manager, memory_vector,
             t_url, t_model, t_headers,

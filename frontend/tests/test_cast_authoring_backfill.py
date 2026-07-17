@@ -419,8 +419,14 @@ def test_admin_health_cast_authoring_pre_game_carries_run_state(admin_client, mo
     assert isinstance(ca, dict) and ca.get("pregame") is True
     assert isinstance(ca.get("givenUp"), list)
     assert "houseEntryHold" in ca
-    # Vault-free: flags / ids / timestamps only — never cast content keys.
-    assert set(ca) <= {"pregame", "givenUp", "houseEntryHold"}
+    # Vault-free: flags / ids / timestamps only — never cast content keys. `prewarm` is the
+    # pre-warm pipeline's own run state (authorStarted/authorDone/promptCount — counts and
+    # flags only), the pre-game completion signal the golden driver waits on (2026-07-17).
+    assert set(ca) <= {"pregame", "givenUp", "houseEntryHold", "prewarm"}
+    pw = ca.get("prewarm")
+    if isinstance(pw, dict):
+        assert set(pw) <= {"authorStarted", "portraitsStarted", "authorDone",
+                           "promptCount", "nextSeasonArmed"}
 
 
 # ── POST /api/admin/ops/reauthor-cast (the admin debug lever) ──────────────────────────────

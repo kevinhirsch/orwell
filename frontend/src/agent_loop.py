@@ -1783,6 +1783,46 @@ _FORCED_ADVANCE_NUDGE = (
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
 
+# 0079/0080 ACTIVE OVERSEER — the CONTINUE-NEVER-REOPEN contract (the "stuttering narrator" fix,
+# 2026-07-16). The active overseer's re-prompting levers (nudge / force-advance / reinject-delta) can
+# fire AFTER a scene has ALREADY streamed to the player this turn — e.g. a desync/stale-409 gets
+# flagged mid-turn, past the silent-commit path above — and #829 turn-coalescing stacks EVERY round of
+# one turn into the SAME message bubble, so a bare re-prompt makes the model re-narrate the whole scene
+# from scratch and the two contradictory renditions land fused, often mid-line ("...What's on your
+# mind?You grab your bag..."). The correction must still land THIS turn (never deferred to a next-turn-
+# only reground, which the model would never re-read mid-stream) — so whenever `_emitted_visible` is
+# already True, the re-prompt directive is prefixed with this contract: continue from the scene already
+# shown, never reopen/restate/re-narrate it. Preserves each lever's correction power; removes only the
+# duplication.
+_CONTINUE_NEVER_REOPEN = (
+    "CONTINUE — DO NOT REOPEN. The scene above has ALREADY been shown to the player this turn. "
+    "Continue the narration from its final line onward; do NOT re-narrate, restate, replay, or repeat "
+    "any part of it — the player would see two contradictory takes of the same moment fused together. "
+    "Add only what is genuinely NEW, picking up exactly where the shown scene left off."
+)
+
+# 2026-07-17 — the PREMIERE-OPENER REFIRE (server-side twin of the FE `_orwellFinalizingActive` belt
+# from the 2026-07-16 audit's fix #3 — chat.js auto-refires a hidden cue when its `finally` block
+# still sees that flag true). That fix is CLIENT-side only, so a headless/API caller (the golden-path
+# driver chief among them — no chat.js in the loop) never gets it. The gap: whichever path finalized
+# casting THIS turn (model-driven at the tool-execution site, or the FE-forced wire/reactive fallback),
+# the round immediately AFTER the createCharacter tool result can come back EMPTY — a known GLM/
+# OpenRouter empty-completion class. With nothing to catch it the turn used to fall straight through to
+# the unconditional "no tools — done" break: no move-in narration, no retry affordance, the player (or
+# the driver) staring at total silence with the game already live underneath them. This is a bounded
+# (ONE per turn — `_premiere_opener_refire_used`) RE-PROMPT, never engine-authored narration: it asks
+# the model to do the job the prompt already gives it (voice the premiere move-in from the engine's own
+# state), it does not invent or narrate anything itself. `_CONTINUE_NEVER_REOPEN` prefixes it exactly
+# like every other mid-turn re-prompt when something has already streamed this turn (defensive; by
+# construction this fires only when nothing has, but the guard is kept symmetric with every sibling
+# site rather than assumed).
+_PREMIERE_OPENER_REFIRE = (
+    "(Production note, not for the player.) The game has started — casting just finalized. The scene "
+    "above has already been shown to the player; continue from it. Narrate the player's entry into the "
+    "house now: the premiere move-in, first impressions, the house reveal. Voice ONLY what the game's "
+    "own state shows — never invent it."
+)
+
 # LIVE-4 (#541) — the eviction-reveal is the season's peak beat, and the model reliably CONSUMES it
 # (advanceGame drips one anonymized ballot per call) while narrating UNRELATED scenes, so the player
 # on the block never sees the votes land. This is the same "error-correct the omission, never
@@ -1915,6 +1955,17 @@ _CASTING_FORCED_NOTE = (
 #      present in messages[0] on the same-turn continuation because the frame was built pre-game.
 _CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
 
+# 2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes the
+# player's own finalize line, which can leave the continuation context with NO user message
+# at all — [system, assistant(tool_calls), tool] — a conversation shape some GLM providers
+# (Novita) reject outright ("invalid request error", HTTP 400), so the premiere opener could
+# never be model-authored there (every round 400'd/emptied until the canned terminal fallback
+# spoke instead). When the purge leaves no user turn, this FIXED, disclosure-free bridge is
+# inserted as the player's voice: it carries the one thing the finalize turn legitimately
+# said (readiness) and nothing else, so the #1312 guarantee holds — the premiere context
+# still cannot carry a casting disclosure — while the provider sees a valid conversation.
+_PREGAME_PURGE_USER_BRIDGE = "I'm ready — send me into the house."
+
 
 def _strip_pregame_context(messages: List[Dict]) -> int:
     """Purge the pre-game casting interview from the in-game narration context, in place.
@@ -1944,6 +1995,17 @@ def _strip_pregame_context(messages: List[Dict]) -> int:
             pass
         kept.append(m)
     if dropped:
+        # Restore a valid conversation shape when the purge removed EVERY user turn (the
+        # finalize line was casting-stamped too): insert the fixed readiness bridge as the
+        # player's voice before the first non-system message. Without it the continuation
+        # request is [system, assistant(tool_calls), tool] and some providers 400 on it.
+        if not any(isinstance(m, dict) and m.get("role") == "user" for m in kept):
+            insert_at = len(kept)
+            for i, m in enumerate(kept):
+                if not (isinstance(m, dict) and m.get("role") == "system"):
+                    insert_at = i
+                    break
+            kept.insert(insert_at, {"role": "user", "content": _PREGAME_PURGE_USER_BRIDGE})
         messages[:] = kept
     return dropped
 
@@ -4696,6 +4758,23 @@ def _empty_response_fallback(
     return (_EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False, False)
 
 
+def _premiere_opener_terminal_net(casting_finalized_this_turn: bool, full_response: str,
+                                  fallback_chunk, fallback_retry: bool):
+    """2026-07-17 — premiere-opener resilience, the terminal net. `_empty_response_fallback`'s own
+    true-empty branch never fires when `tool_events` is non-empty (createCharacter, at minimum), so a
+    SECOND empty round in a row after a mid-turn finalize (even the bounded refire in the round loop
+    came back empty too) would otherwise leave `full_response` blank with no retry chunk. Reuse the
+    SAME established in-character recovery line + retry affordance the true-empty path uses elsewhere
+    (F2 #1017) — never new authored content. Pulled into its own function (not inlined at the call
+    site) so the callsite source-pin tests scanning a fixed char window after `_empty_response_fallback(`
+    keep finding their anchors regardless of how this comment grows."""
+    if casting_finalized_this_turn and not full_response.strip() and not fallback_chunk:
+        full_response = _EMPTY_PRODUCER_LINE
+        fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
+        fallback_retry = True
+    return full_response, fallback_chunk, fallback_retry
+
+
 PLAN_MODE_DIRECTIVE = (
     "## PLAN MODE — OVERRIDES EVERYTHING ELSE BELOW\n"
     "You are in PLAN MODE. Your ONLY job this turn is to PROPOSE a plan. You have "
@@ -5491,6 +5570,18 @@ async def _stream_agent_loop_impl(
     # createCharacter starts the season THIS turn (model-driven OR FE-forced); the purge runs once.
     _casting_finalized_this_turn = False
     _pregame_purged = False
+    # 2026-07-17 (headless premiere-opener resilience, server-side twin of the FE
+    # `_orwellFinalizingActive` belt): bounded to ONE refire per turn — see `_PREMIERE_OPENER_REFIRE`
+    # below, at the terminal "no tools — done" gate. `_visible_chars_at_finalize` snapshots
+    # `len(full_response.strip())` the INSTANT casting finalized (captured once, at whichever site
+    # sets `_casting_finalized_this_turn`) — `None` until then; `.strip()` so the inter-round "\n\n"
+    # separator (appended after every tool round regardless of content) never reads as narration.
+    # Comparing the CURRENT stripped length against this snapshot (not the monotonic `_emitted_visible`
+    # flag, which can't answer "did anything stream SINCE") is what lets the refire fire correctly even
+    # when an earlier pre-finalize round already narrated a beat (e.g. a nudge round) — the exact
+    # reported shape (visible round → force round → empty round).
+    _premiere_opener_refire_used = False
+    _visible_chars_at_finalize = None
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
@@ -6883,7 +6974,12 @@ async def _stream_agent_loop_impl(
                                             _ov_applied_flags = {"force-advance": False,
                                                                  "propose-record": False}
 
-                                            async def _ov_do_force_advance() -> bool:
+                                            # Ruff B023: default-arg binding captures THIS iteration's
+                                            # _emitted_visible at def time (the closure is defined fresh
+                                            # every round-loop iteration and invoked immediately below, so
+                                            # the value is already correct — this just makes it explicit
+                                            # rather than an implicit loop-variable closure).
+                                            async def _ov_do_force_advance(_emitted_visible=_emitted_visible) -> bool:
                                                 _ok = False
                                                 _fok = True
                                                 try:
@@ -6904,8 +7000,13 @@ async def _stream_agent_loop_impl(
                                                         f"skipping: {type(_fe).__name__}: {_fe}".rstrip(': '))
                                                 if _fok and await _commit_advance_silently(
                                                         f"overseer force stall L{_level}"):
-                                                    messages.append({"role": "system",
-                                                                     "content": _FORCED_ADVANCE_NUDGE})
+                                                    _fa_txt = _FORCED_ADVANCE_NUDGE
+                                                    if _emitted_visible:
+                                                        # A scene already streamed THIS turn — do not let
+                                                        # the forced-advance re-prompt read as "narrate the
+                                                        # beat again" (the stuttering-narrator bug).
+                                                        _fa_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _fa_txt
+                                                    messages.append({"role": "system", "content": _fa_txt})
                                                     _ov_flow["act"] = "yield-continue"
                                                     _ok = True
                                                 return _ok
@@ -6935,6 +7036,12 @@ async def _stream_agent_loop_impl(
                                                 # re-prompt (the same rung the floor would pick for _level).
                                                 # Returns True ⇒ dispatch_lever reports it applied.
                                                 _txt = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)]
+                                                if _emitted_visible:
+                                                    # A scene already streamed THIS turn — the re-prompt
+                                                    # must not read as "narrate again" (the stuttering-
+                                                    # narrator bug). Carry the continue-never-reopen contract
+                                                    # ahead of the nudge so the correction still lands.
+                                                    _txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _txt
                                                 messages.append({"role": "system", "content": _txt})
                                                 _ov_flow["act"] = "yield-continue"
                                                 return True
@@ -6944,15 +7051,31 @@ async def _stream_agent_loop_impl(
                                                 # round (fix the INPUT, never the output). A flagged desync
                                                 # already has a RE-GROUND directive queued for the next turn,
                                                 # so re-prompt now to consume it; otherwise queue a re-ground.
+                                                _reground_txt = (
+                                                    "RE-GROUND ON THE BOARD — your view drifted from "
+                                                    "the engine. Read the current GAME CONTEXT before "
+                                                    "you narrate, and voice only what it states.")
                                                 try:
                                                     from routes import chat_helpers as _ov_chd
                                                     if owner not in getattr(_ov_chd, "_DESYNC_REGROUND", {}):
-                                                        _ov_chd._DESYNC_REGROUND[owner] = (
-                                                            "RE-GROUND ON THE BOARD — your view drifted from "
-                                                            "the engine. Read the current GAME CONTEXT before "
-                                                            "you narrate, and voice only what it states.")
+                                                        _ov_chd._DESYNC_REGROUND[owner] = _reground_txt
                                                 except Exception:
                                                     pass
+                                                if _emitted_visible:
+                                                    # A scene has ALREADY streamed to the player this turn —
+                                                    # a bare re-prompt would make the model re-narrate the
+                                                    # whole scene from scratch, and #829 turn-coalescing
+                                                    # stacks both renditions into the SAME message bubble
+                                                    # (the stuttering-narrator bug: two contradictory takes
+                                                    # of one moment fused, often mid-line). Carry the
+                                                    # reground directive straight INTO this round's messages
+                                                    # (not only the next-turn `_DESYNC_REGROUND` stash, which
+                                                    # the model never re-reads mid-stream) wrapped in the
+                                                    # continue-never-reopen contract, so the correction still
+                                                    # lands THIS turn without a duplicate narration.
+                                                    messages.append({"role": "system", "content":
+                                                                     _CONTINUE_NEVER_REOPEN + "\n\n"
+                                                                     + _reground_txt})
                                                 _ov_flow["act"] = "yield-continue"
                                                 return True
 
@@ -7090,7 +7213,15 @@ async def _stream_agent_loop_impl(
                                         lever="force-advance", ok=True, user=owner)
                                 except Exception:
                                     pass
-                                messages.append({"role": "system", "content": _FORCED_ADVANCE_NUDGE})
+                                _fa_txt = _FORCED_ADVANCE_NUDGE
+                                if _emitted_visible:
+                                    # A scene already streamed THIS turn (non-active-overseer path,
+                                    # mirroring _ov_do_force_advance above) — do not let the
+                                    # forced-advance re-prompt read as "narrate the beat again" (the
+                                    # stuttering-narrator bug: two contradictory takes of one moment
+                                    # fused into the SAME message bubble via #829 turn-coalescing).
+                                    _fa_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _fa_txt
+                                messages.append({"role": "system", "content": _fa_txt})
                                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                 continue
                             # else: forced advance failed — fall through to the text nudge below.
@@ -7111,6 +7242,11 @@ async def _stream_agent_loop_impl(
                                 lever="nudge", ok=True, user=owner)
                         except Exception:
                             pass
+                        if _emitted_visible:
+                            # Same guard as above (mirroring _ov_nudge) — a scene already streamed
+                            # this turn, so carry the continue-never-reopen contract ahead of the
+                            # text nudge rather than re-prompting a bare "narrate/advance" line.
+                            _nudge = _CONTINUE_NEVER_REOPEN + "\n\n" + _nudge
                         messages.append({"role": "system", "content": _nudge})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
@@ -7327,10 +7463,14 @@ async def _stream_agent_loop_impl(
                                         "[orwell] forced createCharacter REFUSED (no-model-wired, "
                                         f"classes={_cres.get('unwiredClasses')}) — surfacing the "
                                         f"operator fix, round {round_num} user={owner}")
-                                    messages.append({"role": "system",
-                                                     "content": _creation_no_model_steer(
-                                                         _cres.get("unwiredClasses") or [],
-                                                         str(_cres.get("error") or ""))})
+                                    _nmw_txt = _creation_no_model_steer(
+                                        _cres.get("unwiredClasses") or [], str(_cres.get("error") or ""))
+                                    if _emitted_visible:
+                                        # The interview reply already streamed THIS turn — the re-prompt
+                                        # must not read as "narrate again" (the stuttering-narrator bug,
+                                        # same family as the ACTIVE OVERSEER re-prompt levers above).
+                                        _nmw_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _nmw_txt
+                                    messages.append({"role": "system", "content": _nmw_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 # Fix B: do_create_character serializes the engine view (started /
@@ -7350,6 +7490,13 @@ async def _stream_agent_loop_impl(
                                     _note_belt(owner, "casting-finalize-force")  # gap #3 telemetry
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
+                                    # 2026-07-17: this is a finalize just like the model-driven site below
+                                    # (tool_execution.py dispatch) — mark it the same way so the premiere-
+                                    # opener refire covers this path too. Safe to set even though the purge
+                                    # below runs inline (guarded on `_pregame_purged`, already True next line).
+                                    _casting_finalized_this_turn = True
+                                    if _visible_chars_at_finalize is None:
+                                        _visible_chars_at_finalize = len(full_response.strip())
                                     # #1312 (Vault Wall): the season just went live THIS turn — purge the
                                     # OOC casting interview before the premiere continuation narrates the
                                     # move-in, so the houseguests' first impressions cannot carry a casting
@@ -7360,7 +7507,16 @@ async def _stream_agent_loop_impl(
                                     if _n_purged:
                                         logger.info("[orwell] #1312 purged %d casting turn(s) from the "
                                                     "premiere context (forced finalize) user=%s", _n_purged, owner)
-                                    messages.append({"role": "system", "content": _CASTING_FORCED_NOTE})
+                                    _cfn_txt = _CASTING_FORCED_NOTE
+                                    if _emitted_visible:
+                                        # The interview reply already streamed THIS turn (this is the
+                                        # casting->premiere seam — the msg-5-class duplication: the
+                                        # interview producer reply glued mid-line to the premiere walk-in,
+                                        # same family as the ACTIVE OVERSEER stuttering-narrator bug).
+                                        # Tell the model to CONTINUE into the premiere, never restate the
+                                        # interview reply already shown.
+                                        _cfn_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _cfn_txt
+                                    messages.append({"role": "system", "content": _cfn_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 # #529 — REFUSE-AND-SURFACE: the engine no longer fabricates player canon
@@ -7382,9 +7538,12 @@ async def _stream_agent_loop_impl(
                                         "[orwell] forced createCharacter REFUSED (casting-incomplete, "
                                         f"missing={_missing}, reason={_refused_reason!r}) — surfacing the "
                                         f"gap, round {round_num} user={owner}")
-                                    messages.append({"role": "system",
-                                                     "content": _casting_incomplete_steer(
-                                                         _missing, _refused_reason)})
+                                    _ci_txt = _casting_incomplete_steer(_missing, _refused_reason)
+                                    if _emitted_visible:
+                                        # Same family as above — don't let the re-prompt read as
+                                        # "narrate again" once the interview reply already streamed.
+                                        _ci_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _ci_txt
+                                    messages.append({"role": "system", "content": _ci_txt})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
                                 logger.warning("[orwell] forced createCharacter did not start the "
@@ -7396,6 +7555,9 @@ async def _stream_agent_loop_impl(
                         _turn_casting_nudge += 1  # casting finalize nudge fired
                         _note_belt(owner, "casting-nudge")  # gap #3 telemetry
                         logger.info(f"[orwell] casting finalize nudge (L{_clv}) round {round_num} user={owner}")
+                        if _emitted_visible:
+                            # Same family as above — the interview reply already streamed THIS turn.
+                            _cn = _CONTINUE_NEVER_REOPEN + "\n\n" + _cn
                         messages.append({"role": "system", "content": _cn})
                         yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                         continue
@@ -7436,6 +7598,31 @@ async def _stream_agent_loop_impl(
                     elif owner is not None:
                         _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
                         _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+            # 2026-07-17 — PREMIERE-OPENER REFIRE (see `_PREMIERE_OPENER_REFIRE`). Casting finalized THIS
+            # turn (model-driven or FE-forced, either site above) but no narration has streamed since —
+            # this round came back with nothing new (a known GLM/OpenRouter empty-completion class, or
+            # the finalize round itself). Without this the turn fell straight through to the unconditional
+            # break below: no move-in narration, no retry affordance — the game is live underneath the
+            # player and nothing ever says so. ONE bounded retry (never two — `_premiere_opener_refire_used`
+            # latches immediately), then unconditionally falls through to the break either way, so this can
+            # never itself become a hang. The continue-never-reopen contract prefixes it when something
+            # already streamed earlier this turn (e.g. a pre-finalize nudge round) so the retry never
+            # reads as "narrate the whole thing again" — the same guard every sibling re-prompt in this
+            # block carries (see `test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate`).
+            if (_casting_finalized_this_turn and not _premiere_opener_refire_used
+                    and not (_visible_chars_at_finalize is not None
+                             and len(full_response.strip()) > _visible_chars_at_finalize)):
+                _premiere_opener_refire_used = True
+                _refire_txt = _PREMIERE_OPENER_REFIRE
+                if _emitted_visible:
+                    _refire_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _refire_txt
+                messages.append({"role": "system", "content": _refire_txt})
+                _note_belt(owner, "premiere-opener-refire")  # gap #3 telemetry
+                logger.info(
+                    f"[orwell] premiere-opener refire (no narration since createCharacter finalized) "
+                    f"round {round_num} user={owner}")
+                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -7812,6 +7999,8 @@ async def _stream_agent_loop_impl(
                     _cc_view = {}
                 if isinstance(_cc_view, dict) and _cc_view.get("started") and not _cc_view.get("createRefused"):
                     _casting_finalized_this_turn = True
+                    if _visible_chars_at_finalize is None:
+                        _visible_chars_at_finalize = len(full_response.strip())
             # The game advanced: clear any persisted stall escalation for this game so the
             # next stall (if any) starts gentle again. NAR-1: dropped the `and owner` gate + keyed
             # via _belt_key — this reset never fired single-tenant before (raw `owner=None` is a
@@ -8362,6 +8551,7 @@ async def _stream_agent_loop_impl(
         _fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
         if full_response == _EMPTY_PRODUCER_LINE:
             _fallback_retry = True  # nothing survived the scrub/guard → the in-character retry recovery
+    full_response, _fallback_chunk, _fallback_retry = _premiere_opener_terminal_net(_casting_finalized_this_turn, full_response, _fallback_chunk, _fallback_retry)
     if _fallback_chunk:
         yield _fallback_chunk
     # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap
