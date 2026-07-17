@@ -1845,14 +1845,20 @@ def setup_model_routes(model_discovery):
                     failed.append(mid)
                 yield f"data: {json.dumps(result)}\n\n"
 
-            # Update hidden_models and cached_models in DB
+            # Update hidden_models and cached_models in DB. Route through the shared refresh
+            # policy (never a direct overwrite): the old shape REPLACED hidden_models with just
+            # this probe's failures, which both clobbered every admin-curated hide and let a
+            # newly discovered model that probes OK walk straight into the picker on a curated
+            # endpoint — the same phantom-model bug through the per-endpoint probe door. The
+            # probe's own failures then UNION into the policy's resulting hidden set.
             db2 = SessionLocal()
             try:
                 ep_obj = db2.query(ModelEndpoint).filter(ModelEndpoint.id == ep_id).first()
                 if ep_obj:
-                    ep_obj.hidden_models = json.dumps(failed) if failed else None
                     if all_models:
-                        ep_obj.cached_models = json.dumps(all_models)
+                        _apply_refreshed_models(ep_obj, all_models)
+                    hidden = _hidden_model_ids(ep_obj) | set(failed)
+                    ep_obj.hidden_models = json.dumps(sorted(hidden)) if hidden else None
                     db2.commit()
             finally:
                 db2.close()

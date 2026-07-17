@@ -260,3 +260,57 @@ def test_reset_then_next_refresh_does_not_grow_the_picker(monkeypatch):
         f"a reset followed by the next refresh must not grow the picker: {after}"
     )
     assert _PHANTOM not in after
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# 5. The per-endpoint /probe SSE route (CodeRabbit #1688 round 2): the LAST direct-write
+#    door. It used to REPLACE hidden_models with just this probe's failures — clobbering
+#    every admin-curated hide — and overwrite cached_models wholesale, so a newly
+#    discovered model that probes OK walked straight into the picker on a curated endpoint.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
+def test_probe_route_preserves_curation_and_unions_failures(monkeypatch):
+    """Driving GET /api/model-endpoints/{id}/probe on a curated endpoint whose provider
+    catalog has grown: the newly discovered model stays hidden (refresh policy), the probe's
+    own failures join the hidden set, and neither clobbers the other."""
+    from core.database import SessionLocal, ModelEndpoint
+
+    probed = {"v": list(_CATALOG)}
+    client, _store = _model_routes_client(
+        monkeypatch, {"default_endpoint_id": "", "default_model": _NARRATOR,
+                      "utility_model": _UTILITY, "image_model": _IMAGE}, probed)
+    body = _add_curated_openrouter(client, monkeypatch)
+    ep_id = body["id"]
+
+    before = _visible_ids(client)
+    before_count = len(before)
+
+    # The provider's catalog grows AND one long-standing model now fails its probe.
+    failing = _CATALOG[1]  # a previously visible, non-pinned model
+    probed["v"] = list(_CATALOG) + [_PHANTOM]
+    monkeypatch.setattr(
+        model_routes, "_probe_single_model",
+        lambda base, key, mid, timeout=8, **kw: (
+            {"status": "fail", "error": "probe 400"} if mid == failing else {"status": "ok"}))
+
+    r = client.get(f"/api/model-endpoints/{ep_id}/probe")
+    assert r.status_code == 200
+    assert "probe_start" in r.text  # the SSE stream ran to completion
+
+    db = SessionLocal()
+    try:
+        row = db.query(ModelEndpoint).filter(ModelEndpoint.id == ep_id).first()
+        hidden = set(json.loads(row.hidden_models or "[]"))
+        cached = json.loads(row.cached_models or "[]")
+    finally:
+        db.close()
+
+    # The refresh policy held: the newly discovered model is cached but HIDDEN (probing OK
+    # is not curation), and the probe failure joined the hidden set instead of replacing it.
+    assert _PHANTOM in cached
+    assert _PHANTOM in hidden, "a newly discovered model must not become visible via /probe"
+    assert failing in hidden, "a probe failure must still be hidden"
+
+    after = _visible_ids(client)
+    assert _PHANTOM not in after
+    assert len(after) <= before_count
