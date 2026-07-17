@@ -1,0 +1,436 @@
+# Owner-permitted soft-failures (#1599 — "no silent fail-soft").
+#
+# Governing ruling (owner, 2026-07-14): NOTHING fails softly unless it is on THIS
+# allowlist. Every genuine failure (an exception / non-2xx / a guard that couldn't run /
+# a refused write) must show RED on /admin/status (INCLUDING when auto-corrected) + log at
+# WARN/ERROR + reach a RED-eligible recorder. An expected-empty result (no deal, no NPC,
+# an empty optional, a capability probe that legitimately returns "unavailable") is normal
+# flow, NOT a failure, and is never flagged.
+#
+# The CI lint (frontend/tests/test_no_silent_failsoft.py) reads this file. It flags a handler
+# only when ALL hold: a BROAD catch (Exception/BaseException/bare), a SILENT body (pass /
+# return-default / continue — no log, no re-raise, no RED recorder), AND the guarded try-body
+# touches a RISK surface (an LLM / engine / HTTP / write-back / generation call). A flagged
+# hit PASSES iff (a) its body reaches a RED-eligible recorder [then it is not a hit], OR
+# (b) its function/class- or glob-anchored site is granted below, OR (c) it carries an inline
+# `# failsoft-ok: <id>` (Python) / `/* failsoft-ok */` (JS/TS) pragma.
+#
+# `site` is function/class- or file-anchored (NOT a raw line — line numbers drift). A `*`
+# makes it a glob (pattern-class) matched against the repo-relative path. Paths are
+# repo-relative (frontend/... for the FE app, src/... for the TS engine).
+#
+# Each entry is ONE owner grant. `records: red-eligible` is the default (a real failure owed a
+# RED recorder — a GRANDFATHER grant, burned down by a registry-removal PR). `records: none`
+# is the last resort, reserved for telemetry / recorder-self / optional-probe sites where there
+# is nowhere left to write (surfacing a logger-down through the same logger is circular).
+
+allow:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Class-C — telemetry / recorder-self / optional-probe (records: none).
+  # "Logging must never hurt the app": the recorder, logger, or ring itself failing is
+  # terminal by design (nowhere left to write). These are the seed of the owner allowlist.
+  # ─────────────────────────────────────────────────────────────────────────────
+  - id: log-rings-self
+    site: frontend/src/log_rings.py
+    class: recorder-self
+    records: none
+    reason: "the RED recorder itself (Ring.push / _RingHandler.emit / record_overseer / record_soft_failure self-swallow) — a telemetry-write failure has nowhere left to write; the WARN log already surfaced the diagnosis."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: trace-sink-emit
+    site: frontend/src/trace_sink.py
+    class: telemetry
+    records: none
+    reason: "the LLM-I/O trace sink (emit / archive write) — telemetry path; a failed trace write must never break a turn."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: llm-trace-emit
+    site: frontend/src/llm_trace.py
+    class: telemetry
+    records: none
+    reason: "the durable llm-io.jsonl archive + emit_trace scrub path — telemetry; logging must never hurt the app."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: overseer-debug-ledger
+    site: frontend/src/orwell_overseer_debug.py
+    class: recorder-self
+    records: none
+    reason: "the opt-in overseer debug-telemetry ring write (~L225) — telemetry must never hurt a turn."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: sync-ledger-write
+    site: frontend/src/orwell_sync_ledger.py
+    class: recorder-self
+    records: none
+    reason: "the 0065 divergence/belt-fire ledger write (~L455) — a ledger-write failure is best-effort telemetry (already log-and-swallowed by the outer handler)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: token-ledger-write
+    site: frontend/src/orwell_token_ledger.py
+    class: recorder-self
+    records: none
+    reason: "the 0069 per-turn token/cost ledger write — telemetry path; a cost-ledger blip must never break a turn."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: js-optional-probe
+    site: frontend/static/js/**
+    class: optional-probe
+    records: none
+    reason: "browser optional-probe pattern-class (localStorage/JSON.parse(dataset)/navigator/haptics/glass-render capability probes) — an unavailable browser capability or a malformed dataset attribute is expected-empty, not a failure. A genuine client-side game-failure beacon (POST /api/client-log) is deferred to A4 (#1599); until it lands the JS game-failure catches ride this grant too."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # --- GRANDFATHERED (Class-A burn-down; #1599) ---
+  # records: red-eligible — each of these files swallows at least one genuine failure today
+  # with no RED-eligible record. They are grandfathered so CI is GREEN on landing; each fix is
+  # a registry-removal PR that wires the site to a RED recorder (record_soft_failure /
+  # record_io(ok=False) / record_llm_call(ok=False) / enrichment_policy.record_failure) or, for
+  # the engine, re-throws into the orchestrator's fail-closed checkpoint. File-anchored on
+  # purpose (the backlog is per-file); tighten to function-anchored as each is burned down.
+  #
+  # Explicitly NOT grandfathered (enforced today, A2-wired 2026-07-16): orwell_portraits,
+  # orwell_gen_competitions, orwell_producer_authoring, orwell_tagline, orwell_fal_image.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  # A3 — the deep narration / agent-loop / tool-dispatch lanes (except:pass + catch-and-default).
+  - id: gf-agent-loop
+    site: frontend/src/agent_loop.py
+    class: deep-agent-loop
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A3) — overseer/faith hooks, streaming telemetry catches, tool-under-call belts. Per-site RED wiring is a follow-up slice."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-llm-core
+    site: frontend/src/llm_core.py
+    class: deep-agent-loop
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A3) — the model-call core; emit_trace calls + provider-error coercions owed a RED rollup."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-tool-implementations
+    site: frontend/src/tool_implementations.py
+    class: writeback
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A3) — the ~50 do_* engine dispatch handlers already IO-record on failure via orwell_engine._call (ERROR on /admin/status); they are owed a CLASSIFIED RED rollup (WI3), not a per-site record (which would double-record the IO tap)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-tool-execution
+    site: frontend/src/tool_execution.py
+    class: writeback
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A3) — tool dispatch branches; sibling of tool_implementations."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-chat-helpers
+    site: frontend/routes/chat_helpers.py
+    class: deep-agent-loop
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A3) — canonical-session resolve + pre-emission outcome guard best-effort swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # The enrichment / cast-authoring write-back drivers (already partly RED via enrichment_policy;
+  # residual per-NPC WARN swallows owed the shared recorder — audit lane 2 tail).
+  - id: gf-cast-authoring
+    site: frontend/src/orwell_cast_authoring.py
+    class: enrichment
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 lane-2 tail) — the terminal enrichment failures already route through enrichment_policy.record_failure (RED); residual per-NPC/parse WARN swallows are owed the shared recorder."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-cast-genesis
+    site: frontend/src/orwell_cast_genesis.py
+    class: enrichment
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 lane-2 tail) — 0116 cast-skeleton authoring; sibling of cast-authoring."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-prewarm
+    site: frontend/src/orwell_prewarm.py
+    class: enrichment
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 lane-2 tail) — 0065 cast pre-warm write-back driver."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-zeitgeist
+    site: frontend/src/orwell_zeitgeist.py
+    class: enrichment
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 lane-2 tail) — 0062 move-in zeitgeist; terminal failures already route via enrichment_policy, residual import/parse swallows owed."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-enrichment-policy
+    site: frontend/src/enrichment_policy.py
+    class: enrichment
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — the record_failure/assess best-effort swallow around the overseer assessment (the RED record itself already fired above it)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-overseer
+    site: frontend/src/overseer.py
+    class: guard
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 lane-1) — the LlmOverseer/DeterministicOverseer assess paths already record RED via record_soft_failure; residual resolve/parse swallows owed."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # The remaining game-surface FE files with real-error swallows (per the WI1 scale audit).
+  - id: gf-orwell-routes
+    site: frontend/routes/orwell_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — roster/state/publish best-effort route swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-admin-health-routes
+    site: frontend/routes/admin_health_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — the debug-bundle/health assemblers are deliberately best-effort (P1: the status page must never 500); each degraded section is already marked in meta.sections. Owed a per-section RED where a read is a real fault vs an empty optional."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-model-routes
+    site: frontend/routes/model_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — model-endpoint config route swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-chat-routes
+    site: frontend/routes/chat_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — chat stream route best-effort swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-ws-routes
+    site: frontend/routes/ws_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — websocket transport swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-session-routes
+    site: frontend/routes/session_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — session CRUD best-effort swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-embedding-routes
+    site: frontend/routes/embedding_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — embedding provider route swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-vault-routes
+    site: frontend/routes/vault_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — producerVault DEBUG route best-effort swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-diagnostics-routes
+    site: frontend/routes/diagnostics_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — diagnostics route swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-search-routes
+    site: frontend/routes/search_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — web-search route swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-admin-public-deployment-routes
+    site: frontend/routes/admin_public_deployment_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — public-exposure admin route swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-admin-tls-routes
+    site: frontend/routes/admin_tls_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — local-HTTPS admin route swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-codex-routes
+    site: frontend/routes/codex_routes.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — codex route swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # Runtime / infrastructure FE modules with real-error swallows.
+  - id: gf-ai-interaction
+    site: frontend/src/ai_interaction.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — model-call interaction best-effort swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-builtin-actions
+    site: frontend/src/builtin_actions.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — builtin tool action swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-builtin-mcp
+    site: frontend/src/builtin_mcp.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — builtin MCP bridge swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-agent-runs
+    site: frontend/src/agent_runs.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — agent-run bookkeeping swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-endpoint-resolver
+    site: frontend/src/endpoint_resolver.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — endpoint resolution swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-task-scheduler
+    site: frontend/src/task_scheduler.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — background task scheduler swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-golden-path
+    site: frontend/src/golden_path.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — 0108 golden record/replay best-effort swallow."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-research-handler
+    site: frontend/src/research_handler.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — research handler swallow (inherited workspace, largely game-build-stripped)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-document-processor
+    site: frontend/src/document_processor.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — document processing swallow (inherited workspace)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-memory-vector
+    site: frontend/src/memory_vector.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — memory vector store swallow (inherited workspace)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-rag-vector
+    site: frontend/src/rag_vector.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — RAG vector store swallow (inherited workspace)."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-embedding-lanes
+    site: frontend/src/embedding_lanes.py
+    class: runtime
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — embedding lane swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # Inherited-workspace routes (largely stripped by the game build; low live signal).
+  - id: gf-email-routes
+    site: frontend/routes/email_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited email workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-email-helpers
+    site: frontend/routes/email_helpers.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited email workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-cookbook-routes
+    site: frontend/routes/cookbook_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited cookbook workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-calendar-routes
+    site: frontend/routes/calendar_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited caldav workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-contacts-routes
+    site: frontend/routes/contacts_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited contacts workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-gallery-routes
+    site: frontend/routes/gallery_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited gallery workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-shell-routes
+    site: frontend/routes/shell_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited shell workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-research-routes
+    site: frontend/routes/research_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — inherited research workspace, stripped by the game build."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+  - id: gf-auth-routes
+    site: frontend/routes/auth_routes.py
+    class: inherited-workspace
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599) — auth route best-effort swallows."
+    approved_by: kevinhirsch
+    approved: 2026-07-17
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # --- GRANDFATHERED — TS engine (Class-A / A1 burn-down; #1599) ---
+  # The pure domain core uses typed errors + the orchestrator's fail-closed integrity
+  # checkpoint; the swallow surface is small and concentrated in adapters. A1 (routing these
+  # adapter swallows into the orchestrator's RED-eligible channel — new EngineHealth.recordSoftFault
+  # vs re-throw-to-HealthMetrics) is architecturally significant and needs an owner design nod, so
+  # it stays grandfathered as one glob for now.
+  # ─────────────────────────────────────────────────────────────────────────────
+  - id: gf-engine-ts
+    site: src/**
+    class: engine-persist
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 A1) — engine adapter catch-and-default (FileSaveStore / SqliteSaveStore / SoulStore / FileUserNotorietyStore / GameSessionAdapter / HttpMcpServer / LlmNarrativePort / composition wiring). Needs an owner design nod (EngineHealth.recordSoftFault vs re-throw into the orchestrator's fail-closed checkpoint) before per-site remediation."
+    approved_by: kevinhirsch
+    approved: 2026-07-17

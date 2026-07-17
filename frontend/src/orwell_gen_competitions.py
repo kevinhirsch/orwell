@@ -171,7 +171,7 @@ async def run_author(owner: Optional[str], staging: Optional[dict] = None) -> di
     if staging is None:
         try:
             staging = await orwell_engine.competition_staging_view(user=owner)
-        except Exception:
+        except Exception:  # failsoft-ok: expected-empty (no comp resolved / generation off ⇒ nothing to dress)
             return {"accepted": False, "reason": "no-staging"}
     if not isinstance(staging, dict) or not staging.get("dropOrder"):
         return {"accepted": False, "reason": "no-staging"}
@@ -191,6 +191,19 @@ async def run_author(owner: Optional[str], staging: Optional[dict] = None) -> di
         return await orwell_engine.record_competition_fiction(fiction, user=owner)
 
     result = await author_competition(lambda: _ready(ready), llm_fn, _write)
+    # #1599: a GENUINE competition-fiction failure (the model call RAISED, or the engine REFUSED the
+    # write-back) shows RED on /admin/status — the deterministic 0042 competition-library floor stands
+    # (auto-corrected), never a silent skip. Expected-empty reasons (no-staging / no-model /
+    # already-authored / no-fiction quality-miss) are normal flow and do NOT alarm.
+    if isinstance(result, dict) and not result.get("accepted") \
+            and result.get("reason") in ("llm-failed", "write-failed"):
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "gen-comp:fiction-failed", str(result.get("reason")),
+                corrected="competition-library-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
     # If the fiction landed on the live game, push a server-side "game-updated" so open pages reconcile.
     if isinstance(result, dict) and result.get("accepted"):
         try:
@@ -220,7 +233,7 @@ def kickoff_fiction(owner: Optional[str]) -> None:
         try:
             from src import orwell_engine
             staging = await orwell_engine.competition_staging_view(user=owner)
-        except Exception:
+        except Exception:  # failsoft-ok: expected-empty (no comp resolved / generation off ⇒ nothing to dress)
             return
         if not isinstance(staging, dict) or not staging.get("dropOrder"):
             return  # generation off, or no comp has resolved its roll — nothing to dress

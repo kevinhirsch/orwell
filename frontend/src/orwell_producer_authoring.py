@@ -242,6 +242,14 @@ async def run_authoring(owner: Optional[str]) -> dict:
         llm_fn = await _resolve_llm_fn(owner)
     except Exception as e:  # noqa: BLE001 — fail-soft background driver: never raise
         logger.warning("[producer-authoring] utility-model resolution failed: %s", e)
+        # #1599: a RAISED resolver is a genuine fault (distinct from a resolved None = expected
+        # no-model) — surface it RED; the seeded producer floor stands (auto-corrected).
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("producer:resolver-failed", e,
+                                          corrected="seeded-producer-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"accepted": False, "reason": "resolver-failed"}
     if llm_fn is None:
         logger.debug("[producer-authoring] no utility model — keeping the seeded producer floor")
@@ -251,7 +259,20 @@ async def run_authoring(owner: Optional[str]) -> dict:
     async def _write(overlay: dict) -> dict:
         return await orwell_engine.record_producer_profile(overlay, user=owner)
 
-    return await author_producer(llm_fn, _write)
+    result = await author_producer(llm_fn, _write)
+    # #1599: a GENUINE producer-authoring failure (the model call RAISED, or the engine REFUSED the
+    # write-back) shows RED on /admin/status — the seeded producer floor stands (auto-corrected),
+    # never a silent skip. Expected-empty reasons (no-model / no-fields) are normal flow, no alarm.
+    if isinstance(result, dict) and not result.get("accepted") \
+            and result.get("reason") in ("llm-failed", "write-failed"):
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "producer:authoring-failed", str(result.get("reason")),
+                corrected="seeded-producer-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
+    return result
 
 
 def kickoff_producer_authoring(owner: Optional[str]) -> None:

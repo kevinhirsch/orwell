@@ -159,7 +159,26 @@ def _note_image_budget_skip(user: Optional[str], houseguest_id: str) -> None:
             corrected="image-budget-precheck",
             user=user,
         )
-    except Exception:  # pragma: no cover - defensive: health logging must never break the run
+    except Exception:  # pragma: no cover — failsoft-ok: recorder-self (health logging must never break the run)
+        pass
+
+
+def _note_generation_failure(user: Optional[str], houseguest_id: str, reason: str,
+                             *, corrected: str = "placeholder-fallback") -> None:
+    """#1599: a portrait generation / persist FAILURE was the ORIGINAL silent-fail trigger — a
+    houseguest quietly ends up with the initials placeholder. Record a RED-eligible health event so
+    the failure shows RED on /admin/status (annotated auto-corrected: the placeholder floor stands),
+    beside the existing portrait-log attempt row + the reconciler's retry-budget stamp. Also carries
+    fal.ai transport failures — they surface UP through `_note_gen_error` to this terminal, so this is
+    the ONE place a portrait failure is RED-recorded (no double-record). Best-effort: health logging
+    must never break the run."""
+    try:
+        from src import log_rings
+        log_rings.record_soft_failure(
+            "portraits:generation-failed",
+            f"portrait generation failed for {_safe_id(houseguest_id)}: {reason}",
+            corrected=corrected, user=user)
+    except Exception:  # pragma: no cover — failsoft-ok: recorder-self (health logging must never break the run)
         pass
 
 # ── L17 distinctness: detect look-alike faces and regenerate the offenders ─────────────────
@@ -831,7 +850,7 @@ def image_generation_available(user: Optional[str]) -> bool:
     # the transient failure (not a genuine absence) and generation should be allowed to TRY.
     try:
         return bool(has_image_capable_endpoint(user or None))
-    except Exception:
+    except Exception:  # failsoft-ok: capability-probe (unconfigured provider ⇒ unavailable; expected-empty)
         return False
 
 
@@ -902,7 +921,7 @@ async def _image_bytes_from_url(client, url: str) -> Optional[bytes]:
             return base64.b64decode(b64) if b64 else None
         r = await client.get(url)
         return r.content if r.status_code == 200 else None
-    except Exception:
+    except Exception:  # failsoft-ok: handled-by-caller (None ⇒ caller records image-decode-failed → the terminal)
         return None
 
 
@@ -992,7 +1011,7 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
         transport/JSON-level failure (no usable HTTP status), else the response's HTTP status."""
         try:
             resp = await client.post(chat_url, json=payload, headers=headers)
-        except Exception as e:  # transport error — no HTTP response at all
+        except Exception as e:  # transport error — no HTTP response at all; failsoft-ok: handled-by-caller (recorded at the terminal)
             return None, type(e).__name__, None, None
         if (resp.status_code != 200 and 400 <= resp.status_code < 500 and "image_config" in payload
                 and not _is_transient_gen_error(f"http-{resp.status_code}")):
@@ -1005,7 +1024,7 @@ async def _generate_via_chat_completions(client, chat_url: str, model_id: str,
             stripped = {k: v for k, v in payload.items() if k != "image_config"}
             try:
                 resp = await client.post(chat_url, json=stripped, headers=headers)
-            except Exception as e:
+            except Exception as e:  # failsoft-ok: handled-by-caller (recorded at the terminal)
                 return None, type(e).__name__, None, None
         if resp.status_code != 200:
             logger.info("[portraits] openrouter chat %s: %s", resp.status_code, resp.text[:200])
@@ -1805,6 +1824,9 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 # Stamp the failure class so the G20 reconciler can spare a TRANSIENT failure
                 # (402 credits, 429, 5xx, transport) from the permanent retry budget.
                 _record_gen_result(user, str(hid), False, reason)
+                # #1599: surface the failure RED on /admin/status — a silent placeholder was the
+                # original trigger; the initials floor stands (auto-corrected), still RED.
+                _note_generation_failure(user, str(hid), reason)
                 skipped += 1
                 continue
             try:
@@ -1820,6 +1842,7 @@ async def generate_and_store(prompts: list, user: Optional[str], *, record_beats
                 logger.info("[portraits] failed to persist %s: %s", hid, e)
                 log_attempt(str(hid), False, "persist-failed", duration_ms)
                 _record_gen_result(user, str(hid), False, "persist-failed")
+                _note_generation_failure(user, str(hid), f"persist-failed: {e}")  # #1599: RED, not silent
                 skipped += 1
         finally:
             _INFLIGHT.get(_safe_user(user), set()).discard(sid)
@@ -2030,7 +2053,7 @@ async def _record_image_beats(shown: list, user: Optional[str],
         if fired and IMAGE_BEAT_SPACING_S > 0:
             try:
                 await asyncio.sleep(IMAGE_BEAT_SPACING_S)
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover — failsoft-ok: expected-empty (beat-spacing sleep; the real beat call below logs)
                 pass
         try:
             await orwell_engine.record_image_beat(hid, ref, user=user)
@@ -2167,7 +2190,7 @@ async def portrait_completeness(user: Optional[str]) -> Optional[dict]:
 
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (pre-game / engine-down ⇒ no completeness; also IO-recorded)
         return None
     if not isinstance(state, dict) or state.get("started") is False:
         return None
@@ -2212,7 +2235,7 @@ async def adr0013_allowed_ids(ids: list, user: Optional[str]) -> list:
     from src import orwell_engine
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (the filter is itself fail-open; unknown state ⇒ keep ids)
         return ids
     if not isinstance(state, dict) or state.get("started") is False:
         return ids
@@ -2525,7 +2548,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     # (a) an active game — cheap and fail-open.
     try:
         state = await orwell_engine.get_game_state(user=user)
-    except Exception:
+    except Exception:  # failsoft-ok: expected-empty (engine-down ⇒ idle this cycle; also IO-recorded)
         return None
     if not isinstance(state, dict) or state.get("started") is False:
         return None
@@ -2577,7 +2600,7 @@ async def _reconcile_user(user: Optional[str]) -> Optional[dict]:
     # authored re-shoot owns them the moment their write-back lands).
     try:
         missing = await adr0013_allowed_ids(missing, user)
-    except Exception:  # pragma: no cover - defensive (the filter is itself fail-open)
+    except Exception:  # pragma: no cover — failsoft-ok: expected-empty (the filter is itself fail-open)
         pass
     prev_missing = _LAST_MISSING.get(safe)
     _LAST_MISSING[safe] = len(missing)
