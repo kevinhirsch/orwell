@@ -498,6 +498,50 @@ def test_merge_overflow_drops_oldest_with_own_beat(monkeypatch, tmp_path):
     assert remaining == {"new C", "new D"}              # the freshest survive, bounded to the cap
 
 
+def test_unparseable_retro_verdict_is_requeued_not_clean(monkeypatch, tmp_path):
+    """#1695 — verdict_from_reply returns None ONLY for an UNDECIDABLE reply (a legit no-slip is a
+    NON-None verdict with is_slip=False). A None retro verdict is the guard effectively still down: it
+    must be RED-surfaced + REQUEUED, never recorded `faith:retro-clean` / discarded (which would leave
+    the turn permanently unjudged)."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    from src import agent_loop
+    q["u1"] = [{"narration": "an unjudged turn", "projection": {"board": {}},
+                "beat_before": 4, "context": "in-game"}]
+    # the retro judge CALL lands, but the REPLY is unparseable → verdict_from_reply returns None.
+    _run(agent_loop._faith_drain_retro("u1", lambda prompt: "not json — the model just rambled"))
+
+    unparsed = [(a, k) for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-unparsed"]
+    clean = [(a, k) for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-clean"]
+    assert len(unparsed) == 1 and unparsed[0][1].get("ok") is False   # RED — still effectively down…
+    assert clean == []                                                # …NOT recorded clean…
+    assert len(q.get("u1", [])) == 1                                  # …and REQUEUED (never lost).
+    assert q["u1"][0]["narration"] == "an unjudged turn"
+
+
+def test_concrete_no_slip_retro_verdict_is_recorded_clean(monkeypatch, tmp_path):
+    """The other side of the 3-way branch: a CONCRETE non-slip verdict (in-contract, is_slip=False) is
+    genuinely clean — recorded `faith:retro-clean` (ok=True) and the entry is retired (NOT requeued)."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    from src import agent_loop
+    q["u1"] = [{"narration": "a judged-clean turn", "projection": {"board": {}},
+                "beat_before": 5, "context": "in-game"}]
+    clean_reply = json.dumps({"dimension": "none", "classification": "none", "lever": "none",
+                              "rationale": ""})
+    _run(agent_loop._faith_drain_retro("u1", lambda prompt: clean_reply))
+
+    clean = [(a, k) for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-clean"]
+    assert len(clean) == 1 and clean[0][1].get("ok") is True          # recorded genuinely clean…
+    assert not q.get("u1")                                            # …and the entry is retired.
+
+
 # ── SOURCE-PIN — the loop wires the R5 guard-down machinery ──────────────────────────────────────
 
 _AGENT_LOOP_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_loop.py"
@@ -511,3 +555,4 @@ def test_source_pin_r5_wiring():
     assert "_faith_drain_retro" in src                 # part 3: re-judge on the next opportunity
     assert "_faith_record_retro_dropped" in src        # shared drop recorder (dropped-beat attribution)
     assert "_faith_key" in src                          # canonical-session queue keying (#1695 finding A)
+    assert "faith:retro-unparsed" in src                # None verdict = still-down, requeued (#1695)

@@ -3131,13 +3131,26 @@ async def _faith_drain_retro(owner, llm) -> None:
                     requeue.append(entry)
                 else:
                     _verdict = judge.verdict_from_reply(_raw, _narr, _proj)
-                    if _verdict is not None and _verdict.is_slip:
+                    if _verdict is None:
+                        # #1695: the retro CALL landed but the REPLY was unparseable / out-of-contract.
+                        # verdict_from_reply returns None ONLY for an UNDECIDABLE reply (a legit no-slip
+                        # is a NON-None verdict with is_slip=False) — so this is NOT judged-clean; the
+                        # guard is effectively still down. Surface it RED and REQUEUE — never record it
+                        # clean, never discard it (which would leave the turn permanently unjudged).
+                        _lr.record_overseer(
+                            "anomaly", "faith:retro-unparsed",
+                            "retro-judge reply was unparseable / out-of-contract (guard effectively still "
+                            "down) — requeued, NOT recorded clean",
+                            lever=None, beat_before=_bb, ok=False, user=owner)
+                        requeue.append(entry)
+                    elif _verdict.is_slip:
                         _lr.record_overseer(
                             "anomaly", f"faith:retro:{_verdict.dimension}",
                             f"RETRO-JUDGED a previously guard-down turn — {_verdict.classification}-set "
                             f"slip ({_verdict.dimension}), lever '{_verdict.lever}': {_verdict.rationale}",
                             lever=_verdict.lever, beat_before=_bb, ok=False, user=owner)
                     else:
+                        # a CONCRETE non-slip verdict (in-contract, is_slip=False) — genuinely clean.
                         _lr.record_overseer(
                             "observation", "faith:retro-clean",
                             "RETRO-JUDGED a previously guard-down turn — no slip found (now "
