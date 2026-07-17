@@ -257,6 +257,12 @@ def test_pre_filter_matches_player_expulsion_and_ignores_conditional():
     assert not chat_helpers._sentence_has_closed_set_claim("Production is removing you from the kitchen.")
     # … but the real agent-form expulsion (game/house/BB qualifier) still trips.
     assert chat_helpers._sentence_has_closed_set_claim("Production is now removing you from the game.")
+    # A LOCATION continuation ("the game ROOM", "the house KITCHEN") is a room move, not an expulsion —
+    # the qualifier must end the removal phrase, so these stand down while the real expulsion holds.
+    assert not chat_helpers._sentence_has_closed_set_claim("We're removing you from the game room.")
+    assert not chat_helpers._sentence_has_closed_set_claim("You have been removed from the house kitchen.")
+    # A trailing clause (comma / conjunction) after the bare qualifier is still a committed expulsion.
+    assert chat_helpers._sentence_has_closed_set_claim("You're being removed from the game and sent home.")
 
 
 def test_veto_save_removing_you_from_the_block_emits(monkeypatch):
@@ -272,6 +278,21 @@ def test_veto_save_removing_you_from_the_block_emits(monkeypatch):
                  player_status="active")
     emit = _run(chat_helpers.screen_streamed_outcome(
         _USER, "With the veto, we're removing you from the block."))
+    assert emit is True
+    assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_room_move_from_the_game_room_emits(monkeypatch):
+    """A room move ("removing you from the game room") is not an expulsion — the location continuation
+    after the qualifier makes it a move, so the guard stands down and EMITs while the player is active."""
+    chat_helpers._LAST_BEAT_SIG[_USER] = {
+        "week": 2, "phase": "social", "pending": None, "hoh": "npc:1",
+        "noms": [], "vetoHolder": None, "vetoUsed": False,
+        "evicted": 1, "finished": False, "playerStatus": "active",
+    }
+    _board_fakes(monkeypatch, phase="social", evicted=1, noms=(), player_status="active")
+    emit = _run(chat_helpers.screen_streamed_outcome(
+        _USER, "The producers are now removing you from the game room for a diary session."))
     assert emit is True
     assert _USER not in chat_helpers._DESYNC_REGROUND
 

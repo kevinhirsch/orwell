@@ -1616,6 +1616,9 @@ _CLAIM_PLAYER_EXPULSION_RE = re.compile(
     r"\byou(?:'|’)?(?:re|\s+are|(?:'|’)?ve|\s+have)\s+(?:being|been|now|just|officially|hereby)\s+"
     r"(?:removed|expelled|ejected|eliminated|disqualified|kicked\s+out)\s+(?:from\s+)?(?:the\s+)?"
     r"(?:game|house|competition|big\s+brother)\b"
+    # the qualifier must END the removal phrase — a following location noun ("the game ROOM", "the
+    # house KITCHEN") makes it a room move, not an expulsion, so reject that continuation (CodeRabbit).
+    r"(?![ \t]+(?:room|rooms|kitchen|bedroom|bathroom|lounge|suite|area|yard|backyard|garden|patio|hoh))"
     # (b) you're being / you've been … expelled/ejected/disqualified (game-terminal verbs, no qualifier needed)
     r"|\byou(?:'|’)?(?:re|\s+are|(?:'|’)?ve|\s+have)\s+(?:being|been|now|just|officially|hereby)\s+"
     r"(?:expelled|ejected|disqualified)\b"
@@ -1625,6 +1628,9 @@ _CLAIM_PLAYER_EXPULSION_RE = re.compile(
     r"|\b(?:we(?:'|’)?re|production\s+(?:is|are)|the\s+producers?\s+(?:are|is))\s+(?:now\s+)?"
     r"(?:removing|expelling|ejecting|eliminating|disqualifying)\s+you\s+(?:from\s+)?(?:the\s+)?"
     r"(?:game|house|competition|big\s+brother)\b"
+    # the qualifier must END the removal phrase — a following location noun ("the game ROOM", "the
+    # house KITCHEN") makes it a room move, not an expulsion, so reject that continuation (CodeRabbit).
+    r"(?![ \t]+(?:room|rooms|kitchen|bedroom|bathroom|lounge|suite|area|yard|backyard|garden|patio|hoh))"
     # (d) you're no longer in the game/house — a committed removal
     r"|\byou(?:'|’)?re\s+no\s+longer\s+in\s+the\s+(?:game|house)\b",
     re.IGNORECASE,
