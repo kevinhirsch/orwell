@@ -310,8 +310,27 @@ def _hl_syntax(v):
     return _norm(v).startswith("var(--hl-")
 
 
+# a color-mix that blends currentColor/inherit toward `transparent` is a muted SHADE of the inherited
+# surface ink, so it follows the surface polarity by construction — exactly like bare `inherit`. This
+# is the #1644 adaptive-bubble meta pattern (`color-mix(currentColor 62%, transparent)` on the .msg-ai
+# timestamps/action glyphs, which follow the bubble's per-wallpaper adaptive ink).
+# Greptile P1 (#1690): the mix must actually PAINT the surface ink — it must CONTAIN currentColor/
+# inherit (`transparent, transparent` is invisible), and must NOT reduce it to nothing (`currentColor
+# 0%` or `transparent 100%` render invisible). Those degenerate/invisible forms are rejected, so an
+# accidental 0% no longer passes the gate as "surface-following".
+_CURRENTCOLOR_MIX = re.compile(
+    r"^color-mix\(\s*in\s+srgb\s*,\s*"
+    r"(?=.*(?:currentcolor|inherit))"                  # must carry the surface ink at all
+    r"(?!.*(?:^|[,\s])transparent\s+100%)"             # …not fully transparent
+    r"(?!.*(?:currentcolor|inherit)\s+0%)"             # …and not a 0% (invisible) surface ink
+    r"(?:currentcolor|inherit)(?:\s+[\d.]+%)?\s*,\s*transparent\s*\)$")
+
+
 def _follows_surface(v):
-    return _norm(v) in ("inherit", "currentcolor")   # transparent handled separately (finding #3)
+    n = _norm(v)
+    if n in ("inherit", "currentcolor"):             # transparent handled separately (finding #3)
+        return True
+    return bool(_CURRENTCOLOR_MIX.match(n))           # muted shade of the inherited surface ink
 
 
 def _is_transparent(v):
@@ -342,10 +361,21 @@ def _kit_on_fill_ink(v):
 # either surface — never a light-on-light straggler. This is the INLINE mirror of W4's JS-side
 # JS_COOL_REGISTRY registration for the SAME `var(--color-danger)` token.
 _DANGER_TOKEN = re.compile(r"^var\(\s*--color-(?:danger|error)\s*\)$")
+# the AA-SAFE SOLID danger ink: --color-danger-strong = color-mix(--color-danger 76%, #000), a DARK
+# red designed to clear the 4.5:1 NORMAL-text floor (raw --color-danger is only ~3.9:1 as body text —
+# style.css ~L152 note). Legible as normal-size body/control text on any surface.
+_DANGER_STRONG_TOKEN = re.compile(r"^var\(\s*--color-(?:danger|error)-strong\s*\)$")
+# large-bold heading tags: the app renders <h1>–<h3> heavy enough that the RAW danger hue clears its
+# 3:1 large floor (rendered audit flagged only the normal-size vault BUTTON, not the <h2> heads).
+_LARGE_TAGS = ("h1", "h2", "h3")
 
 
 def _standard_danger(v):
     return bool(_DANGER_TOKEN.match(_norm(v)))
+
+
+def _standard_danger_strong(v):
+    return bool(_DANGER_STRONG_TOKEN.match(_norm(v)))
 
 
 # ── surface predicates over the SELECTOR — COMPLETE-token match (finding #2) ─────────
@@ -434,6 +464,15 @@ COOL_REGISTRY = {
     # adaptive primitive, legible in BOTH contexts — the sanctioned adaptive-wallpaper pattern.
     'body.theme-frosted .ow-btn-icon': ("adaptive-wallpaper", "compact chrome icon button; adaptive over wallpaper (#1638)"),
     'body.theme-frosted .ow-btn-compact': ("adaptive-wallpaper", "compact chrome text button; adaptive over wallpaper (#1638)"),
+
+    # #1690: the .msg-ai footer meta controls float over the chat wallpaper. Their DEFAULT ink is a
+    # muted color-mix(currentColor…) (follows-surface); on HOVER they brighten to the FULL adaptive
+    # ink var(--fg) — dark over a light frosted wallpaper (W3 --fg remap), light over a dark one. The
+    # prior `color: inherit` pulled the muted footer value and never brightened (CodeRabbit #1690).
+    'body.theme-frosted .msg-ai .msg-action-btn:hover': ("adaptive-wallpaper", "footer action btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .footer-copy-btn:hover': ("adaptive-wallpaper", "footer copy btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .regen-btn:hover': ("adaptive-wallpaper", "footer regen btn hover; full adaptive ink (#1690)"),
+    'body.theme-frosted .msg-ai .fork-btn:hover': ("adaptive-wallpaper", "footer fork btn hover; full adaptive ink (#1690)"),
 }
 
 
@@ -765,8 +804,20 @@ _INLINE_COLOR = re.compile(r"(?<![-\w])color\s*:\s*([^;]*)", re.I)
 _INLINE_BG = re.compile(r"(?<![-\w])background(?:-color)?\s*:\s*([^;]*)", re.I)
 
 
+def _tag_for(text, style_start):
+    """The element TAG bearing the inline style at `style_start` — the nearest `<tag` opening before
+    it (a style attr lives inside its element's start tag, so the last `<tag` before it is the host).
+    Lets the danger check be size-aware: raw danger hue is fine on a large-bold heading, not on a
+    normal-size control/body label (finding: the rendered vault BUTTON @ ~3.4:1)."""
+    lt = text.rfind("<", 0, style_start)
+    if lt == -1:
+        return ""
+    m = re.match(r"<\s*([a-zA-Z][\w-]*)", text[lt:])
+    return m.group(1).lower() if m else ""
+
+
 def _html_inline_color_sites(rel):
-    """(file, line, style_string, color_value) for every inline style with a property-position
+    """(file, line, style_string, color_value, tag) for every inline style with a property-position
     color, whole-text (so a multiline or single-quoted style attr is not missed)."""
     text = _read(rel)
     sites = []
@@ -774,7 +825,8 @@ def _html_inline_color_sites(rel):
         style = m.group(1) if m.group(1) is not None else m.group(2)
         cm = _INLINE_COLOR.search(style)
         if cm and cm.group(1).strip():
-            sites.append((rel, text.count("\n", 0, m.start()) + 1, style, cm.group(1).strip()))
+            sites.append((rel, text.count("\n", 0, m.start()) + 1, style, cm.group(1).strip(),
+                          _tag_for(text, m.start())))
     return sites
 
 
@@ -807,11 +859,70 @@ def _bg_is_solid_fill(style):
     return "var(" in bg or bool(_BARE_HEX.match(bg)) or bg in ("black", "red")
 
 
+def _bg_is_danger_fill(style):
+    """The paired background is a CONTRASTING danger-surface fill on which the raw danger *ink* is a
+    legible, intended treatment. Two footguns are explicitly excluded (CodeRabbit Major on #1690):
+      • the BASE `var(--color-danger)` / `--color-error` token — raw danger ink on the SAME base
+        danger hue is a 1:1 (invisible) pair, the worst case, so only the darker `-strong` PLATE
+        qualifies (a `-strong` fullmatch, not a prefix search);
+      • a neutral/light literal fill (e.g. `#fff`) — raw-danger-on-white is the exact ~3.9:1
+        normal-body failure class this gate exists to catch (so `_bg_is_solid_fill`, which accepts
+        any non-theme fill, is too permissive for the danger branch).
+    Only the `-strong` danger plate + explicit dark-red literals pass. Enforces the "danger-strong
+    surface OR `-strong` ink" rule the widened gate is meant to hold."""
+    bm = _INLINE_BG.search(style)
+    if not bm:
+        return False
+    bg = _norm(bm.group(1))
+    if re.fullmatch(r"var\(\s*--color-(?:danger|error)-strong\s*\)", bg):
+        return True
+    return bg in ("crimson", "darkred", "firebrick", "maroon")
+
+
+def test_danger_fill_gate_rejects_same_token_and_light_fills():
+    """Regression (Greptile P1 + CodeRabbit Major on #1690): the size-aware danger branch must NOT
+    accept raw danger *ink* on a same-hue or light fill. `color:var(--color-danger);
+    background:var(--color-danger)` is a 1:1 (invisible) pair; raw-danger-on-#fff is ~3.9:1. Only the
+    darker `-strong` plate (or an explicit dark-red literal) is a legible danger surface for raw
+    danger ink; otherwise a normal-size control must ink `-strong` or move to white-on-fill."""
+    # the 1:1 same-token pair — raw danger ink on the raw danger fill — must be REJECTED.
+    assert not _bg_is_danger_fill("color:var(--color-danger);background:var(--color-danger)")
+    assert not _bg_is_danger_fill("color:var(--color-error);background:var(--color-error)")
+    # base danger/error tokens as a fill are NOT a legible surface for raw danger ink.
+    assert not _bg_is_danger_fill("background:var(--color-danger)")
+    assert not _bg_is_danger_fill("background: var(--color-error)")
+    # a light / neutral literal fill must be REJECTED (raw-danger-on-white ~3.9:1).
+    for lit in ("#fff", "#ffffff", "white", "#eee", "var(--panel)", "var(--bg)"):
+        assert not _bg_is_danger_fill(f"background:{lit}"), f"{lit} must not count as a danger fill"
+    # ONLY the darker -strong plate (or an explicit dark-red literal) qualifies.
+    assert _bg_is_danger_fill("background:var(--color-danger-strong)")
+    assert _bg_is_danger_fill("background: var(--color-error-strong)")
+    assert _bg_is_danger_fill("background:darkred")
+
+
+def test_currentcolor_mix_rejects_invisible_forms():
+    """Regression (Greptile P1 on #1690): a currentColor/inherit→transparent mix follows the surface
+    ONLY when it actually paints the ink. Degenerate/invisible forms (0% ink, transparent 100%, or a
+    no-currentColor `transparent, transparent`) must NOT classify as surface-following, so an
+    accidental 0% is caught by the closed-world gate instead of silently passing."""
+    # the live, visible muted-meta shades follow the surface.
+    for good in ("color-mix(in srgb, currentColor 62%, transparent)",
+                 "color-mix(in srgb, currentColor 45%, transparent)",
+                 "color-mix(in srgb, currentColor 22%, transparent)",
+                 "color-mix(in srgb, inherit 40%, transparent)"):
+        assert _follows_surface(good), f"visible muted shade must follow the surface: {good}"
+    # invisible / degenerate forms must NOT be treated as surface-following.
+    for bad in ("color-mix(in srgb, currentColor 0%, transparent)",
+                "color-mix(in srgb, transparent 100%, currentColor)",
+                "color-mix(in srgb, transparent, transparent)"):
+        assert not _follows_surface(bad), f"invisible mix must NOT follow the surface: {bad}"
+
+
 def test_index_html_inline_closed_world():
     """Genuinely closed-world (finding #6): EVERY inline color value must classify as an accepted
     family (inherit / decorative / theme-consistent / dark-ink / on-fill) or a tracked residual."""
     risky = []
-    for file, line, style, color in INLINE_SITES:
+    for file, line, style, color, tag in INLINE_SITES:
         if _follows_surface(color):
             continue                                   # inherit / currentColor → follows the surface
         if _accepted_decorative(style):
@@ -820,8 +931,18 @@ def test_index_html_inline_closed_world():
             continue                                   # theme-consistent pair (co-varying background)
         if _primary_dark(color):
             continue                                   # a dark literal is correct polarity on light glass
+        if _standard_danger_strong(color):
+            continue                                   # the AA-safe SOLID danger ink (dark red) — legible as normal body text on any surface
         if _standard_danger(color):
-            continue                                   # standardized semantic danger/error status ink (polarity-aware token; HIG Destructive role)
+            # #1644 WIDENING (size-aware danger): the RAW danger HUE (var(--color-danger/--color-error))
+            # clears the 3:1 large-bold / UI-hue floor but is only ~3.9:1 as NORMAL body text (rendered
+            # audit: the vault BUTTON @ ~3.4:1). Accept it only on a large-bold HEADING or a colored
+            # danger FILL; a normal-size control / body label must ink -strong (dark red) or move the
+            # red onto a fill (white-on-danger-strong).
+            if tag in _LARGE_TAGS or _bg_is_danger_fill(style):
+                continue
+            risky.append((file, line, color, style[:70]))
+            continue
         if _light_ink(color) and _bg_is_solid_fill(style):
             continue                                   # white / light ink on a colored fill
         if _residual_hit(style, file):
@@ -968,7 +1089,7 @@ def _residual_coverage():
                 if rel.endswith(e["file"]) and e["find"] in v:
                     cov[i] += 1
         else:                                          # W5 inline HTML style strings
-            for file, _ln, style, _color in INLINE_SITES:
+            for file, _ln, style, _color, _tag in INLINE_SITES:
                 if file.endswith(e["file"]) and e["find"] in style:
                     cov[i] += 1
     return cov
@@ -1008,3 +1129,65 @@ def test_enumeration_coverage_floors():
     js_live = collections.Counter((rel, _norm(v)) for rel, _ln, v, _c in JS_COLOR_SITES if _js_risky_ink(v))
     js_missing = sorted(k for k in JS_COOL_REGISTRY if js_live[k] == 0)
     assert not js_missing, "JS_COOL_REGISTRY keys not found among live JS color sets: " + repr(js_missing)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# TEST 11 — #1644 WIDENING (surface-aware muted): the frosted --fg remap CONTAINER blocks must ALSO
+#           floor the theme-MOVING muted META tokens, so `var(--color-muted*)` labels inside the
+#           light-glass chrome resolve dark, not light-muted-on-light. (Catches the §1/§3 spots: the
+#           settings inactive-nav labels + chat-meta timestamps at the SOURCE.)
+# ═══════════════════════════════════════════════════════════════════════════════════
+_MUTED_META_TOKENS = ("--color-muted", "--color-muted-alt", "--color-subheader")
+
+
+def _custom_prop(body, name):
+    """The value of a `--name:` custom-property declaration in a rule body (whole-token, so
+    `--color-muted` does not match `--color-muted-alt`)."""
+    m = re.search(re.escape(name) + r"(?![\w-])\s*:\s*([^;{}]+)", body)
+    return _norm(m.group(1)) if m else None
+
+
+def _is_dark_muted(v):
+    """A floored dark muted ink for the light glass — the #2f323a --fg-muted value, a var pointing at
+    it, or any primary-dark chrome ink."""
+    if v is None:
+        return False
+    return v == "#2f323a" or v.startswith("var(--fg-muted") or _primary_dark(v)
+
+
+def test_frosted_remap_containers_floor_muted_tokens():
+    """A frosted --fg remap CONTAINER block (one that redefines --fg to the chrome dark ink on the
+    light-glass settings/sidebar chrome) must ALSO floor --color-muted / --color-muted-alt /
+    --color-subheader to a dark muted. The --fg remap (#1646 W3) fixes `var(--fg)` descendants, but
+    the muted META tokens are theme-MOVING (LIGHT #9aa0a8 / #6b7280 in the dark theme) and are NOT
+    swept by it — so a muted-token label (the settings inactive-nav labels, chat-meta timestamps,
+    sub-headers) inside that container stayed light-muted-on-light-glass (~2.4:1, rendered audit
+    §1/§3). Pinning the token remap makes any `var(--color-muted*)` descendant resolve dark by
+    construction, exactly as the --fg remap already does for `var(--fg)`."""
+    checked, bad = 0, []
+    for sel, body, at_stack, _pos in _iter_rules(CSS_NC):
+        if not _is_default_render(at_stack) or "theme-frosted" not in sel:
+            continue
+        # only the WHOLE-CONTAINER --fg remap blocks anchored on the settings/sidebar chrome — not the
+        # per-element #16191f color patches, and not the adaptive-wallpaper heads.
+        if not (".ow-window .ow-body" in sel or re.search(r"#sidebar(?![\w-])", sel)):
+            continue
+        if not re.search(r"--fg(?![\w-])\s*:\s*#16191f", body):
+            continue
+        checked += 1
+        for tok in _MUTED_META_TOKENS:
+            val = _custom_prop(body, tok)
+            if not _is_dark_muted(val):
+                bad.append((" ".join(sel.split())[:70], tok, val))
+    assert checked >= 2, (
+        "#1644 WIDENING: expected ≥2 frosted --fg-remap container blocks (the `.ow-window .ow-body` "
+        "blanket + the `#sidebar` W3 block) to floor the muted tokens on; found %d — the anchors "
+        "moved, re-point this gate." % checked
+    )
+    assert not bad, (
+        "#1644 WIDENING (surface-aware muted): %d frosted --fg-remap container block/token pair(s) do "
+        "not floor the theme-moving muted META token to a dark muted (#2f323a / var(--fg-muted)) — a "
+        "`var(--color-muted*)` label inside this light-glass chrome would render light-muted-on-light. "
+        "Add `<token>: #2f323a;` to the block:\n" % len(bad)
+        + "\n".join(f"  block `{s}…`  {tok} = {val!r}" for s, tok, val in bad)
+    )

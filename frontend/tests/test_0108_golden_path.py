@@ -117,6 +117,54 @@ def test_npc_dwell_labels_never_drift_the_key(golden):
         golden.request_key("stream", moved, TOOLS, PARAMS)
 
 
+def test_raw_json_turnsHere_in_a_tool_result_never_drifts_the_key(golden):
+    """The 2026-07-17 fresh-GLM-recording miss: `createCharacter`'s tool result nests a full
+    `whereabouts` snapshot — {"turnsHere": N, "companions": [{"turnsHere": N}, …]} — echoed back
+    into the NEXT round's messages as `tool`-role content. That is the SAME per-committed-turn
+    presence-tenure counter the "Your room:"/"With you:" prompt-line subs above neutralize, but
+    reaching the key through a totally different code path (a raw JSON tool result, not
+    `momentPrompts.ts` rendered text) that those line-scoped subs never touch — so a real live
+    recording's tenure value (however it landed) could never be reproduced bit-for-bit by a
+    deterministic replay reconstruction, and the finalize turn's very next round missed every time.
+    Neutralized narrowly by JSON key name; every other field in the same tool result (room
+    assignment, roster, ids) still drifts the key on a real change."""
+    tool_msgs_0 = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 0, '
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
+    ]
+    tool_msgs_1 = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 1, '
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 1}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
+    ]
+    assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) == \
+        golden.request_key("stream", tool_msgs_1, TOOLS, PARAMS)
+    # …but a real change to who is present (not merely their tenure) still drifts the key.
+    moved = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "kitchen", "turnsHere": 0, '
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
+    ]
+    assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) != \
+        golden.request_key("stream", moved, TOOLS, PARAMS)
+
+
 def test_dwell_neutralization_is_scoped_to_presence_lines(golden):
     """PR #1234 review: the dwell subs are line-scoped — the SAME parenthetical worded
     into unrelated prompt prose is a game fact and must still drift the key; and the
@@ -333,6 +381,77 @@ def test_record_scrubs_secret_shapes_before_write(golden, tmp_path, monkeypatch)
 
 
 # ── byte-identical when off + in-process roundtrip through the REAL chokepoint ─────
+
+def test_finishless_clean_stream_is_persisted_as_replayable(tmp_path, monkeypatch):
+    """GLM-4.7 sometimes ends a live stream empty-handed — no finish chunk, no [DONE], no
+    error. The FE's refire belts handle that live, so replay must re-emit the same stream
+    to walk the same belt path. The old finish-marker requirement silently dropped these
+    and made the take unreplayable (the 2026-07-17 finalize-turn replay miss)."""
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7}, [])
+    recs = [json.loads(l) for l in fix.read_text().splitlines() if l.strip()]
+    streams = [r for r in recs if r.get("kind") == "stream"]
+    assert len(streams) == 1, "a clean finish-less (even empty) stream must be persisted"
+    assert streams[0]["meta"]["completed_normally"] is False
+    assert not os.path.exists(gp.dropped_sidecar_path(str(fix))), \
+        "a persisted stream is not a drop"
+
+
+def test_errored_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):
+    """An errored stream stays unpersisted (the FE's live retry/fallback reaction cannot be
+    reproduced from a poisoned record) — but it must land in the dropped-stream sidecar so
+    the record script fails the take loudly instead of printing RECORD OK over a fixture
+    replay cannot walk."""
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"error": {"message": "provider 502"}}\n\n'])
+    assert not fix.exists() or not any(
+        json.loads(l).get("kind") == "stream"
+        for l in fix.read_text().splitlines() if l.strip()), \
+        "an errored stream must never be persisted as replayable"
+    side = gp.dropped_sidecar_path(str(fix))
+    assert os.path.exists(side) and os.path.getsize(side) > 0
+    entry = json.loads(open(side).read().splitlines()[0])
+    assert entry["reason"] == "error-chunk"
+    # The sidecar entry carries the request KEY so the record script can tell a benign
+    # drop (a same-key retry succeeded and was persisted — replay consumes the success)
+    # from a poisoned take (no persisted twin — replay hard-misses there).
+    assert entry["key"] == gp.request_key(
+        "stream", MSGS, None, {"temperature": 0.7, "model": "narrator-model"})
+    # Triage primitive: once a successful same-key retry lands in the fixture,
+    # fixture_keys() contains the dropped key — the drop is benign.
+    assert entry["key"] not in gp.fixture_keys(str(fix))
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"delta": "recovered"}\n\n', "data: [DONE]\n\n"])
+    assert entry["key"] in gp.fixture_keys(str(fix))
+
+
+def test_vetoed_stream_is_dropped_to_the_sidecar(tmp_path, monkeypatch):
+    fix = tmp_path / "fixture.jsonl"
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_GOLDEN_FIXTURE", str(fix))
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
+    sys.modules.pop("src.golden_path", None)
+    import src.golden_path as gp
+    gp.record_stream("narrator-model", MSGS, {"temperature": 0.7},
+                     ['data: {"delta": "half a"}\n\n'], completed=False)
+    assert not fix.exists() or not any(
+        json.loads(l).get("kind") == "stream"
+        for l in fix.read_text().splitlines() if l.strip())
+    side = gp.dropped_sidecar_path(str(fix))
+    assert os.path.exists(side) and os.path.getsize(side) > 0
+    assert json.loads(open(side).read().splitlines()[0])["reason"] == "vetoed"
+
 
 def test_chokepoint_never_imports_golden_when_disabled(monkeypatch):
     monkeypatch.delenv("ORWELL_GOLDEN_RECORD", raising=False)

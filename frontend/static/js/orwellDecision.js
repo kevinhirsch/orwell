@@ -232,9 +232,16 @@
            caption token clears the floor at every tier. */
         padding: .08rem .45rem; border-radius: 999px; font-size: var(--fs-xs, .75rem); font-weight: 700;
         letter-spacing: .04em; text-transform: uppercase; white-space: nowrap;
-        color: var(--color-error, var(--red, #e06c75));
-        border: 1px solid color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 60%, transparent);
-        background: color-mix(in srgb, var(--color-error, var(--red, #e06c75)) 12%, transparent);
+        /* #1644 (rendered audit §2.2): the raw error HUE as small-caps TEXT on a faint 12% tint
+           measured ~2.7:1 on a LIGHT flat theme (red-on-light-red), and the flat presets carry no
+           polarity class to scope a light-only ink fix. HIG "apply colour to the background": make it
+           a solid danger PLATE with white ink — white-on-danger-strong reads AA on ANY surrounding
+           theme because the fill is opaque. The frosted glass tier keeps its own dark-ink-on-light-red
+           override (style.css ~L21190, higher specificity). Colour is never the only signal — the ⚠
+           glyph + "Irreversible — binding" text carry it for colourblind/SR users. */
+        color: var(--ow-on-danger, #fff);
+        border: 1px solid var(--color-danger-strong, #a4262c);
+        background: var(--color-danger-strong, #a4262c);
       }
       .odec .odec-prompt { margin: .35rem 0 .55rem; opacity: .9; }
       /* 0006 staged-rounds: the "still in this round" field — the narrowed roster the player reads to adapt. */

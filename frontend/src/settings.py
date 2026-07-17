@@ -149,6 +149,24 @@ DEFAULT_SETTINGS = {
     # in src/context_budget.py.
     "agent_input_token_hard_max": 48_000,
     "agent_stream_timeout_seconds": 300,
+    # N4 (2026-07-16 live-playthrough forensics): `agent_stream_timeout_seconds` above only
+    # guards the STREAMING path (agent_loop.py's `stream_llm` call). The async NON-stream
+    # chokepoint (`llm_core.llm_call_async`) had no comparable knob — a background memory-
+    # extraction call (pure JSON extraction, temp=0.1, max_tokens=500) was observed running
+    # 780,485ms (13 minutes) and still completing `ok:true`, because the per-attempt httpx read
+    # timeout can be defeated by upstream keep-alive trickle and, even when it does fire, gets
+    # multiplied by `llm_call_async`'s own retry loop (up to `max_retries` attempts). This is
+    # the sane DEFAULT overall wall-clock ceiling for non-stream UTILITY-class calls that don't
+    # pass their own explicit `timeout=` (memory extraction is the flagship consumer — see
+    # `services/memory/memory_extractor.py`); deliberately well under the 300s streaming figure,
+    # since a background JSON-extraction call has no business running anywhere near that long.
+    # `llm_core._llm_call_async_traced` now enforces WHATEVER `timeout` is in effect (this
+    # default, or a caller's explicit override) as a genuine `asyncio.wait_for` ceiling over the
+    # WHOLE call (all retries included, immune to keep-alive trickle) — never just a soft
+    # per-attempt hint a retry loop can multiply past. On expiry the failure is truthful: logged
+    # `ok:false` / `failClass:"timeout"` (the rc6 #1663 pattern — `_exc_fail_class` already
+    # recognizes `asyncio.TimeoutError`), never a silent `ok:true`.
+    "memory_extraction_timeout_seconds": 60,
     # ADR 0010 / feature 0069 (token economy) — the admin-editable per-class
     # reasoning budget. Maps a call class to a reasoning effort. As shipped, ALL FOUR classes
     # default to **"off"** (owner rulings, perf audit F-PY-1 2026-07-13 + casting 2026-07-14):

@@ -58,6 +58,9 @@ def main() -> int:
         return 2
     if os.path.exists(args.fixture):
         os.remove(args.fixture)  # a recording always starts a FRESH fixture
+    _sidecar = gp.dropped_sidecar_path(args.fixture)
+    if os.path.exists(_sidecar):
+        os.remove(_sidecar)  # stale drop diagnostics belong to a previous take
     # Resolve the utility tier ONCE (empty ⇒ same as narration) so the declared meta, the
     # integrity scan, and the ACTUAL run all agree — passing the raw empty value to the run
     # while meta/integrity resolve it would make them describe a model the run didn't use.
@@ -94,6 +97,51 @@ def main() -> int:
             print("  -", v)
         return 1
     print("leak scan: clean (no Vault keys, no secret-shaped material)")
+    # Dropped-stream triage: an errored/vetoed stream is never persisted, but that is only
+    # fatal when NO persisted record shares its request key. If the FE transparently retried
+    # the same request and the retry succeeded, the success IS in the fixture under the same
+    # key and replay simply consumes it — a benign drop (noted, not fatal). A drop with no
+    # persisted twin means replay hard-misses there: the take is structurally unreplayable.
+    # A failed sidecar APPEND is itself fatal (cross-process via the FE log — the flag in
+    # golden_path lives in the FE process): with the drop diagnostics lost, a dropped stream
+    # could slip past the triage below and bless an unreplayable take.
+    try:
+        _fe_log = open(os.path.join(d.work, "fe.log"), encoding="utf-8", errors="replace").read()
+        if "failed to append dropped-stream sidecar" in _fe_log:
+            print("\nFAIL: a dropped-stream sidecar append failed during the take — drop "
+                  "diagnostics were lost, so the triage below cannot be trusted "
+                  "(fixture NOT replayable — re-run the record)")
+            return 1
+    except OSError:
+        pass  # no FE log to scan — the driver would have failed the run long before this
+    if os.path.exists(_sidecar) and os.path.getsize(_sidecar) > 0:
+        import json as _json
+        keys = gp.fixture_keys(args.fixture)
+        benign, fatal = [], []
+        with open(_sidecar, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = _json.loads(line)
+                except Exception:
+                    entry = {"reason": "unparseable", "raw": line[:200]}
+                if not isinstance(entry, dict):
+                    # json.loads can return null/list/str without raising — normalize so the
+                    # classification below never crashes, and never counts it as benign.
+                    entry = {"reason": "unparseable", "raw": line[:200]}
+                _k = entry.get("key")
+                (benign if isinstance(_k, str) and _k in keys else fatal).append(entry)
+        for entry in benign:
+            print(f"note: dropped stream recovered by a same-key retry "
+                  f"(replayable): {entry.get('reason')} model={entry.get('model')}")
+        if fatal:
+            print("\nFAIL: this take dropped stream(s) with no persisted same-key retry — "
+                  "replay would hard-miss there (fixture NOT replayable — re-run the record):")
+            for entry in fatal[:20]:
+                print("  -", _json.dumps(entry, ensure_ascii=False)[:400])
+            return 1
     if d.inv.failed:
         print(f"\nFAIL: {len(d.inv.failed)} invariant(s) failed on the LIVE run — "
               "fix the seam (or the driver) before committing this fixture.")

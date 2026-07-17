@@ -186,8 +186,9 @@ def test_l28b_author_cast_is_best_effort_per_houseguest():
     writes = []
 
     async def llm_fn(messages):
-        # the middle houseguest's model call blows up — the others must still author
-        if "B" in messages[1]["content"]:
+        # the middle houseguest's model call blows up — the others must still author. Match the skeleton
+        # name token exactly (not a bare "B", which now also appears in prompt prose like "IMMUTABLE").
+        if '"name": "B"' in messages[1]["content"]:
             raise RuntimeError("model timeout")
         return json.dumps(_FULL)
 
@@ -234,31 +235,30 @@ def test_l28b_engine_client_method_exists():
 
 # ── A1 (ship-blocker, "the phantom-houseguest root") ───────────────────────────
 #
-# The engine now structurally refuses to rename an ALREADY-INTRODUCED houseguest
-# (`recordCastProfile`'s durable `introducedNames` lock — GameSessionAdapter.ts): once the player has
-# met a houseguest by name, a later authoring write-back that proposes a different name is silently
-# dropped for THAT ONE FIELD — the call still succeeds (`accepted: True`) and every other authored
-# field still lands. This is precisely the shape `author_cast` must already tolerate: it is a
+# The engine structurally refuses to rename an ALREADY-INTRODUCED houseguest
+# (`recordCastProfile`'s durable `introducedNames` lock — GameSessionAdapter.ts): the call still
+# succeeds (`accepted: True`) but the response reports which fields actually sealed. `author_cast` is a
 # best-effort orchestrator that only branches on `accepted` (never on which individual public/hidden
-# field names came back), so no FE code changes were needed to close this race — this test PINS that
-# contract so a future change to `author_cast`'s accept-handling can't silently regress it back into
-# assuming every requested field is echoed back accepted.
+# field names came back) — this test PINS that contract so a future change to its accept-handling can't
+# silently regress it back into assuming every requested field is echoed back accepted.
+# (#1660: a genuine RENAME is now dropped FE-side by `identity_contradictions` BEFORE the write-back —
+# covered by `test_cast_identity_coherence`; so this test authors the COMMITTED name to isolate the
+# accept-only-branching contract from the name guard.)
 
 def test_l28b_author_cast_tolerates_the_engine_dropping_the_name_field():
-    """Simulates the A1 scenario: this NPC has already been introduced to the player, so the engine's
-    write-back accepts the call but the `publicFields` it reports back omit "name" (only "biography"
-    landed) even though the proposed profile included a (now-refused) name. `author_cast` must still
-    count this houseguest as authored — it never inspects `publicFields`/`hiddenFields`, only
-    `accepted` — and must call `on_authored` exactly as it would for a fully-accepted write."""
-    cast = [{"id": "npc:1", "name": "A One"}]
+    """The engine's write-back accepts the call but the `publicFields` it reports back omit "name" (only
+    "biography" landed). `author_cast` must still count this houseguest as authored — it never inspects
+    `publicFields`/`hiddenFields`, only `accepted` — and must call `on_authored` exactly as it would for
+    a fully-accepted write."""
+    cast = [{"id": "npc:1", "name": "Marcus Webb"}]
     authored_callback_ids = []
 
     async def llm_fn(messages):
+        # Authors the COMMITTED name (no rename) — the FE name guard is a no-op, so the name is forwarded
+        # and the scenario isolates author_cast's accept-only branching (a rename-drop is tested apart).
         return json.dumps({**_FULL, "name": "Marcus Webb"})
 
     async def write_fn(profile):
-        # The engine received the proposed name (the FE still forwards it — it has no way to know the
-        # houseguest was already introduced) but the response signals only "biography" actually sealed.
         assert profile.get("name") == "Marcus Webb"
         return {"accepted": True, "publicFields": ["biography"], "hiddenFields": ["secrets", "trueGoals", "weakness"]}
 
@@ -308,7 +308,8 @@ def test_author_cast_fires_on_authored_per_successful_write():
     authored = []
 
     async def llm_fn(messages):
-        if "C" in messages[1]["content"]:
+        # Match the skeleton name token exactly (a bare "C" now also appears in prompt prose).
+        if '"name": "C"' in messages[1]["content"]:
             return "no json here"
         return json.dumps(_FULL)
 

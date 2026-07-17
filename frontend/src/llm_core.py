@@ -1451,6 +1451,38 @@ async def llm_call_async(
         prompt_type=prompt_type, call_class=call_class, user=user, session=session)
 
 
+async def _bounded_impl_call(*args, timeout: int, **impl_kwargs) -> str:
+    """N4 (2026-07-16 live-playthrough forensics) — wrap ``_llm_call_async_impl`` in a genuine
+    WALL-CLOCK ceiling of ``timeout`` seconds, enforced over the WHOLE call (every retry attempt
+    the impl's internal loop makes, plus any inter-attempt delay), not just the per-attempt httpx
+    ``read`` timeout the impl already sets. Two things defeated that per-attempt timeout in prod:
+    (1) it resets on ANY received byte, so an upstream that trickles keep-alive padding while a
+    completion is still generating never trips it, and (2) even when it DOES fire, the impl's own
+    retry loop (``max_retries``, default 3) multiplies it — a background memory-extraction call
+    was observed running 780,485ms (13 minutes) against a nominal ``timeout=300``. ``timeout``
+    here is whatever the caller resolved (an explicit override, or ``llm_call_async``'s default);
+    this makes that number a REAL ceiling instead of a soft, multipliable hint.
+
+    Falsy ``timeout`` (0/None) is treated as "no ceiling" (unchanged legacy behavior) — no known
+    caller passes that, but a literal 0 must never become an instant-expiry `wait_for(timeout=0)`.
+
+    On expiry raises ``asyncio.TimeoutError`` (never returns a silent success) — the ONE type
+    ``_exc_fail_class`` already recognizes as ``"timeout"`` (the rc6 #1663 failure-class
+    contract), so both ``_llm_call_async_traced`` branches log ``ok:false`` /
+    ``failClass:"timeout"`` for free, and every fail-soft background caller (memory extraction,
+    the `_auto_*` belts, etc.) sees a genuine exception instead of an artificially-long "success".
+    """
+    coro = _llm_call_async_impl(*args, timeout=timeout, **impl_kwargs)
+    if not timeout:
+        return await coro
+    try:
+        return await asyncio.wait_for(coro, timeout=float(timeout))
+    except asyncio.TimeoutError:
+        raise asyncio.TimeoutError(
+            f"LLM call exceeded its {timeout}s wall-clock ceiling (all attempts/retries included)"
+        ) from None
+
+
 async def _llm_call_async_traced(
     url: str,
     model: str,
@@ -1532,7 +1564,7 @@ async def _llm_call_async_traced(
 
     started = time.time()
     if not llm_trace.enabled():
-        text = await _llm_call_async_impl(
+        text = await _bounded_impl_call(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
             policy=policy, usage_sink=_usage, meta_sink=_meta, obs_metadata=_obs_md)
@@ -1540,7 +1572,7 @@ async def _llm_call_async_traced(
         await _emit_obs("ok", int((time.time() - started) * 1000), text)
         return text
     try:
-        text = await _llm_call_async_impl(
+        text = await _bounded_impl_call(
             url, model, messages, temperature=temperature, max_tokens=max_tokens,
             headers=headers, timeout=timeout, max_retries=max_retries, prompt_type=prompt_type,
             policy=policy, usage_sink=_usage, meta_sink=_meta, obs_metadata=_obs_md)

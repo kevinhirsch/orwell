@@ -132,6 +132,14 @@ EXPECTED_UNREACHED: Dict[str, str] = {
                  "composer — it mounts only alongside a live decision, so it is absent for the "
                  "exact same reason as #orwell-decision-card at this fixture's terminal social beat "
                  "(the two are coupled: the sheet is the card's host). Not a sheet-kit regression.",
+    ".ow-cslate": "ceremony slates render only from a VISIBLE advanceGame/submitDecision tool "
+                  "event (orwellToolBeats.orwellCeremonySlate); in the 2026-07-17 fixture the "
+                  "pre-nominations advances were committed by the FE stall belt (silent — no chat "
+                  "tool event), so no slate exists in scrollback at the parked midweek beat. "
+                  "Fixture-content-dependent reach, not a render regression (the slate path is "
+                  "unchanged and still theme-probed whenever present). Revisit (remove this "
+                  "entry) when a fixture whose model calls a ceremony advance visibly before "
+                  "nominations lands.",
 }
 
 
@@ -510,6 +518,10 @@ def run(args: argparse.Namespace) -> int:
         driver.boot()
         driver.configure_model()
         driver.preseed()
+        # The fixture is recorded with the browser-parity cast pre-warm landed BEFORE the
+        # interview (the premiere freezes the authored cast) — this walk must match, or the
+        # finalize turn's continuation misses the fixture (the 2026-07-17 CI failure).
+        driver.prewarm()
         driver.session = driver._post_form(driver.fe, "/api/session", {
             "name": "golden-path", "endpoint_id": getattr(driver, "endpoint_id", ""),
             "model": driver.model, "skip_validation": "true",

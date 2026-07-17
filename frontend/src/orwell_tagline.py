@@ -95,6 +95,14 @@ async def _generate(standing: str, week, phase, anchor: str, user: Optional[str]
         return line or None
     except Exception as e:
         logger.debug("[orwell] tagline generation fell open to the curated line: %s", e)
+        # #1599: a real utility-LLM failure (timeout / 5xx) on the hero line is a genuine fault —
+        # surface it RED; the curated line stands (auto-corrected), never a silent fall-open.
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("tagline:generation-failed", e,
+                                          corrected="curated-line", user=user)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return None
 
 
@@ -122,7 +130,16 @@ async def get_tagline(user: Optional[str] = None) -> dict:
             return {"text": curated}
         player_id = ((state.get("player") or {}).get("id"))
         status = await orwell_engine.game_status(user=user)
-    except Exception:
+    except Exception as e:
+        # #1599 (CodeRabbit): we only reach here AFTER player_tagline succeeded (an active game exists —
+        # its pre-game no_game already returned above), so a get_game_state / game_status RAISE is a
+        # genuine engine/transport fault, NOT pre-game — surface it RED; the curated line stands.
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("tagline:state-read-failed", e,
+                                          corrected="curated-line", user=user)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"text": curated}
 
     week = status.get("week")
