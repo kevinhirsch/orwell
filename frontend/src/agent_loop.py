@@ -1943,6 +1943,17 @@ _CASTING_FORCED_NOTE = (
 #      present in messages[0] on the same-turn continuation because the frame was built pre-game.
 _CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
 
+# 2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes the
+# player's own finalize line, which can leave the continuation context with NO user message
+# at all — [system, assistant(tool_calls), tool] — a conversation shape some GLM providers
+# (Novita) reject outright ("invalid request error", HTTP 400), so the premiere opener could
+# never be model-authored there (every round 400'd/emptied until the canned terminal fallback
+# spoke instead). When the purge leaves no user turn, this FIXED, disclosure-free bridge is
+# inserted as the player's voice: it carries the one thing the finalize turn legitimately
+# said (readiness) and nothing else, so the #1312 guarantee holds — the premiere context
+# still cannot carry a casting disclosure — while the provider sees a valid conversation.
+_PREGAME_PURGE_USER_BRIDGE = "I'm ready — send me into the house."
+
 
 def _strip_pregame_context(messages: List[Dict]) -> int:
     """Purge the pre-game casting interview from the in-game narration context, in place.
@@ -1972,6 +1983,17 @@ def _strip_pregame_context(messages: List[Dict]) -> int:
             pass
         kept.append(m)
     if dropped:
+        # Restore a valid conversation shape when the purge removed EVERY user turn (the
+        # finalize line was casting-stamped too): insert the fixed readiness bridge as the
+        # player's voice before the first non-system message. Without it the continuation
+        # request is [system, assistant(tool_calls), tool] and some providers 400 on it.
+        if not any(isinstance(m, dict) and m.get("role") == "user" for m in kept):
+            insert_at = len(kept)
+            for i, m in enumerate(kept):
+                if not (isinstance(m, dict) and m.get("role") == "system"):
+                    insert_at = i
+                    break
+            kept.insert(insert_at, {"role": "user", "content": _PREGAME_PURGE_USER_BRIDGE})
         messages[:] = kept
     return dropped
 
