@@ -7028,15 +7028,12 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
        every width, load-bearing once the row wraps below. */
     .theme-fd-group { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
     .theme-fd-label { font-size: 12px; font-weight: 500; color: var(--fg); opacity: 0.6; }
-    .theme-fd-select {
-      padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
-      background: var(--bg); color: var(--fg); font-size: 12px;
-      font-family: inherit; cursor: pointer;
-    }
-    .theme-fd-select:focus { outline: none; border-color: var(--red); }
-    /* THM-05 (#1606): `.theme-fd-range` migrated to the `.ow-slider` kit primitive
-       (index.html) — the bespoke range styling (and its `var(--red)` accent leak) is
-       removed here. */
+    /* THM-05 (#1606): `.theme-fd-range` migrated to the `.ow-slider` kit primitive, and the
+       two Customize `.theme-fd-select` text inputs (the Google-font combobox + the bg-image
+       URL field) to the `.ow-field` kit primitive (both in index.html) — the bespoke range
+       + text-field styling (and its `var(--red)` accent leak) is removed here. The
+       `select.theme-fd-select` rules (below, ~23066) are a DIFFERENT, `<select>`-scoped legacy
+       fix retained on purpose (test_0765_admin_glass / test_1644_text_ink_polarity pin them). */
     /* THM-02: Customize never reflowed narrow — the Colors 2-col grid (.theme-custom)
        and the 4-across Font & Layout row (.theme-fd-row, no flex-wrap) both overflowed
        to a horizontal scrollbar at the kit window's 320px floor. #theme-popup already
