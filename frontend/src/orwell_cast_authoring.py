@@ -516,8 +516,9 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
         or "IT"), fall back to RAW tokens (>=2 letters, stopwords included) on BOTH sides and apply the
         same containment — "manager" vs "bartender" / "IT" vs "DJ" are crosswires, "manager" vs "senior
         manager" a refinement kept; (3) when NEITHER side yields comparable tokens (1-letter / digits /
-        non-latin script), the terminal fallback keeps it coherent ONLY on a normalized substring/equality
-        match, else drops "vocation" (a different job).
+        non-latin script), the terminal fallback keeps it coherent ONLY on a WHOLE-TOKEN/phrase substring
+        or equality match (space-padded, so a 1-letter "x" can't match INSIDE "taxi driver"), else drops
+        "vocation" (a different job).
       • genderPresentation / age — DEFENSIVE: `parse_authored_profile` does not forward these today (the
         pin is engine-owned), so this only fires if a future parse path forwarded a value that differs
         from the committed pin. Kept so the guard is complete + directly unit-testable."""
@@ -545,10 +546,14 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
     else:
         # Terminal fallback: NEITHER side yields comparable tokens (1-letter / digits-only / non-latin
         # script) — an empty-token phrase must NEVER silently skip the guard. Coherent only on a
-        # normalized substring/equality match, else treat it as a different job and drop.
+        # WHOLE-TOKEN/phrase substring or equality match (space-pad both so "x" can't match INSIDE
+        # "taxi driver" — the containment must be a whole word/phrase, not an arbitrary substring),
+        # else treat it as a different job and drop.
         cv_n = " ".join(str(cv or "").lower().split())
         av_n = " ".join(str(av or "").lower().split())
-        crosswire = bool(cv_n) and bool(av_n) and (cv_n not in av_n and av_n not in cv_n)
+        cv_phrase = f" {cv_n} "
+        av_phrase = f" {av_n} "
+        crosswire = bool(cv_n) and bool(av_n) and (cv_phrase not in av_phrase and av_phrase not in cv_phrase)
     if crosswire:
         drop.append("vocation")
     pin = str((npc or {}).get("genderPresentation") or "").strip().lower()

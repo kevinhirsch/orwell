@@ -626,11 +626,17 @@ def test_short_token_vocation_is_guarded():
 
 def test_exotic_no_comparable_token_falls_back_to_normalized_string():
     # NEITHER side yields comparable tokens (1-letter / non-latin) — the terminal normalized fallback
-    # keeps it coherent ONLY on a substring/equality match, else drops.
-    assert ca.identity_contradictions({"vocation": "y"}, {"vocation": "х"}) == ["vocation"]  # cyrillic vs latin
-    assert ca.identity_contradictions({"vocation": "х"}, {"vocation": "х"}) == []            # identical exotic
-    # a normalized substring of an exotic committed vocation is a refinement (kept).
-    assert ca.identity_contradictions({"vocation": "х y"}, {"vocation": "х"}) == []
+    # keeps it coherent ONLY on a WHOLE-TOKEN/phrase substring or equality match, else drops.
+    # (Cyrillic small "ha" — escaped so Ruff RUF001 can't flag an ambiguous literal.)
+    cyr = "х"
+    assert ca.identity_contradictions({"vocation": "y"}, {"vocation": cyr}) == ["vocation"]  # cyrillic vs latin
+    assert ca.identity_contradictions({"vocation": cyr}, {"vocation": cyr}) == []            # identical exotic
+    # a normalized WHOLE-TOKEN superset of an exotic committed vocation is a refinement (kept).
+    assert ca.identity_contradictions({"vocation": f"{cyr} y"}, {"vocation": cyr}) == []
+    # BOUNDARY: a 1-letter committed vocation must NOT match INSIDE a longer word — "x" ⊄ "taxi driver".
+    assert ca.identity_contradictions({"vocation": "x"}, {"vocation": "taxi driver"}) == ["vocation"]
+    # ...but a whole-word match IS a refinement (kept): committed "x" ⊆ authored "x ray tech".
+    assert ca.identity_contradictions({"vocation": "x ray tech"}, {"vocation": "x"}) == []
 
 
 def test_short_token_crosswire_dropped_and_red_end_to_end(_clean_ledger):
