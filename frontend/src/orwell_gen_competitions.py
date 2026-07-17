@@ -134,8 +134,16 @@ async def author_competition(staging_fn: StagingFn, llm_fn: LlmFn, write_fn: Wri
     or ``{"accepted": False, "reason": ...}`` — the deterministic 0042 floor then stands. Never raises."""
     try:
         staging = await staging_fn()
-    except Exception as e:  # a staging read hiccup ⇒ floor stands
+    except Exception as e:
+        # #1599 (CodeRabbit): a staging read that RAISES is a genuine engine/transport fault — RED,
+        # NOT the expected-empty "no dropOrder" case below (generation off / no comp resolved yet).
         logger.warning("[gen-comp] staging read failed: %s", e)
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure("gen-comp:staging-read-failed", e,
+                                          corrected="competition-library-floor")
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
         return {"accepted": False, "reason": "no-staging"}
     if not isinstance(staging, dict) or not staging.get("dropOrder"):
         return {"accepted": False, "reason": "no-staging"}  # generation off, or no comp resolved yet
@@ -147,7 +155,7 @@ async def author_competition(staging_fn: StagingFn, llm_fn: LlmFn, write_fn: Wri
         return {"accepted": False, "reason": "already-authored"}
     try:
         text = await llm_fn(_synthesis_messages(staging))
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_author records llm-failed RED via log_rings.record_soft_failure)
         logger.warning("[gen-comp] synthesis failed: %s", e)
         return {"accepted": False, "reason": "llm-failed"}
     fiction = build_fiction(staging, text or "")
@@ -155,7 +163,7 @@ async def author_competition(staging_fn: StagingFn, llm_fn: LlmFn, write_fn: Wri
         return {"accepted": False, "reason": "no-fiction"}
     try:
         return await write_fn(fiction)
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (run_author records write-failed RED via log_rings.record_soft_failure)
         logger.warning("[gen-comp] write-back failed: %s", e)
         return {"accepted": False, "reason": "write-failed"}
 
@@ -171,7 +179,17 @@ async def run_author(owner: Optional[str], staging: Optional[dict] = None) -> di
     if staging is None:
         try:
             staging = await orwell_engine.competition_staging_view(user=owner)
-        except Exception:
+        except Exception as e:
+            # #1599 (CodeRabbit): PRE-GAME (EngineToolError.no_game) is expected-empty; anything else is
+            # a genuine engine/transport fault while a game exists — surface it RED. `no_game` is set only
+            # on the engine's pre-game refusal, so getattr suffices (no orwell_engine ref needed here).
+            if not getattr(e, "no_game", False):
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("gen-comp:staging-read-failed", e,
+                                                  corrected="competition-library-floor", user=owner)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
             return {"accepted": False, "reason": "no-staging"}
     if not isinstance(staging, dict) or not staging.get("dropOrder"):
         return {"accepted": False, "reason": "no-staging"}
@@ -191,6 +209,21 @@ async def run_author(owner: Optional[str], staging: Optional[dict] = None) -> di
         return await orwell_engine.record_competition_fiction(fiction, user=owner)
 
     result = await author_competition(lambda: _ready(ready), llm_fn, _write)
+    # #1599 (CodeRabbit): a GENUINE competition-fiction failure shows RED on /admin/status — the model
+    # call RAISED (llm-failed), OR the engine REFUSED the write-back (write-failed on a transport error,
+    # OR a NON-exceptional reject reason returned by recordCompetitionFiction — e.g. a drop-order
+    # mismatch). Record on ANY non-accept EXCEPT the expected-empty reasons (no comp/model/already-done/
+    # quality-miss), which are normal flow. The deterministic 0042 floor stands (auto-corrected).
+    _EXPECTED_EMPTY = ("no-staging", "no-model", "already-authored", "no-fiction")
+    if isinstance(result, dict) and not result.get("accepted") \
+            and result.get("reason") not in _EXPECTED_EMPTY:
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "gen-comp:fiction-failed", str(result.get("reason") or "refused"),
+                corrected="competition-library-floor", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
     # If the fiction landed on the live game, push a server-side "game-updated" so open pages reconcile.
     if isinstance(result, dict) and result.get("accepted"):
         try:
@@ -220,7 +253,16 @@ def kickoff_fiction(owner: Optional[str]) -> None:
         try:
             from src import orwell_engine
             staging = await orwell_engine.competition_staging_view(user=owner)
-        except Exception:
+        except Exception as e:
+            # #1599 (CodeRabbit): PRE-GAME refusal (EngineToolError.no_game) is expected-empty; any other
+            # engine/transport fault while a game exists is RED — never a silent skip. The 0042 floor stands.
+            if not getattr(e, "no_game", False):
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("gen-comp:staging-read-failed", e,
+                                                  corrected="competition-library-floor", user=owner)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
             return
         if not isinstance(staging, dict) or not staging.get("dropOrder"):
             return  # generation off, or no comp has resolved its roll — nothing to dress
@@ -236,7 +278,15 @@ def kickoff_fiction(owner: Optional[str]) -> None:
         try:
             await run_author(owner, staging)
         except Exception as e:  # pragma: no cover - defensive
+            # #1599: run_author records its own llm/write failures but its resolver call is un-wrapped;
+            # a raise here means competition fiction silently degraded with no record — surface it RED.
             logger.warning("[gen-comp] background author failed: %s", e)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("gen-comp:background-run-failed", e,
+                                              corrected="competition-library-floor", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
         finally:
             _IN_FLIGHT.discard(k)
 
