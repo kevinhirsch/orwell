@@ -517,6 +517,17 @@ function createSessionItem(s) {
   // Archive.
   async function _doArchive() {
     _forceSidebarOpen();
+    // Archiving the session we're actively viewing must deselect + abort it, mirroring
+    // _doDelete's active-session cleanup, so loadSessions() doesn't re-attach the
+    // archived chat and leave it open/streaming after its sidebar row disappears (#1669).
+    const wasCurrentSession = currentSessionId === s.id;
+    if (wasCurrentSession && window.chatModule && window.chatModule.abortCurrentRequest) {
+      window.chatModule.abortCurrentRequest();
+    }
+    if (wasCurrentSession) {
+      _deselectCurrentSession(s.id);
+      _skipAutoSelect = true;
+    }
     try {
       const response = await fetch(`${API_BASE}/api/session/${s.id}/archive`, {
         method: 'POST',
