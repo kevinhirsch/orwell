@@ -11955,9 +11955,18 @@ body:has(.doc-version-panel:not(.hidden)) .hamburger-btn {
      padding-top and left an oversized gap above each section title
      (Registration / Users / Add User). */
   margin-top: 0;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  /* Apple Genius rendered-pixel-parity (2026-07-16): this heading used to carry its OWN
+     border-bottom (a "short" hairline sitting immediately under the title text) INSIDE a
+     card that already has a full 4-sided box border (the base .admin-card rule's own
+     "border: 1px solid var(--border)") — every settings section (Chat Area, Sidebar, Account, …) sandwiched
+     its title between the card's own top edge and this second hairline, reading as a
+     double underline. Apple's System Settings groups sections with the boxed/inset card
+     alone — no separate title underline — so drop this rule's own divider and let the
+     card's box border (or, under the frosted Settings window where that box border is
+     stripped to transparent, spacing/typography alone) be the ONE grouping cue. The
+     margin-bottom absorbs the space the dropped padding-bottom used to add, so the visual
+     gap before the section's content is unchanged. */
+  margin-bottom: 14px;
 }
 /* SET-02 (2026-07-14 audit): a section header must never wrap to two lines when the
    window is resized to its narrow floor — truncate with an ellipsis instead, the same

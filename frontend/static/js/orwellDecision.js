@@ -191,14 +191,23 @@
         background-color: transparent; background-image: none;
         -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
       }
-      .odec .odec-head { display: flex; align-items: baseline; gap: .5rem; }
+      /* Apple Genius rendered-pixel-parity (2026-07-16): the head row had NO reserved gutter for
+         the absolutely-positioned × (below), so a comp-intent card's longer title ("Competition
+         round — set your approach") could run its full width UNDER the × footprint — at the
+         real render width the title (and, once it wrapped, its second line) visually collided
+         with the corner control, reading as if the × had drifted down into the prose instead of
+         sitting cleanly in the corner. Reserve a gutter matching the ×'s footprint (right offset
+         .35rem + 44px hit target, below) on the row itself, so BOTH the title and the risk badge
+         (which also lives in this row) shrink-wrap clear of the × at every width — never overlap. */
+      .odec .odec-head { display: flex; align-items: baseline; gap: .5rem; padding-right: 3rem; }
       .odec .odec-title { font-size: var(--ow-fs-title, .875rem); font-weight: var(--ow-fw-semibold, 600); letter-spacing: -.01em; flex: 1; }
       /* J5-21: the dismiss × stays visually in the top-right corner (absolute), but is moved to the
          END of the card's DOM so it is the LAST thing a keyboard user Tabs to — the decision options
          and Confirm come first (WCAG 2.4.3 focus order: a binding-decision surface must not put
          "skip this" ahead of the actual choice). Visual position is unchanged; only tab order moves.
-         The 44×44 tap target + descriptive aria-label are preserved below. */
-      .odec .odec-x { position: absolute; top: .35rem; right: .35rem; cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+         The 44×44 tap target + descriptive aria-label are preserved below. z-index keeps it above
+         the head row's text at any width (belt-and-suspenders alongside the .odec-head gutter). */
+      .odec .odec-x { position: absolute; top: .35rem; right: .35rem; z-index: 1; cursor: pointer; border: none; background: none; color: inherit; opacity: .75; font-size: 1rem; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
       .odec .odec-x:hover { opacity: .9; }
       /* J5-20: a high-stakes, irreversible decision (eviction/noms/jury vote) wears a risk skin —
          an eviction-red border + a faint red wash so it never reads as a low-stakes comp chip. The
@@ -274,10 +283,23 @@
         background: rgba(255,255,255,.05); color: inherit; border: 1px solid var(--border, #355a66);
         border-radius: 8px; padding: .5rem; font: inherit;
       }
-      /* flex-wrap so the full-width .odec-hint (flex-basis:100%; order:99) drops to
+      /* Apple Genius rendered-pixel-parity (2026-07-16): the row (note + Confirm) carried only a
+         bare margin-top — the SAME visual weight as every other internal gap on the card — so it
+         never read as its OWN "footer" zone; Confirm looked like a loose, floating element beside
+         the note rather than a deliberately grouped action bar. Apple form conventions (see e.g.
+         Settings/Sheets footers) separate the primary action into a clearly bounded footer: a
+         thin top hairline + a touch more breathing room, note/hint LEFT, action RIGHT, baseline-
+         aligned. currentColor-derived so the hairline automatically follows whichever ink
+         polarity the card's host (bare/flat, the Notice-kit light glass, the anchored sheet)
+         already resolves .odec's color to — no theme-specific override needed.
+         flex-wrap so the full-width .odec-hint (flex-basis:100%; order:99) drops to
          its OWN line instead of competing for width and crushing .odec-note (the
          description) into a one-word-per-line column. */
-      .odec .odec-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: .65rem; }
+      .odec .odec-row {
+        display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .6rem;
+        margin-top: .9rem; padding-top: .65rem;
+        border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+      }
       .odec .odec-confirm {
         cursor: pointer; border: none; border-radius: 8px; padding: .42rem .95rem; font-weight: 700;
         min-height: 44px;

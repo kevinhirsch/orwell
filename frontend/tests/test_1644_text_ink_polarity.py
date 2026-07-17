@@ -528,6 +528,14 @@ KNOWN_RESIDUAL = [
      "wave": "W6", "why": "archive badge uses ONE accent source: the label, fill, border and data-URI SVG "
                           "icon stroke all use the muted archive gold #b48a4a. --color-warning (#f0ad4e) is "
                           "a brighter amber that would visibly shift the badge and can't reach the SVG stroke."},
+    # ── G-7 (Apple Genius rendered-parity, 2026-07-16): the settings-nav INACTIVE tab ink. ──
+    {"file": "static/style.css", "line": 21324, "find": "color: #5b6572",
+     "sel": "body.theme-frosted .settings-nav-item:not(.active)", "count": 1,
+     "wave": "W6", "why": "the base (non-theme-scoped) .settings-nav-item{color:var(--color-muted)} "
+                          "resolves to the dark theme's --color-muted (#9aa0a8, tuned for a dark backdrop), "
+                          "which measures 2.50:1 on the frosted light nav surface. --color-muted itself is a "
+                          "widely-shared token used correctly elsewhere, so this is a scoped bespoke ink "
+                          "(#5b6572, ~5.6:1 on the light nav), not a token remap."},
 ]
 
 # ── ACCEPTED exceptions (contrast holds / semantically correct — audit §5) ──────────
