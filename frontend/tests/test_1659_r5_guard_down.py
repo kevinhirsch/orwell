@@ -378,6 +378,126 @@ def test_concurrent_defer_during_drain_is_preserved(monkeypatch, tmp_path):
     assert "new turn during drain" in narrs             # …AND the concurrently-deferred turn is preserved.
 
 
+# ── Round-2 review hardening (#1695: CodeRabbit) — concurrent-state surface ───────────────────────
+
+def test_authed_owners_keep_separate_retro_queues(monkeypatch):
+    """#1695 finding A — two DISTINCT authed owners must key to separate retro queues (cross-user
+    isolation is first-class); one owner can never drain/overflow another's retained narration."""
+    q = _isolate_queue(monkeypatch)
+    _capture_overseer(monkeypatch)
+    from src.agent_loop import _faith_defer_retro
+    _faith_defer_retro("u1", "u1 guard-down turn", {"board": {}}, 1, "in-game")
+    _faith_defer_retro("u2", "u2 guard-down turn", {"board": {}}, 2, "in-game")
+    assert set(q.keys()) == {"u1", "u2"}                          # a separate bucket per authed owner
+    assert q["u1"][0]["narration"] == "u1 guard-down turn"
+    assert q["u2"][0]["narration"] == "u2 guard-down turn"        # no bleed between owners
+
+
+def test_anon_owner_keys_to_canonical_session_not_none(monkeypatch):
+    """#1695 finding A — an auth-off owner=None must key to the CANONICAL game-session id (gs:<id>),
+    NOT a single shared literal-None bucket (which would let distinct anon games bleed into each other).
+    Reuses the faith machinery's `_desync_key` resolver."""
+    q = _isolate_queue(monkeypatch)
+    _capture_overseer(monkeypatch)
+    monkeypatch.setattr("src.orwell_game_session.get_game_session", lambda user=None: "sess-anon")
+    from src.agent_loop import _faith_defer_retro
+    _faith_defer_retro(None, "an auth-off guard-down turn", {"board": {}}, 3, "in-game")
+    assert "gs:sess-anon" in q                                    # keyed on the canonical session…
+    assert None not in q                                          # …NOT a shared literal-None bucket
+
+
+def test_mid_drain_exception_preserves_remaining_entries(monkeypatch, tmp_path):
+    """#1695 finding B — an error OUTSIDE the inner judge-call try (verdict-parse / telemetry) must NOT
+    abort the drain and lose the still-unprocessed popped entries. The per-entry belt catches it,
+    requeues, and CONTINUES; the try/finally merge always restores the queue."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    from src import agent_loop
+    q["u1"] = [
+        {"narration": "turn A", "projection": {"board": {}}, "beat_before": 1, "context": "in-game"},
+        {"narration": "turn B", "projection": {"board": {}}, "beat_before": 2, "context": "in-game"},
+    ]
+    # the judge CALL succeeds, but verdict-parse raises for EVERY entry (an error outside the inner try).
+    calls = []
+
+    def _raise_verdict(self, *a, **k):
+        calls.append(1)
+        raise RuntimeError("verdict parse boom")
+    monkeypatch.setattr("src.faithfulness.FaithfulnessJudge.verdict_from_reply", _raise_verdict)
+
+    _run(agent_loop._faith_drain_retro("u1", lambda prompt: "{}"))
+
+    assert len(calls) == 2                              # the loop CONTINUED past the first error…
+    narrs = {e.get("narration") for e in q.get("u1", [])}
+    assert narrs == {"turn A", "turn B"}               # …and BOTH remaining entries are preserved
+    errs = [(a, k) for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-error"]
+    assert len(errs) == 2 and all(k.get("ok") is False for (_a, k) in errs)   # each RED-recorded
+
+
+def test_concurrent_defer_during_resolution_is_drained_this_turn(monkeypatch, tmp_path):
+    """#1695 finding C — a concurrent same-session defer landing DURING _resolve_llm_fn (an await point,
+    AFTER the _has_retro snapshot) must still be drained THIS turn: the drain decision re-reads the LIVE
+    queue, not the stale snapshot."""
+    _set_mode(monkeypatch, tmp_path, "shadow")
+    _patch_engine_reads(monkeypatch)
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    from src import agent_loop
+    slip = json.dumps({"dimension": "board", "classification": "closed", "lever": "reframe",
+                       "rationale": "contradicts the board"})
+
+    # the queue is EMPTY at the top (stale _has_retro=False); a concurrent defer lands during resolve.
+    async def _resolve_inject(owner=None, **k):
+        agent_loop._faith_defer_retro("u1", "concurrent guard-down turn", {"board": {}}, 7, "in-game")
+        return (lambda prompt: slip)
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", _resolve_inject)
+
+    # an ELIGIBLE current turn (so _faith_check proceeds to resolve despite the empty snapshot).
+    _run(_faith_check("you win the Head of Household competition", claim_bearing=True,
+                      engaged_scene=False, owner="u1"))
+
+    retro = [(a, k) for (a, k) in logged if len(a) > 1 and str(a[1]).startswith("faith:retro")]
+    assert len(retro) == 1                              # the concurrently-deferred turn was drained NOW…
+    assert retro[0][0][1] == "faith:retro:board"
+    assert not q.get("u1")                              # …and the (re-read) queue is drained
+
+
+def test_merge_overflow_drops_oldest_with_own_beat(monkeypatch, tmp_path):
+    """#1695 test nitpick — when the drain's requeue MERGED with concurrent deferrals exceeds the cap,
+    the OLDEST are dropped, each attributed to its OWN beat (the drain-time merge-overflow branch)."""
+    q = _isolate_queue(monkeypatch)
+    _capture_llmio(monkeypatch)
+    logged = _capture_overseer(monkeypatch)
+    from src import agent_loop
+    q["u1"] = [
+        {"narration": "old A", "projection": None, "beat_before": 0, "context": "in-game"},
+        {"narration": "old B", "projection": None, "beat_before": 1, "context": "in-game"},
+    ]
+    injected = {"done": False}
+
+    async def _proj_inject(owner):
+        # two concurrent same-session defers land during the first entry's projection-build await.
+        if not injected["done"]:
+            injected["done"] = True
+            agent_loop._faith_defer_retro("u1", "new C", {"board": {}}, 100, "in-game")
+            agent_loop._faith_defer_retro("u1", "new D", {"board": {}}, 101, "in-game")
+        return {"board": {}, "visible": {}}
+    monkeypatch.setattr("src.agent_loop._faith_build_projection", _proj_inject)
+
+    # the judge is STILL down → old A + old B re-queue; merged with concurrent C + D exceeds the cap (2).
+    _run(agent_loop._faith_drain_retro("u1", _timeout_llm))
+
+    dropped_beats = sorted(k.get("beat_before")
+                           for (a, k) in logged if len(a) > 1 and a[1] == "faith:retro-dropped")
+    assert dropped_beats == [0, 1]                      # the OLDEST (requeued A/B) dropped, each own beat
+    remaining = {e.get("narration") for e in q.get("u1", [])}
+    assert remaining == {"new C", "new D"}              # the freshest survive, bounded to the cap
+
+
 # ── SOURCE-PIN — the loop wires the R5 guard-down machinery ──────────────────────────────────────
 
 _AGENT_LOOP_SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "agent_loop.py"
@@ -390,3 +510,4 @@ def test_source_pin_r5_wiring():
     assert "_faith_defer_retro" in src                 # part 3: defer the guard-down turn
     assert "_faith_drain_retro" in src                 # part 3: re-judge on the next opportunity
     assert "_faith_record_retro_dropped" in src        # shared drop recorder (dropped-beat attribution)
+    assert "_faith_key" in src                          # canonical-session queue keying (#1695 finding A)

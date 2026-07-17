@@ -3003,10 +3003,28 @@ async def _faith_guard_down_p0(owner, narration) -> bool:
 #      empty/errored/timed-out judge result) — `_faith_record_judge_down_io`; and
 #   2) the turn is DEFERRED and RE-JUDGED on the next opportunity — `_faith_defer_retro` /
 #      `_faith_drain_retro`, mirroring the CON-11 deferred-fold queue — so a guard-down turn is never
-#      shipped PERMANENTLY unjudged. Bounded per owner; an overflow drop is itself a real
+#      shipped PERMANENTLY unjudged. Bounded per queue; an overflow drop is itself a real
 #      permanently-unjudged turn, so it fires a RED-eligible health event, never a silent drop.
+#
+# The queue is keyed by the CANONICAL-SESSION key (`_faith_key` → `_desync_key`, #1695 finding A), NOT
+# the raw owner: an authed owner keys on itself (cross-user isolation unweakened), and an auth-off
+# owner=None keys on the canonical game-session id (`gs:<id>`) — the SAME key the rest of the faith
+# machinery (`_faith_queue_reground`) already uses — so distinct anon games never share one bucket.
 _DEFERRED_FAITH: dict = {}
 _DEFERRED_FAITH_MAX = 2
+
+
+def _faith_key(owner):
+    """The canonical-session retro-queue key. REUSE the faith machinery's `_desync_key` (exactly like
+    `_faith_queue_reground`): an authed owner keys on itself; an auth-off ``owner=None`` keys on the
+    canonical game-session id (``gs:<id>``), never a single shared raw-None bucket (the cross-session
+    bleed of #1695 finding A). Fail-soft: if the resolver is unavailable, fall back to the raw owner
+    (single-tenant stays internally consistent within a process)."""
+    try:
+        from routes.chat_helpers import _desync_key
+        return _desync_key(owner)
+    except Exception:
+        return owner
 
 
 def _faith_record_judge_down_io(owner, narration, err, duration_ms, fail_class) -> None:
@@ -3039,14 +3057,16 @@ def _faith_record_retro_dropped(owner, beat_before) -> None:
 
 
 def _faith_defer_retro(owner, narration, projection, beat_before, context) -> None:
-    """R5 part 3 — queue a guard-down turn for a RE-JUDGE on the next opportunity. Bounded per owner; an
-    overflow drops the OLDEST — itself a permanently-unjudged turn, so it is surfaced RED (never silently
-    dropped). ``owner=None`` is a SUPPORTED auth-off case (CON-1: the beat-seq spine no longer bails on a
-    None user) and MUST be admitted — dropping it would silently leave every auth-off turn permanently
-    unjudged. Best-effort; never raises into the loop."""
+    """R5 part 3 — queue a guard-down turn for a RE-JUDGE on the next opportunity. Bounded per canonical
+    session; an overflow drops the OLDEST — itself a permanently-unjudged turn, so it is surfaced RED
+    (never silently dropped). ``owner=None`` is a SUPPORTED auth-off case (CON-1) and MUST be admitted —
+    dropping it would silently leave every auth-off turn permanently unjudged; it is keyed by the
+    canonical session (`_faith_key`), never a shared raw-None bucket (#1695 finding A). Best-effort;
+    never raises into the loop."""
     if not narration or not str(narration).strip():
         return
-    q = _DEFERRED_FAITH.setdefault(owner, [])
+    key = _faith_key(owner)
+    q = _DEFERRED_FAITH.setdefault(key, [])
     q.append({"narration": str(narration), "projection": projection,
               "beat_before": beat_before, "context": context or "in-game"})
     if len(q) > _DEFERRED_FAITH_MAX:
@@ -3064,7 +3084,8 @@ async def _faith_drain_retro(owner, llm) -> None:
     late (that would steer a DIFFERENT turn's narration — the R1/R6 in-turn emission path, out of R5's
     scope). The guarantee R5 owns is that the turn gets JUDGED and any slip becomes VISIBLE. Fail-soft:
     never hurts the current turn."""
-    pending = _DEFERRED_FAITH.pop(owner, None)
+    key = _faith_key(owner)                             # canonical-session key (#1695 finding A)
+    pending = _DEFERRED_FAITH.pop(key, None)
     if not pending:
         return
     from src import log_rings as _lr
@@ -3072,60 +3093,83 @@ async def _faith_drain_retro(owner, llm) -> None:
     import inspect as _insp
     judge = FaithfulnessJudge(llm)
     requeue = []
-    for entry in pending:
-        _narr = entry.get("narration") or ""
-        _bb = entry.get("beat_before")
-        _ctx = entry.get("context") or "in-game"
-        _proj = entry.get("projection")
-        if _proj is None:
-            _proj = await _faith_build_projection(owner)
-        _t0 = time.monotonic()
-        try:
-            _raw = llm(judge.build_prompt(_narr, _proj, _ctx))
-            if _insp.isawaitable(_raw):
-                _raw = await asyncio.wait_for(_raw, timeout=12)
-        except Exception as _retry_err:
-            # the judge is STILL down. Record the retro judge's OWN failed call ok:FALSE on the llm-io
-            # ring (part-1 consistency: a retro-path failure must be as loud there as the primary path,
-            # not only on the overseer ring — #1695 finding 3), then RED-record the still-down state and
-            # re-queue (bounded, never lost).
-            _fc = "timeout" if isinstance(_retry_err, (asyncio.TimeoutError, TimeoutError)) else "error"
-            _faith_record_judge_down_io(
-                owner, _narr, _retry_err, int((time.monotonic() - _t0) * 1000), _fc)
-            _lr.record_overseer(
-                "anomaly", "faith:retro-still-down",
-                f"retro-judge could not run either (guard still down): "
-                f"{type(_retry_err).__name__}: {_retry_err}",
-                lever=None, beat_before=_bb, ok=False, user=owner)
-            requeue.append(entry)
-            continue
-        _verdict = judge.verdict_from_reply(_raw, _narr, _proj)
-        if _verdict is not None and _verdict.is_slip:
-            _lr.record_overseer(
-                "anomaly", f"faith:retro:{_verdict.dimension}",
-                f"RETRO-JUDGED a previously guard-down turn — {_verdict.classification}-set slip "
-                f"({_verdict.dimension}), lever '{_verdict.lever}': {_verdict.rationale}",
-                lever=_verdict.lever, beat_before=_bb, ok=False, user=owner)
+    # #1695 finding B — EXCEPTION-SAFE DRAIN. `pending` is popped up front, so ANY error escaping the
+    # loop before the merge would LOSE the still-unprocessed entries. Two belts: (1) each entry's WHOLE
+    # body is exception-wrapped — any unexpected error treats it as still-down (RED-record + requeue), so
+    # nothing escapes the loop; (2) an index cursor + a top-level try/finally guarantee the merge/restore
+    # of (requeue + any UNREACHED entries + leftover) runs even if something truly unexpected escaped —
+    # popped entries are never lost.
+    _idx = 0
+    try:
+        while _idx < len(pending):
+            entry = pending[_idx]
+            _bb = entry.get("beat_before")
+            try:
+                _narr = entry.get("narration") or ""
+                _ctx = entry.get("context") or "in-game"
+                _proj = entry.get("projection")
+                if _proj is None:
+                    _proj = await _faith_build_projection(owner)
+                _t0 = time.monotonic()
+                try:
+                    _raw = llm(judge.build_prompt(_narr, _proj, _ctx))
+                    if _insp.isawaitable(_raw):
+                        _raw = await asyncio.wait_for(_raw, timeout=12)
+                except Exception as _retry_err:
+                    # the judge is STILL down. Record the retro judge's OWN failed call ok:FALSE on the
+                    # llm-io ring (part-1 consistency: a retro-path failure must be as loud there as the
+                    # primary path, not only on the overseer ring — #1695 finding 3), RED-record the
+                    # still-down state, and re-queue (bounded, never lost).
+                    _fc = "timeout" if isinstance(_retry_err, (asyncio.TimeoutError, TimeoutError)) else "error"
+                    _faith_record_judge_down_io(
+                        owner, _narr, _retry_err, int((time.monotonic() - _t0) * 1000), _fc)
+                    _lr.record_overseer(
+                        "anomaly", "faith:retro-still-down",
+                        f"retro-judge could not run either (guard still down): "
+                        f"{type(_retry_err).__name__}: {_retry_err}",
+                        lever=None, beat_before=_bb, ok=False, user=owner)
+                    requeue.append(entry)
+                else:
+                    _verdict = judge.verdict_from_reply(_raw, _narr, _proj)
+                    if _verdict is not None and _verdict.is_slip:
+                        _lr.record_overseer(
+                            "anomaly", f"faith:retro:{_verdict.dimension}",
+                            f"RETRO-JUDGED a previously guard-down turn — {_verdict.classification}-set "
+                            f"slip ({_verdict.dimension}), lever '{_verdict.lever}': {_verdict.rationale}",
+                            lever=_verdict.lever, beat_before=_bb, ok=False, user=owner)
+                    else:
+                        _lr.record_overseer(
+                            "observation", "faith:retro-clean",
+                            "RETRO-JUDGED a previously guard-down turn — no slip found (now "
+                            "judged-of-record)", lever=None, beat_before=_bb, ok=True, user=owner)
+            except Exception as _entry_err:
+                # ANY unexpected error in this entry's processing (projection build / verdict parse /
+                # telemetry) — treat it as still-down: RED-record + requeue so it is never lost and no
+                # exception escapes the loop. record_overseer self-guards, so it will not re-raise.
+                _lr.record_overseer(
+                    "anomaly", "faith:retro-error",
+                    f"retro-judge processing errored (guard down, requeued): "
+                    f"{type(_entry_err).__name__}: {_entry_err}",
+                    lever=None, beat_before=_bb, ok=False, user=owner)
+                requeue.append(entry)
+            _idx += 1                                   # this entry is accounted for (judged or requeued)
+    finally:
+        # MERGE, don't clobber (#1695 finding 5) + restore even on a truly-unexpected escape (finding B).
+        # A concurrent _faith_check→_faith_defer_retro for THIS session may have created a fresh queue
+        # under `key` while we awaited; overwriting would silently lose it. Combine requeue (older/retried)
+        # + any UNREACHED entries (the escape backstop) + leftover (newest), bound to the cap, and emit the
+        # SAME RED drop event (attributing each DROPPED turn's own beat) for anything that overflows.
+        unreached = pending[_idx:]
+        leftover = _DEFERRED_FAITH.get(key, [])
+        combined = requeue + unreached + leftover
+        if len(combined) > _DEFERRED_FAITH_MAX:
+            for _d in combined[:-_DEFERRED_FAITH_MAX]:
+                _faith_record_retro_dropped(owner, _d.get("beat_before"))
+            combined = combined[-_DEFERRED_FAITH_MAX:]
+        if combined:
+            _DEFERRED_FAITH[key] = combined
         else:
-            _lr.record_overseer(
-                "observation", "faith:retro-clean",
-                "RETRO-JUDGED a previously guard-down turn — no slip found (now judged-of-record)",
-                lever=None, beat_before=_bb, ok=True, user=owner)
-    # MERGE, don't clobber (#1695 finding 5): a concurrent _faith_check→_faith_defer_retro for THIS owner
-    # can create a fresh _DEFERRED_FAITH[owner] while we were awaiting above; overwriting would silently
-    # lose those newly-deferred turns with no drop event. Combine requeue (older/retried, first) with the
-    # leftover (newer, last), bound to the cap, and emit the SAME RED drop event (attributing each
-    # DROPPED turn's own beat) for anything that overflows.
-    leftover = _DEFERRED_FAITH.get(owner, [])
-    combined = requeue + leftover
-    if len(combined) > _DEFERRED_FAITH_MAX:
-        for _d in combined[:-_DEFERRED_FAITH_MAX]:
-            _faith_record_retro_dropped(owner, _d.get("beat_before"))
-        combined = combined[-_DEFERRED_FAITH_MAX:]
-    if combined:
-        _DEFERRED_FAITH[owner] = combined
-    else:
-        _DEFERRED_FAITH.pop(owner, None)
+            _DEFERRED_FAITH.pop(key, None)
 
 
 async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_before=None,
@@ -3153,10 +3197,11 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
         if mode not in ("shadow", "active"):
             return
         # R5 (#1659): the current turn is judge-eligible on a board claim / engaged scene (the sparse
-        # trigger). A LULL turn still runs when this owner has a guard-down turn queued for a retro-judge
-        # — the next opportunity to catch it up (never ship it permanently unjudged).
+        # trigger). A LULL turn still runs when this session has a guard-down turn queued for a
+        # retro-judge — the next opportunity to catch it up (never ship it permanently unjudged).
         _eligible = should_judge(claim_bearing=bool(claim_bearing), engaged_scene=bool(engaged_scene))
-        _has_retro = bool(_DEFERRED_FAITH.get(owner))
+        _key = _faith_key(owner)                        # canonical-session retro key (#1695 finding A)
+        _has_retro = bool(_DEFERRED_FAITH.get(_key))    # snapshot — the EARLY-RETURN gate only (#1695 C)
         if not _eligible and not _has_retro:
             return
         # live-only carve-out (ruling D4): no model ⇒ nothing runs (seeded lanes unchanged). The judge
@@ -3199,8 +3244,10 @@ async def _faith_check(narration, *, claim_bearing, engaged_scene, owner, beat_b
             return
         # R5 part 3: catch up any guard-down turns queued for a retro-judge (bounded, best-effort). Runs
         # on the next opportunity a model resolves — even on a lull turn — so an unjudged turn never
-        # lingers. Fail-soft inside the drain; the current turn's judge proceeds regardless.
-        if _has_retro:
+        # lingers. RE-READ the LIVE queue here (#1695 finding C): a concurrent same-session defer during
+        # the _resolve_llm_fn await above may have enqueued AFTER the _has_retro snapshot, so gate the
+        # drain on the live queue, not the stale snapshot. Fail-soft; the current turn's judge proceeds.
+        if _DEFERRED_FAITH.get(_key):
             await _faith_drain_retro(owner, _llm)
         if not _eligible:
             return
