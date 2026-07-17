@@ -15,6 +15,7 @@ import pathlib
 import sys
 import tempfile
 import types
+import warnings
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -133,6 +134,55 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 def _run_fixture() -> Callable[..., Any]:
     """Fixture form of the `_run` helper — accepts a coroutine and returns its result."""
     return _run
+
+
+@pytest.fixture(autouse=True)
+def _ensure_current_event_loop() -> None:
+    """Py3.12 guard: `asyncio.get_event_loop()` RAISES ("There is no current event loop in thread
+    'MainThread'") when no loop is set for the thread — unlike 3.11, which silently auto-created one.
+    ~13 FE test files call `asyncio.get_event_loop().run_until_complete(...)` directly and rely on a
+    loop already being current. pytest-asyncio (asyncio_mode=auto) creates a fresh loop per async
+    test and, on teardown, closes it and leaves the thread loop UNSET — so a SYNC test that runs
+    right after an async one on the same worker hits the raise. Under `pytest-xdist -n 4` with the
+    default dynamic (`--dist load`) distribution, which test lands on which worker after which is
+    timing-dependent and NON-deterministic across machines: CI can serialise an async→sync pair on
+    one worker (mass "no current event loop" red) while a dev box never does. Adding/removing ANY
+    test file also reshuffles the odds. Guarantee a live current loop before every test so no
+    ordering can trigger it; only create one when genuinely absent or closed, leaving pytest-asyncio's
+    own per-test loop management untouched for `async def` tests.
+    """
+    try:
+        with warnings.catch_warnings():
+            # 3.12 emits a DeprecationWarning right before it raises on an unset loop; we handle the
+            # raise ourselves, so mute just that one line (it would otherwise fire on every boundary).
+            warnings.simplefilter("ignore", DeprecationWarning)
+            loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+@pytest.fixture(autouse=True)
+def _isolate_game_session_store(tmp_path, monkeypatch) -> None:
+    """The canonical game-session binding (feature 0064) persists to a JSON file at a MODULE-CONSTANT
+    path (`orwell_game_session.GAME_SESSION_PATH`, under the non-overridable `DATA_DIR`), so every
+    test — and, under `pytest-xdist`, every WORKER — shares ONE file. A route/integration test that
+    binds a session for the `"default"` bucket (the `user=None` / single-tenant key) leaves that
+    binding for a later test to read: `_desync_key(None)` then resolves to `gs:<id>` instead of None,
+    and an `owner=None` assertion that keys on None flakes purely by co-run order (the intermittent
+    `test_1659_r5_guard_down::test_owner_none_is_admitted_and_rejudged` red — visible once a new test
+    file reshuffles the xdist distribution). Redirect the store to a per-test temp file so no binding
+    bleeds — generalising the per-test `_tmp_store` isolation that `test_0064_canonical_session.py`
+    already applies locally. The import is lazy in production (`_desync_key` does `from src import
+    orwell_game_session` on demand), so patch the module directly; guard the import so the stubbed-
+    `core` unit tests (which never touch the store) pay nothing.
+    """
+    try:
+        import src.orwell_game_session as _ogs
+    except Exception:
+        return
+    monkeypatch.setattr(_ogs, "GAME_SESSION_PATH", tmp_path / "orwell_game_session.json")
 
 
 @pytest.fixture(autouse=True)

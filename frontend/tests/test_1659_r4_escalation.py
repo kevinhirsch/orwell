@@ -91,13 +91,19 @@ def test_session_tally_forces_when_the_consecutive_ladder_keeps_getting_reset():
             # … then the FE force-commits the beat: the CONSECUTIVE ladder is popped, the SESSION
             # tally is NOT (it clears only on a genuine model advance / peer advance).
             al._ADVANCE_STALL_LEVEL.pop(key, None)
+        # Through all N reset-plagued stalls the session force must NEVER have armed early (each
+        # turn's read saw fewer than N accrued flags) — that lock-steps it behind the text ladder.
+        assert not forced_via_session, "the session force must not arm before N flags have accrued"
         # After N reset-plagued stalls the NEXT turn's read arms the session force, and the
-        # consecutive ladder — reset every beat — never did.
+        # consecutive ladder — reset every beat — never did. Run that read exactly as the loop does.
         level = al._ADVANCE_STALL_LEVEL.get(key, 0)
         stall_flags_prior = al._ADVANCE_STALL_FLAGS.get(key, 0)
+        if stall_flags_prior >= al._STALL_FLAGS_BEFORE_FORCE:
+            forced_via_session = True
         assert level < al._ADVANCE_FORCE_LEVEL, "consecutive ladder should have been reset below the rung"
         assert stall_flags_prior >= al._STALL_FLAGS_BEFORE_FORCE, "session tally must reach the force threshold"
-        assert not forced_via_consecutive
+        assert forced_via_session, "the next turn's read must ARM the session force — seam 4's whole point"
+        assert not forced_via_consecutive, "the consecutive ladder, reset each beat, must never have forced"
     finally:
         al._ADVANCE_STALL_LEVEL.pop(key, None)
         al._ADVANCE_STALL_FLAGS.pop(key, None)
