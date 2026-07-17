@@ -2459,8 +2459,12 @@ function initHealthLogs() {
   const refreshBtn = el('adm-health-refresh');
   const msgEl = el('adm-health-msg');
 
+  // #1644 (rendered audit §2 / HIG "apply colour to the background not the text"): green/red status
+  // TEXT on a faint 16%-tint fill measured ~2.1:1. Convey status via an OPAQUE pastel status fill +
+  // a DARK ink on it — reads ≥7:1 on ANY theme (the flat presets carry no polarity class to scope a
+  // light-only fix), and colour still signals ok/fail through the fill.
   const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,85,85,.16)'};color:${ok ? '#3cb46e' : '#e55'};">${esc(text)}</span>`;
+    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#f5c2c2'};color:${ok ? '#0f5132' : '#842029'};">${esc(text)}</span>`;
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
@@ -2569,8 +2573,11 @@ function initPublicDeployment() {
 
   let pollTimer = null;
 
+  // #1644 (rendered audit §2 / HIG): status via an OPAQUE pastel fill + DARK ink (green ok / amber
+  // not-ok) — theme-independent, ≥6:1, colour still carried by the fill (the flat presets have no
+  // polarity class for a light-only ink fix).
   const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,170,60,.16)'};color:${ok ? '#3cb46e' : '#e0a83c'};">${esc(text)}</span>`;
+    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#ffe2b3'};color:${ok ? '#0f5132' : '#7a4f00'};">${esc(text)}</span>`;
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
@@ -2742,8 +2749,11 @@ function initLocalTls() {
 
   let pollTimer = null;
 
+  // #1644 (rendered audit §2 / HIG): status via an OPAQUE pastel fill + DARK ink (green ok / amber
+  // not-ok) — theme-independent, ≥6:1, colour still carried by the fill (the flat presets have no
+  // polarity class for a light-only ink fix).
   const badge = (ok, text) =>
-    `<span class="admin-badge" style="background:${ok ? 'rgba(60,180,110,.16)' : 'rgba(229,170,60,.16)'};color:${ok ? '#3cb46e' : '#e0a83c'};">${esc(text)}</span>`;
+    `<span class="admin-badge" style="background:${ok ? '#bfe8cf' : '#ffe2b3'};color:${ok ? '#0f5132' : '#7a4f00'};">${esc(text)}</span>`;
 
   const row = (label, valueHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
