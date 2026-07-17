@@ -454,6 +454,30 @@ def fixture_keys(path: Optional[str] = None) -> set:
     return keys
 
 
+def _debug_dump_request(kind: str, key: str, digest: Optional[Dict[str, Any]],
+                        params: Dict[str, Any], messages: Optional[List[Dict]]) -> None:
+    """Opt-in drift forensics (``ORWELL_GOLDEN_DEBUG_DUMP=<path>``): append this request's
+    CANONICAL form (key + digest + neutralized messages). On the replay side the miss path
+    calls this so a drifted prompt can be diffed instead of guessed at from the sha; on the
+    record side record_stream/record_call call it for EVERY persisted request so the two
+    dumps can be byte-diffed turn-by-turn. Best-effort, never raises, off by default."""
+    dump = os.environ.get("ORWELL_GOLDEN_DEBUG_DUMP")
+    if not dump:
+        return
+    try:
+        # noqa: the dump path is an operator/CI-controlled env var (opt-in drift
+        # diagnosis), never user input — not an untrusted-path traversal.
+        with open(dump, "a", encoding="utf-8") as fh:  # nosec B108
+            fh.write(json.dumps(_scrub({
+                "kind": kind, "key": key, "digest": digest,
+                "params": _canon_params(params),
+                "messages": _canon_messages(messages),
+            }), ensure_ascii=False) + "\n")
+    except OSError:
+        # Best-effort diagnostic only — a write failure must never affect the run.
+        pass
+
+
 def record_stream(candidates_model: str, messages: List[Dict],
                   kwargs: Dict[str, Any], chunks: List[str],
                   *, completed: Optional[bool] = None) -> None:
@@ -489,8 +513,12 @@ def record_stream(candidates_model: str, messages: List[Dict],
         bool(resp.get("finishReason")) or any("[DONE]" in c for c in chunks))
     params = dict(kwargs)
     params["model"] = candidates_model
+    _key = request_key("stream", messages, kwargs.get("tools"), params)
+    _debug_dump_request("stream", _key,
+                        request_digest(messages, kwargs.get("tools"), params),
+                        params, messages)
     _append_record({
-        "key": request_key("stream", messages, kwargs.get("tools"), params),
+        "key": _key,
         "call_class": kwargs.get("call_class") or "narration",
         "model": candidates_model,
         "request_digest": request_digest(messages, kwargs.get("tools"), params),
@@ -512,8 +540,11 @@ def record_call(model: str, messages: List[Dict], params: Dict[str, Any],
     """Append one completed utility (non-streaming) call to the fixture."""
     params = dict(params)
     params["model"] = model
+    _key = request_key("call", messages, None, params)
+    _debug_dump_request("call", _key, request_digest(messages, None, params),
+                        params, messages)
     _append_record({
-        "key": request_key("call", messages, None, params),
+        "key": _key,
         "call_class": params.get("call_class") or "utility",
         "model": model,
         "request_digest": request_digest(messages, None, params),
@@ -688,21 +719,7 @@ def _lookup(key: str, kind: str, params: Dict[str, Any],
         # Diagnosis aid: with ORWELL_GOLDEN_DEBUG_DUMP=<path>, append the full live
         # request (scrubbed) so a drifted prompt can be diffed against the recording
         # instead of guessed at from the sha alone.
-        dump = os.environ.get("ORWELL_GOLDEN_DEBUG_DUMP")
-        if dump:
-            try:
-                # noqa: the dump path is an operator/CI-controlled env var (opt-in drift
-                # diagnosis), never user input — not an untrusted-path traversal.
-                with open(dump, "a", encoding="utf-8") as fh:  # nosec B108
-                    fh.write(json.dumps(_scrub({
-                        "kind": kind, "key": key, "digest": digest,
-                        "params": _canon_params(params),
-                        "messages": _canon_messages(messages),
-                    }), ensure_ascii=False) + "\n")
-            except OSError:
-                # Best-effort diagnostic only — a write failure must never mask the drift
-                # miss we are about to raise. Narrow to I/O errors so real bugs still surface.
-                pass
+        _debug_dump_request(kind, key, digest, params, messages)
         raise GoldenReplayMiss(
             f"{MISS_SENTINEL}: no fixture entry for {kind} request key {key[:16]}… "
             f"(model={params.get('model')}, call_class={params.get('call_class')}, "
