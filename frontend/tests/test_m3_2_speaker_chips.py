@@ -131,6 +131,7 @@ def _run_battery(cases):
       grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
       grabFn('function _scanTopLevelBlocks'),
       grabFn('function _extendSpeakerContinuations'),
+      grab('const _CODE_FENCE_RE = ', ';'),
       grabFn('function _codeLineIndices'),
       grabFn('function _lineIndexAtOffset'),
       grabFn('export function extractSpeakerTags'),
@@ -253,6 +254,7 @@ def _run_natural_battery(cases, roster):
       grab('const _SPEAKER_SCAN_VOID_TAGS = ', ';'),
       grabFn('function _scanTopLevelBlocks'),
       grabFn('function _extendSpeakerContinuations'),
+      grab('const _CODE_FENCE_RE = ', ';'),
       grabFn('function _codeLineIndices'),
       grabFn('function _lineIndexAtOffset'),
       grabFn('export function extractSpeakerTags'),
@@ -692,6 +694,68 @@ def test_tilde_fenced_code_block_bold_roster_name_is_never_chip_ified():
     assert n["chips"] == []
     assert "**Stephanie Briggs** is the format example." in n["text"]
     assert "___OWSPK_" not in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_backtick_fence_containing_a_tilde_marker_does_not_close_early():
+    """CodeRabbit follow-up: fence tracking must be DELIMITER-AWARE, not "any ``` or ~~~ line
+    toggles". A ``` fence quoting a ~~~ marker (e.g. the narrator explaining BOTH fence styles in
+    one example) must stay open across that tilde line — the naive toggle-on-either-marker
+    reading closed early here, resuming speaker extraction while still genuinely inside the
+    backtick-fenced block."""
+    r = _run_natural_battery(
+        {
+            "mixed_fence": (
+                "```\n"
+                "some prose about fences\n"
+                "~~~\n"
+                "**Stephanie Briggs** is still inside the backtick fence.\n"
+                "```\n"
+                "**Stephanie Briggs** speaks for real, outside every fence.\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["mixed_fence"]
+    # Only the line genuinely OUTSIDE every fence gets a chip.
+    assert len(n["chips"]) == 1
+    assert n["chips"][0]["name"] == "Stephanie Briggs"
+    assert n["text"].count("___OWSPK_") == 1
+    assert "**Stephanie Briggs** is still inside the backtick fence." in n["text"], (
+        "the tilde marker inside the ``` fence must NOT close it — the enclosed bold line stays "
+        "completely untouched, verbatim"
+    )
+    assert "___OWSPK_0___ **Stephanie Briggs** speaks for real, outside every fence." in n["text"]
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not available")
+def test_four_backtick_fence_containing_a_triple_backtick_marker_does_not_close_early():
+    """CodeRabbit follow-up: a fence only closes on the SAME character with a run length >= the
+    OPENING run's length (CommonMark). A ```` (4-backtick) fence quoting a plain ``` (3-backtick)
+    example — e.g. narration explaining how to write a fenced block — must stay open across that
+    shorter marker."""
+    r = _run_natural_battery(
+        {
+            "nested_backtick": (
+                "````\n"
+                "```\n"
+                "**Stephanie Briggs** is still inside the outer fence.\n"
+                "```\n"
+                "````\n"
+                "**Stephanie Briggs** speaks for real, outside every fence.\n"
+            ),
+        },
+        roster=["Stephanie Briggs"],
+    )
+    n = r["nested_backtick"]
+    assert len(n["chips"]) == 1
+    assert n["chips"][0]["name"] == "Stephanie Briggs"
+    assert n["text"].count("___OWSPK_") == 1
+    assert "**Stephanie Briggs** is still inside the outer fence." in n["text"], (
+        "the inner ``` (3-backtick) marker must NOT close the outer ```` (4-backtick) fence — the "
+        "enclosed bold line stays completely untouched, verbatim"
+    )
+    assert "___OWSPK_0___ **Stephanie Briggs** speaks for real, outside every fence." in n["text"]
 
 
 @pytest.mark.skipif(_NODE is None, reason="node not available")

@@ -918,21 +918,43 @@ function _speakerChipHtml(id, name) {
 // chip-ified and corrupt the eventual `<pre><code>` render. Builds the set of zero-based line
 // indices that fall inside either kind of code region so both speaker passes below can skip
 // them, preserving detection in ordinary prose. A lone fence line toggling state counts as code
-// itself (never a speaker line). Pure; a plain ``` (no lang) or ~~~ fence both count, mirroring
-// common Markdown practice even though mdToHtml's own fence-extraction only handles backticks.
+// itself (never a speaker line). A plain ``` (no lang) or ~~~ fence both count, mirroring common
+// Markdown practice even though mdToHtml's own fence-extraction only handles backticks.
+const _CODE_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+// CodeRabbit follow-up: delimiter-AWARE, per CommonMark's actual closing rule — a fence only
+// closes on a marker using the SAME character with a run length >= the OPENING run's length. A
+// naive "any ``` or ~~~ line toggles" reading (the prior shape here) closes early on a tilde
+// marker quoted INSIDE a backtick fence (or a ``` example quoted inside a ```` fence), resuming
+// speaker extraction while still genuinely inside the code block.
 function _codeLineIndices(text) {
   const lines = String(text).split('\n');
   const codeLines = new Set();
   let inFence = false;
+  let fenceChar = null;
+  let fenceLen = 0;
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].replace(/^ {0,3}/, '');
-    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) {
-      codeLines.add(i);
-      inFence = !inFence;
+    const m = _CODE_FENCE_RE.exec(lines[i]);
+    if (!inFence) {
+      if (m) {
+        codeLines.add(i);
+        fenceChar = m[1][0];
+        fenceLen = m[1].length;
+        inFence = true;
+        continue;
+      }
+      if (/^(?: {4}|\t)/.test(lines[i]) && lines[i].trim()) codeLines.add(i);
       continue;
     }
-    if (inFence) { codeLines.add(i); continue; }
-    if (/^(?: {4}|\t)/.test(lines[i]) && lines[i].trim()) codeLines.add(i);
+    // Inside a fence: every line counts as code, including a would-be marker that doesn't
+    // qualify to close it (retain the opening delimiter + run length; close only on the SAME
+    // character with an equal-or-longer run).
+    codeLines.add(i);
+    if (m && m[1][0] === fenceChar && m[1].length >= fenceLen) {
+      inFence = false;
+      fenceChar = null;
+      fenceLen = 0;
+    }
   }
   return codeLines;
 }
