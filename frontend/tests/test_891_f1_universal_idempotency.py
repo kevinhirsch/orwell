@@ -21,7 +21,9 @@ The invariant these lock:
     genuine next advance (last-seen moved ⇒ new key);
   • expectedBeatSeq is sourced from the SHARED FE beatSeq store (`chat_helpers._LAST_BEAT_SEQ`), not a
     parallel mechanism;
-  • a stale-beat 409 reconciles to the CURRENT board — never a second, unintended advance.
+  • a stale-beat 409 refreshes beatSeq and RE-FIRES the call ONCE against the reconciled token (R3 /
+    #1659), reusing the SAME idempotency key so the engine dedups — never a second, unintended advance;
+    a persistent stale then reconciles to the CURRENT board.
 """
 import asyncio
 import importlib
@@ -175,10 +177,12 @@ def test_f1_model_submit_decision_attaches_both_tokens_and_scopes_key_by_kind(mo
 # ── F1 concurrency — a stale-beat 409 reconciles to the current board, never a second advance ── #
 
 def test_f1_stale_beat_409_reconciles_to_current_board_not_a_second_advance(monkeypatch):
-    """The two-window double-advance guard on the MODEL path: if a concurrent peer already moved the
-    board, the engine refuses the model's advance with 409 `stale-beat`. The FE must reconcile (refresh
-    last-seen + stash the re-ground via the existing desync spine) and return the CURRENT state — it must
-    NOT force a second, unintended advance."""
+    """The no-double-APPLY guard on the MODEL path under R3 (#1659): if a concurrent peer already moved
+    the board, the engine refuses the model's advance with 409 `stale-beat`. R3 (owner ruling 2026-07-16
+    — "StaleBeatError is a dead end") now refreshes beatSeq and RE-FIRES the advance ONCE against the
+    reconciled token rather than dead-ending, but reuses the SAME idempotency key so the engine's at-most-
+    once dedups a genuine double-apply — never a second UNINTENDED advance. When the board keeps moving
+    (this test forces a persistent stale), the FE reconciles to the CURRENT state via the desync spine."""
     from src import tool_implementations as ti
     from src import orwell_engine
     advance_calls = []
@@ -200,6 +204,8 @@ def test_f1_stale_beat_409_reconciles_to_current_board_not_a_second_advance(monk
 
     out = _run(ti.do_advance_game("{}", owner="owner"))
     assert out["exit_code"] == 0                       # reconciled, not an error surfaced to the player
-    assert len(advance_calls) == 1                     # exactly ONE advance attempt — never a blind retry
-    assert state_reads == ["owner"]                    # returned the CURRENT board instead
+    # R3: ONE bounded refresh+retry (the initial attempt + exactly one re-fire) — never a loop.
+    assert len(advance_calls) == 2
+    assert advance_calls[0] == advance_calls[1]        # SAME idempotency key ⇒ the engine can never double-apply
+    assert state_reads == ["owner"]                    # a persistent stale reconciles to the CURRENT board
     assert chat_helpers.last_beat_seq("owner") == 30   # last-seen reconciled to the peer-moved beat
