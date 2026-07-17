@@ -1765,6 +1765,18 @@ def _effective_advance_grace(owner) -> int:
 # most one forced advance per finishing turn, only past the threshold, and a pending PLAYER decision is
 # never auto-resolved (the engine returns the pending unchanged — the model surfaces it as a choice).
 _ADVANCE_FORCE_LEVEL = len(_ADVANCE_NUDGES)  # past the last text rung (levels are 0-indexed)
+# R4 (#1659 seam 4) — the SESSION-cumulative counterpart of the force rung. The consecutive
+# ladder above (`_ADVANCE_STALL_LEVEL`) is reset to zero every time the FE force-commits a beat
+# for the model (`_commit_advance_silently`), so a model that CHRONICALLY under-calls advanceGame
+# is handed a fresh gentle ladder at each new beat and the L39b force keeps restarting from zero —
+# the "escalation rungs dead / forced-advanceGame never fired" symptom (issue #1659, bundle seam 4).
+# `_ADVANCE_STALL_FLAGS` (below) counts stall-nudges SINCE THE MODEL LAST PROGRESSED ON ITS OWN —
+# it is NOT cleared by an FE-forced commit — and once N of them accrue it arms the SAME L39b force
+# on the next lull. Pinned to `_ADVANCE_FORCE_LEVEL` so the session trigger can never fire BEFORE
+# the per-beat consecutive rung within a single beat (both reach threshold on the same turn): the
+# model always gets the full gentle→firmer→forceful ladder the FIRST time, and only a session that
+# keeps stalling past FE cover-ups escalates without a fresh ladder. N≈3 (owner ruling: "e.g. 3").
+_STALL_FLAGS_BEFORE_FORCE = _ADVANCE_FORCE_LEVEL
 _FORCED_ADVANCE_NUDGE = (
     "(Production note, not for the player.) The beat was stuck for several turns, so the game has been "
     "advanced for you. Call gameStatus / getGameState NOW to read the REAL new beat the engine just "
@@ -4411,6 +4423,12 @@ def _scene_touched_houseguest(narration: str, messages, house_names) -> bool:
 # the engine user (game) so it survives across the per-turn agent loop. Reset when the
 # game actually advances (a progression tool fires).
 _ADVANCE_STALL_LEVEL: Dict[str, int] = {}
+# R4 (#1659 seam 4): SESSION-cumulative stall-flag tally per game — the count of advance-stall
+# nudges fired SINCE THE MODEL LAST PROGRESSED ON ITS OWN. Unlike `_ADVANCE_STALL_LEVEL` (which the
+# FE-forced silent commit pops clean at each beat), this survives FE cover-ups and clears ONLY on a
+# genuine model-driven advance (or a peer advance), so a chronically under-calling model's L39b
+# force actually escalates instead of restarting from zero every beat. Keyed via `_belt_key`.
+_ADVANCE_STALL_FLAGS: Dict[str, int] = {}
 # Per-game staleness: live turns elapsed since the last progression tool fired. Climbs while the
 # night sits on one beat; resets to 0 the moment the game advances. The lull-nudge only fires once
 # this passes _ADVANCE_GRACE_TURNS, so good engaging play (and a fresh beat) is left to breathe.
@@ -6551,6 +6569,7 @@ async def _stream_agent_loop_impl(
                             # must reset the SAME belt state the single-tenant write path uses.
                             _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0
                             _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                            _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a peer moved the beat — clear session stall pressure
                             logger.info(
                                 f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
                                 f"{_beat_key_at_read} with no progression this turn — suppressing "
@@ -6649,9 +6668,17 @@ async def _stream_agent_loop_impl(
                         # never climb single-tenant: every read saw the empty-key default).
                         _sl_key = _belt_key(owner)
                         _level = _ADVANCE_STALL_LEVEL.get(_sl_key, 0)
+                        # R4 (#1659 seam 4): the SESSION-cumulative stall-flag count, read BEFORE this
+                        # turn's bump. It arms the L39b force below once N flags have accrued since the
+                        # model last self-advanced — even when the per-beat consecutive ladder keeps
+                        # getting reset by FE-forced commits. `_stall_flags_prior` (this turn's count
+                        # excluded) keeps the session trigger in lock-step with the consecutive rung
+                        # within a clean beat, so the full text ladder always runs the first time.
+                        _stall_flags_prior = _ADVANCE_STALL_FLAGS.get(_sl_key, 0)
                         _turn_advance_nudges += 1
                         _note_belt(owner, "advance-stall-nudge")  # gap #3 telemetry
                         _ADVANCE_STALL_LEVEL[_sl_key] = _level + 1
+                        _ADVANCE_STALL_FLAGS[_sl_key] = _stall_flags_prior + 1
 
                         # Finding 4 (#1664): a per-call flag that distinguishes a RECONCILED double-stale
                         # (the beat moved under us — turn-terminating, never a second narration) from an
@@ -7024,7 +7051,8 @@ async def _stream_agent_loop_impl(
                             except Exception as _dr_e:
                                 logger.warning(f"[orwell] eviction-drain pending read skipped: {_dr_e}")
                                 _eviction_drain_force = False
-                        if ((_eviction_drain_force or _level >= _ADVANCE_FORCE_LEVEL)
+                        if ((_eviction_drain_force or _level >= _ADVANCE_FORCE_LEVEL
+                             or _stall_flags_prior >= _STALL_FLAGS_BEFORE_FORCE)
                                 and not _previewed_uncommitted and not _decision_undelivered):
                             # F7 DOUBLE-ADVANCE GUARD: between the state read at the top of this block and
                             # this forced POST, another device (or the model's own tool path) may have
@@ -7791,6 +7819,7 @@ async def _stream_agent_loop_impl(
             # resolved, feeding stale reads on the NEXT lull check.
             if _is_live_game and block.tool_type in _PROGRESSION_TOOLS:
                 _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
+                _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a genuine MODEL advance clears the session stall tally
                 _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:
