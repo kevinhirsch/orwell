@@ -479,6 +479,16 @@ def _vocation_tokens(vocation) -> set:
     return {t for t in _VOCATION_WORD.findall(vocation.lower()) if t not in _VOCATION_STOPWORDS}
 
 
+def _vocation_raw_tokens(vocation) -> set:
+    """ALL >=3-letter word tokens of a vocation phrase, stopwords INCLUDED — the fallback signal when
+    a committed occupation is a single GENERIC word ("manager", "director") whose distinctive-token set
+    is empty. "senior manager" -> {"senior", "manager"}. Used on BOTH sides together (never mixed with
+    the distinctive set) so containment still judges refinements ("manager" ⊆ "senior manager")."""
+    if not isinstance(vocation, str):
+        return set()
+    return set(_VOCATION_WORD.findall(vocation.lower()))
+
+
 def identity_contradictions(profile: dict, npc: dict) -> list:
     """F1 (#1660): return the authored STRUCTURED identity fields that CONTRADICT the committed roster's
     IMMUTABLE identity — the set the caller drops before the `recordCastProfile` write-back so the
@@ -493,10 +503,13 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
         stands (the engine also refuses renaming an already-introduced houseguest; this is the earlier
         FE complement).
       • vocation — the committed roster owns the occupation (genesis-authored; the engine keys the hidden
-        stakes off it). The authored vocation is coherent ONLY when one distinctive-token set CONTAINS
-        the other (a refinement — "reporter" ⊆ "court reporter"); otherwise it names a DIFFERENT job
-        (a crosswire — "software engineer" vs "civil engineer" share only the generic "engineer" but
-        neither contains the other) and "vocation" is dropped so the committed job stands.
+        stakes off it). When BOTH sides carry a distinctive token, the authored vocation is coherent ONLY
+        when one distinctive-token set CONTAINS the other (a refinement — "reporter" ⊆ "court reporter");
+        otherwise it names a DIFFERENT job (a crosswire — "software engineer" vs "civil engineer" share
+        only the generic "engineer" but neither contains the other) and "vocation" is dropped. When one
+        side is ALL-GENERIC (no distinctive token, e.g. a committed "manager"), containment can't judge
+        it — fall back to RAW tokens (stopwords included) on BOTH sides, so "manager" vs "bartender" is
+        still a crosswire (dropped) while "manager" vs "senior manager" stays a refinement (kept).
       • genderPresentation / age — DEFENSIVE: `parse_authored_profile` does not forward these today (the
         pin is engine-owned), so this only fires if a future parse path forwarded a value that differs
         from the committed pin. Kept so the guard is complete + directly unit-testable."""
@@ -505,12 +518,20 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
     authored_name = str((profile or {}).get("name") or "").strip()
     if committed_name and authored_name and committed_name.casefold() != authored_name.casefold():
         drop.append("name")
-    committed_voc = _vocation_tokens((npc or {}).get("vocation"))
-    authored_voc = _vocation_tokens((profile or {}).get("vocation"))
-    # Coherent ONLY when one distinctive-token set CONTAINS the other (a refinement); a mere shared
-    # generic token ("engineer") with neither containing the other is a crosswire — drop "vocation".
-    if committed_voc and authored_voc \
-            and not (committed_voc <= authored_voc or authored_voc <= committed_voc):
+    cv = (npc or {}).get("vocation")
+    av = (profile or {}).get("vocation")
+    committed_voc = _vocation_tokens(cv)
+    authored_voc = _vocation_tokens(av)
+    if committed_voc and authored_voc:
+        # Both sides carry a distinctive signal — judge by distinctive-token containment (existing path).
+        c, a = committed_voc, authored_voc
+    else:
+        # One side is ALL-GENERIC (no distinctive token, e.g. a committed "manager") — distinctive-token
+        # containment can't judge it; fall back to RAW tokens (stopwords included) on BOTH sides. Never
+        # mix distinctive-one-side with raw-the-other (that wrongly drops "manager" -> "project manager").
+        c, a = _vocation_raw_tokens(cv), _vocation_raw_tokens(av)
+    # Coherent ONLY when one token set CONTAINS the other (a refinement); otherwise a crosswire — drop.
+    if c and a and not (c <= a or a <= c):
         drop.append("vocation")
     pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
     authored_gp = str((profile or {}).get("genderPresentation") or "").strip().lower()

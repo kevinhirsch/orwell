@@ -543,3 +543,65 @@ def test_shared_generic_token_crosswire_drops_vocation_and_secrets_end_to_end(_c
     failed = _overseer_kinds_failed_for("probe-user")
     assert "cast-authoring:identity-contradiction" in failed
     assert "cast-authoring:secret-identity-contradiction" in failed
+
+
+# ══════════════ F1/F5 — a STOPWORD-ONLY committed vocation still guards against a crosswire ══════════════
+#
+# A committed occupation that is a single GENERIC word ("manager", "director") yields no distinctive
+# token, so the distinctive-containment test would short-circuit on the empty set and never drop a
+# crosswired authored vocation. The raw-token fallback (stopwords included, both sides) closes that gap
+# (Greptile P1 on #1692).
+
+
+def test_stopword_only_committed_vocation_still_catches_a_crosswire():
+    # Committed "manager" (all-generic) vs authored "bartender" — the raw fallback still drops it.
+    assert ca.identity_contradictions({"vocation": "bartender"}, {"vocation": "manager"}) == ["vocation"]
+    # An exact echo of the generic committed vocation is NOT flagged.
+    assert ca.identity_contradictions({"vocation": "manager"}, {"vocation": "manager"}) == []
+    # A raw-superset refinement of a generic committed vocation ("senior manager") is NOT flagged.
+    assert ca.identity_contradictions({"vocation": "senior manager"}, {"vocation": "manager"}) == []
+    # The mirror: a distinctive committed job vs an all-generic authored one still drops (keep the real job).
+    assert ca.identity_contradictions({"vocation": "manager"}, {"vocation": "engineer"}) == ["vocation"]
+
+
+def test_stopword_only_committed_vocation_crosswire_dropped_and_red_end_to_end(_clean_ledger):
+    # END TO END with a generic committed occupation: the crosswired vocation AND the secrets grounded in
+    # the wrong job are dropped, both RED-recorded.
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "bartender",  # crosswires the generic committed "manager"
+            "biography": _MASC_BIO,
+            "secrets": ["pockets cash from the bar tabs"],
+            "trueGoals": ["clear a gambling debt"],
+            "weakness": "cannot resist a high-stakes bet",
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "manager"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    committed = written_profiles[0]
+    assert "vocation" not in committed, "a crosswire off a generic committed vocation is dropped"
+    for k in ("secrets", "trueGoals", "weakness"):
+        assert k not in committed, f"the hidden thread {k!r} grounded in the wrong job must be dropped"
+    failed = _overseer_kinds_failed_for("probe-user")
+    assert "cast-authoring:identity-contradiction" in failed
+    assert "cast-authoring:secret-identity-contradiction" in failed
+
+
+def test_stopword_only_committed_vocation_f5_mirror():
+    # F5 inherits the raw-token fallback: mis-grounded secrets drop when a generic committed vocation is
+    # crosswired, and a matching/refinement generic vocation keeps them.
+    npc = {"vocation": "manager"}
+    prof = {"vocation": "bartender", "secrets": ["skims the register"],
+            "trueGoals": ["reach the end"], "weakness": "trusts too fast today"}
+    assert ca.secret_vocation_conflicts(prof, npc) == ["secrets", "trueGoals", "weakness"]
+    # A refinement of the generic vocation keeps the secrets.
+    assert ca.secret_vocation_conflicts(
+        {"vocation": "senior manager", "secrets": ["a real secret here"]}, npc) == []
