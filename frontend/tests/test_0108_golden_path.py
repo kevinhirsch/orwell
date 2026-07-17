@@ -117,6 +117,54 @@ def test_npc_dwell_labels_never_drift_the_key(golden):
         golden.request_key("stream", moved, TOOLS, PARAMS)
 
 
+def test_raw_json_turnsHere_in_a_tool_result_never_drifts_the_key(golden):
+    """The 2026-07-17 fresh-GLM-recording miss: `createCharacter`'s tool result nests a full
+    `whereabouts` snapshot — {"turnsHere": N, "companions": [{"turnsHere": N}, …]} — echoed back
+    into the NEXT round's messages as `tool`-role content. That is the SAME per-committed-turn
+    presence-tenure counter the "Your room:"/"With you:" prompt-line subs above neutralize, but
+    reaching the key through a totally different code path (a raw JSON tool result, not
+    `momentPrompts.ts` rendered text) that those line-scoped subs never touch — so a real live
+    recording's tenure value (however it landed) could never be reproduced bit-for-bit by a
+    deterministic replay reconstruction, and the finalize turn's very next round missed every time.
+    Neutralized narrowly by JSON key name; every other field in the same tool result (room
+    assignment, roster, ids) still drifts the key on a real change."""
+    tool_msgs_0 = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 0, '
+         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+    ]
+    tool_msgs_1 = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 1, '
+         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 1}, '
+         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+    ]
+    assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) == \
+        golden.request_key("stream", tool_msgs_1, TOOLS, PARAMS)
+    # …but a real change to who is present (not merely their tenure) still drifts the key.
+    moved = [
+        {"role": "system", "content": "framing"},
+        {"role": "assistant", "content": "Fine. You're cast.",
+         "tool_calls": [{"id": "tool-abc", "type": "function",
+                         "function": {"name": "createCharacter", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "tool-abc", "content":
+         '### createCharacter\n```\n{"whereabouts": {"room": "kitchen", "turnsHere": 0, '
+         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+    ]
+    assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) != \
+        golden.request_key("stream", moved, TOOLS, PARAMS)
+
+
 def test_dwell_neutralization_is_scoped_to_presence_lines(golden):
     """PR #1234 review: the dwell subs are line-scoped — the SAME parenthetical worded
     into unrelated prompt prose is a game fact and must still drift the key; and the

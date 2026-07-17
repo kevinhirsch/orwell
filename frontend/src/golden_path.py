@@ -205,12 +205,34 @@ def _neutralize_offscreen_society(s: str) -> str:
     return s
 
 
+# The SAME per-committed-turn presence-tenure counter neutralized above in the rendered "Your
+# room:"/"With you:" PROMPT TEXT (`_neutralize_presence_lines`) is ALSO echoed RAW into a tool
+# RESULT a round can hand back to the model on the very next round — e.g. `createCharacter`'s
+# response nests a full `whereabouts` snapshot (`{"turnsHere": N, "companions": [{"turnsHere": N},
+# …]}`) at season start. That JSON leaf is a distinct code path from the humanized prompt lines
+# (it reaches the key via `_canon_messages`' `tool`-role content, not `momentPrompts.ts`), so the
+# line-scoped presence subs above never touch it — the exact gap the fresh 2026-07-17 GLM
+# recording surfaced: the finalize turn's round-2 request (built from round-1's replayed
+# `createCharacter` tool result) keys on the LIVE-recorded tenure snapshot, which the deterministic
+# replay reconstruction cannot reproduce bit-for-bit (a real, otherwise-harmless value baked into
+# ONE recording run). Neutralized narrowly — the numeric LEAF only, by JSON key name, wherever it
+# appears — so every other detail in the same tool-result payload (room assignment, roster, names)
+# still drifts the key on a real change.
+_TURNSHERE_JSON_RE = _re.compile(r'("turnsHere"\s*:\s*)\d+')
+
+
+def _neutralize_presence_tenure_json(s: str) -> str:
+    return _TURNSHERE_JSON_RE.sub(r"\g<1>0", s)
+
+
 def _neutralize_volatile(s: str) -> str:
     # Dwell counters/labels are neutralized only on the presence lines that render them.
     s = _neutralize_presence_lines(s)
     # The off-screen-society gossip-drift hedge + the movement-in-the-room cue (#1355) —
     # both tick-timing-volatile framing, narrowly neutralized (see the module notes above).
     s = _neutralize_offscreen_society(s)
+    # The same tenure counter, echoed RAW as JSON inside a tool result (see the note above).
+    s = _neutralize_presence_tenure_json(s)
     # Date/time shapes are neutralized ONLY inside the wall-clock context section, so a real
     # date/time embedded in game content or a tool result still drifts the key.
     idx = s.find(_WALLCLOCK_HEADER)
