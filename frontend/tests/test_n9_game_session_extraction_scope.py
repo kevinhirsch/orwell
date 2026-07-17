@@ -159,3 +159,25 @@ def test_a_different_session_for_a_game_owner_still_extracts(monkeypatch):
 
     assert len(calls) == 1
     assert mm.entries_added
+
+
+def test_lookup_failure_fails_closed_and_skips_extraction(monkeypatch):
+    """CodeRabbit #1681: if the canonical-session lookup RAISES, extraction must fail CLOSED
+    (skip) — proceeding could persist in-character game dialogue as durable user biography,
+    the exact privacy condition the guard exists to prevent (ADR 0003)."""
+    owner = "u-n9-lookup-fail"
+
+    def _boom(_owner):
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(ogs, "get_game_session", _boom)
+
+    calls = []
+    _stub_llm(monkeypatch, calls)
+    mm = _FakeMemoryManager()
+    sess = _FakeSession("sess-any", owner)
+
+    _run(memory_extractor.extract_and_store(sess, mm, None, _URL, _MODEL, {}))
+
+    assert calls == [], "extraction must be skipped when the canonical lookup fails"
+    assert not mm.entries_added, "nothing may be stored on a failed canonical lookup"

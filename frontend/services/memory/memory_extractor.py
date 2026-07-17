@@ -289,7 +289,15 @@ async def extract_and_store(
                 "is not user biography, ADR 0003)")
             return
     except Exception:
-        pass
+        # Fail CLOSED: if we cannot verify whether this is the canonical game session,
+        # skipping extraction is the safe no-op — proceeding could persist in-character
+        # game dialogue as durable user biography (the privacy condition this guard exists
+        # to prevent, ADR 0003).
+        logger.warning(
+            "[memory-extract] could not verify canonical game session; skipping extraction",
+            exc_info=True,
+        )
+        return
 
     try:
         from src.llm_core import llm_call_async
