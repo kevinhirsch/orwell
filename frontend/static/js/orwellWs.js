@@ -111,6 +111,15 @@
   var _highestChatSeq = -1;      // highest `chat` event.seq rendered (reconnect cursor)
   var _chatSubscribed = false;
   var _chatTailActive = false;   // are we tailing a LIVE chat run right now? (§4.1 re-attach guard)
+  // CodeRabbit fix (2026-07-17): a monotonic generation stamped on each `_onRunStarted` re-attach's
+  // OWN `_subscribeChat(0)` call. `_chatTailActive` is a single shared boolean — a STALE reattach A's
+  // `hasRun:false` ack can resolve AFTER a genuinely new run B has superseded it (B's own re-attach,
+  // or B's own `done` clearing the flag), so by the time A's ack lands `_chatTailActive` no longer
+  // reflects what A itself observed. Bumped once per `_onRunStarted` re-attach; each ack callback
+  // captures its OWN generation at subscribe-time and compares against the CURRENT value before
+  // acting — a superseded ack (an older generation) is always a no-op, regardless of what
+  // `_chatTailActive` currently reads.
+  var _chatReattachGen = 0;
   // #1087 reconcile-by-id: the id of the run this socket is attached to (or last fully rendered).
   // `session_events` is at-least-once — its replay ring re-delivers a FINISHED run's `run-started`
   // edge (≤8 events, 180s retention) to any fresh state-channel subscribe. The `_chatTailActive`
@@ -485,7 +494,14 @@
     // holder, release the render-lock, reconcile from history — a cheap no-op if there is nothing to
     // fix). Guarded on `!_chatTailActive` so a genuinely-new run-started that raced in behind this one
     // (and is already being tailed) is never torn down by this stale ack's own resolution.
+    // CodeRabbit fix: ALSO guarded on the reattach generation — `_chatTailActive` is a single shared
+    // boolean, so a STALE reattach's ack can still land after `_chatTailActive` has been flipped back
+    // to false by an UNRELATED later event (e.g. a superseding run B's own `done`), which would make
+    // this stale ack misread as "genuinely no live run" and tear down B's already-reconciled holder.
+    // Stamp THIS reattach's own generation and require it still be current before acting at all.
+    var _myReattachGen = ++_chatReattachGen;
     _subscribeChat(0).then(function (ack) {
+      if (_myReattachGen !== _chatReattachGen) return;  // superseded by a newer reattach — no-op
       if (ack && ack.d && ack.d.hasRun === false && !_chatTailActive) {
         _emitWindow("orwell:ws-resync",
           { canonicalId: _canonicalId, beatSeq: _beatSeq, reason: "run-started-empty" });
