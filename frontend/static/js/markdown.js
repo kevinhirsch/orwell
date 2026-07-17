@@ -786,6 +786,24 @@ const _SPEAKER_TAG_RE = /^([ \t]*)@\[([^\]\n]{1,80})\](?:\(npc:(\d+)\))?[ \t]*:?
 // `]` yet. A complete `@[Name]` always carries a `]`, so this only ever matches a partial.
 const _SPEAKER_TRAILING_PARTIAL_RE = /@\[[^\]\n]{0,80}$/;
 
+// #1638 fallback — the narrator makes the `@[Name]` tag OPTIONAL and in real play reliably
+// writes its own house style instead: a line-leading BOLD name — `**Full Name** does
+// something.` / `**Full Name:** "quote"` — with no sanctioned tag at all, so the chip
+// machinery above never fires. This recognizes that natural pattern too, but stays
+// deliberately narrow: it is a STYLING addition, never a rewrite (ADR 0005 — normalizing
+// creative prose is out of bounds). Unlike `_SPEAKER_TAG_RE`, which consumes the tag
+// syntax entirely (it IS machinery, not prose), this only ever PREPENDS a placeholder ahead
+// of the bold run — the `**Name**`/`**Name:**` text the model wrote is never touched, so the
+// visible sentence is byte-identical apart from the added gutter chip. `m` flag so `^` is
+// per line, matching `_SPEAKER_TAG_RE`'s anchor; the inner name is captured separately from
+// an optional trailing colon (inside OR outside the closing `**`) purely for the roster-match
+// check below — group 2 (`boldRun`) is what actually gets kept in the output, verbatim. NO
+// trailing `[ \t]*` here (unlike `_SPEAKER_TAG_RE`, which deliberately swallows the tag's
+// trailing whitespace because the tag itself is discarded) — the whitespace AFTER the bold
+// run is real prose (the space before "leans against the counter…") and must stay in the
+// unmatched remainder untouched, or it silently vanishes from the rendered sentence.
+const _SPEAKER_BOLD_LINE_RE = /^([ \t]*)(\*\*([^*\n]{1,80}?)\*\*:?)/gm;
+
 function _speakerInitials(name) {
   try {
     if (typeof window !== 'undefined' && window.OrwellMonogram && window.OrwellMonogram.initialsFor) {
@@ -813,6 +831,23 @@ function _resolveSpeakerSeed(id, name) {
     }
   } catch (_) { /* seed by name */ }
   return name;
+}
+
+// #1638 — is `name` an EXACT (case/whitespace-insensitive) live-roster houseguest name? Reuses
+// the SAME `window.orwellResolveHouseguestId` roster resolver `_resolveSpeakerSeed` already
+// calls for the sanctioned-tag path (see orwellMonogram.js's `cardFor`, which looks the trimmed
+// lower-cased name up in the roster cache — no fuzzy/partial matching). Deliberately
+// conservative: absent a roster (headless, cold cache, no game) this always fails closed
+// (returns false), so the natural-bold-name fallback below never fires without a real,
+// confirmed roster match — a plain `**bold**` that happens not to be a houseguest's name
+// renders exactly as it always has. Never throws.
+function _isKnownRosterName(name) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.orwellResolveHouseguestId === 'function') {
+      return !!window.orwellResolveHouseguestId(name);
+    }
+  } catch (_) { /* fail closed — not a confirmed roster name */ }
+  return false;
 }
 
 // The gutter-chip CSS, injected once (mirrors OrwellMonogram.ensureCss). No-op headless.
@@ -877,6 +912,65 @@ function _speakerChipHtml(id, name) {
     + `aria-label="${safe}" role="img">${face}</span>`;
 }
 
+// CodeRabbit fix: the speaker pass below runs on RAW markdown (before mdToHtml extracts fenced
+// blocks — see the file-header note above), so a roster name inside a ```fenced``` or 4-space/
+// tab-INDENTED code line (an example transcript, a quoted format sample) could otherwise get
+// chip-ified and corrupt the eventual `<pre><code>` render. Builds the set of zero-based line
+// indices that fall inside either kind of code region so both speaker passes below can skip
+// them, preserving detection in ordinary prose. A lone fence line toggling state counts as code
+// itself (never a speaker line). A plain ``` (no lang) or ~~~ fence both count, mirroring common
+// Markdown practice even though mdToHtml's own fence-extraction only handles backticks.
+const _CODE_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+// CodeRabbit follow-up: delimiter-AWARE, per CommonMark's actual closing rule — a fence only
+// closes on a marker using the SAME character with a run length >= the OPENING run's length. A
+// naive "any ``` or ~~~ line toggles" reading (the prior shape here) closes early on a tilde
+// marker quoted INSIDE a backtick fence (or a ``` example quoted inside a ```` fence), resuming
+// speaker extraction while still genuinely inside the code block.
+function _codeLineIndices(text) {
+  const lines = String(text).split('\n');
+  const codeLines = new Set();
+  let inFence = false;
+  let fenceChar = null;
+  let fenceLen = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const m = _CODE_FENCE_RE.exec(lines[i]);
+    if (!inFence) {
+      if (m) {
+        codeLines.add(i);
+        fenceChar = m[1][0];
+        fenceLen = m[1].length;
+        inFence = true;
+        continue;
+      }
+      if (/^(?: {4}|\t)/.test(lines[i]) && lines[i].trim()) codeLines.add(i);
+      continue;
+    }
+    // Inside a fence: every line counts as code, including a would-be marker that doesn't
+    // qualify to close it (retain the opening delimiter + run length; close only on the SAME
+    // character with an equal-or-longer run, followed by NOTHING but whitespace — per
+    // CommonMark a CLOSING fence takes no info string, so "```js" inside an open block is a
+    // quoted example, not a close; treating it as one would resume speaker extraction while
+    // still genuinely inside the code block).
+    codeLines.add(i);
+    if (m && m[1][0] === fenceChar && m[1].length >= fenceLen
+        && lines[i].slice(lines[i].indexOf(m[1]) + m[1].length).trim() === '') {
+      inFence = false;
+      fenceChar = null;
+      fenceLen = 0;
+    }
+  }
+  return codeLines;
+}
+
+// The zero-based line index containing a given character offset into `str` (counts `\n` up to
+// offset). Used to test a regex match's position against `_codeLineIndices` above.
+function _lineIndexAtOffset(str, offset) {
+  let idx = 0;
+  for (let i = 0; i < offset; i++) if (str.charCodeAt(i) === 10) idx++;
+  return idx;
+}
+
 // Extract every complete, line-leading sanctioned speaker tag, replacing it with an inert
 // `___OWSPK_N___` placeholder (so downstream scrubs + mdToHtml can't mangle it) and returning
 // the parsed {id, name} chips in order. Also swallows a trailing INCOMPLETE tag so a tag split
@@ -884,7 +978,9 @@ function _speakerChipHtml(id, name) {
 export function extractSpeakerTags(text) {
   if (!text) return { text: text, chips: [] };
   const chips = [];
-  let out = String(text).replace(_SPEAKER_TAG_RE, (_m, lead, name, id) => {
+  const codeLines = _codeLineIndices(text);
+  let out = String(text).replace(_SPEAKER_TAG_RE, (_m, lead, name, id, offset) => {
+    if (codeLines.has(_lineIndexAtOffset(text, offset))) return _m;  // fenced/indented code — never chip-ify
     const nm = String(name || '').trim();
     if (!nm) return _m;                    // `@[]` — not a real speaker; leave it for the scrub
     const i = chips.length;
@@ -894,6 +990,25 @@ export function extractSpeakerTags(text) {
   // A dangling partial tag at the very end of a streaming buffer renders as nothing until the
   // next delta closes it. (A complete tag was already replaced above, so this is only a partial.)
   out = out.replace(_SPEAKER_TRAILING_PARTIAL_RE, '');
+  // #1638 — SECOND pass, over text with sanctioned tags already swallowed above: a
+  // line-leading BOLD houseguest name in the model's own natural house style
+  // (`**Full Name** does something.` / `**Full Name:** "quote"`) instead of the sanctioned
+  // `@[Name]` tag. Exact live-roster match only (`_isKnownRosterName` — never fuzzy, never
+  // partial, and fails closed with no roster loaded), line-leading only (the same `^`/`m`
+  // anchor as `_SPEAKER_TAG_RE`, so a mid-sentence bold mention never matches), and the
+  // placeholder is INSERTED ahead of the bold run rather than consuming it — the `**Name**`/
+  // `**Name:**` markdown the model wrote is kept byte-for-byte, so this only ever ADDS a
+  // gutter chip and never rewrites/normalizes the prose (ADR 0005). A line already replaced
+  // by the sanctioned-tag pass above starts with a placeholder, not `**`, so it can never
+  // double-match here — the two paths are mutually exclusive per line.
+  out = out.replace(_SPEAKER_BOLD_LINE_RE, (m, lead, boldRun, nameRaw, offset) => {
+    if (codeLines.has(_lineIndexAtOffset(out, offset))) return m;  // fenced/indented code — never chip-ify
+    const nm = String(nameRaw || '').trim().replace(/:$/, '').trim();
+    if (!nm || !_isKnownRosterName(nm)) return m; // not a confirmed roster name — untouched
+    const i = chips.length;
+    chips.push({ id: null, name: nm });
+    return (lead || '') + '___OWSPK_' + i + '___ ' + boldRun;
+  });
   // OWN-8b — anchor a DETACHED attribution to its speech. The narrator sometimes emits the tag
   // ALONE on its own line (a blank line between the tag and the quote, or the tag trailing the
   // quote); mdToHtml then wraps the lone placeholder as its own paragraph and the face chip
