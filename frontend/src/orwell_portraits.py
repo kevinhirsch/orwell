@@ -2131,7 +2131,16 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
             try:
                 t.result()
             except Exception as e:  # pragma: no cover - defensive
+                # #1599 (CodeRabbit): the NORMAL async path — generate_and_store records each
+                # per-houseguest failure, but a raise OUT of the task is a whole-run crash that would
+                # otherwise only log. Surface it RED (same reason as the sync path; mutually exclusive).
                 logger.info("[portraits] background generation error: %s", e)
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("portraits:generation-run-failed", e,
+                                                  corrected="placeholder-floor", user=user)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
 
         task.add_done_callback(_done)
     else:  # pragma: no cover - non-async callers (tests call generate_and_store directly)
@@ -2461,7 +2470,16 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
             try:
                 t.result()
             except Exception as e:  # pragma: no cover - defensive
+                # #1599 (CodeRabbit): the NORMAL async path — backfill_missing records per-houseguest
+                # failures, but a raise OUT of the task is a whole-run crash that would otherwise only
+                # log. Surface it RED (same reason as the sync path; mutually exclusive).
                 logger.info("[portraits] background backfill error: %s", e)
+                try:
+                    from src import log_rings
+                    log_rings.record_soft_failure("portraits:backfill-run-failed", e,
+                                                  corrected="placeholder-floor", user=user)
+                except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                    pass
 
         task.add_done_callback(_done)
     else:  # non-async callers (tests drive backfill_missing directly)

@@ -209,16 +209,18 @@ async def run_author(owner: Optional[str], staging: Optional[dict] = None) -> di
         return await orwell_engine.record_competition_fiction(fiction, user=owner)
 
     result = await author_competition(lambda: _ready(ready), llm_fn, _write)
-    # #1599: a GENUINE competition-fiction failure (the model call RAISED, or the engine REFUSED the
-    # write-back) shows RED on /admin/status — the deterministic 0042 competition-library floor stands
-    # (auto-corrected), never a silent skip. Expected-empty reasons (no-staging / no-model /
-    # already-authored / no-fiction quality-miss) are normal flow and do NOT alarm.
+    # #1599 (CodeRabbit): a GENUINE competition-fiction failure shows RED on /admin/status — the model
+    # call RAISED (llm-failed), OR the engine REFUSED the write-back (write-failed on a transport error,
+    # OR a NON-exceptional reject reason returned by recordCompetitionFiction — e.g. a drop-order
+    # mismatch). Record on ANY non-accept EXCEPT the expected-empty reasons (no comp/model/already-done/
+    # quality-miss), which are normal flow. The deterministic 0042 floor stands (auto-corrected).
+    _EXPECTED_EMPTY = ("no-staging", "no-model", "already-authored", "no-fiction")
     if isinstance(result, dict) and not result.get("accepted") \
-            and result.get("reason") in ("llm-failed", "write-failed"):
+            and result.get("reason") not in _EXPECTED_EMPTY:
         try:
             from src import log_rings
             log_rings.record_soft_failure(
-                "gen-comp:fiction-failed", str(result.get("reason")),
+                "gen-comp:fiction-failed", str(result.get("reason") or "refused"),
                 corrected="competition-library-floor", user=owner)
         except Exception:  # pragma: no cover — failsoft-ok: recorder-self
             pass

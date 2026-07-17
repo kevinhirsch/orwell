@@ -172,6 +172,18 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
             enrichment_policy.record_failure(
                 owner, "offscreen-texture", "off-screen texture enrichment failed", detail=str(exc))
         return {"voiced": 0, "total": 0, "error": str(exc)}
+    # #1599 (CodeRabbit): a COMPLETE 0/N run — skeletons existed but every scene failed to voice
+    # (voice_scene absorbs each per-scene LLM/write fault as False) — reaches no other recorder. Surface
+    # ONE RED; the deterministic templates stand. A partial success (voiced>0) is normal flow, no alarm.
+    if isinstance(result, dict) and result.get("total") and not result.get("voiced"):
+        try:
+            from src import log_rings
+            log_rings.record_soft_failure(
+                "offscreen-texture:enrich-run-failed",
+                f"all {result.get('total')} off-screen scene(s) failed to voice this tick",
+                corrected="deterministic-templates", user=owner)
+        except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+            pass
     # #617: voiced texture landed on the live game — push a server-side "game-updated" so open
     # pages reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
     if isinstance(result, dict) and result.get("voiced"):
