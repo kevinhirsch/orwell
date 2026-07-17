@@ -477,11 +477,13 @@ class GoldenDriver:
         misses. Kicking the browser-parity pre-warm and waiting for `authorDone` here puts
         the fully-authored cast in front of createCharacter in BOTH modes. Replay is fast:
         the same calls replay from the fixture in seconds."""
-        r = self._post_json(self.fe, "/api/orwell/prewarm-cast", {})
-        if not r.get("warmed"):
-            raise RuntimeError(f"prewarm-cast did not warm the cast: {r}")
         budget = (CAST_AUTHORING_WAIT_RECORD_S if self.mode == "record"
                   else CAST_AUTHORING_WAIT_REPLAY_S)
+        # The route runs genesis + identity INLINE (minutes on a live record) — it is exempt
+        # from the FE's 45s hard timeout, and this client call must be equally patient.
+        r = self._post_json(self.fe, "/api/orwell/prewarm-cast", {}, timeout=budget)
+        if not r.get("warmed"):
+            raise RuntimeError(f"prewarm-cast did not warm the cast: {r}")
         started_at = time.time()
         deadline = started_at + budget
         last: dict = {}
