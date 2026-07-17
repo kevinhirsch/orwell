@@ -186,8 +186,9 @@ def test_l28b_author_cast_is_best_effort_per_houseguest():
     writes = []
 
     async def llm_fn(messages):
-        # the middle houseguest's model call blows up — the others must still author
-        if "B" in messages[1]["content"]:
+        # the middle houseguest's model call blows up — the others must still author. Match the skeleton
+        # name token exactly (not a bare "B", which now also appears in prompt prose like "IMMUTABLE").
+        if '"name": "B"' in messages[1]["content"]:
             raise RuntimeError("model timeout")
         return json.dumps(_FULL)
 
@@ -308,7 +309,8 @@ def test_author_cast_fires_on_authored_per_successful_write():
     authored = []
 
     async def llm_fn(messages):
-        if "C" in messages[1]["content"]:
+        # Match the skeleton name token exactly (a bare "C" now also appears in prompt prose).
+        if '"name": "C"' in messages[1]["content"]:
             return "no json here"
         return json.dumps(_FULL)
 

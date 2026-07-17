@@ -248,3 +248,184 @@ def test_authoring_resolver_accepts_the_genesis_output_floor():
     params = inspect.signature(ca.resolve_authoring_llm_fn).parameters
     assert "min_output_tokens" in params, (
         "resolve_authoring_llm_fn must accept min_output_tokens so genesis can raise the sketch cap")
+
+
+# ══════════════════ F1 (FE) — roster-constrained authoring: identity is IMMUTABLE ══════════════════
+#
+# The committed roster owns each houseguest's name / gender / vocation / age BEFORE deep authoring runs
+# (genesis skeleton → 0063 identity → author). Deep authoring EXTENDS that person; it must never
+# re-invent them into a different one (the issue's "occupation-crosswired" houseguests). These pin the
+# pure structured-field guard + its end-to-end drop-and-RED behavior + the prompt constraint.
+
+
+def _overseer_kinds_failed_for(user):
+    _, lines = log_rings.OVERSEER.since(0, limit=100000)
+    return {e.get("kind") for e in lines if e.get("ok") is False and e.get("user") == user}
+
+
+def test_identity_contradictions_drops_a_crosswired_vocation():
+    # A DIFFERENT job (no shared distinctive token) is a crosswire → dropped so the committed job stands.
+    npc = {"id": "npc:1", "vocation": "concierge"}
+    assert ca.identity_contradictions({"vocation": "bartender"}, npc) == ["vocation"]
+    # A refinement that shares a distinctive token is NOT a crosswire (kept).
+    assert ca.identity_contradictions({"vocation": "court reporter"}, {"vocation": "reporter"}) == []
+    assert ca.identity_contradictions({"vocation": "chef"}, {"vocation": "private chef"}) == []
+    # Case / whitespace / stopword-only differences never read as a crosswire.
+    assert ca.identity_contradictions({"vocation": "Senior Welder"}, {"vocation": "welder"}) == []
+    # No committed vocation ⇒ nothing to contradict (an authored vocation freely EXTENDS).
+    assert ca.identity_contradictions({"vocation": "bartender"}, {"id": "npc:1"}) == []
+    # A coherent dossier is a clean no-op.
+    assert ca.identity_contradictions({"vocation": "welder", "biography": _MASC_BIO}, {"vocation": "welder"}) == []
+
+
+def test_identity_contradictions_defensive_gender_and_age():
+    # DEFENSIVE structured-field guards: `parse_authored_profile` does not forward these today, but the
+    # pure guard is complete + ready if a future parse path did — a value differing from the committed
+    # pin is dropped (never overwriting the engine-owned identity).
+    assert ca.identity_contradictions({"genderPresentation": "woman"}, {"genderPresentation": "man"}) == [
+        "genderPresentation"]
+    assert ca.identity_contradictions({"age": 55}, {"age": 24}) == ["age"]
+    # Matching values ⇒ no drop.
+    assert ca.identity_contradictions({"genderPresentation": "man", "age": 24},
+                                      {"genderPresentation": "man", "age": 24}) == []
+
+
+def test_authoring_prompt_carries_the_immutable_roster_constraints():
+    # F1 prompt: the deep-authoring call must feed the committed name/gender/vocation/age as an IMMUTABLE
+    # constraint with an EXTEND-not-overwrite instruction, so the model cannot re-invent the identity.
+    npc = {"id": "npc:1", "name": "Some One", "genderPresentation": "man", "vocation": "concierge", "age": 29}
+    user = ca.build_authoring_messages(npc)[1]["content"]
+    low = user.lower()
+    assert "immutable" in low, "the prompt must mark the committed identity IMMUTABLE"
+    assert "concierge" in user, "the committed occupation is fed as a hard constraint"
+    assert "extend" in low, "authored fields must be framed as EXTENDING, not overwriting, the identity"
+    assert "different job" in low, "the prompt must forbid implying a different occupation (F5 source-pin)"
+    # A skeleton with no immutable facets adds no constraint clause (byte-safe for a bare roster entry).
+    bare = ca.build_authoring_messages({"id": "npc:2"})[1]["content"]
+    assert "fixed identity" not in bare.lower()
+
+
+def test_crosswired_vocation_is_dropped_and_red_recorded(_clean_ledger):
+    # END TO END through author_cast: an authored profile whose vocation names a DIFFERENT job than the
+    # committed roster has that vocation DROPPED (the committed job stands) while the coherent fields
+    # (biography, physical facet) still commit, and a RED identity-contradiction health event is recorded.
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "bartender",             # crosswires the committed "concierge" — must be dropped
+            "biography": _MASC_BIO,              # coherent with the pinned "man" — kept
+            "physicalCharacteristics": _phys(),  # neutral — kept
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "player"},
+            {"id": "npc:1", "genderPresentation": "man", "vocation": "concierge"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1, "the coherent remainder of the dossier still commits"
+    committed = written_profiles[0]
+    assert "vocation" not in committed, "the crosswired vocation must be dropped so the committed job stands"
+    assert "biography" in committed and "physicalCharacteristics" in committed, "coherent fields survive"
+    assert "cast-authoring:identity-contradiction" in _overseer_kinds_failed_for("probe-user"), (
+        "a crosswired vocation must record a RED identity-contradiction event, never a silent overwrite")
+
+
+def test_coherent_vocation_is_a_byte_identical_no_op(_clean_ledger):
+    # A matching authored vocation (a refinement of the committed one) commits untouched with no health
+    # event — this is what keeps a coherent cast byte-identical.
+    async def _llm(_messages):
+        return json.dumps({"vocation": "hotel concierge", "biography": _MASC_BIO,
+                           "physicalCharacteristics": _phys()})
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "concierge"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    assert written_profiles[0].get("vocation") == "hotel concierge", "a coherent vocation is preserved"
+    assert "cast-authoring:identity-contradiction" not in _overseer_kinds_failed_for("probe-user")
+
+
+# ══════════════════ F5 — secrets constrained to the committed identity (vocation INCLUDED) ══════════════════
+#
+# The hidden threads (secrets / trueGoals / weakness) are authored in the SAME call as the vocation, so a
+# crosswired job means they were grounded in the WRONG identity — they must not commit against the correct
+# committed vocation. Dropping them lets the engine re-derive the hidden stakes off the committed job.
+
+
+def test_secret_vocation_conflicts_flags_hidden_threads_on_a_crosswire():
+    npc = {"id": "npc:1", "vocation": "concierge"}
+    profile = {"vocation": "bartender", "secrets": ["skims from the register nightly"],
+               "trueGoals": ["reach the end quietly"], "weakness": "too trusting once bought a round"}
+    assert ca.secret_vocation_conflicts(profile, npc) == ["secrets", "trueGoals", "weakness"]
+    # No crosswire (coherent vocation) ⇒ the hidden threads are grounded in the right job — never flagged.
+    assert ca.secret_vocation_conflicts({"vocation": "concierge", "secrets": ["a real secret here"]}, npc) == []
+    # A crosswire but no hidden threads present ⇒ nothing to drop.
+    assert ca.secret_vocation_conflicts({"vocation": "bartender"}, npc) == []
+
+
+def test_crosswired_vocation_also_drops_the_hidden_threads_end_to_end(_clean_ledger):
+    # The full F5 belt: a crosswired vocation drops BOTH the vocation (F1) AND the hidden threads authored
+    # around the wrong job (F5), and records a RED secret-identity-contradiction event. The engine then
+    # re-grounds the secrets off the committed vocation (its seeded hidden floor stands).
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "bartender",  # crosswires the committed "concierge"
+            "biography": _MASC_BIO,   # coherent — kept, so the write-back still commits
+            "secrets": ["pockets cash from the bar tabs each shift", "hiding a gambling debt"],
+            "trueGoals": ["win the money to clear the debt"],
+            "weakness": "cannot resist a high-stakes bet",
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "concierge"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    committed = written_profiles[0]
+    assert "vocation" not in committed, "the crosswired vocation is dropped (F1)"
+    for k in ("secrets", "trueGoals", "weakness"):
+        assert k not in committed, f"the hidden thread {k!r} authored around the wrong job must be dropped (F5)"
+    assert "biography" in committed, "coherent fields still commit (non-degradation)"
+    failed = _overseer_kinds_failed_for("probe-user")
+    assert "cast-authoring:secret-identity-contradiction" in failed, (
+        "hidden threads grounded in a crosswired vocation must record a RED secret-identity-contradiction")
+    assert "cast-authoring:identity-contradiction" in failed, "the vocation crosswire itself is also RED"
+
+
+def test_secrets_survive_a_coherent_vocation(_clean_ledger):
+    # When the vocation is coherent, the secrets are generated against the committed identity and commit
+    # untouched — F5 never strips a well-grounded hidden bible.
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "concierge", "biography": _MASC_BIO,
+            "secrets": ["keeps a private ledger of every guest's secret"],
+            "trueGoals": ["reach the end quietly"],
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "concierge"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    assert written_profiles[0].get("secrets"), "a coherent hidden bible is preserved"
+    assert "cast-authoring:secret-identity-contradiction" not in _overseer_kinds_failed_for("probe-user")
