@@ -846,19 +846,44 @@ def _bg_is_solid_fill(style):
 
 
 def _bg_is_danger_fill(style):
-    """The paired background is a DANGER-colored fill (the raw danger hue, a `-strong` danger plate,
-    or a red/crimson literal) — the ONLY fill on which the raw danger *ink* is an intended, legible
-    treatment. A neutral/light literal fill (e.g. `#fff`) does NOT qualify: raw-danger-on-white is
-    the exact ~3.9:1 normal-body failure class this gate exists to catch, so `_bg_is_solid_fill`
-    (which accepts any non-theme fill, light literals included) is too permissive for the danger
-    branch. Enforces the "danger fill OR `-strong` ink" rule the widened gate is meant to hold."""
+    """The paired background is a CONTRASTING danger-surface fill on which the raw danger *ink* is a
+    legible, intended treatment. Two footguns are explicitly excluded (CodeRabbit Major on #1690):
+      • the BASE `var(--color-danger)` / `--color-error` token — raw danger ink on the SAME base
+        danger hue is a 1:1 (invisible) pair, the worst case, so only the darker `-strong` PLATE
+        qualifies (a `-strong` fullmatch, not a prefix search);
+      • a neutral/light literal fill (e.g. `#fff`) — raw-danger-on-white is the exact ~3.9:1
+        normal-body failure class this gate exists to catch (so `_bg_is_solid_fill`, which accepts
+        any non-theme fill, is too permissive for the danger branch).
+    Only the `-strong` danger plate + explicit dark-red literals pass. Enforces the "danger-strong
+    surface OR `-strong` ink" rule the widened gate is meant to hold."""
     bm = _INLINE_BG.search(style)
     if not bm:
         return False
     bg = _norm(bm.group(1))
-    if re.search(r"var\(\s*--color-(?:danger|error)\b", bg):
+    if re.fullmatch(r"var\(\s*--color-(?:danger|error)-strong\s*\)", bg):
         return True
-    return bg in ("red", "crimson", "darkred", "firebrick", "maroon")
+    return bg in ("crimson", "darkred", "firebrick", "maroon")
+
+
+def test_danger_fill_gate_rejects_same_token_and_light_fills():
+    """Regression (Greptile P1 + CodeRabbit Major on #1690): the size-aware danger branch must NOT
+    accept raw danger *ink* on a same-hue or light fill. `color:var(--color-danger);
+    background:var(--color-danger)` is a 1:1 (invisible) pair; raw-danger-on-#fff is ~3.9:1. Only the
+    darker `-strong` plate (or an explicit dark-red literal) is a legible danger surface for raw
+    danger ink; otherwise a normal-size control must ink `-strong` or move to white-on-fill."""
+    # the 1:1 same-token pair — raw danger ink on the raw danger fill — must be REJECTED.
+    assert not _bg_is_danger_fill("color:var(--color-danger);background:var(--color-danger)")
+    assert not _bg_is_danger_fill("color:var(--color-error);background:var(--color-error)")
+    # base danger/error tokens as a fill are NOT a legible surface for raw danger ink.
+    assert not _bg_is_danger_fill("background:var(--color-danger)")
+    assert not _bg_is_danger_fill("background: var(--color-error)")
+    # a light / neutral literal fill must be REJECTED (raw-danger-on-white ~3.9:1).
+    for lit in ("#fff", "#ffffff", "white", "#eee", "var(--panel)", "var(--bg)"):
+        assert not _bg_is_danger_fill(f"background:{lit}"), f"{lit} must not count as a danger fill"
+    # ONLY the darker -strong plate (or an explicit dark-red literal) qualifies.
+    assert _bg_is_danger_fill("background:var(--color-danger-strong)")
+    assert _bg_is_danger_fill("background: var(--color-error-strong)")
+    assert _bg_is_danger_fill("background:darkred")
 
 
 def test_index_html_inline_closed_world():
