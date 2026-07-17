@@ -89,9 +89,12 @@ def _add_curated_openrouter(client, monkeypatch):
 
 
 def _visible_ids(client):
+    # The picker can surface a model in EITHER `models` or the secondary `models_extra`
+    # collection — a phantom leaking into models_extra is just as selectable, so the
+    # regression must check BOTH (CodeRabbit #1688).
     items = client.get("/api/models").json()["items"]
     assert items, "expected at least one endpoint in the picker feed"
-    return items[0]["models"]
+    return list(items[0].get("models") or []) + list(items[0].get("models_extra") or [])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════
@@ -283,10 +286,13 @@ def test_probe_route_preserves_curation_and_unions_failures(monkeypatch):
     ep_id = body["id"]
 
     before = _visible_ids(client)
-    before_count = len(before)
+    # On a curated (game-build) endpoint the visible set is exactly the pinned trio; every
+    # other catalog id is already hidden.
+    assert set(before) == {_NARRATOR, _UTILITY, _IMAGE}
 
-    # The provider's catalog grows AND one long-standing model now fails its probe.
-    failing = _CATALOG[1]  # a previously visible, non-pinned model
+    # The provider's catalog grows AND one already-hidden model now fails its probe.
+    failing = _CATALOG[1]  # a non-pinned model — already hidden, must STAY hidden
+    assert failing not in before
     probed["v"] = list(_CATALOG) + [_PHANTOM]
     monkeypatch.setattr(
         model_routes, "_probe_single_model",
@@ -312,5 +318,9 @@ def test_probe_route_preserves_curation_and_unions_failures(monkeypatch):
     assert failing in hidden, "a probe failure must still be hidden"
 
     after = _visible_ids(client)
-    assert _PHANTOM not in after
-    assert len(after) <= before_count
+    # The real regression: the OLD code REPLACED hidden_models with just this probe's
+    # failures, which un-hid the entire catalog. The visible set must stay EXACTLY the
+    # curated trio — the phantom never appears, and the already-hidden failing model
+    # stays hidden.
+    assert set(after) == {_NARRATOR, _UTILITY, _IMAGE}, (
+        f"the probe must not grow the curated picker: {before} -> {after}")
