@@ -85,7 +85,7 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
             return False
         result = await write_fn(sk["eventId"], prose)
         return bool(result.get("ok"))
-    except Exception as exc:  # failsoft-ok: best-effort-enrichment (per-scene voicing; the deterministic template stands, enrich_tick continues and its terminal ledgers a wholesale failure)
+    except Exception as exc:  # failsoft-ok: handled-by-terminal (per-scene fault returned as False; run_enrich AGGREGATES the failed count and RED-records ONCE per tick when failed>0 — one record per tick, not per scene; the deterministic template stands)
         logger.debug("[offscreen-texture] voice_scene failed for %s: %s", sk.get("eventId"), exc)
         return False
 
@@ -184,15 +184,20 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
             except Exception:  # pragma: no cover — failsoft-ok: recorder-self
                 pass
         return {"voiced": 0, "total": 0, "error": str(exc)}
-    # #1599 (CodeRabbit): a COMPLETE 0/N run — skeletons existed but every scene failed to voice
-    # (voice_scene absorbs each per-scene LLM/write fault as False) — reaches no other recorder. Surface
-    # ONE RED; the deterministic templates stand. A partial success (voiced>0) is normal flow, no alarm.
-    if isinstance(result, dict) and result.get("total") and not result.get("voiced"):
+    # #1599 (Greptile P1): ANY per-scene voicing fault must show RED — voice_scene absorbs each LLM/write
+    # fault as False, so a PARTIAL run (some voiced, some failed) would otherwise reach no recorder. Record
+    # ONE RED per tick when failed>0 (aggregated, not per-scene); this SUBSUMES the 0/N complete-failure
+    # case (voiced==0 ⇒ failed==total). RED-but-auto-corrected: the deterministic templates stand. The
+    # except/crash path above returns total=0 ⇒ failed=0, so it stays covered there (no double-record).
+    failed = 0
+    if isinstance(result, dict):
+        failed = int(result.get("total") or 0) - int(result.get("voiced") or 0)
+    if failed > 0:
         try:
             from src import log_rings
             log_rings.record_soft_failure(
                 "offscreen-texture:enrich-run-failed",
-                f"all {result.get('total')} off-screen scene(s) failed to voice this tick",
+                f"{failed} of {result.get('total')} off-screen scene(s) failed to voice this tick",
                 corrected="deterministic-templates", user=owner)
         except Exception:  # pragma: no cover — failsoft-ok: recorder-self
             pass
