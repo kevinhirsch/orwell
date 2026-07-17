@@ -200,7 +200,7 @@ async def generate_via_fal(client, base_url: str, model_id: str, prompt: str, he
 
     try:
         resp = await client.post(url, json=payload, headers=h)
-    except Exception as e:
+    except Exception as e:  # failsoft-ok: handled-by-terminal (returns the reason tuple → orwell_portraits._note_gen_error → the generate_and_store terminal records it RED via _note_generation_failure)
         logger.info("[fal] request failed: %s", e)
         return None, type(e).__name__, None
 
@@ -219,14 +219,22 @@ async def generate_via_fal(client, base_url: str, model_id: str, prompt: str, he
         return None, "no-image-in-response", None
 
     # fal returns a hosted URL (or, when image bytes are inlined, a data: URI) — fetch/decode it.
-    try:
-        if img_url.startswith("data:"):
+    # #1599 (CodeRabbit finding c): keep an UNDECODABLE inlined image ('image-decode-failed', permanent)
+    # apart from a TRANSIENT network FETCH failure ('image-fetch-failed' / http), so an image-host outage
+    # never burns the reconciler's permanent per-content retry budget.
+    if img_url.startswith("data:"):
+        try:
             b64 = img_url.split(",", 1)[1] if "," in img_url else ""
-            return (base64.b64decode(b64) if b64 else None), (None if b64 else "image-decode-failed"), None
+            png = base64.b64decode(b64) if b64 else None
+        except Exception as e:  # undecodable inlined base64 — a permanent decode fault, not transient
+            logger.info("[fal] inlined image decode failed: %s", e)
+            return None, "image-decode-failed", None
+        return (png, None, None) if png else (None, "image-decode-failed", None)
+    try:
         ir = await client.get(img_url)
-        if getattr(ir, "status_code", 0) == 200:
-            return ir.content, None, None
-        return None, f"image-fetch-http-{getattr(ir, 'status_code', '?')}", None
-    except Exception as e:
-        logger.info("[fal] image fetch/decode failed: %s", e)
-        return None, "image-decode-failed", None
+    except Exception as e:  # failsoft-ok: handled-by-terminal (returns image-fetch-failed → orwell_portraits terminal records it RED via _note_generation_failure; distinct TRANSIENT reason, not image-decode-failed)
+        logger.info("[fal] image fetch failed: %s", e)
+        return None, "image-fetch-failed", None
+    if getattr(ir, "status_code", 0) == 200:
+        return ir.content, None, None
+    return None, f"image-fetch-http-{getattr(ir, 'status_code', '?')}", None

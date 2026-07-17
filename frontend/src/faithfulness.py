@@ -58,7 +58,7 @@ def _record_faith_guard_down(kind: str, diagnosis: str) -> None:
     try:
         from src import log_rings as _lr
         _lr.record_overseer("anomaly", kind, diagnosis, lever=None, ok=False)
-    except Exception as _rec_err:
+    except Exception as _rec_err:  # failsoft-ok: recorder-self (the RED health-event write itself failed; the WARN above already surfaced the diagnosis — nowhere left to write)
         # The RED health-event write failed — but the WARN above already surfaced the diagnosis, so
         # this is not the silent-fail #1599 bans. Note the telemetry-write failure at debug.
         if warned:
