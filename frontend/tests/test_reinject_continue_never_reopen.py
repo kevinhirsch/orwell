@@ -429,23 +429,28 @@ def test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate():
     (not _emitted_visible) and not _turn_had_error`, and the whole block requires `not
     _turn_was_cancelled` to fire — yet its `continue` re-prompts (no-model-wired steer, the forced
     finalize->premiere note, the casting-incomplete refusal steer, and the generic finalize nudge)
-    previously injected their directive bare. Each now carries the same continue-never-reopen gate."""
+    previously injected their directive bare. Each now carries the same continue-never-reopen gate.
+
+    2026-07-17: a FIFTH site joined the family — the premiere-opener refire (`_refire_txt`), the
+    terminal net for when casting finalized THIS turn but no narration streamed since (the empty-
+    completion hang fix). It sits at the very end of this same block, immediately before the
+    unconditional "no tools — done" break, so it is included in `casting_block` below."""
     src = _src()
     casting_start = src.index('elif game_mode == "casting":')
     casting_end = src.index("break  # no tools — done", casting_start)
     casting_block = src[casting_start:casting_end]
 
-    # All four re-prompt directives built in this block are now conditionally wrapped.
-    assert casting_block.count("_CONTINUE_NEVER_REOPEN") == 4, (
-        "expected exactly the four casting finalize-force re-prompt sites to carry the "
+    # All five re-prompt directives built in this block are now conditionally wrapped.
+    assert casting_block.count("_CONTINUE_NEVER_REOPEN") == 5, (
+        "expected exactly the five casting finalize-force re-prompt sites to carry the "
         "continue-never-reopen gate (no-model-wired / forced-finalize->premiere / "
-        "casting-incomplete refusal / the generic finalize nudge)"
+        "casting-incomplete refusal / the generic finalize nudge / the premiere-opener refire)"
     )
-    assert casting_block.count("if _emitted_visible:") >= 4
+    assert casting_block.count("if _emitted_visible:") >= 5
 
-    # CodeRabbit strengthening: the two counts above only prove 4-and-4 occur SOMEWHERE in this
-    # (large) block — not that each of the four re-prompt sites carries its OWN LOCAL guard
-    # immediately ahead of its own assignment. Pin each of the four sites individually: the wrap
+    # CodeRabbit strengthening: the two counts above only prove 5-and-5 occur SOMEWHERE in this
+    # (large) block — not that each of the five re-prompt sites carries its OWN LOCAL guard
+    # immediately ahead of its own assignment. Pin each of the five sites individually: the wrap
     # assignment must be preceded by an `if _emitted_visible:` with nothing but that guard's own
     # comment lines between them (no other code, no function/branch boundary crossed), i.e. the
     # guard actually gates THAT assignment and not some other one.
@@ -454,6 +459,7 @@ def test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate():
         ("_cfn_txt", "forced finalize->premiere note"),
         ("_ci_txt", "casting-incomplete refusal steer"),
         ("_cn", "generic finalize nudge"),
+        ("_refire_txt", "premiere-opener refire"),
     ):
         assign_marker = f"{var_name} = _CONTINUE_NEVER_REOPEN"
         assign_idx = casting_block.index(assign_marker)

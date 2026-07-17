@@ -1789,6 +1789,28 @@ _CONTINUE_NEVER_REOPEN = (
     "Add only what is genuinely NEW, picking up exactly where the shown scene left off."
 )
 
+# 2026-07-17 — the PREMIERE-OPENER REFIRE (server-side twin of the FE `_orwellFinalizingActive` belt
+# from the 2026-07-16 audit's fix #3 — chat.js auto-refires a hidden cue when its `finally` block
+# still sees that flag true). That fix is CLIENT-side only, so a headless/API caller (the golden-path
+# driver chief among them — no chat.js in the loop) never gets it. The gap: whichever path finalized
+# casting THIS turn (model-driven at the tool-execution site, or the FE-forced wire/reactive fallback),
+# the round immediately AFTER the createCharacter tool result can come back EMPTY — a known GLM/
+# OpenRouter empty-completion class. With nothing to catch it the turn used to fall straight through to
+# the unconditional "no tools — done" break: no move-in narration, no retry affordance, the player (or
+# the driver) staring at total silence with the game already live underneath them. This is a bounded
+# (ONE per turn — `_premiere_opener_refire_used`) RE-PROMPT, never engine-authored narration: it asks
+# the model to do the job the prompt already gives it (voice the premiere move-in from the engine's own
+# state), it does not invent or narrate anything itself. `_CONTINUE_NEVER_REOPEN` prefixes it exactly
+# like every other mid-turn re-prompt when something has already streamed this turn (defensive; by
+# construction this fires only when nothing has, but the guard is kept symmetric with every sibling
+# site rather than assumed).
+_PREMIERE_OPENER_REFIRE = (
+    "(Production note, not for the player.) The game has started — casting just finalized. The scene "
+    "above has already been shown to the player; continue from it. Narrate the player's entry into the "
+    "house now: the premiere move-in, first impressions, the house reveal. Voice ONLY what the game's "
+    "own state shows — never invent it."
+)
+
 # LIVE-4 (#541) — the eviction-reveal is the season's peak beat, and the model reliably CONSUMES it
 # (advanceGame drips one anonymized ballot per call) while narrating UNRELATED scenes, so the player
 # on the block never sees the votes land. This is the same "error-correct the omission, never
@@ -4470,6 +4492,23 @@ def _empty_response_fallback(
     return (_EMPTY_OPERATOR_LINE, f'data: {json.dumps({"delta": _EMPTY_OPERATOR_LINE})}\n\n', False, False)
 
 
+def _premiere_opener_terminal_net(casting_finalized_this_turn: bool, full_response: str,
+                                  fallback_chunk, fallback_retry: bool):
+    """2026-07-17 — premiere-opener resilience, the terminal net. `_empty_response_fallback`'s own
+    true-empty branch never fires when `tool_events` is non-empty (createCharacter, at minimum), so a
+    SECOND empty round in a row after a mid-turn finalize (even the bounded refire in the round loop
+    came back empty too) would otherwise leave `full_response` blank with no retry chunk. Reuse the
+    SAME established in-character recovery line + retry affordance the true-empty path uses elsewhere
+    (F2 #1017) — never new authored content. Pulled into its own function (not inlined at the call
+    site) so the callsite source-pin tests scanning a fixed char window after `_empty_response_fallback(`
+    keep finding their anchors regardless of how this comment grows."""
+    if casting_finalized_this_turn and not full_response.strip() and not fallback_chunk:
+        full_response = _EMPTY_PRODUCER_LINE
+        fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
+        fallback_retry = True
+    return full_response, fallback_chunk, fallback_retry
+
+
 PLAN_MODE_DIRECTIVE = (
     "## PLAN MODE — OVERRIDES EVERYTHING ELSE BELOW\n"
     "You are in PLAN MODE. Your ONLY job this turn is to PROPOSE a plan. You have "
@@ -5265,6 +5304,18 @@ async def _stream_agent_loop_impl(
     # createCharacter starts the season THIS turn (model-driven OR FE-forced); the purge runs once.
     _casting_finalized_this_turn = False
     _pregame_purged = False
+    # 2026-07-17 (headless premiere-opener resilience, server-side twin of the FE
+    # `_orwellFinalizingActive` belt): bounded to ONE refire per turn — see `_PREMIERE_OPENER_REFIRE`
+    # below, at the terminal "no tools — done" gate. `_visible_chars_at_finalize` snapshots
+    # `len(full_response.strip())` the INSTANT casting finalized (captured once, at whichever site
+    # sets `_casting_finalized_this_turn`) — `None` until then; `.strip()` so the inter-round "\n\n"
+    # separator (appended after every tool round regardless of content) never reads as narration.
+    # Comparing the CURRENT stripped length against this snapshot (not the monotonic `_emitted_visible`
+    # flag, which can't answer "did anything stream SINCE") is what lets the refire fire correctly even
+    # when an earlier pre-finalize round already narrated a beat (e.g. a nudge round) — the exact
+    # reported shape (visible round → force round → empty round).
+    _premiere_opener_refire_used = False
+    _visible_chars_at_finalize = None
 
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
@@ -7163,6 +7214,13 @@ async def _stream_agent_loop_impl(
                                     _note_belt(owner, "casting-finalize-force")  # gap #3 telemetry
                                     logger.info(f"[orwell] FORCED createCharacter (casting stall "
                                                 f"L{_clv}) round {round_num} user={owner}")
+                                    # 2026-07-17: this is a finalize just like the model-driven site below
+                                    # (tool_execution.py dispatch) — mark it the same way so the premiere-
+                                    # opener refire covers this path too. Safe to set even though the purge
+                                    # below runs inline (guarded on `_pregame_purged`, already True next line).
+                                    _casting_finalized_this_turn = True
+                                    if _visible_chars_at_finalize is None:
+                                        _visible_chars_at_finalize = len(full_response.strip())
                                     # #1312 (Vault Wall): the season just went live THIS turn — purge the
                                     # OOC casting interview before the premiere continuation narrates the
                                     # move-in, so the houseguests' first impressions cannot carry a casting
@@ -7264,6 +7322,31 @@ async def _stream_agent_loop_impl(
                     elif owner is not None:
                         _CASTING_STALL_LEVEL.pop(owner, None)  # not ready / not asking — start gentle next time
                         _CASTING_SUBSTANCE_LEVEL.pop(owner, None)
+            # 2026-07-17 — PREMIERE-OPENER REFIRE (see `_PREMIERE_OPENER_REFIRE`). Casting finalized THIS
+            # turn (model-driven or FE-forced, either site above) but no narration has streamed since —
+            # this round came back with nothing new (a known GLM/OpenRouter empty-completion class, or
+            # the finalize round itself). Without this the turn fell straight through to the unconditional
+            # break below: no move-in narration, no retry affordance — the game is live underneath the
+            # player and nothing ever says so. ONE bounded retry (never two — `_premiere_opener_refire_used`
+            # latches immediately), then unconditionally falls through to the break either way, so this can
+            # never itself become a hang. The continue-never-reopen contract prefixes it when something
+            # already streamed earlier this turn (e.g. a pre-finalize nudge round) so the retry never
+            # reads as "narrate the whole thing again" — the same guard every sibling re-prompt in this
+            # block carries (see `test_source_pin_casting_finalize_force_reprompts_carry_the_same_gate`).
+            if (_casting_finalized_this_turn and not _premiere_opener_refire_used
+                    and not (_visible_chars_at_finalize is not None
+                             and len(full_response.strip()) > _visible_chars_at_finalize)):
+                _premiere_opener_refire_used = True
+                _refire_txt = _PREMIERE_OPENER_REFIRE
+                if _emitted_visible:
+                    _refire_txt = _CONTINUE_NEVER_REOPEN + "\n\n" + _refire_txt
+                messages.append({"role": "system", "content": _refire_txt})
+                _note_belt(owner, "premiere-opener-refire")  # gap #3 telemetry
+                logger.info(
+                    f"[orwell] premiere-opener refire (no narration since createCharacter finalized) "
+                    f"round {round_num} user={owner}")
+                yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                continue
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -7640,6 +7723,8 @@ async def _stream_agent_loop_impl(
                     _cc_view = {}
                 if isinstance(_cc_view, dict) and _cc_view.get("started") and not _cc_view.get("createRefused"):
                     _casting_finalized_this_turn = True
+                    if _visible_chars_at_finalize is None:
+                        _visible_chars_at_finalize = len(full_response.strip())
             # The game advanced: clear any persisted stall escalation for this game so the
             # next stall (if any) starts gentle again. NAR-1: dropped the `and owner` gate + keyed
             # via _belt_key — this reset never fired single-tenant before (raw `owner=None` is a
@@ -8189,6 +8274,7 @@ async def _stream_agent_loop_impl(
         _fallback_chunk = f'data: {json.dumps({"delta": full_response})}\n\n'
         if full_response == _EMPTY_PRODUCER_LINE:
             _fallback_retry = True  # nothing survived the scrub/guard → the in-character retry recovery
+    full_response, _fallback_chunk, _fallback_retry = _premiere_opener_terminal_net(_casting_finalized_this_turn, full_response, _fallback_chunk, _fallback_retry)
     if _fallback_chunk:
         yield _fallback_chunk
     # F2 (#1017): a true-empty live-game turn pairs the in-character producer line with a one-tap
