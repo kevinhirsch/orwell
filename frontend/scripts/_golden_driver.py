@@ -479,27 +479,28 @@ class GoldenDriver:
         the same calls replay from the fixture in seconds."""
         budget = (CAST_AUTHORING_WAIT_RECORD_S if self.mode == "record"
                   else CAST_AUTHORING_WAIT_REPLAY_S)
-        # The route runs genesis + identity INLINE (minutes on a live record) — it is exempt
-        # from the FE's 45s hard timeout, and this client call must be equally patient.
+        # ONE monotonic deadline covers the POST and the poll loop together (the POST runs
+        # genesis + identity inline — minutes on a live record — and the whole step must
+        # still bound at `budget`, not 2×budget).
+        started_at = time.monotonic()
+        deadline = started_at + budget
         r = self._post_json(self.fe, "/api/orwell/prewarm-cast", {}, timeout=budget)
         if not r.get("warmed"):
             raise RuntimeError(f"prewarm-cast did not warm the cast: {r}")
-        started_at = time.time()
-        deadline = started_at + budget
         last: dict = {}
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             try:
                 health = self._get(self.fe, "/api/admin/health")
                 ca = (health.get("castAuthoring") or {})
                 last = ca.get("prewarm") or {}
-            except Exception:
+            except Exception:  # noqa: BLE001 — a transient health-read blip must not kill the wait
                 last = last or {}
             if last.get("authorDone"):
                 print(f"  prewarm: enrichment landed (authorDone) "
-                      f"({int(time.time() - started_at)}s elapsed)", flush=True)
+                      f"({int(time.monotonic() - started_at)}s elapsed)", flush=True)
                 self._quiesce_beats("post-prewarm")
                 return
-            time.sleep(CAST_AUTHORING_POLL_S)
+            time.sleep(min(CAST_AUTHORING_POLL_S, max(0.1, deadline - time.monotonic())))
         raise RuntimeError(
             f"prewarm enrichment did not finish within {int(budget)}s (state: {last}) — "
             "the cast would enter the house on the floor and every started-game frame "

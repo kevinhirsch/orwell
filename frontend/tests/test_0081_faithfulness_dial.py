@@ -49,6 +49,26 @@ def test_modes_tuple_is_the_three_states():
 
 # ── 1) default off + per-state resolution + reversibility ──────────────────────────
 
+def test_golden_mode_pins_off_over_settings_and_env(monkeypatch, tmp_path):
+    """0108 (2026-07-17, sibling of overseer_mode's pin): under golden record/replay the judge is
+    STRUCTURALLY off — the fixture is recorded judge-off, and a settings round-trip can land
+    'faithfulness_mode: active' in settings.json mid-run, outranking the driver's env pin."""
+    from src.faithfulness import faithfulness_mode
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    _clear_env(monkeypatch)
+    save_settings({"faithfulness_mode": "active"})
+    monkeypatch.setenv("ORWELL_GOLDEN_REPLAY", str(tmp_path / "fixture.jsonl"))
+    assert faithfulness_mode() == "off"
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY")
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_FAITHFULNESS_MODE", "active")
+    assert faithfulness_mode() == "off"
+    # Golden mode off again ⇒ the normal resolution stands.
+    monkeypatch.delenv("ORWELL_GOLDEN_RECORD")
+    assert faithfulness_mode() == "active"
+
+
 def test_mode_defaults_to_active_with_nothing_configured(monkeypatch, tmp_path):
     """A fresh install with no faithfulness mode configured ⇒ ACTIVE (owner ruling 2026-07-13 — the
     judge ships on, using the cheap utility tier; was 'off'). Only the truly-unset default changed."""

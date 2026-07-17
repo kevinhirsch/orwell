@@ -401,20 +401,35 @@ def _append_record(rec: Dict[str, Any]) -> None:
 
 def dropped_sidecar_path(path: Optional[str] = None) -> str:
     """The sidecar file beside the fixture that records every stream the record run
-    could NOT persist as replayable. A non-empty sidecar means the take is structurally
-    unreplayable (replay would hard-miss at that request), so the record script fails
-    loudly on it instead of printing RECORD OK over a poisoned fixture."""
+    could NOT persist as replayable. The record script triages each entry by request
+    key: a drop whose key also has a PERSISTED fixture record (the FE transparently
+    retried the same request and the retry succeeded) is benign — replay just consumes
+    the success — while a drop with no persisted same-key twin means replay would
+    hard-miss there, and the script fails the take instead of printing RECORD OK."""
     return (path or fixture_path()) + ".dropped.jsonl"
+
+
+#: Set when a dropped-stream sidecar write itself failed. The record script treats this as
+#: fatal: with the diagnostics lost, a dropped stream could otherwise slip past the triage
+#: and bless an unreplayable take. Kept as a flag (not a raise) because record_stream runs
+#: in the live chokepoint's ``finally`` — recording must never break the run it rides.
+_sidecar_write_failed = False
+
+
+def sidecar_write_failed() -> bool:
+    """True if any dropped-stream sidecar append failed this process (record script gate)."""
+    return _sidecar_write_failed
 
 
 def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
                     resp: Dict[str, Any], chunks: List[str], key: str) -> None:
-    """Best-effort diagnostics for a stream the record run dropped (never fixture content —
-    key/model/shape only, so the sidecar can be printed verbatim in the record report).
-    The request key lets the record script tell a BENIGN drop (the FE transparently
-    retried the same request and the retry's success was persisted under this key — replay
-    just consumes the success) from a POISONED take (no persisted record shares the key,
-    so replay hard-misses there)."""
+    """Diagnostics for a stream the record run dropped (never fixture content — key/model/
+    shape only, 0107-scrubbed, so the sidecar can be printed verbatim in the record report).
+    The request key lets the record script tell a BENIGN drop (a persisted same-key retry)
+    from a POISONED take (no persisted twin ⇒ replay hard-misses there). A write failure
+    latches ``_sidecar_write_failed`` so the record script fails the take rather than
+    accepting one whose drop diagnostics were lost."""
+    global _sidecar_write_failed
     try:
         with open(dropped_sidecar_path(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps({
@@ -423,11 +438,12 @@ def _append_dropped(reason: str, candidates_model: str, kwargs: Dict[str, Any],
                 "model": candidates_model,
                 "call_class": kwargs.get("call_class") or "narration",
                 "finish_reason": resp.get("finishReason"),
-                "error": resp.get("error"),
+                "error": _scrub(resp.get("error")),
                 "chunk_count": len(chunks),
                 "output_chars": len(resp.get("text") or ""),
             }, ensure_ascii=False) + "\n")
     except Exception:
+        _sidecar_write_failed = True
         import logging
         logging.getLogger(__name__).exception("golden-record: failed to append dropped-stream sidecar")
 

@@ -102,6 +102,18 @@ def main() -> int:
     # the same request and the retry succeeded, the success IS in the fixture under the same
     # key and replay simply consumes it — a benign drop (noted, not fatal). A drop with no
     # persisted twin means replay hard-misses there: the take is structurally unreplayable.
+    # A failed sidecar APPEND is itself fatal (cross-process via the FE log — the flag in
+    # golden_path lives in the FE process): with the drop diagnostics lost, a dropped stream
+    # could slip past the triage below and bless an unreplayable take.
+    try:
+        _fe_log = open(os.path.join(d.work, "fe.log"), encoding="utf-8", errors="replace").read()
+        if "failed to append dropped-stream sidecar" in _fe_log:
+            print("\nFAIL: a dropped-stream sidecar append failed during the take — drop "
+                  "diagnostics were lost, so the triage below cannot be trusted "
+                  "(fixture NOT replayable — re-run the record)")
+            return 1
+    except OSError:
+        pass  # no FE log to scan — the driver would have failed the run long before this
     if os.path.exists(_sidecar) and os.path.getsize(_sidecar) > 0:
         import json as _json
         keys = gp.fixture_keys(args.fixture)

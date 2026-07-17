@@ -39,6 +39,27 @@ def test_modes_constant_is_the_three_states():
 
 # ── overseer_mode() resolution — all 5 steps, settings-first ──────────────────────
 
+def test_step0_golden_mode_pins_off_over_settings_and_env(monkeypatch, tmp_path):
+    """0108 (2026-07-17): under golden record/replay the overseer is STRUCTURALLY off — the
+    fixture is recorded overseer-off, so an overseer LLM leg firing under replay is an
+    un-recorded call and a guaranteed fixture miss. Neither an explicitly saved settings
+    'active' (the full merged-defaults settings round-trip that defeated the driver's env
+    pin on CI) nor an env 'active' may turn it on while golden mode is live."""
+    from src.settings import save_settings
+    _isolate_settings(monkeypatch, tmp_path)
+    _clear_env(monkeypatch)
+    save_settings({"overseer_mode": "active"})
+    monkeypatch.setenv("ORWELL_GOLDEN_REPLAY", str(tmp_path / "fixture.jsonl"))
+    assert overseer.overseer_mode() == "off"
+    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY")
+    monkeypatch.setenv("ORWELL_GOLDEN_RECORD", "1")
+    monkeypatch.setenv("ORWELL_OVERSEER_MODE", "active")
+    assert overseer.overseer_mode() == "off"
+    # Golden mode off again ⇒ the normal resolution stands (settings 'active' wins).
+    monkeypatch.delenv("ORWELL_GOLDEN_RECORD")
+    assert overseer.overseer_mode() == "active"
+
+
 def test_step1_settings_overseer_mode_wins(monkeypatch, tmp_path):
     """Step 1: a valid settings 'overseer_mode' wins over every fallback (env + legacy key)."""
     from src.settings import save_settings

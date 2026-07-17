@@ -340,6 +340,16 @@ async def extract_and_store(
         # (previously unledgered — no token/cost entry at all, silent even in the usage envelope).
         _owner_for_ledger = getattr(session, "owner", None)
 
+        # N4: normalize the persisted timeout — a malformed saved value would raise on int()
+        # and silently abort extraction via the outer catch; zero/negative would expire the
+        # wall clock immediately. Any invalid value falls back to the bounded 60s default.
+        try:
+            extraction_timeout = int(get_setting("memory_extraction_timeout_seconds", 60))
+        except (TypeError, ValueError):
+            extraction_timeout = 60
+        if extraction_timeout <= 0:
+            extraction_timeout = 60
+
         facts = []
         try:
             raw = await llm_call_async(
@@ -352,7 +362,7 @@ async def extract_and_store(
                 # N4: a background extraction call has no business running anywhere near the
                 # shared 300s streaming figure — bound it to the dedicated, configurable
                 # utility-class default (see settings.memory_extraction_timeout_seconds).
-                timeout=int(get_setting("memory_extraction_timeout_seconds", 60) or 60),
+                timeout=extraction_timeout,
                 call_class="utility-extraction",
                 user=_owner_for_ledger,
             )

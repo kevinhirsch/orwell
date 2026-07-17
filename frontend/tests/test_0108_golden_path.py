@@ -135,8 +135,8 @@ def test_raw_json_turnsHere_in_a_tool_result_never_drifts_the_key(golden):
                          "function": {"name": "createCharacter", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "tool-abc", "content":
          '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 0, '
-         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 0}, '
-         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
     ]
     tool_msgs_1 = [
         {"role": "system", "content": "framing"},
@@ -145,8 +145,8 @@ def test_raw_json_turnsHere_in_a_tool_result_never_drifts_the_key(golden):
                          "function": {"name": "createCharacter", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "tool-abc", "content":
          '### createCharacter\n```\n{"whereabouts": {"room": "living-room", "turnsHere": 1, '
-         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 1}, '
-         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 1}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
     ]
     assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) == \
         golden.request_key("stream", tool_msgs_1, TOOLS, PARAMS)
@@ -158,8 +158,8 @@ def test_raw_json_turnsHere_in_a_tool_result_never_drifts_the_key(golden):
                          "function": {"name": "createCharacter", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "tool-abc", "content":
          '### createCharacter\n```\n{"whereabouts": {"room": "kitchen", "turnsHere": 0, '
-         '"companions": [{"id": "npc:6", "name": "Brandon Miller", "turnsHere": 0}, '
-         '{"id": "npc:9", "name": "Casey Chen", "turnsHere": 0}]}}\n```'},
+         '"companions": [{"id": "npc:6", "name": "Houseguest A", "turnsHere": 0}, '
+         '{"id": "npc:9", "name": "Houseguest B", "turnsHere": 0}]}}\n```'},
     ]
     assert golden.request_key("stream", tool_msgs_0, TOOLS, PARAMS) != \
         golden.request_key("stream", moved, TOOLS, PARAMS)
