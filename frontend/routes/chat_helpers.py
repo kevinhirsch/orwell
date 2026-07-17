@@ -5389,9 +5389,24 @@ def run_post_response_tasks(
     if allow_background_extraction and not incognito and not compare_mode and _should_extract and uprefs.get("auto_memory", True):
         from services.memory.memory_extractor import extract_and_store
         from src.task_endpoint import resolve_task_endpoint
-        t_url, t_model, t_headers = resolve_task_endpoint(
-            sess.endpoint_url, sess.model, sess.headers, owner=owner,
-        )
+        # N9 half 1 (2026-07-16 live-playthrough forensics): memory extraction is pure JSON
+        # extraction — the SAME class of call the #1620 `_auto_*` belts route onto the cheap
+        # UTILITY tier (see agent_loop._resolve_belt_endpoint). It was instead resolved through
+        # the "task" tier, whose default (unconfigured `task_endpoint_id`) short-circuits
+        # straight to the caller-supplied fallback — the session's EXPENSIVE narration model
+        # (endpoint_resolver.resolve_endpoint's early `if not ep_id and fallback_url and
+        # fallback_model: return fallback_url, ...` branch) — so extraction silently ran on the
+        # narrator (13 calls observed live). Resolve the utility tier FIRST, with NO fallback
+        # args, so `resolve_endpoint` tries the configured/default utility model instead of
+        # short-circuiting past it; fall through to the existing task-tier resolution (itself
+        # falling back to the session's own model) only on a genuine miss, so extraction never
+        # silently stops firing.
+        from src.endpoint_resolver import resolve_endpoint
+        t_url, t_model, t_headers = resolve_endpoint("utility", owner=owner)
+        if not (t_url and t_model):
+            t_url, t_model, t_headers = resolve_task_endpoint(
+                sess.endpoint_url, sess.model, sess.headers, owner=owner,
+            )
         asyncio.create_task(extract_and_store(
             sess, memory_manager, memory_vector,
             t_url, t_model, t_headers,
