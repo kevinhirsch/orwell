@@ -5152,17 +5152,25 @@ async def do_advance_game(content: str, owner: Optional[str] = None) -> Dict:
             res = await orwell_engine.advance_game(
                 expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
         except orwell_engine.EngineToolError as _e:
-            # CON-2/CON-3: a stale-beat 409 means a concurrent peer already moved the board — reconcile
-            # (refresh last-seen + stash the re-ground) and return the CURRENT state rather than forcing a
-            # second unintended advance (the two-window double-advance guard). Any other engine error
-            # falls through to the generic handler below.
             from routes import chat_helpers as _ch
-            if _ch._is_stale_beat_error(_e):
-                await _ch._handle_stale_beat(owner, _e)
+            if not _ch._is_stale_beat_error(_e):
+                raise  # any other engine error → the generic handler below
+            # R3 / #1659 / audit A-S3: a stale-beat 409 is NOT a dead end. The old path reconciled and
+            # RETURNED the current board without re-firing, so the model free-ran on a beat that never
+            # committed. Refresh beatSeq + RE-FIRE ONCE against the reconciled token, reusing the SAME
+            # idempotency key so the engine's at-most-once dedups a genuine double-apply (never a
+            # double-advance). Mirrors the S1a/RC1 protocol the FE-issued pre-resolve advance already runs.
+            async def _retry_advance(_fresh):
+                return await orwell_engine.advance_game(
+                    expected_beat_seq=_fresh, idempotency_key=_ik, user=owner)
+            res = await _ch.retry_progression_after_stale(owner, _e, _retry_advance, action="advanceGame")
+            if res is None:
+                # The board moved AGAIN under the retry (already reconciled + RED-with-disposition +
+                # ledger-visible): reconcile to the live board rather than force a second advance.
                 _cur = await orwell_engine.get_game_state(user=owner)
                 orwell_engine.remember_pending(_cur, user=owner)
                 return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
-            raise
+            # else: the retry LANDED — fall through to the shared post-advance handling below.
         await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: the card survives a reload
         # 0070: an advance runs the bounded off-screen tick, which may record new HIDDEN NPC-to-NPC
@@ -5219,12 +5227,21 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
                 decision, expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
         except orwell_engine.EngineToolError as _e:
             from routes import chat_helpers as _ch
-            if _ch._is_stale_beat_error(_e):
-                await _ch._handle_stale_beat(owner, _e)
+            if not _ch._is_stale_beat_error(_e):
+                raise
+            # R3 / #1659 / audit A-S3: refresh beatSeq + RE-FIRE the decision ONCE against the reconciled
+            # token, reusing the SAME (kind-keyed) idempotency key so the engine's at-most-once dedups a
+            # double-apply. A persistent stale reconciles to the live board (RED-with-disposition, ledger-
+            # visible) rather than leaving the decision un-applied and the model free-running.
+            async def _retry_submit(_fresh):
+                return await orwell_engine.submit_decision(
+                    decision, expected_beat_seq=_fresh, idempotency_key=_ik, user=owner)
+            res = await _ch.retry_progression_after_stale(owner, _e, _retry_submit, action="submitDecision")
+            if res is None:
                 _cur = await orwell_engine.get_game_state(user=owner)
                 orwell_engine.remember_pending(_cur, user=owner)
                 return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
-            raise
+            # else: the retry LANDED — fall through to the shared post-decision handling below.
         await _refresh_after_model_progression(owner, res)  # CON-3
         orwell_engine.remember_pending(res, user=owner)  # D3/E66: bound ⇒ the cache clears
         # #1400: a comp-round approach RESOLVES the staged competition (its roll commits). Fire-and-forget
@@ -5270,16 +5287,22 @@ async def do_turn_in(content: str, owner: Optional[str] = None) -> Dict:
             res = await orwell_engine.turn_in(
                 expected_beat_seq=_ebs, idempotency_key=_ik, user=owner)
         except orwell_engine.EngineToolError as _e:
-            # A stale-beat 409 means a concurrent peer already moved the board — reconcile (refresh
-            # last-seen + stash the re-ground) and return the CURRENT state rather than forcing a second
-            # unintended night-end. Any other engine error falls through to the generic handler below.
             from routes import chat_helpers as _ch
-            if _ch._is_stale_beat_error(_e):
-                await _ch._handle_stale_beat(owner, _e)
+            if not _ch._is_stale_beat_error(_e):
+                raise  # any other engine error → the generic handler below
+            # R3 / #1659 / audit A-S3: refresh beatSeq + RE-FIRE turnIn ONCE against the reconciled token,
+            # reusing the SAME idempotency key so the engine's at-most-once never re-ends the night (never
+            # re-stamps the rest penalty). A persistent stale reconciles to the live board (RED-with-
+            # disposition, ledger-visible) rather than leaving the night un-ended and the model free-running.
+            async def _retry_turn_in(_fresh):
+                return await orwell_engine.turn_in(
+                    expected_beat_seq=_fresh, idempotency_key=_ik, user=owner)
+            res = await _ch.retry_progression_after_stale(owner, _e, _retry_turn_in, action="turnIn")
+            if res is None:
                 _cur = await orwell_engine.get_game_state(user=owner)
                 orwell_engine.remember_pending(_cur, user=owner)
                 return {"output": json.dumps(_cur, indent=2), "exit_code": 0}
-            raise
+            # else: the retry LANDED — fall through to the shared post-turnIn handling below.
         await _refresh_after_model_progression(owner, res)  # CON-3: keep last-seen beatSeq fresh (turnIn mutates)
         orwell_engine.remember_pending(res, user=owner)     # D3/E66: any pending survives a reload (no-op if none)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
