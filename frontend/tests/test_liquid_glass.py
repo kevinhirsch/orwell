@@ -482,6 +482,22 @@ def test_green_dock_light_always_rendered_greyed_when_not_dockable():
     assert re.search(r"body:not\(\.theme-frosted\) \.ow-controls \.ow-dock\[disabled\] \{ display: none; \}", win)
 
 
+def test_disabled_dock_light_stays_glyphless_on_hover():
+    # CodeRabbit #1687: the titlebar-hover `::before` reveal sets the dock/min glyph color on
+    # the pseudo-element directly, which beats the disabled button's own `color: transparent`
+    # — so a non-dockable (or non-minimizable) window would flash an active-looking dock/undock
+    # arrow when the titlebar is hovered. A suppression rule keeps any disabled disc glyphless
+    # under hover/focus. Pin both themes' rules so a future hover-glyph edit can't silently
+    # re-expose it.
+    assert re.search(
+        r"\.ow-titlebar:hover \.ow-controls \.ow-dock\[disabled\]::before[^{]*\{[^}]*"
+        r"color:\s*transparent",
+        CSS, re.S), "frosted: disabled dock disc must stay glyphless on titlebar hover"
+    assert re.search(
+        r"\.ow-controls button\[disabled\]:focus-visible::before[^{]*\{[^}]*color:\s*transparent",
+        CSS, re.S), "a disabled disc must stay glyphless on focus-visible too"
+
+
 def test_three_light_cluster_close_min_dock():
     # The cluster is close (red) + minimize (yellow) + dock/zoom (green) on EVERY window —
     # the constant macOS 3-light cluster (2026-07-16). The min AND dock buttons are both

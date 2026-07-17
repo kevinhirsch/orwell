@@ -21040,6 +21040,16 @@ body.theme-frosted .ow-controls .ow-dock[disabled] {
   background: color-mix(in srgb, var(--fg, #fff) 18%, transparent) !important;
   opacity: 0.5; cursor: default; pointer-events: none; color: transparent !important;
 }
+/* A greyed/inert light must stay GLYPHLESS even under titlebar-hover / focus-visible — the
+   `:hover …::before` reveal above sets the glyph color on the pseudo-element directly, which
+   beats the button's own `color: transparent` (a disabled non-dockable window would otherwise
+   flash an active-looking dock/undock arrow on hover). Suppress the ::before glyph on any
+   disabled disc regardless of hover/focus. */
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-min[disabled]::before,
+body.theme-frosted .ow-titlebar:hover .ow-controls .ow-dock[disabled]::before,
+body.theme-frosted .ow-controls button[disabled]:focus-visible::before {
+  color: transparent !important;
+}
 body.theme-frosted .ow-controls button {
   width: 30px; height: 30px; min-width: 30px; min-height: 30px;  /* uniform discs */
   border-radius: 50%;
@@ -22987,6 +22997,13 @@ body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-min::before,
 body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-dock::before,
 body:not(.theme-frosted) .ow-controls button:focus-visible::before {
   color: color-mix(in srgb, var(--fg, #fff) 75%, transparent);
+}
+/* Mirror the frosted rule: a disabled (non-dockable / non-minimizable) disc stays glyphless
+   under hover/focus — the reveal above sets the ::before color directly, so gate it out. */
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-min[disabled]::before,
+body:not(.theme-frosted) .ow-titlebar:hover .ow-controls .ow-dock[disabled]::before,
+body:not(.theme-frosted) .ow-controls button[disabled]:focus-visible::before {
+  color: transparent !important;
 }
 body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-close { background: #ff5f57; }
 body:not(.theme-frosted) .ow-window.ow-focused .ow-controls .ow-min   { background: #febc2e; }
