@@ -57,11 +57,9 @@ _SYSTEM = (
     "common, pronounceable FIRST and LAST name (two words), diverse and ordinary, NEVER invented/fantasy/"
     "gibberish.\n"
     '  "biography": a 2-3 sentence presentable backstory (life outside the house),\n'
-    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter"). KEEP the skeleton\'s '
-    "occupation by default; ONLY change it if your biography genuinely gives this person a different "
-    "job — and then set vocation to MATCH the biography. The public occupation and the biography must "
-    "name the SAME job, and the secrets must be grounded in THAT job (the engine keys the hidden stakes "
-    "off vocation),\n"
+    '  "vocation": echo the skeleton\'s occupation EXACTLY — it is already cast and IMMUTABLE; do NOT '
+    "change it, and do NOT adopt a different job from the biography. The biography and the secrets must "
+    "name the SAME job as the committed occupation (the engine keys the hidden stakes off vocation),\n"
     '  "physicalCharacteristics": { "heightBuild", "skinTone", "hair", "facialFeatures", '
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
     "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
@@ -488,17 +486,31 @@ def identity_contradictions(profile: dict, npc: dict) -> list:
     common case; a byte-identical no-op). Vault-free: returns field NAMES only.
 
     Checks:
+      • name — `parse_authored_profile` DOES forward an authored `name` (it passes the reasonable-name
+        guard), so a model reply that RENAMES a rostered houseguest would overwrite the committed
+        identity. A committed name and an authored name that DIFFER (normalized: strip + casefold, so a
+        trivial case/whitespace echo of the SAME name is not flagged) drop "name" — the committed name
+        stands (the engine also refuses renaming an already-introduced houseguest; this is the earlier
+        FE complement).
       • vocation — the committed roster owns the occupation (genesis-authored; the engine keys the hidden
-        stakes off it). An authored vocation naming a DIFFERENT job (no shared distinctive token) is a
-        crosswire and is dropped so the committed job stands. A refinement that shares a token
-        ("reporter" -> "court reporter") is NOT a crosswire.
+        stakes off it). The authored vocation is coherent ONLY when one distinctive-token set CONTAINS
+        the other (a refinement — "reporter" ⊆ "court reporter"); otherwise it names a DIFFERENT job
+        (a crosswire — "software engineer" vs "civil engineer" share only the generic "engineer" but
+        neither contains the other) and "vocation" is dropped so the committed job stands.
       • genderPresentation / age — DEFENSIVE: `parse_authored_profile` does not forward these today (the
         pin is engine-owned), so this only fires if a future parse path forwarded a value that differs
         from the committed pin. Kept so the guard is complete + directly unit-testable."""
     drop: list = []
+    committed_name = str((npc or {}).get("name") or "").strip()
+    authored_name = str((profile or {}).get("name") or "").strip()
+    if committed_name and authored_name and committed_name.casefold() != authored_name.casefold():
+        drop.append("name")
     committed_voc = _vocation_tokens((npc or {}).get("vocation"))
     authored_voc = _vocation_tokens((profile or {}).get("vocation"))
-    if committed_voc and authored_voc and committed_voc.isdisjoint(authored_voc):
+    # Coherent ONLY when one distinctive-token set CONTAINS the other (a refinement); a mere shared
+    # generic token ("engineer") with neither containing the other is a crosswire — drop "vocation".
+    if committed_voc and authored_voc \
+            and not (committed_voc <= authored_voc or authored_voc <= committed_voc):
         drop.append("vocation")
     pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
     authored_gp = str((profile or {}).get("genderPresentation") or "").strip().lower()

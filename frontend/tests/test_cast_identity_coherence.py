@@ -429,3 +429,117 @@ def test_secrets_survive_a_coherent_vocation(_clean_ledger):
     assert written == 1
     assert written_profiles[0].get("secrets"), "a coherent hidden bible is preserved"
     assert "cast-authoring:secret-identity-contradiction" not in _overseer_kinds_failed_for("probe-user")
+
+
+# ══════════════════ F1 — the authored NAME may not overwrite the committed roster name ══════════════════
+#
+# parse_authored_profile DOES forward a reasonable authored name (out["name"] = name), so a model reply
+# renaming a rostered houseguest would overwrite the committed identity — the name must be dropped like
+# any other immutable field (bots on #1692).
+
+
+def test_identity_contradictions_drops_a_rename_but_not_a_case_echo():
+    # A genuine rename is dropped so the committed roster name stands.
+    assert ca.identity_contradictions({"name": "Marcus Webb"}, {"name": "Some One"}) == ["name"]
+    # A trivial case / whitespace echo of the SAME name is NOT flagged (normalized: strip + casefold).
+    assert ca.identity_contradictions({"name": "some one"}, {"name": "Some One"}) == []
+    assert ca.identity_contradictions({"name": "  Some One  "}, {"name": "Some One"}) == []
+    # No committed name, or no authored name ⇒ nothing to contradict.
+    assert ca.identity_contradictions({"name": "Marcus Webb"}, {"id": "npc:1"}) == []
+    assert ca.identity_contradictions({"biography": "x"}, {"name": "Some One"}) == []
+
+
+def test_a_rename_is_dropped_and_red_recorded(_clean_ledger):
+    # END TO END: an authored (reasonable) name that renames the rostered houseguest is dropped before
+    # the write-back so the committed name stands, and a RED identity-contradiction event is recorded.
+    async def _llm(_messages):
+        return json.dumps({"name": "Marcus Webb", "biography": _MASC_BIO,
+                           "physicalCharacteristics": _phys()})
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "name": "Some One", "genderPresentation": "man"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1, "the coherent remainder still commits"
+    committed = written_profiles[0]
+    assert "name" not in committed, "a rename must be dropped so the committed roster name stands"
+    assert committed.get("biography"), "coherent fields survive"
+    assert "cast-authoring:identity-contradiction" in _overseer_kinds_failed_for("probe-user")
+
+
+def test_a_matching_name_is_forwarded_untouched(_clean_ledger):
+    # The model may echo the committed name (or a case/space variant) — it is forwarded, no health event.
+    async def _llm(_messages):
+        return json.dumps({"name": "Some One", "biography": _MASC_BIO})
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "name": "Some One", "genderPresentation": "man"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    assert written_profiles[0].get("name") == "Some One", "a matching name is preserved"
+    assert "cast-authoring:identity-contradiction" not in _overseer_kinds_failed_for("probe-user")
+
+
+# ══════════════════ F1/F5 — vocation coherence requires token CONTAINMENT, not mere intersection ══════════════════
+#
+# A shared GENERIC token ("engineer") is not a refinement — "software engineer" vs "civil engineer" are
+# different jobs. Coherence holds only when one distinctive-token set contains the other (bots on #1692).
+
+
+def test_shared_generic_token_vocation_is_a_crosswire_not_a_refinement():
+    # Neither {software, engineer} nor {civil, engineer} contains the other ⇒ a crosswire (dropped),
+    # even though they share the generic "engineer".
+    assert ca.identity_contradictions({"vocation": "software engineer"},
+                                      {"vocation": "civil engineer"}) == ["vocation"]
+    # The intended refinement (containment) is STILL kept.
+    assert ca.identity_contradictions({"vocation": "court reporter"}, {"vocation": "reporter"}) == []
+    assert ca.identity_contradictions({"vocation": "reporter"}, {"vocation": "court reporter"}) == []
+
+
+def test_shared_generic_token_crosswire_also_drops_the_secrets():
+    # F5 reuses the F1 crosswire signal, so the mis-grounded secrets drop for the shared-generic case too.
+    npc = {"vocation": "civil engineer"}
+    prof = {"vocation": "software engineer", "secrets": ["ships a hidden backdoor"],
+            "weakness": "cuts corners under deadline"}
+    assert ca.secret_vocation_conflicts(prof, npc) == ["secrets", "weakness"]
+    # A true refinement keeps the secrets (no crosswire).
+    assert ca.secret_vocation_conflicts(
+        {"vocation": "court reporter", "secrets": ["keeps a private transcript"]},
+        {"vocation": "reporter"}) == []
+
+
+def test_shared_generic_token_crosswire_drops_vocation_and_secrets_end_to_end(_clean_ledger):
+    async def _llm(_messages):
+        return json.dumps({
+            "vocation": "software engineer",  # crosswires committed "civil engineer" (only "engineer" shared)
+            "biography": _MASC_BIO,
+            "secrets": ["ships code with a hidden backdoor", "hiding a lapsed license"],
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "man", "vocation": "civil engineer"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    committed = written_profiles[0]
+    assert "vocation" not in committed, "the shared-generic-token crosswire is dropped"
+    assert "secrets" not in committed, "secrets grounded in the crosswired job are dropped"
+    failed = _overseer_kinds_failed_for("probe-user")
+    assert "cast-authoring:identity-contradiction" in failed
+    assert "cast-authoring:secret-identity-contradiction" in failed
