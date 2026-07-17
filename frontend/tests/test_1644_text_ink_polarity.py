@@ -310,14 +310,20 @@ def _hl_syntax(v):
     return _norm(v).startswith("var(--hl-")
 
 
-# a color-mix built ONLY on currentColor/inherit (+ transparent) is a muted SHADE of the inherited
+# a color-mix that blends currentColor/inherit toward `transparent` is a muted SHADE of the inherited
 # surface ink, so it follows the surface polarity by construction — exactly like bare `inherit`. This
 # is the #1644 adaptive-bubble meta pattern (`color-mix(currentColor 62%, transparent)` on the .msg-ai
 # timestamps/action glyphs, which follow the bubble's per-wallpaper adaptive ink).
+# Greptile P1 (#1690): the mix must actually PAINT the surface ink — it must CONTAIN currentColor/
+# inherit (`transparent, transparent` is invisible), and must NOT reduce it to nothing (`currentColor
+# 0%` or `transparent 100%` render invisible). Those degenerate/invisible forms are rejected, so an
+# accidental 0% no longer passes the gate as "surface-following".
 _CURRENTCOLOR_MIX = re.compile(
     r"^color-mix\(\s*in\s+srgb\s*,\s*"
-    r"(?:currentcolor|inherit|transparent)(?:\s+[\d.]+%)?\s*,\s*"
-    r"(?:currentcolor|inherit|transparent)(?:\s+[\d.]+%)?\s*\)$")
+    r"(?=.*(?:currentcolor|inherit))"                  # must carry the surface ink at all
+    r"(?!.*(?:^|[,\s])transparent\s+100%)"             # …not fully transparent
+    r"(?!.*(?:currentcolor|inherit)\s+0%)"             # …and not a 0% (invisible) surface ink
+    r"(?:currentcolor|inherit)(?:\s+[\d.]+%)?\s*,\s*transparent\s*\)$")
 
 
 def _follows_surface(v):
@@ -884,6 +890,24 @@ def test_danger_fill_gate_rejects_same_token_and_light_fills():
     assert _bg_is_danger_fill("background:var(--color-danger-strong)")
     assert _bg_is_danger_fill("background: var(--color-error-strong)")
     assert _bg_is_danger_fill("background:darkred")
+
+
+def test_currentcolor_mix_rejects_invisible_forms():
+    """Regression (Greptile P1 on #1690): a currentColor/inherit→transparent mix follows the surface
+    ONLY when it actually paints the ink. Degenerate/invisible forms (0% ink, transparent 100%, or a
+    no-currentColor `transparent, transparent`) must NOT classify as surface-following, so an
+    accidental 0% is caught by the closed-world gate instead of silently passing."""
+    # the live, visible muted-meta shades follow the surface.
+    for good in ("color-mix(in srgb, currentColor 62%, transparent)",
+                 "color-mix(in srgb, currentColor 45%, transparent)",
+                 "color-mix(in srgb, currentColor 22%, transparent)",
+                 "color-mix(in srgb, inherit 40%, transparent)"):
+        assert _follows_surface(good), f"visible muted shade must follow the surface: {good}"
+    # invisible / degenerate forms must NOT be treated as surface-following.
+    for bad in ("color-mix(in srgb, currentColor 0%, transparent)",
+                "color-mix(in srgb, transparent 100%, currentColor)",
+                "color-mix(in srgb, transparent, transparent)"):
+        assert not _follows_surface(bad), f"invisible mix must NOT follow the surface: {bad}"
 
 
 def test_index_html_inline_closed_world():
