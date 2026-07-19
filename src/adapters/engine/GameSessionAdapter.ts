@@ -214,7 +214,7 @@ import {
   newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, deriveNpcCompIntent, GOODBYE_TONES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
-  advanceClock, advanceClockPerConversation, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
+  advanceClock, advanceClockPerConversation, advanceClockPerScene, resetSceneClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   competitionStagingData, validateCompetitionFiction,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
@@ -222,7 +222,7 @@ import {
 import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
 import { themeForWeek, applyTheme } from "../../engine/competitionThemes";
 import type { CompetitionDef } from "../../engine/competitionLibrary";
-import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, soreSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, type ConversationKind } from "../../engine/timeOfDay";
+import { restStatusFor, TIME_OF_DAY_LABEL, DAY_START, WAKE_HOUR, awakeSet, bedtimeDepthFor, socialSwayScale, soreSwayScale, CONFLICT_BEDTIME_DRAIN, BEDTIME_DEPTH_FLOOR, accrueFatigue, combinedRestDeficit, conversationHours, CLOCK, SCENE, type ConversationKind } from "../../engine/timeOfDay";
 import { APPROACH_GATE, APPROACH_COOLDOWN_STRETCHES } from "../../engine/decisionConstants";
 import { FINALE_APPEALS, type FinaleAppeal } from "../../engine/jury";
 import { loadReserveTwists, planReserveTwists } from "../../engine/reserveTwists";
@@ -6702,12 +6702,41 @@ export class GameSessionAdapter implements GameSession {
     // duration was stashed here (`pendingFeltHours`) — consume it as the turn's advance so the clock tracks
     // the play the player actually did, not the flat floor. An explicit `opts` caller still wins; with
     // neither ⇒ the floor (byte-identical). Consumed once per advance so it can't leak into a later turn.
+    // Extension 6 (SCENE-based clock): the proposed contribution for THIS turn — a narrator-proposed felt
+    // duration when present (opts / stashed), else the small deterministic per-exchange increment. The scene
+    // layer then CAPS the accumulation, so this is a proposal, not a guaranteed advance.
     let hours: number;
     if (opts?.kind) hours = conversationHours(opts.kind, opts.proposedHours);
     else if (this.pendingFeltHours !== undefined) hours = this.pendingFeltHours;
-    else hours = CLOCK.perConversationHours;
+    else hours = SCENE.perExchangeHours;
     this.pendingFeltHours = undefined;
-    advanceClockPerConversation(this.live, hours);
+    // Time advances per SCENE, not per turn: turns inside the same (room + co-present set) accumulate toward
+    // the scene cap; a context change starts a fresh scene. The scene key is derived from live occupancy — a
+    // pure, Vault-free read (rooms/co-presence are public), so this stays no-rng and byte-identical when off.
+    advanceClockPerScene(this.live, this.currentSceneKey(), hours);
+  }
+
+  /** Extension 6 — the current scene's identity for the clock: the player's room + the SORTED set of NPCs
+   *  co-present in it. A change (moved rooms, or someone entered/left) opens a fresh scene; a solo room is a
+   *  real scene too (empty co-present set). Absent presence info ⇒ one stable key (the day still costs time).
+   *  Vault-free (rooms + co-presence are public), deterministic, no rng. */
+  private currentSceneKey(): string {
+    const room = this.presence?.get(PLAYER) ?? null;
+    if (!room) return "scene:none";
+    const coPresent: string[] = [];
+    if (this.presence) {
+      for (const [id, where] of this.presence) {
+        if (id !== PLAYER && where === room) coPresent.push(id);
+      }
+    }
+    coPresent.sort();
+    return `scene:${room}|${coPresent.join(",")}`;
+  }
+
+  /** Extension 6 — a hard scene boundary (a resolved beat/ceremony): forget the current scene so the next
+   *  social turn opens a fresh one with a full cap. No clock move; a no-op when no scene is tracked (clock off). */
+  resetSceneClock(): void {
+    if (this.live) resetSceneClock(this.live);
   }
 
   /** Phase 2 — a recorded scene's LLM-proposed felt duration (hours, already clamped by

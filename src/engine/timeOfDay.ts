@@ -16,7 +16,7 @@
  * night runs past midnight, NPCs turn in and the awake set thins; then pre-dawn larks wake and it refills.
  */
 
-import { CLOCK, SLEEP, EVENT_DURATION, AFTER_HOURS, type AfterHoursConstants } from "./sleepConstants";
+import { CLOCK, SCENE, SLEEP, EVENT_DURATION, AFTER_HOURS, type AfterHoursConstants } from "./sleepConstants";
 
 export { SLEEP, type SleepConstants } from "./sleepConstants";
 
@@ -310,7 +310,7 @@ export {
   type ConversationKind,
 } from "./sleepConstants";
 // `CLOCK` + `EVENT_DURATION` are also used in this module's bodies (imported above) — re-export the local bindings.
-export { CLOCK, EVENT_DURATION };
+export { CLOCK, SCENE, EVENT_DURATION };
 
 // Legacy-name aliases for the few call/test sites that referenced the flat constants by name (kept so this
 // refactor is byte-neutral to importers; the values now live in `sleepConstants`).

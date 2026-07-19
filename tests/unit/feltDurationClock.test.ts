@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { GameSessionRegistry } from "../../src/composition/registry";
-import { feltHoursFromMinutes, SCENE_FELT_MINUTES, CLOCK } from "../../src/engine/sleepConstants";
+import { feltHoursFromMinutes, SCENE_FELT_MINUTES, SCENE, CLOCK } from "../../src/engine/sleepConstants";
 import { PLAYER } from "../../src/domain/ids";
 
 /**
@@ -51,21 +51,21 @@ describe("Phase 2 — feltMinutes drives the per-conversation clock", () => {
     expect(depth(session) - start).toBeCloseTo(SCENE_FELT_MINUTES.max / 60, 5); // clamped to 4h, not 100h
   });
 
-  it("falls back to the flat floor when no feltMinutes is proposed (byte-identical to pre-Phase-2)", () => {
+  it("falls back to the small per-exchange increment when no feltMinutes is proposed (Extension 6 scene model)", () => {
     const { session, commands, npc } = startedWithClock();
     const start = depth(session);
     commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc], content: "an untimed scene" });
     session.advanceClockPerConversation();
-    expect(depth(session) - start).toBeCloseTo(CLOCK.perConversationHours, 5);
+    expect(depth(session) - start).toBeCloseTo(SCENE.perExchangeHours, 5); // the per-exchange increment, not the old 0.5h floor
   });
 
-  it("is consumed once — a later tick with no new scene uses the floor again", () => {
+  it("a later tick in the SAME scene accrues only the per-exchange increment (capped accumulation, not a fresh floor)", () => {
     const { session, commands, npc } = startedWithClock();
     commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc], content: "a chat", feltMinutes: 90 });
-    session.advanceClockPerConversation(); // consumes the 90-min stash
+    session.advanceClockPerConversation(); // this scene's FIRST turn: bills the 90-min stash (1.5h)
     const mid = depth(session);
-    session.advanceClockPerConversation(); // no new scene ⇒ the floor
-    expect(depth(session) - mid).toBeCloseTo(CLOCK.perConversationHours, 5);
+    session.advanceClockPerConversation(); // SAME scene (occupancy unchanged) ⇒ just the per-exchange increment
+    expect(depth(session) - mid).toBeCloseTo(SCENE.perExchangeHours, 5);
   });
 
   it("discards a duration stashed while gated — it never leaks into a later enabled turn", () => {
@@ -90,7 +90,7 @@ describe("Phase 2 — feltMinutes drives the per-conversation clock", () => {
     sb.session.setPerConversationClockEnabled(true);
     const beforeEnabledTick = depth(sb.session);
     sb.session.advanceClockPerConversation();
-    expect(depth(sb.session) - beforeEnabledTick).toBeCloseTo(CLOCK.perConversationHours, 5); // floor, NOT the stale 2h
+    expect(depth(sb.session) - beforeEnabledTick).toBeCloseTo(SCENE.perExchangeHours, 5); // per-exchange increment, NOT the stale 2h
   });
 
   it("is INERT when the master clock is off (the calibration-spine guarantee)", () => {
