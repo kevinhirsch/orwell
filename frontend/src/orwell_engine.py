@@ -656,7 +656,10 @@ async def record_interaction(content: str, with_ids: list | None = None, initiat
         req["idempotencyKey"] = idempotency_key
     # Phase 2 (duration-based clock): the LLM's proposal for how long this scene FELT, in in-game minutes.
     # The engine clamps it and advances the day clock by that bounded duration (pacing-only; clock-gated).
-    if isinstance(felt_minutes, (int, float)) and felt_minutes > 0:
+    # Guard finite + bounded (mirrors the auto-record belt): a NON-FINITE proposal (`float('inf')`/nan,
+    # which `json.loads` yields from `1e309`) or an absurd magnitude must fall back to "no duration" —
+    # forwarding `inf` would crash the engine JSON encode / clamp, silently dropping the scene fold.
+    if isinstance(felt_minutes, (int, float)) and not isinstance(felt_minutes, bool) and 0 < felt_minutes < 1_000_000:
         req["feltMinutes"] = felt_minutes
     return await _call("recordInteraction", req, user=user)
 

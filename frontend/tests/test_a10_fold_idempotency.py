@@ -61,7 +61,7 @@ def test_record_backfill_attaches_a_stable_idempotency_key(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a quiet bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, idempotency_key=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
         captured["key"] = idempotency_key
         return {"recorded": True, "beatSeq": 12}
 
@@ -85,7 +85,7 @@ def test_stale_once_retry_reuses_the_same_key(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, idempotency_key=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
         keys.append(idempotency_key)
         if expected_beat_seq != 9:
             raise _stale_409(9)                # board moved on to 9 under the stale write
@@ -121,7 +121,7 @@ def test_deferred_fold_carries_the_key_and_drain_reuses_it(monkeypatch):
         return '{"withIds":["npc:3"],"kind":"bonding","content":"a bond"}'
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, idempotency_key=None, user=None):
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
         keys.append(idempotency_key)
         if expected_beat_seq == 11:
             return {"recorded": True, "beatSeq": 12}   # board settled at 11 — it lands

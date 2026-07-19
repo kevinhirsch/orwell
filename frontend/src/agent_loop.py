@@ -2809,6 +2809,8 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 '{"withIds":[<ids of houseguests the player actually interacted WITH, from the roster>],'
                 '"kind":"<one of: bonding, betrayal, conflict, strategy, alliance, gossip, showmance>",'
                 '"content":"<one concise past-tense sentence of what passed between them>",'
+                '"feltMinutes":<how long the scene took IN-FICTION, in minutes: a quick word ~15-30, an '
+                'ordinary chat ~45-90, a long strategy summit ~120-240>,'
                 '"consequence":{"edges":[{"toward":"<houseguest id>",'
                 '"direction":"<one of: warmer, cooler, more-trust, less-trust, more-threatened, '
                 'less-threatened, more-aligned, less-aligned>","emphasis":"<slight|notable|strong>"}],'
@@ -2816,7 +2818,10 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 '"about":"<a DIFFERENT third houseguest, never the player>",'
                 '"direction":"<same 8 options as above>","emphasis":"<slight|notable|strong>"}],'
                 '"rationale":"<why, grounded in the scene>"}}\n'
-                "Pick the kind matching the emotional/strategic direction. Add `consequence` ONLY when "
+                "Always set `feltMinutes` to how long the exchange plausibly took in the house — the engine "
+                "uses it to pace the in-game clock (a scene, not a turn), so a brief hallway word is ~15-30 "
+                "and a long backyard strategy session is a couple of hours. Pick the kind matching the "
+                "emotional/strategic direction. Add `consequence` ONLY when "
                 "the scene moves different houseguests DIFFERENTLY (e.g. it warms one and threatens "
                 "another); otherwise omit it. Use `aboutEdges` SPECIFICALLY when the player pitched one "
                 "houseguest's opinion of a THIRD houseguest — 'I told holder that about is the real "
@@ -2862,6 +2867,16 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
             return False
         kind = obj.get("kind") if obj.get("kind") in _RECORD_KINDS else "strategy"
         content = (obj.get("content") or "").strip() or "The player and a houseguest had a private exchange."
+        # 0066 Ext 6 (PR 2) — the model's proposed scene DURATION in minutes. The engine bounds it
+        # (`feltHoursFromMinutes`, 15-240) and paces the scene-based clock by it; None/invalid ⇒ the engine's
+        # deterministic per-exchange increment (byte-identical to "no proposal"). This is the belt path — the
+        # dominant recording route when the model under-calls recordInteraction — so proposing it here is what
+        # makes scene lengths model-authored rather than floored.
+        # Bounded-finite guard: reject non-positive, non-finite (Infinity/NaN — json.loads parses `Infinity`
+        # by default, and `int(inf)` would RAISE inside this record `try` and silently drop the scene's fold),
+        # and absurd values. A finite float truncates harmlessly (the engine clamps 15-240 regardless).
+        _felt = obj.get("feltMinutes")
+        felt_minutes = int(_felt) if isinstance(_felt, (int, float)) and not isinstance(_felt, bool) and 0 < _felt < 1_000_000 else None
         # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
         # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
         consequence = _validate_consequence(obj.get("consequence"), valid)
@@ -2881,13 +2896,14 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         _scene_idem_key = _ch_idem._mint_idempotency_key()
         if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
                                     with_ids=ids, kind=kind, consequence=consequence,
+                                    felt_minutes=felt_minutes,
                                     user=owner, defer_fold=True,
                                     idempotency_key=_scene_idem_key) is None:
             return False
         n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
         n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0
         logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
-                    f"edges={n_edges}, aboutEdges={n_about}) user={owner}")
+                    f"edges={n_edges}, aboutEdges={n_about}, feltMinutes={felt_minutes}) user={owner}")
         try:  # 0079: surface this gap-repair on the overseer diagnostic log
             from src import log_rings as _lr
             _lr.record_overseer(
