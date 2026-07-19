@@ -61,11 +61,22 @@ def test_missing_felt_minutes_falls_back_to_none(monkeypatch):
 
 
 def test_invalid_felt_minutes_is_dropped_to_none(monkeypatch):
-    # A non-positive / non-numeric / boolean proposal is ignored (the engine also clamps, but the belt is defensive).
-    for bad in ('"feltMinutes":0', '"feltMinutes":-30', '"feltMinutes":true', '"feltMinutes":"a while"'):
+    # Non-positive / non-numeric / boolean / NON-FINITE proposals are ignored (the engine also clamps, but the
+    # belt is defensive). `1e309` parses to +inf via json.loads (allow_nan default) — the crash case: `int(inf)`
+    # would raise inside the record `try` and silently drop the scene's fold, so it must resolve to None, not raise.
+    for bad in ('"feltMinutes":0', '"feltMinutes":-30', '"feltMinutes":true', '"feltMinutes":"a while"',
+                '"feltMinutes":1e309', '"feltMinutes":-1e309'):
         ok, cap = _drive(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x",' + bad + '}')
         assert ok is True, bad
         assert cap["felt_minutes"] is None, bad
+
+
+def test_fractional_felt_minutes_truncates_without_crashing(monkeypatch):
+    # A finite fractional proposal is harmlessly truncated to an int (the engine clamps 15-240 regardless) —
+    # never a crash, never dropped.
+    ok, cap = _drive(monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"x","feltMinutes":90.7}')
+    assert ok is True
+    assert cap["felt_minutes"] == 90
 
 
 def test_prompt_advertises_felt_minutes_and_belt_wiring_is_source_pinned():

@@ -2872,8 +2872,11 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # deterministic per-exchange increment (byte-identical to "no proposal"). This is the belt path — the
         # dominant recording route when the model under-calls recordInteraction — so proposing it here is what
         # makes scene lengths model-authored rather than floored.
+        # Bounded-finite guard: reject non-positive, non-finite (Infinity/NaN — json.loads parses `Infinity`
+        # by default, and `int(inf)` would RAISE inside this record `try` and silently drop the scene's fold),
+        # and absurd values. A finite float truncates harmlessly (the engine clamps 15-240 regardless).
         _felt = obj.get("feltMinutes")
-        felt_minutes = int(_felt) if isinstance(_felt, (int, float)) and not isinstance(_felt, bool) and _felt > 0 else None
+        felt_minutes = int(_felt) if isinstance(_felt, (int, float)) and not isinstance(_felt, bool) and 0 < _felt < 1_000_000 else None
         # ADR 0005: validate the proposed descriptor against the SAME roster id-set used for withIds;
         # a None result (nothing valid) means we forward NOTHING — exactly the kind-only path.
         consequence = _validate_consequence(obj.get("consequence"), valid)
