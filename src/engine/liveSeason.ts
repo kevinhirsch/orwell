@@ -80,7 +80,7 @@ import { GEN_COMPETITION_BOUNDS } from "./genCompetitionConstants";
 import {
   phaseForHour, bedtimeDepthFor, restDeficitForDepth, emergentBedtimeHour, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
 } from "./timeOfDay";
-import { CLOCK } from "./sleepConstants";
+import { CLOCK, SCENE } from "./sleepConstants";
 
 /**
  * The LIVE weekly loop (feature 0011, wired into the running game). Unlike
@@ -449,6 +449,16 @@ export interface LiveSeasonState {
    */
   nightDepth?: number;
   lastSleepDepth?: number;
+  /**
+   * Extension 6 (SCENE-based clock) — the CURRENT scene the player is in: a stable key of (room + sorted
+   * co-present set), and the in-game HOURS this scene has already billed. Time advances per SCENE, not per
+   * turn: turns inside the same scene accumulate toward the cap (`SCENE.capHours`); a key change (moved
+   * rooms / someone entered or left / a beat) starts a fresh scene. Written ONLY when the per-conversation
+   * clock is live (the adapter gates it) ⇒ a clock-off / calibration / golden game never sets them ⇒ absent
+   * ⇒ byte-identical. Persisted with the season like the rest of the clock state (0030).
+   */
+  sceneKey?: string;
+  sceneAccruedHours?: number;
   /**
    * #1320 night-gate one-shot: set once the pre-nominations day-break has fired for the CURRENT HOH reign,
    * so the "a new day dawns" beat is inserted exactly once between the HOH crown and the nominations
@@ -1411,6 +1421,37 @@ export function advanceClock(s: LiveSeasonState, hours: number = CLOCK.perBeatHo
 export function advanceClockPerConversation(s: LiveSeasonState, hours: number = CLOCK.perConversationHours): void {
   if (s.nightDepth === undefined) return; // the day hasn't started; the per-beat clock initializes it
   advanceClockBy(s, hours, false);
+}
+
+/**
+ * Extension 6 — advance the clock per SCENE, not per turn. `sceneKey` identifies the current scene (room +
+ * co-present set, computed by the adapter from occupancy). `proposedHours` is this turn's contribution (the
+ * small deterministic increment, or a narrator-proposed felt duration). Model B "capped accumulation": a turn
+ * that CONTINUES the same scene bills only up to the scene's remaining room under `capHours`; a NEW `sceneKey`
+ * resets the accrual and starts a fresh scene. So a long conversation is a touch longer in-fiction, but turn
+ * count can never run the clock away. Pure + deterministic (no rng); clamps at the pre-dawn edge and never
+ * wraps the night (`advanceClockBy(..., false)`), so it can't skip the player past their bedtime (ADR 0003).
+ * A no-op before the day starts (unchanged from the per-conversation path).
+ */
+export function advanceClockPerScene(
+  s: LiveSeasonState, sceneKey: string, proposedHours: number = CLOCK.perConversationHours, capHours: number = SCENE.capHours,
+): void {
+  if (s.nightDepth === undefined) return; // the day hasn't started; the per-beat clock initializes it
+  if (s.sceneKey !== sceneKey) { s.sceneKey = sceneKey; s.sceneAccruedHours = 0; } // a new scene: fresh cap
+  const accrued = s.sceneAccruedHours ?? 0;
+  const advance = Math.max(0, Math.min(proposedHours, capHours - accrued)); // clamp to the scene's remaining room
+  s.sceneAccruedHours = accrued + advance;
+  if (advance > 0) advanceClockBy(s, advance, false);
+}
+
+/**
+ * Extension 6 — a SCENE BOUNDARY (a resolved beat, or any hard interrupt): forget the current scene so the
+ * next social turn opens a fresh one with a full cap. Deterministic, no clock move of its own. A no-op when
+ * no scene is being tracked (clock off) ⇒ byte-identical.
+ */
+export function resetSceneClock(s: LiveSeasonState): void {
+  s.sceneKey = undefined;
+  s.sceneAccruedHours = undefined;
 }
 
 /**
