@@ -172,6 +172,46 @@ count), so they add ZERO draws to the seeded competition/vote/jury stream; the p
 {perConversationClock,socialFatigue,multiNightFatigue}Neutral.test.ts` and `tests/unit/
 npcBedtimeIndependence.test.ts`. Tunables live in the single `src/engine/sleepConstants.ts`.
 
+### Extension 6 — the SCENE-based clock: scenes, not turns (owner ruling 2026-07-12)
+
+**The problem Extension 1 left.** Extension 1 advances the clock once per player **turn** (the orchestrator's
+per-turn tick), and Extension 5 sizes each *scene's* felt duration — but the two units are **mismatched**: a
+single conversation that runs six turns of back-and-forth gets billed **six times** (the small per-turn floor
+each turn), not once. Turns are too quick and too plentiful to be the unit of in-game time. The felt-duration
+system was *designed* per scene (`SCENE_FELT_MINUTES`, "the narrator sizes each **scene**") but the clock
+never had a notion of a scene, so in practice the per-turn floor dominates and "the narrator determines the
+length" rarely gets to matter.
+
+**The fix — the SCENE is the unit of time; turns are texture inside it.**
+
+- **A scene = (room + the co-present participant set).** It stays OPEN across many turns and **closes** on: a
+  room change (`moveTo`), a **participant-set change** (someone walks in or leaves; the player pulls a
+  different person aside), a **beat** (comp/ceremony — its own scene, already duration-priced by Extension 5),
+  an explicit **lull** ("let's move on"), or the scene's **max-duration cap**.
+- **Model B — capped accumulation (not a single jump).** Each turn inside a scene adds a SMALL increment, but
+  the scene is **capped** at its felt duration (`SCENE_FELT_MINUTES.max`, 240 min): a 3-turn chat ≈ 20 min, a
+  12-turn marathon caps at ~60–90 min instead of running to 6 h. A longer conversation *is* a touch longer
+  in-fiction, but turn count can never run the clock away. Degrades gracefully if boundary detection misfires
+  (a scene that never "closes" still can't exceed its cap).
+- **The scene's duration is sourced** (best-available, all bounded to `SCENE_FELT_MINUTES`): the narrator's
+  `feltMinutes` when proposed (Extension 5) → else a **deterministic** richness/turn estimate (turns-in-scene ×
+  a small per-exchange rate, capped) → the floor only as the last resort. *(Wiring the narrator/auto-record
+  `feltMinutes` as the PREFERRED source is the follow-on that touches the prompts and therefore owes a golden
+  re-record; the deterministic estimate ships first and is prompt-free / golden-neutral.)*
+- **Solo time is NOT free.** The player alone in a room is a real scene that accrues time (capped, same
+  machinery). It is **theirs to end** — they leave or turn in, nothing force-marches them (ADR 0003) — **or an
+  NPC walks in**, which is a participant-set change that closes the solo scene and opens a social one (ties
+  straight into presence 0049 — NPCs already wander in on their own motivation).
+- **Scene-time participants ≠ consequence targets.** Scene-*time* is anchored on who is **co-present** (the
+  room's set — "who's in the scene"); the **consequence fold** still targets whoever the player actually
+  addressed (`withIds` — "who they worked"). Two different jobs; kept separate.
+
+Rides the SAME `ORWELL_TIME_PER_CONVERSATION` flag (it *is* the per-conversation clock, done per scene), so
+it is byte-identical to the seeded calibration spine when the clock is off and **golden-neutral** (the golden
+replay runs the per-conversation clock off). PURE (the scene tracker is deterministic state + a bounded
+estimate — no rng), so it adds ZERO draws to the seeded stream. Proof: `tests/unit/sceneClockNeutral.test.ts`
+(off ⇒ byte-identical) + scene-boundary/cap unit tests. Tunables (`SCENE_*`) live in `src/engine/sleepConstants.ts`.
+
 ## 10. The 24-hour model (accepted amendment — owner, 2026-06-28; #1125)
 
 The five phases are now real HOUR BANDS on a 24-hour day measured from the **8am forced wake**:
