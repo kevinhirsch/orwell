@@ -85,3 +85,35 @@ def test_prompt_advertises_felt_minutes_and_belt_wiring_is_source_pinned():
     # The extraction schema asks for it AND the belt forwards it (guards against a silent unwire).
     assert '"feltMinutes"' in body
     assert "felt_minutes=felt_minutes" in body
+
+
+# --- The DIRECT tool path (orwell_engine.record_interaction), not the belt. -------------------------
+# The narrator prompt now routinely has the MODEL call recordInteraction with `feltMinutes` directly
+# (PR2 of 0066 Ext 6), so the direct forwarder needs the SAME finite+bounded guard as the belt — a
+# non-finite proposal (`1e309` → +inf via json.loads) must fall back to "no duration", never forward
+# and crash the engine call inside the best-effort record (which would silently drop the scene fold).
+
+def _capture_direct(monkeypatch, felt):
+    from src import orwell_engine as oe
+    captured = {}
+
+    async def fake_call(tool, req, user=None):
+        captured["req"] = req
+        return {"recorded": True}
+
+    monkeypatch.setattr(oe, "_call", fake_call)
+    _run(oe.record_interaction("a scene", with_ids=["npc:3"], kind="strategy", felt_minutes=felt))
+    return captured["req"]
+
+
+def test_direct_path_forwards_a_valid_felt_minutes(monkeypatch):
+    req = _capture_direct(monkeypatch, 120)
+    assert req["feltMinutes"] == 120
+
+
+def test_direct_path_drops_non_finite_and_out_of_range(monkeypatch):
+    # +inf (what `1e309` parses to), a bool, zero/negative, and an absurd magnitude all fall back to
+    # "no duration" — the engine never sees a `feltMinutes` it can't clamp.
+    for bad in (float("inf"), float("-inf"), float("nan"), 0, -30, True, 1_000_000, 10_000_000):
+        req = _capture_direct(monkeypatch, bad)
+        assert "feltMinutes" not in req, bad
