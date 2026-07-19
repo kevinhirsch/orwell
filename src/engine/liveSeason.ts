@@ -1434,7 +1434,7 @@ export function advanceClockPerConversation(s: LiveSeasonState, hours: number = 
  * A no-op before the day starts (unchanged from the per-conversation path).
  */
 export function advanceClockPerScene(
-  s: LiveSeasonState, sceneKey: string, proposedHours: number = CLOCK.perConversationHours, capHours: number = SCENE.capHours,
+  s: LiveSeasonState, sceneKey: string, proposedHours: number = SCENE.perExchangeHours, capHours: number = SCENE.capHours,
 ): void {
   if (s.nightDepth === undefined) return; // the day hasn't started; the per-beat clock initializes it
   if (s.sceneKey !== sceneKey) { s.sceneKey = sceneKey; s.sceneAccruedHours = 0; } // a new scene: fresh cap
