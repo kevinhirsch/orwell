@@ -70,6 +70,20 @@ export const CLOCK: ClockConstants = {
 };
 
 /**
+ * Extension 6 (SCENE-based clock — "scenes, not turns", owner ruling 2026-07-12). The clock advances per
+ * SCENE (a continuous interaction in one room with a stable co-present set), NOT per turn. `perExchangeHours`
+ * is the small amount ONE turn inside a scene contributes (~12 min); `capHours` is the ceiling ANY single
+ * scene can bill (mirrors `SCENE_FELT_MINUTES.max` / 60 = 4h) — Model B "capped accumulation", so a long
+ * conversation is a touch longer in-fiction but turn count can never run the clock away. A scene resets on a
+ * room change, a co-present-set change (someone walks in / leaves), or a beat. Tunable — the increment trades
+ * realism (bigger = the day feels its finite scheming time) against pace (smaller = the house moves slower).
+ */
+export const SCENE = {
+  perExchangeHours: 0.2, // ~12 min per turn within a scene
+  capHours: 4,           // = SCENE_FELT_MINUTES.max (240) / 60 — one scene never bills more than this
+} as const;
+
+/**
  * 0117 (in-game-time pivot, Phase 1) — the in-game hours that must elapse during the player's social
  * play before the off-screen house schemes again. This is the cadence at which the hidden society
  * (0038 scenes + gossip + motivated movement + campaigns/drives) lives BETWEEN ceremonies, paced to the
