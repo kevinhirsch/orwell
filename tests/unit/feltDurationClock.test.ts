@@ -27,6 +27,7 @@ function startedWithClock(): { session: ReturnType<GameSessionRegistry["sandboxF
   const sb = reg.sandboxFor("felt");
   sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: SEED });
   sb.session.setPerConversationClockEnabled(true);
+  sb.session.advanceGame(); // 0111: close the premiere champagne circle
   sb.session.advanceGame(); // start the day (initializes the clock)
   const npc = [...sb.session.livingIds()].find((id) => id !== PLAYER)!;
   return { session: sb.session, commands: sb.commands, npc };
@@ -77,6 +78,7 @@ describe("Phase 2 — feltMinutes drives the per-conversation clock", () => {
     const sb = reg.sandboxFor("felt-gated-leak");
     sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: SEED });
     sb.session.setPerConversationClockEnabled(false); // per-conversation clock OFF ⇒ the tick self-gates to a no-op
+    sb.session.advanceGame(); // 0111: close the premiere champagne circle
     sb.session.advanceGame(); // start the day (master clock initialized) but per-conversation clock still OFF
     const npc = [...sb.session.livingIds()].find((id) => id !== PLAYER)!;
 

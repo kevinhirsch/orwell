@@ -709,14 +709,15 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "self to voice when they introduce themselves — never a thing the others already know). Do not write " +
     "any pre-existing familiarity, alliances, or closeness; bonds form from here, live, on screen. " +
     "WALK THE PLAYER THROUGH THESE PREMIERE BEATS, in order, lightly producer-guided: " +
-    "(1) INTRODUCTIONS — THE CHAMPAGNE CIRCLE. The FIRST thing that happens: production calls the WHOLE " +
-    "house into a champagne circle in the living room, and everyone is introduced right there, at once. " +
-    "This is the set-piece where the player meets the ENTIRE house — no wandering off to stumble on " +
-    "strangers, nobody skipped. Each houseguest introduces their PUBLIC self — name, where they're from, " +
-    "what they do, one real thing — voiced from THAT person's card (their look, demeanor, " +
-    "background/biography in the GAME CONTEXT), in their OWN register, as a STRANGER meeting strangers. Go " +
-    "around the circle so it breathes (a few at a time, some landing harder than others — this is a social " +
-    "game, not a flat roll-call), and let the player jump into the circle and introduce THEMSELVES. " +
+    "(1) INTRODUCTIONS — THE CHAMPAGNE CIRCLE. The FIRST thing that happens: THE GAME HAS ALREADY " +
+    "GATHERED THE WHOLE HOUSE into a champagne circle in the living room — whereabouts shows every " +
+    "houseguest present there with the player, and the player CANNOT be moved out until the toast closes " +
+    "(a moveTo no-ops while the circle is gathered). So narrate THIS gathered scene — never stage the " +
+    "toast elsewhere or narrate it while the player has stepped away. Each houseguest introduces their " +
+    "PUBLIC self — name, where they're from, what they do, one real thing — voiced from THAT person's " +
+    "card (their look, demeanor, background/biography in the GAME CONTEXT), in their OWN register, as a " +
+    "STRANGER meeting strangers. Go around the circle A FEW AT A TIME ACROSS TURNS so it breathes (not a " +
+    "flat fifteen-name roll-call dumped in one turn), and let the player jump in and introduce THEMSELVES. " +
     "THE ENGINE HAS ALREADY RECORDED THE WHOLE HOUSE AS MET at the champagne circle — you do NOT track the " +
     "introductions from memory and you do NOT call markHouseguestMet person by person; just voice the " +
     "toast-circle introductions warmly and let the player gravitate to whoever they want a real read on. " +
@@ -729,11 +730,20 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "the player draws their OWN conclusions from what they see, you never assert them. " +
     "(2) THE TOAST — production brings out champagne; the house pops it and toasts to the season ahead. A " +
     "loose, celebratory mingling beat — first impressions over a glass, the room finding its energy. " +
-    "(3) PICK A BEDROOM — a REAL player choice: the house has bedrooms (the GAME CONTEXT/whereabouts names " +
-    "the rooms — typically two, e.g. \"bedroom a\" and \"bedroom b\"). Invite the player to go claim a bed " +
-    "and settle in; when they choose one, call moveTo {that room} so the game MOVES them there for real, " +
-    "then voice the room and whoever whereabouts shows is in it. Let it be their call — never pick for them " +
-    "and never narrate them into a room the game has not moved them to. " +
+    "CLOSE THE CIRCLE WHEN THE TOAST HAS PLAYED: once the circle has gone around and the house has " +
+    "toasted, call advanceGame ONCE to CLOSE the champagne circle and un-pin the player. This first " +
+    "advanceGame does NOT start the game or bring up the HOH — it only settles the toast; only AFTER it " +
+    "does moveTo work for the bedroom pick. (If the player wants to wander before you have closed the " +
+    "circle, that IS the cue the toast is done — close it, then honor the move.) " +
+    "OVERRIDE — ONCE THE CIRCLE HAS CLOSED (the engine truth reports it DONE): treat beats (1)–(2) as " +
+    "finished — do NOT re-run the gathered-circle introductions or the toast; go straight to the bedroom " +
+    "pick and move only to the room the player selects. " +
+    "(3) PICK A BEDROOM — a REAL player choice (AFTER the circle has closed): the house has bedrooms (the " +
+    "GAME CONTEXT/whereabouts names the rooms — typically two, e.g. \"bedroom a\" and \"bedroom b\"). " +
+    "Invite the player to go claim a bed and settle in; when they choose one, call moveTo {that room} so " +
+    "the game MOVES them there for real, then voice the room and whoever whereabouts shows is in it. Let " +
+    "it be their call — never pick for them and never narrate them into a room the game has not moved " +
+    "them to. " +
     "(4) GETTING SETTLED — a scene or two of everyone unpacking, claiming beds, drifting through the house, " +
     "feeling each other out on the first night. Light mingling; let the player wander and meet people. " +
     "GROUND EVERY PERSON IN THE ROSTER: the GAME CONTEXT below lists the EXACT houseguests — when you " +
@@ -749,15 +759,17 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "(the first HOH, then nominations, then the veto, then eviction), briefly orient the player to what it " +
     "is and what's at stake the FIRST time, in your producer voice, without lecturing or showing any " +
     "numbers — they learn the weekly rhythm by living it. " +
-    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION: after the champagne-circle " +
-    "introductions, the toast, the bedroom pick, and a little settling-in, call advanceGame to bring up the " +
-    "first HOH competition; do not let the premiere drift indefinitely. " +
+    "THE PREMIERE'S DESTINATION IS THE FIRST HEAD OF HOUSEHOLD COMPETITION — reached in TWO advanceGame " +
+    "steps, never one: the FIRST closes the champagne circle after the toast (releasing the player into " +
+    "the bedroom pick, NOT into the HOH); then, after the bedroom pick and a little settling-in, a SECOND " +
+    "advanceGame brings up the first HOH. Do not let the premiere drift, but do not rush straight past " +
+    "the bedroom-pick beats to the HOH either. " +
     "THE FIRST POWER IS READY ONCE THE CIRCLE HAS PLAYED: because the whole house is met at the champagne " +
     "toast, there is NO roll-call to grind through and nobody to hunt down — the first HOH is reachable as " +
     "soon as the champagne circle, the toast, and the bedroom pick have played out. Don't rush past those " +
     "beats (they are where the player's first reads actually form), and don't stall past them either. Once " +
-    "the player has met the circle and signals they're ready for the game to start, THAT is your cue to " +
-    "call advanceGame into the first HOH.",
+    "the circle has closed and the player has settled in and signals they're ready for the game to start, " +
+    "THAT is your cue to call advanceGame into the first HOH.",
   "hoh-competition":
     "MOMENT — Head of Household competition. Build the tension, then call advanceGame to RESOLVE it " +
     "and announce ONLY the game's winner — never scores or rankings. (advanceGame is the sole " +
@@ -1279,6 +1291,23 @@ export function renderGameContext(view: GameStateView): string {
     `- PREMIERE — THE CHAMPAGNE CIRCLE (engine truth): the producers convened the whole house for ` +
       `champagne-circle introductions, so all ${pr.total - 1} houseguests are MET at the toast — there is ` +
       `no roll-call to work through and nobody left to hunt down.`,
+    ...(pr.champagneCircle === "gathered"
+      ? [
+          `- PREMIERE — THE CIRCLE IS GATHERED NOW: the GAME has convened the whole house in the living ` +
+            `room (whereabouts shows everyone present; moveTo no-ops until the toast closes). Narrate the ` +
+            `gathered toast a FEW AT A TIME across turns, never all fifteen at once. When the toast has ` +
+            `played, call advanceGame ONCE to CLOSE the circle (releases the player to the bedroom pick — ` +
+            `it does NOT start the HOH); a LATER advanceGame begins the first HOH.`,
+        ]
+      : pr.champagneCircle === "done"
+        ? [
+            `- PREMIERE — THE CIRCLE HAS CLOSED: the toast is done; move on to the bedroom pick and settling ` +
+              `in (moveTo works now). A later advanceGame brings up the first HOH.`,
+            `- PREMIERE — OVERRIDE (circle closed): ignore the gathered-circle and introduction instructions ` +
+              `above — do NOT continue the toast or the roll-call. Offer the bedroom choice and move only to ` +
+              `the room the player selects.`,
+          ]
+        : []),
     `- PREMIERE — FIRST POWER: ` +
       (pr.powerReachable
         ? "READY — the whole house is met at the champagne circle; the first HOH may begin as soon as the toast and the bedroom pick have played and the player is ready. Do not gift or rush past those beats."

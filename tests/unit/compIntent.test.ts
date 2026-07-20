@@ -47,7 +47,8 @@ describe("0006 staged-rounds — a declared throw measurably lowers the player's
   it("the comp-round decision offers compete / throw / play-safe (compete first = the default) + the still-in field", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "P", seed: 2 });
-    const view = s.advanceGame();
+    s.advanceGame(); // 0111: close the premiere champagne circle
+    const view = s.advanceGame(); // now the first HOH stages
     expect(view.pending?.kind).toBe("comp-round");
     expect(view.pending!.options.map((o) => o.id)).toEqual(["compete", "throw", "play-safe"]);
     // The staged prompt carries WHO IS STILL IN this round (the narrowed field) + the round number.

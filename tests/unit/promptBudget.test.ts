@@ -77,7 +77,12 @@ describe("#1391 — narrator-prompt token budget (anti-re-bloat gate)", () => {
   });
 
   it("the assembled premiere prompt stays under its budget", () => {
-    const BUDGET = 72_100; // ~18k tok — over the 70,702-char size (full 16-cast roster + premiere tracker)
+    // 2026-07-20 re-baseline (feature 0111 — THE CHAMPAGNE CIRCLE): the premiere now GATHERS the whole
+    // house for the opening toast, so the assembled premiere prompt carries the gathered-circle context
+    // block (whereabouts pins the house; the two-step close→HOH framing) — 72,853 chars. Consciously
+    // bumped, not widened to sneak past: the new tokens buy the pin + close-edge framing that stops the
+    // toast firing off-screen (the reported bug).
+    const BUDGET = 74_300; // ~18.6k tok — ≈2.0% over the 72,853-char post-0111 size
     expect(buildSystemPrompt("premiere", LIVE_VIEW).length).toBeLessThanOrEqual(BUDGET);
   });
 

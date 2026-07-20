@@ -15,6 +15,9 @@ function startedSession(seed: number): { session: GameSessionAdapter; npcIds: En
   const session = new GameSessionAdapter();
   session.createCharacter({ playerName: "The Player", seed });
   const house = (session as unknown as { house: GameHouse }).house;
+  // 0111: these tests poke the private presence map to exercise SIGHTLINE — clear the premiere's
+  // gathered champagne-circle flag so `whereabouts` reads the seated presence, not the opening toast.
+  (session as unknown as { live?: { champagneCircle?: string } }).live!.champagneCircle = undefined;
   return { session, npcIds: house.npcs.map((n) => n.id) };
 }
 

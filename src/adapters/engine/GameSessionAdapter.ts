@@ -4019,6 +4019,11 @@ export class GameSessionAdapter implements GameSession {
   private houseEventInSession(): { kind: NonNullable<WhereaboutsView["houseEvent"]>["kind"]; field?: EntityId[] } | null {
     const s = this.live;
     if (!s) return null;
+    // FEATURE 0111 — THE CHAMPAGNE CIRCLE: while the premiere toast is GATHERED, the whole house is
+    // convened in the living room. This is a whole-house event exactly like a comp/ceremony (no field
+    // split — nobody competes, the house simply toasts), so the pin (movePlayer no-op) + gathered
+    // whereabouts come for free. Released to `"done"` on the model's first advanceGame (see advanceGame).
+    if (s.champagneCircle === "gathered") return { kind: "champagne-circle" };
     if (s.competition) { // a staged comp is running ⇒ its real field is authoritative
       return { kind: s.competition.comp, field: [...s.competition.field] };
     }
@@ -4328,11 +4333,15 @@ export class GameSessionAdapter implements GameSession {
 
   /** Lazily clear a stale tracker once the premiere is over (keeps the snapshot clean; idempotent). */
   private clearPremiereIfOver(): void {
-    if (!this.inPremiere() && (this.premiereMet.size > 0 || this.premiereHotReads.size > 0)) {
+    const staleCircle = this.live?.champagneCircle !== undefined;
+    if (!this.inPremiere() && (this.premiereMet.size > 0 || this.premiereHotReads.size > 0 || staleCircle)) {
       this.premiereMet.clear();
       // #1318: the hot-read set is premiere-scoped too — clear it alongside so it never lingers in the
       // snapshot (the DURABLE name-lock `introducedNames` is intentionally NOT cleared here).
       this.premiereHotReads.clear();
+      // 0111: the champagne-circle flag is premiere-scoped — clear it so a post-premiere `live` never
+      // reports a stale `champagne-circle` house event (which would wrongly pin the player).
+      if (this.live) this.live.champagneCircle = undefined;
       this.persist();
     }
   }
@@ -4400,6 +4409,9 @@ export class GameSessionAdapter implements GameSession {
       met,
       hotReads,
       powerReachable: everyoneMet && everyoneVisible,
+      // 0111: surface the champagne-circle sub-state so the moment prompt knows whether the toast is
+      // still GATHERED (voice the toast, house pinned) or DONE (released to bedroom pick / settling in).
+      ...(this.live?.champagneCircle !== undefined ? { champagneCircle: this.live.champagneCircle } : {}),
     };
   }
 
@@ -4801,6 +4813,17 @@ export class GameSessionAdapter implements GameSession {
     // introductions auto-happen at the champagne toast (the first thing that happens), NOT via a manual
     // roll-call. Done after `this.live` exists so seat resolution is unambiguous (every NPC is active at genesis).
     this.meetWholeHouseAtChampagneCircle();
+    // FEATURE 0111 — GATHER the whole house for the champagne circle: the toast is a whole-house EVENT,
+    // not free prose. Marking the live season `"gathered"` makes `houseEventInSession()` report a
+    // `champagne-circle` event, so `whereabouts()` seats the whole house co-present in the living room
+    // and `movePlayer` no-ops — the narrator cannot stage the toast elsewhere, and it cannot fire while
+    // the player has wandered off (the reported bug: "the champagne circle fired and I wasn't in the
+    // room"). The player's living-room seat itself is forced below at the `assignRooms` override (the
+    // social heart of the house), so this is purely a projection flag: seed-NEUTRAL (no rng, no fold),
+    // and the whole change persists in the same season-start commit (no extra beatSeq bump). Released to
+    // free-roam premiere on the model's first `advanceGame` (`champagneCircle = "done"`), which does NOT
+    // start the first HOH — the bedroom pick + settling-in premiere beats still run.
+    this.live.champagneCircle = "gathered";
     if (this.reactiveTwistsEnabled) {
       // 0025 REACTIVE (PO ruling 2026-07-06): arm the standing pool — all three twists watch the live
       // house, each fires when the house EARNS its (per-season seeded) trigger, at most once, and all
@@ -7964,6 +7987,21 @@ export class GameSessionAdapter implements GameSession {
       const v = this.advanceView(null);
       return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, v) : v;
     }
+    // FEATURE 0111 — THE CHAMPAGNE-CIRCLE CLOSE EDGE. The model's FIRST advanceGame during the gathered
+    // premiere toast RESOLVES the circle: un-pin the player into free-roam premiere (bedroom pick,
+    // settling in). It deliberately does NOT run `advanceBeat` — the premiere is NOT over and the first
+    // HOH does NOT start here (ADR 0003: guide, don't force-march the week). A LATER advanceGame, once
+    // the player has picked a bedroom and settled, begins the first HOH. Committed like any beat (one
+    // persist, one beatSeq bump) so the released state is durable; `advanceView(null)` reports no new
+    // beat (nothing was resolved — only the toast scene closed).
+    if (this.live.champagneCircle === "gathered") {
+      const closed = this.inOneCommit(() => {
+        this.live!.champagneCircle = "done";
+        this.persist(); // one committed mutation — durable + bumps beatSeq via the registry funnel
+        return this.advanceView(null);
+      });
+      return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, closed) : closed;
+    }
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
     const view = this.inOneCommit(() => {
@@ -9411,6 +9449,9 @@ export class GameSessionAdapter implements GameSession {
       this.premiereMet.clear();
       this.premiereHotReads.clear();
     }
+    // 0111: the champagne-circle flag is premiere-scoped — clear it the instant the phase leaves
+    // "premiere" so a post-premiere `live` never reports a stale `champagne-circle` house event.
+    if (this.phase !== "premiere" && s.champagneCircle !== undefined) s.champagneCircle = undefined;
     this.ceremony = {
       hoh: s.hoh,
       nominees: (s.finalNominees ?? s.nominees ?? []).slice(),

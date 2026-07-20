@@ -77,6 +77,7 @@ describe("Extension 6 — the adapter caps a single scene end-to-end", () => {
     const sb = reg.sandboxFor("scene-cap");
     sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: 7 });
     sb.session.setPerConversationClockEnabled(true);
+    sb.session.advanceGame(); // 0111: close the premiere champagne circle
     sb.session.advanceGame(); // start the day
     const start = sb.session.snapshot().live?.nightDepth ?? 0;
     for (let i = 0; i < 60; i++) sb.session.advanceClockPerConversation(); // one continuous scene

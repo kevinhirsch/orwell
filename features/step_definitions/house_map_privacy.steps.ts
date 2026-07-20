@@ -21,6 +21,9 @@ function newGame(w: BbWorld, seed: number): void {
   const user = `pm${pmUsers++}`;
   const sb = reg.sandboxFor(user);
   sb.session.createCharacter({ playerName: "The Player", seed });
+  // 0111: close the premiere champagne circle so whereabouts/movePlayer read the seated presence these
+  // privacy/floor-plan scenarios drive — not the opening gathered toast (which pins the whole house).
+  sb.session.advanceGame();
   w.pmRegistry = reg;
   w.pmUser = user;
   w.pmSandbox = sb;

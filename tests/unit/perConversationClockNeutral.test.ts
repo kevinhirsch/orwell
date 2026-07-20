@@ -120,6 +120,7 @@ describe("0066 Phase-2 Ext 1 — the pure advance is gated, non-vacuous, and nev
       const s = new GameSessionAdapter();
       s.createCharacter({ playerName: "The Player", seed: SEED });
       s.setPerConversationClockEnabled(extOn);
+      s.advanceGame(); // 0111: close the premiere champagne circle
       s.advanceGame(); // initialize the clock (if it's on)
       return s;
     };
@@ -137,6 +138,7 @@ describe("0066 Phase-2 Ext 1 — the pure advance is gated, non-vacuous, and nev
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Player", seed: SEED });
     s.setPerConversationClockEnabled(true);
+    s.advanceGame(); // 0111: close the premiere champagne circle
     s.advanceGame(); // start the day
     const startDepth = s.snapshot().live?.nightDepth ?? 0;
     for (let i = 0; i < 20; i++) s.advanceClockPerConversation();
@@ -152,6 +154,7 @@ describe("0066 Phase-2 Ext 1 — the pure advance is gated, non-vacuous, and nev
     GameSessionAdapter.setTimeOfDayEnabled(true);
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "The Player", seed: SEED });
+    s.advanceGame(); // 0111: close the premiere champagne circle
     s.advanceGame(); // start the day (no opt-in call)
     const startDepth = s.snapshot().live?.nightDepth ?? 0;
     for (let i = 0; i < 20; i++) s.advanceClockPerConversation();

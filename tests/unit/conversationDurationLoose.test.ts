@@ -68,6 +68,7 @@ describe("Extension 5 — the per-conversation clock advance honors the bounded 
       const s = new GameSessionAdapter();
       s.createCharacter({ playerName: "The Player", seed: 7 });
       s.setPerConversationClockEnabled(true);
+      s.advanceGame(); // 0111: close the premiere champagne circle
       s.advanceGame(); // start the day
       const before = s.snapshot().live?.nightDepth ?? 0;
       s.advanceClockPerConversation({ kind, proposedHours: proposed });

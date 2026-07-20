@@ -124,6 +124,9 @@ describe("C8-04 — the ceremony state is in the model's persistent context", ()
   it("no NON-observable houseguest leaks into the WHERE YOU ARE block (Vault Wall — fog of war is real)", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({ playerName: "P", seed: 81000 });
+    // 0111: close the premiere champagne circle — while gathered the whole house is co-present in the
+    // living room (no fog of war to test); this test needs the normal partial-house whereabouts.
+    s.advanceGame();
     const gs = s.getGameState();
     const wa = gs.whereabouts!;
     expect(wa).not.toBeNull();

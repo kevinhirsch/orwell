@@ -27,6 +27,9 @@ function liveGame(seed: number) {
   const user = `loc-r4-u${seed}`;
   const sb = reg.sandboxFor(user);
   sb.session.createCharacter({ playerName: "The Player", seed });
+  // 0111: close the premiere champagne circle so movePlayer/whereabouts read normal free-roam presence
+  // (these tests ground narrated movement, not the opening gathered toast).
+  sb.session.advanceGame();
   return { reg, user, s: sb.session };
 }
 

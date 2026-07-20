@@ -301,6 +301,19 @@ export interface LiveSeasonState {
   week: number;                 // 1-based HOH reign
   beat: Beat;                   // the next beat to resolve
   active: EntityId[];
+  /**
+   * FEATURE 0111 — THE CHAMPAGNE CIRCLE (the premiere's opening GATHERED set-piece). Reuses the 0106
+   * whole-house-event machinery: `"gathered"` = the game has convened the whole house in the living
+   * room for the champagne toast, so `houseEventInSession()` reports a `champagne-circle` event — the
+   * player is PINNED (movePlayer no-ops) and `whereabouts()` shows the whole house co-present, so the
+   * narrator cannot stage the toast elsewhere and cannot fire it while the player is away. `"done"` =
+   * the toast has resolved (the model's first `advanceGame`); the player un-pins into free-roam premiere
+   * (bedroom pick, settling in) — it does NOT auto-advance to the first HOH. Cleared once the premiere
+   * ends. Seed-NEUTRAL (a projection flag only — no rng, no fold), so all calibration is byte-identical;
+   * absent on a pre-0111 save / outside the premiere ⇒ byte-identical to the pre-feature flow. Persisted
+   * with the live state (0030), so a reload mid-toast resumes gathered.
+   */
+  champagneCircle?: "gathered" | "done";
   /** The player's declared intent for the upcoming competition (B46); consumed when it resolves. */
   compIntent?: Intent;
   hoh?: EntityId;

@@ -76,7 +76,7 @@ describe("L31 — the premiere is a producer-guided introductions round + a ligh
     const { systemPrompt } = sb.session.getMomentPrompt({ moment: "premiere" });
     // a BUILT-IN introductions beat — the champagne circle: production convenes the WHOLE house at once
     expect(systemPrompt).toMatch(/\(1\) INTRODUCTIONS/i);
-    expect(systemPrompt).toMatch(/calls the WHOLE house into a champagne circle/i);
+    expect(systemPrompt).toMatch(/GATHERED THE WHOLE HOUSE into a champagne circle/i);
     // each houseguest introduces their PUBLIC self (name / from / what they do / one real thing)
     expect(systemPrompt).toMatch(/name, where they're from/i);
     // once introduced, the public intro is fixed (ties to 0058 byte-stable public depth)

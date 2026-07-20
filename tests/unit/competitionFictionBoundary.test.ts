@@ -29,7 +29,8 @@ function playerServer(genEnabled = true): { server: McpServer; session: GameSess
 /** Drive a fresh season to a RESOLVED staged HOH competition (winner + drop order fixed). */
 function driveToResolvedComp(session: GameSessionAdapter): void {
   session.createCharacter({ playerName: "The Player", seed: 4 });
-  const adv = session.advanceGame();
+  session.advanceGame(); // 0111: close the premiere champagne circle
+  const adv = session.advanceGame(); // the first HOH stages
   if (adv.pending?.kind === "comp-round" || adv.pending?.kind === "comp-intent") {
     session.submitDecision({ kind: "comp-round", intent: "compete" }); // resolves + begins staging
   }

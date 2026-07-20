@@ -26,6 +26,10 @@ function started(seed: number): { s: GameSessionAdapter; playerId: string; npcs:
   const playerId = snap.house!.player.id;
   const npcs = snap.house!.npcs.map((n) => n.id);
   const live = (s as unknown as { live: LivePoke }).live;
+  // 0111: these tests poke a mid-game comp/ceremony pending directly — clear the premiere's gathered
+  // champagne-circle flag so `houseEventInSession` reports the poked event, not the (higher-priority)
+  // opening toast (which, in a real game, has closed long before any comp).
+  (live as unknown as { champagneCircle?: string }).champagneCircle = undefined;
   return { s, playerId, npcs, live };
 }
 const ids = (rs: NamedRef[]): string[] => rs.map((r) => r.id);

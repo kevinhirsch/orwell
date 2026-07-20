@@ -433,7 +433,8 @@ Then("an engaged scene is never cut short by the clock", function () {
   const s = new GameSessionAdapter();
   s.createCharacter({ playerName: "The Player", seed: SEED });
   s.setPerConversationClockEnabled(true);
-  s.advanceGame();
+  s.advanceGame(); // 0111: close the premiere champagne circle
+  s.advanceGame(); // start the day (initializes the clock)
   // Extension 6 (SCENE-based clock): a SINGLE continuous scene caps at SCENE.capHours (4h), so the day
   // advances as the player moves THROUGH scenes — `resetSceneClock()` stands in for each scene boundary
   // (a move / someone entering / a beat), which real play produces via presence 0049. Across many scenes
@@ -448,7 +449,8 @@ Then("an engaged scene is never cut short by the clock", function () {
 
 When("the player lingers and plays within a beat", function (this: BbWorld) {
   const s = bag(this).session!;
-  s.advanceGame();
+  s.advanceGame(); // 0111: close the premiere champagne circle
+  s.advanceGame(); // start the day (initializes the clock)
   bag(this).depthBefore = s.snapshot().live?.nightDepth ?? 0;
   for (let i = 0; i < 20; i++) s.advanceClockPerConversation();
   bag(this).depthAfter = s.snapshot().live?.nightDepth ?? 0;

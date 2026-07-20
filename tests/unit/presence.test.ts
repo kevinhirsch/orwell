@@ -413,6 +413,9 @@ function liveGame(seed: number) {
   const user = `presence-u${seed}`;
   const sb = reg.sandboxFor(user);
   sb.session.createCharacter({ playerName: "The Player", seed });
+  // 0111: close the premiere champagne circle so whereabouts/movePlayer read normal free-roam presence
+  // (these tests exercise the presence/sightline system, not the opening gathered toast).
+  sb.session.advanceGame();
   return { reg, user, sb };
 }
 

@@ -381,6 +381,9 @@ import { onNarrowChange } from './platform.js';
     "veto-ceremony": "Veto ceremony", "eviction": "Eviction night",
     "final-eviction": "Final eviction", "finale": "The finale", "jury": "Jury",
     "social": "A day in the house",
+    // 0111 — a graceful label for the premiere's gathered champagne-circle whole-house event (kind),
+    // so if any surface renders `whereabouts().houseEvent.kind` it reads the show's vocabulary.
+    "champagne-circle": "Champagne circle",
     "twist-reveal": "A twist!", // GADGET-5: one of the 8 legal structural Beat values — was falling
                                  // through to a raw word-swap ("Twist reveal") on a sealed-twist night.
   };
