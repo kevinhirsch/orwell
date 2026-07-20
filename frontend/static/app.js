@@ -3871,6 +3871,7 @@ function startOrwellApp() {
           if (sendBtn.dataset.mode !== 'send') return;
           sendBtn.innerHTML = _sendIcon;
           sendBtn.title = 'Send message';
+          sendBtn.setAttribute('aria-label', 'Send message');
           sendBtn.classList.remove('mic-mode', 'newchat-mode', 'anim-spin-swap');
           sendBtn.classList.add('anim-spin');
           sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
@@ -3894,6 +3895,12 @@ function startOrwellApp() {
         sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
       }
     }
+    // BL-044: keep the accessible name in lock-step with the visible tooltip so a
+    // screen reader announces the button's ACTUAL current action (send / attach /
+    // record voice / new chat) instead of the stale static "New chat" aria-label
+    // that the composer chrome shipped with. The `title` is the single source of
+    // truth for the button's current meaning; mirror it onto aria-label.
+    if (sendBtn.title) sendBtn.setAttribute('aria-label', sendBtn.title);
     sendBtn.dataset.mode = newMode;
   }
 
