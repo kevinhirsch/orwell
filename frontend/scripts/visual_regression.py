@@ -115,6 +115,14 @@ TIER_A_SURFACES: Dict[str, Dict[str, object]] = {
                                  "||{click(){}}).click()"},
     "decision-card": {"moment": "midweek", "primary_selector": "#orwell-decision-card"},
     "settings":      {"moment": "midweek", "primary_selector": "#settings-modal",
+                      # SET-09/#1607: under AUTH_ENABLED=false settings.js hides the Account
+                      # cards (`#settings-pw-card` / `#settings-2fa-card`) via async inline
+                      # `display:none`, so they never get screenshotted. Best-effort keep-shown
+                      # (self-healing interval — the hide fires after the modal opens, so a
+                      # one-shot unhide would race and lose) so their regressions can't ship unseen.
+                      "ensure_js": "setInterval(function(){document.querySelectorAll("
+                                   "'#settings-pw-card,#settings-2fa-card').forEach("
+                                   "function(e){e.style.display='';});},150)",
                       "open_js": "(document.getElementById('user-bar-settings')"
                                  "||document.getElementById('tool-settings-btn')"
                                  "||document.getElementById('rail-settings')"
