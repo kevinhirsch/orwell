@@ -215,11 +215,11 @@ def test_narration_temperature_is_clamped_and_garbage_safe(monkeypatch):
 
 
 def test_narration_temperature_untouched_lanes_stay_hot_and_cold():
-    """Scoping guard: the narration knob must not disturb the cast-authoring (1.1) temperature."""
+    """Scoping guard: the narration knob must not disturb the cast-authoring (1.0) temperature."""
     import src.settings as settings_mod
     settings_mod._invalidate_caches()
     # cast authoring keeps its own hot default, independent of the narration knob.
-    assert ca.cast_authoring_temperature() == pytest.approx(1.1)
+    assert ca.cast_authoring_temperature() == pytest.approx(1.0)
 
 
 def test_faith_check_call_failure_is_loud_not_silent(monkeypatch, run):

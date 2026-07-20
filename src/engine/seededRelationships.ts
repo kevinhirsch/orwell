@@ -21,8 +21,10 @@ import type { Houseguest } from "./characterFactory";
  * PURE + seed-deterministic, player-INDEPENDENT (keys off the cast names): same seed ⇒ same layer.
  */
 
-/** Why two houseguests already know each other (flavor only — never a deterministic advantage). */
-export type TieNature = "casting-callback" | "mutual-friend" | "shared-hometown" | "old-acquaintance";
+/** Why two houseguests already know each other (flavor only — never a deterministic advantage). `showmance`
+ * is a pre-show romantic SPARK (owner casting-craft upgrade — lets a romance nucleus seed); the hidden game
+ * weight/magnitude of any tie stays engine-seeded (Vault Wall), only the PUBLIC texture is authored. */
+export type TieNature = "casting-callback" | "mutual-friend" | "shared-hometown" | "old-acquaintance" | "showmance";
 /** A showmance's arc, advancing only as the live relationship genuinely develops (never instant). */
 export type ShowmanceStage = "spark" | "bond" | "visible" | "resolved";
 
@@ -73,7 +75,7 @@ export interface SeededRelationships {
   showmances: Showmance[];
 }
 
-export const TIE_NATURES: readonly TieNature[] = ["casting-callback", "mutual-friend", "shared-hometown", "old-acquaintance"];
+export const TIE_NATURES: readonly TieNature[] = ["casting-callback", "mutual-friend", "shared-hometown", "old-acquaintance", "showmance"];
 /** Chance an enabled tie/showmance slot is actually loaded (often none, even when budgeted). */
 export const SEED_LOAD_PROB = 0.5;
 /** The small standing affinity bias a pre-game tie folds between the pair (each direction). Never large. */
@@ -173,6 +175,7 @@ const TIE_NATURE_PROSE: Record<TieNature, string> = {
   "mutual-friend": "shared a mutual friend coming in",
   "shared-hometown": "are from the same hometown",
   "old-acquaintance": "already knew each other before the show",
+  "showmance": "came in with a pre-show romantic spark",
 };
 
 /** 0095 — the Vault-free prose of WHY a tied pair knew each other, for a reveal's diffused content. */

@@ -275,13 +275,13 @@ DEFAULT_SETTINGS = {
     # via orwell_cast_authoring.cast_authoring_model_source() — garbage falls back to the default.
     "cast_authoring_model_source": "narration",
     # Owner directive 2026-07-11 — the cast-authoring SAMPLING TEMPERATURE (per-class: applied to the
-    # cast-authoring calls ONLY). Default 1.1 (owner ruling: hot character generation out of the box —
-    # "1.1 or 1.2 at default"); clamped at read time to 0.0–2.0, so ≥1.5 stays admin-reachable and a
+    # cast-authoring calls ONLY). Default 1.0 (owner ruling 2026-07-20: hot character generation out of
+    # the box, dialed back from 1.1); clamped at read time to 0.0-2.0, so >=1.5 stays admin-reachable and a
     # fat-fingered 40 can never become the live temperature. Runtime-editable like the sibling
     # per-class knobs; read per-run via orwell_cast_authoring.cast_authoring_temperature(). The other
     # background-utility lanes (zeitgeist / off-screen texture / identity) keep their own moderate
     # default — this knob never touches them.
-    "cast_authoring_temperature": 1.1,
+    "cast_authoring_temperature": 1.0,
     # The GAME-MASTER NARRATION sampling temperature (the live in-character narration + casting
     # producer voice — the player-facing agent chat turn). Default 0.7 (grounded): the app-wide
     # DEFAULT_TEMPERATURE (1.0) ran the narration too hot — the owner reported prose that "doesn't
@@ -290,7 +290,7 @@ DEFAULT_SETTINGS = {
     # reality-TV drama/richness mandate (#1) - 0.6 grounds harder but reads flatter. Clamped at read
     # time to 0.0-2.0 (an admin can push higher; a fat-fingered value can never become live). Applies
     # ONLY to the game/casting narration path (agent_loop game_mode); utility-extraction (0.1/0.2) and
-    # cast-authoring (cast_authoring_temperature, 1.1) are untouched. Runtime-editable; read per-turn.
+    # cast-authoring (cast_authoring_temperature, 1.0) are untouched. Runtime-editable; read per-turn.
     "narration_temperature": 0.7,
     # Owner directive 2026-07-11 — the ENRICHMENT runtime policy: "strict" (failures are LOUD: an
     # unwired class refuses game creation with a clear class-naming error; failed calls are retried

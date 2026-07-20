@@ -10,8 +10,15 @@ import type { PreGameTie, TieNature } from "./seededRelationships";
 import {
   GENESIS_TOTAL_BAND, GENESIS_STAT_CLAMP, GENESIS_VARIANCE_FLOOR,
   GENESIS_HIDDEN_ELEMENT_RANGE, GENESIS_TIE_BUDGET,
-  BRIEF_DEMOGRAPHIC_SKEWS, BRIEF_REGIONAL_FLAVORS, BRIEF_ENSEMBLE_VIBES,
+  BRIEF_DEMOGRAPHIC_SKEWS, BRIEF_REGIONAL_FLAVORS,
+  GENESIS_ENSEMBLE_ACCENTS, GENESIS_ENERGY_AXIS, GENESIS_REGISTER_AXIS,
+  GENESIS_EXPRESSIVENESS_AXIS, GENESIS_ACCENT_FRACTION,
+  GENESIS_EMOTIONAL_REGISTER_AXIS, GENESIS_SELF_AWARENESS_AXIS, GENESIS_SOCIAL_GRAVITY_AXIS,
+  GENESIS_ENERGY_LOUD, GENESIS_EXPRESSIVENESS_LOUD, GENESIS_EMOTIONAL_REGISTER_LOUD,
+  GENESIS_SOCIAL_GRAVITY_LOUD, GENESIS_AMPLIFIED_MIN, GENESIS_AMPLIFIED_SPAN,
+  GENESIS_AGE_BANDS, GENESIS_CASTING_ROLES, GENESIS_ROLE_MAX_PER_CAST, GENESIS_CEREBRAL_MAX_PER_CAST,
 } from "./genesisConstants";
+import type { GenesisCastingRole } from "./genesisConstants";
 
 /**
  * Feature 0116 — model-authored cast genesis: the ENGINE VALIDATION ENVELOPE (pure, no I/O).
@@ -39,7 +46,6 @@ import {
 export interface SeasonBrief {
   demographicSkew: string;
   regionalFlavor: string;
-  ensembleVibe: string;
 }
 
 /**
@@ -48,19 +54,208 @@ export interface SeasonBrief {
  * generation; it never binds a validator (only the engine's caps/floors/bands bind, §3). The dimension
  * space is finite, so distinct seeds can occasionally deal a similar brief — the brief steers variety,
  * it is not a uniqueness guarantee (§2).
+ *
+ * The old house-wide `ensembleVibe` was REMOVED (it homogenized the whole cast); the ensemble mood now
+ * rides per-slot as an ACCENT on a seeded 20–30% minority (`assignGenesisSlots`). Removing that third
+ * `pick` does not perturb the first two — `demographicSkew`/`regionalFlavor` still come off the same two
+ * leading draws — so the brief stays deterministic and player-independent (arity 1, seed only).
  */
 export function generateSeasonBrief(seed: number): SeasonBrief {
   const rng = new SeededRandom(hashSeed(`${seed}:genesis:brief`));
   return {
     demographicSkew: rng.pick(BRIEF_DEMOGRAPHIC_SKEWS),
     regionalFlavor: rng.pick(BRIEF_REGIONAL_FLAVORS),
-    ensembleVibe: rng.pick(BRIEF_ENSEMBLE_VIBES),
   };
 }
 
 /** Render the brief as one short casting-direction line (for the FE sketch prompt — the follow-on driver). */
 export function renderSeasonBrief(b: SeasonBrief): string {
-  return `This season: ${b.demographicSkew}; ${b.regionalFlavor}; ${b.ensembleVibe}.`;
+  return `This season: ${b.demographicSkew}; ${b.regionalFlavor}.`;
+}
+
+// ── The seeded PER-SLOT casting directives (the whole-cast constraints, computed up front) ───────────
+/**
+ * One houseguest slot's SEEDED casting card — the whole-cast constraints computed up front and injected
+ * into each PER-NPC sketch prompt (genesis now authors ONE houseguest per LLM call, so a call cannot see
+ * its siblings; every cross-cast constraint is dealt here, seeded + deterministic, and the model is told
+ * to honor the card). PURE creative steering (open set) — never a validator. Mirrored byte-for-byte by
+ * the FE (`orwell_cast_genesis.assign_genesis_slots`).
+ */
+export interface GenesisSlotDirective {
+  /** The rich CASTING ROLE (prompt flavor — the classic BB "type"). */
+  role: string;
+  /** The role's one-line casting note (what makes this type tick). */
+  roleNote: string;
+  /** The mechanical ARCHETYPE tag the role maps to (∈ the 12-member enum) — the engine's committed tag. */
+  archetype: Archetype;
+  /** A physical competitor — steer toward a high physical stat + an athletic/first-responder/performer job. */
+  physical: boolean;
+  /** The seeded AGE band `[lo, hi]` (a real-world cast age curve) — the model picks the exact age + name era. */
+  ageLo: number;
+  ageHi: number;
+  /** An ensemble-mood ACCENT (only a seeded 20–30% of slots carry one; the rest are `null`, their own people). */
+  accent: string | null;
+  /** A seeded "big personality" — draws ONLY from the LOUD ends so the cast is never uniformly reserved. */
+  amplified: boolean;
+  /** Independent per-slot delivery dials so per-person variety is seeded, not left to sampling temperature. */
+  energy: string;
+  register: string;
+  expressiveness: string;
+  emotionalRegister: string;
+  selfAwareness: string;
+  socialGravity: string;
+}
+
+/** Fisher–Yates in-place shuffle driven by a seeded RNG (identical stream ⇒ identical permutation; the FE mirrors it). */
+function seededShuffle<T>(arr: T[], rng: SeededRandom): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = rng.int(i + 1);
+    const t = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = t;
+  }
+}
+
+const ROLE_BY_LABEL = new Map<string, GenesisCastingRole>(GENESIS_CASTING_ROLES.map((r) => [r.role, r]));
+const roleOf = (label: string): GenesisCastingRole => ROLE_BY_LABEL.get(label)!;
+// The believable BB casting recipe, in essential→optional order (role labels). Walked with the per-role +
+// combined-cerebral caps to fill the cast; a seeded flex on the underdog slot adds inter-season variety.
+const GENESIS_CASTING_RECIPE: readonly string[] = [
+  "comp-beast (humble)", "mastermind", "floater", "villain", "showmance instigator", "flirt",
+  "hothead", "america's sweetheart", "mom/dad figure", "underdog", "comp-threat self-mastermind",
+  "under-the-radar assassin", "wildcard", "loyalist", "floater", "analyst",
+];
+const GENESIS_UNDERDOG_FLEX: readonly string[] = ["underdog", "analyst", "superfan gamebot"];
+
+/** Build the seeded casting PLAN — a believable role multiset honoring the per-role + cerebral caps. */
+function buildCastingPlan(rng: SeededRandom, count: number): GenesisCastingRole[] {
+  const plan: GenesisCastingRole[] = [];
+  const roleCounts = new Map<string, number>();
+  let cerebral = 0;
+  const tryAdd = (label: string): boolean => {
+    const r = roleOf(label);
+    if ((roleCounts.get(label) ?? 0) >= GENESIS_ROLE_MAX_PER_CAST) return false;
+    if (r.cerebral && cerebral >= GENESIS_CEREBRAL_MAX_PER_CAST) return false;
+    plan.push(r);
+    roleCounts.set(label, (roleCounts.get(label) ?? 0) + 1);
+    if (r.cerebral) cerebral++;
+    return true;
+  };
+  for (const label of GENESIS_CASTING_RECIPE) {
+    if (plan.length >= count) break;
+    tryAdd(label);
+  }
+  // Pad (large cast) by cycling the recipe again under the caps; then trim to count.
+  let guard = 0;
+  while (plan.length < count && guard++ < count * GENESIS_CASTING_RECIPE.length) {
+    let added = false;
+    for (const label of GENESIS_CASTING_RECIPE) {
+      if (plan.length >= count) break;
+      if (tryAdd(label)) added = true;
+    }
+    if (!added) break;
+  }
+  // Seeded flex: swap the (first) underdog for a seeded alternate — inter-season variety in the cerebral slot.
+  const flex = GENESIS_UNDERDOG_FLEX[rng.int(GENESIS_UNDERDOG_FLEX.length)]!;
+  if (flex !== "underdog") {
+    const idx = plan.findIndex((r) => r.role === "underdog");
+    const alt = roleOf(flex);
+    if (idx >= 0 && !(alt.cerebral && cerebral >= GENESIS_CEREBRAL_MAX_PER_CAST)) plan[idx] = alt;
+  }
+  seededShuffle(plan, rng);
+  return plan;
+}
+
+/** Build the seeded AGE plan — the real-world cast age curve, one `[lo,hi]` band per slot, shuffled. */
+function buildAgePlan(rng: SeededRandom, count: number): Array<{ lo: number; hi: number }> {
+  const bands: Array<{ lo: number; hi: number }> = [];
+  const baseTotal = GENESIS_AGE_BANDS.reduce((a, b) => a + b.count, 0);
+  for (const band of GENESIS_AGE_BANDS) {
+    // Scale the band's count to the actual cast size (round), so the curve holds for any N.
+    const n = Math.max(0, Math.round((band.count / baseTotal) * count));
+    for (let i = 0; i < n; i++) bands.push({ lo: band.lo, hi: band.hi });
+  }
+  // Pad/trim to exactly count (rounding can drift by one), padding from the youngest band.
+  while (bands.length < count) bands.push({ lo: GENESIS_AGE_BANDS[0]!.lo, hi: GENESIS_AGE_BANDS[0]!.hi });
+  bands.length = count;
+  seededShuffle(bands, rng);
+  return bands;
+}
+
+/**
+ * Deal the seeded per-slot casting cards for a roster of `count` houseguests (roster order). Each cross-cast
+ * constraint runs on its OWN dedicated side-stream (the #338 RNG-isolation lesson) so adding/removing one
+ * never perturbs the others:
+ *   - ROLE (`:genesis:roles`): a believable BB casting plan (rich roles → mechanical archetype tags), capped
+ *     per-role at 2 and cerebral-combined at 3, shuffled onto the slots.
+ *   - AGE (`:genesis:ages`): a real-world age curve (`GENESIS_AGE_BANDS`), one band per slot, shuffled.
+ *   - ACCENT (`:genesis:accent`): a seeded 20–30% of slots carry a distinct ensemble accent (the rest none).
+ *   - AXES (`:genesis:axes`): six delivery dials drawn per slot; a seeded 4–5 "amplified" slots draw ONLY
+ *     from the LOUD ends so a loud/reactive/main-character contingent is GUARANTEED.
+ * GENDER is deliberately NOT seeded — the identity model proposes correct, diverse, name-coherent genders,
+ * and `diversity.ts` remains the coherence authority (§ gender course-correction). PURE + player-blind
+ * (seed + count only). Mirrored byte-for-byte by the FE.
+ */
+export function assignGenesisSlots(seed: number, count: number): GenesisSlotDirective[] {
+  if (count <= 0) return [];
+
+  // 1. ROLE — the believable casting plan (rich roles mapped to mechanical archetype tags).
+  const rolePlan = buildCastingPlan(new SeededRandom(hashSeed(`${seed}:genesis:roles`)), count);
+  // 2. AGE — the real-world age curve.
+  const agePlan = buildAgePlan(new SeededRandom(hashSeed(`${seed}:genesis:ages`)), count);
+
+  // 3. ACCENT — a seeded 20–30% carry a distinct ensemble accent; the rest are their own people.
+  const cRng = new SeededRandom(hashSeed(`${seed}:genesis:accent`));
+  const fraction = GENESIS_ACCENT_FRACTION.min + cRng.next() * (GENESIS_ACCENT_FRACTION.max - GENESIS_ACCENT_FRACTION.min);
+  const accentCount = Math.max(0, Math.min(count, Math.floor(count * fraction + 0.5)));
+  const carry: boolean[] = [...Array(accentCount).fill(true), ...Array(count - accentCount).fill(false)];
+  seededShuffle(carry, cRng);
+  const accentPool = [...GENESIS_ENSEMBLE_ACCENTS];
+  seededShuffle(accentPool, cRng);
+  let accentCursor = 0;
+
+  // 4. AXES — six delivery dials; a seeded 4–5 "amplified" slots draw ONLY from the loud ends.
+  const xRng = new SeededRandom(hashSeed(`${seed}:genesis:axes`));
+  const amplifiedCount = Math.max(0, Math.min(count, GENESIS_AMPLIFIED_MIN + xRng.int(GENESIS_AMPLIFIED_SPAN + 1)));
+  const amplified: boolean[] = [...Array(amplifiedCount).fill(true), ...Array(count - amplifiedCount).fill(false)];
+  seededShuffle(amplified, xRng);
+  const pick = (full: readonly string[], loud: readonly string[], amp: boolean): string =>
+    amp ? loud[xRng.int(loud.length)]! : full[xRng.int(full.length)]!;
+
+  const out: GenesisSlotDirective[] = [];
+  for (let i = 0; i < count; i++) {
+    const role = rolePlan[i]!;
+    const amp = amplified[i]!;
+    out.push({
+      role: role.role,
+      roleNote: role.note,
+      archetype: role.archetype,
+      physical: role.physical,
+      ageLo: agePlan[i]!.lo,
+      ageHi: agePlan[i]!.hi,
+      accent: carry[i] ? accentPool[accentCursor++ % accentPool.length]! : null,
+      amplified: amp,
+      energy: pick(GENESIS_ENERGY_AXIS, GENESIS_ENERGY_LOUD, amp),
+      register: GENESIS_REGISTER_AXIS[xRng.int(GENESIS_REGISTER_AXIS.length)]!,
+      expressiveness: pick(GENESIS_EXPRESSIVENESS_AXIS, GENESIS_EXPRESSIVENESS_LOUD, amp),
+      emotionalRegister: pick(GENESIS_EMOTIONAL_REGISTER_AXIS, GENESIS_EMOTIONAL_REGISTER_LOUD, amp),
+      selfAwareness: GENESIS_SELF_AWARENESS_AXIS[xRng.int(GENESIS_SELF_AWARENESS_AXIS.length)]!,
+      socialGravity: pick(GENESIS_SOCIAL_GRAVITY_AXIS, GENESIS_SOCIAL_GRAVITY_LOUD, amp),
+    });
+  }
+  return out;
+}
+
+/** Render one slot's casting card as a compact fixed-input line for the sketch prompt (mirrored by the FE). */
+export function renderSlotDirective(id: EntityId, d: GenesisSlotDirective): string {
+  const accent = d.accent ? `house-accent: ${d.accent}` : "no house-accent (their own person)";
+  const phys = d.physical ? " PHYSICAL COMPETITOR (give a high physical stat + an athletic/first-responder/performer vocation)." : "";
+  const big = d.amplified ? " BIG PERSONALITY — write them genuinely loud/reactive/unfiltered; do NOT let the accent tone them down." : "";
+  return `${id} — cast as: ${d.role} (${d.roleNote}); archetype tag: ${d.archetype}; `
+    + `age ~${d.ageLo}-${d.ageHi} (name from that birth era); ${accent}; `
+    + `energy: ${d.energy}; register: ${d.register}; expressiveness: ${d.expressiveness}; `
+    + `reactivity: ${d.emotionalRegister}; self-awareness: ${d.selfAwareness}; social-gravity: ${d.socialGravity}.`
+    + phys + big;
 }
 
 // ── The legacy-Bible deny-list (§5 ruling-#1 amendment) ─────────────────────────────────────────────

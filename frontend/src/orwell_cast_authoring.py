@@ -116,8 +116,8 @@ _AUTHOR_TEMPERATURE = 0.6
 # runtime-editable in settings like the sibling per-class knobs (`reasoning_budget` /
 # `max_tokens_budget`, ADR 0010 #1) and read per-run — no restart:
 #   * `cast_authoring_model_source` — "narration" (default) | "utility" (the legacy routing).
-#   * `cast_authoring_temperature` — default 1.1 (owner ruling: hot character generation out of the
-#     box; "1.1 or 1.2 at default"), validated/clamped to 0.0–2.0 so ≥1.5 stays admin-reachable.
+#   * `cast_authoring_temperature` — default 1.0 (owner ruling 2026-07-20: hot character generation out
+#     of the box, dialed back from 1.1), validated/clamped to 0.0-2.0 so >=1.5 stays admin-reachable.
 #     Applied to the CAST-AUTHORING call class ONLY — the other `_resolve_llm_fn` consumers keep
 #     `_AUTHOR_TEMPERATURE`.
 # The #1044/#1002 strict-JSON protections stay in force regardless of routing: reasoning OFF, the
@@ -125,7 +125,7 @@ _AUTHOR_TEMPERATURE = 0.6
 # temperature varies WHAT is authored; a malformed reply is still caught and retried.
 _CAST_MODEL_SOURCES = ("narration", "utility")
 _CAST_MODEL_SOURCE_DEFAULT = "narration"
-_CAST_TEMPERATURE_DEFAULT = 1.1
+_CAST_TEMPERATURE_DEFAULT = 1.0
 _CAST_TEMPERATURE_MIN = 0.0
 _CAST_TEMPERATURE_MAX = 2.0
 
@@ -145,9 +145,9 @@ def cast_authoring_model_source() -> str:
 
 
 def cast_authoring_temperature() -> float:
-    """The cast-authoring sampling temperature — default 1.1 (owner: hot out of the box),
-    runtime-editable via the `cast_authoring_temperature` setting, clamped to 0.0–2.0 (an admin can
-    push to 1.5+; a fat-fingered 40 can never become the live temperature). Garbage ⇒ the default."""
+    """The cast-authoring sampling temperature — default 1.0 (owner: hot out of the box, dialed back
+    from 1.1), runtime-editable via the `cast_authoring_temperature` setting, clamped to 0.0-2.0 (an
+    admin can push to 1.5+; a fat-fingered 40 can never become the live temperature). Garbage ⇒ the default."""
     try:
         from src.settings import get_setting
         raw = get_setting("cast_authoring_temperature", None)
