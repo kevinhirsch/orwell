@@ -105,11 +105,18 @@ Diary-Room wall already documents.
 
 Structural where possible, mirroring `liveSentinel.property.test.ts` and `test_knowledge_wall.py`:
 
-- **Engine structural (the core new gate).** Plant a unique token into a scene witnessed **only** by
-  NPC B (`witnessSet: [B]`) and a second token into the **producer casting interview**. Assert
-  neither appears in `npcVoice(A).knows/suspects`, `deriveNpcKnowledge(A)`, `knownTo(A)`,
-  `sealedFromHouse` holders for A, the roster, or `renderGameContext`. This proves per-NPC scoping
-  structurally and folds the casting leak in as **instance #1**.
+- **Engine structural (the core new gate).** Plant two distinct tokens and assert *different*
+  scopes — the point of per-NPC scoping is that a fact is **bounded to its holder**, not globally
+  erased:
+  - a token into a scene witnessed **only** by NPC B (`witnessSet: [B]`) — assert it is **absent
+    from A's scope** (`npcVoice(A).knows/suspects`, `deriveNpcKnowledge(A)`, `knownTo(A)`,
+    `sealedFromHouse` holders for A) and, once Layer 2 lands, appears in `renderGameContext`
+    **only under B's labeled `knows/suspects` block** — never in A's, and never in the shared/roster
+    prose. (Asserting it is globally absent from `renderGameContext` would be *wrong* under Layer 2,
+    which deliberately surfaces B's own knowledge under B's scope.)
+  - a token into the **producer casting interview** — assert it is absent **globally**: from every
+    NPC's `knows/suspects` and `knownTo`, and from `renderGameContext` **entirely** (it has no
+    in-game pathway to any NPC — this is the casting leak, folded in as **instance #1**).
 - **FE guard.** Generalize `test_knowledge_wall.py`: plant a distinctive fact known only to B, stage
   A voicing it, assert `screen_knowledge_wall` drops the sentence (today it fires for DR only).
 - **Live red-team (nightly, non-blocking, `live-harness-nightly.yml`).** Generalize
