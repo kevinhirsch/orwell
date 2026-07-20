@@ -47,3 +47,29 @@ def test_scrub_bundle_keeps_secret_named_flag_but_redacts_credentials():
     assert out["webhook_secret"] == ahr.REDACTED
     assert out["inputTokens"] == "1234"
     assert out["maxTokens"] == "4096"
+
+
+def test_scrub_bundle_token_prefix_is_boundary_aware():
+    """`token(?![a-z0-9])` must not over-match benign TOKENIZE* keys, while the real credential
+    `*_token` forms are still redacted and the plural COUNT field survives."""
+    obj = {
+        "TOKENIZER": "cl100k_base",          # benign — a tokenizer name, NOT a credential
+        "TOKENIZED": "true",                 # benign
+        "TOKENIZATION_MODE": "bpe",          # benign
+        "tokens": "512",                     # plural COUNT field — keep
+        "access_token": "at-secret",         # credential — redact
+        "api_token": "apitok-secret",        # credential — redact
+        "token": "bare-secret",              # credential — redact
+        "authorization": "Bearer z",         # credential — redact
+        "bearer": "b-secret",                # credential — redact
+    }
+    out = ahr._scrub_bundle(obj)
+    assert out["TOKENIZER"] == "cl100k_base"     # value crosses intact
+    assert out["TOKENIZED"] == "true"
+    assert out["TOKENIZATION_MODE"] == "bpe"
+    assert out["tokens"] == "512"
+    assert out["access_token"] == ahr.REDACTED
+    assert out["api_token"] == ahr.REDACTED
+    assert out["token"] == ahr.REDACTED
+    assert out["authorization"] == ahr.REDACTED
+    assert out["bearer"] == ahr.REDACTED

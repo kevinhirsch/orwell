@@ -701,10 +701,12 @@ _BUNDLE_RING_LIMIT = 100_000        # "everything the ring holds" (rings cap the
 # and numeric budgets are not secrets).
 # BL-057: 'secret' is credential-shaped ONLY (standalone/trailing or `secret[_-](key|token|id|
 # access[_-]?key)`), never a prefix adjective on a non-credential word (…SECRET_PACING) — so a
-# feature flag whose NAME merely contains "secret" isn't spuriously value-redacted. `token(?!s)`
-# already keeps the plural *_tokens COUNT fields (inputTokens/maxTokens) intact.
+# feature flag whose NAME merely contains "secret" isn't spuriously value-redacted. `token(?![a-z0-9])`
+# is boundary/suffix-aware (under IGNORECASE the class also excludes A-Z): it matches the credential
+# forms (`token`/`token_id`/`access_token`/`api_token`) but NOT the plural *_tokens COUNT fields
+# (inputTokens/maxTokens) NOR benign words like TOKENIZER/TOKENIZED/TOKENIZATION_MODE.
 _BUNDLE_SECRET_KEY_RE = re.compile(
-    r"authorization|api[-_]?key|token(?!s)|" + _SECRET_WORD +
+    r"authorization|api[-_]?key|token(?![a-z0-9])|" + _SECRET_WORD +
     r"|password|passwd|credential|bearer",
     re.IGNORECASE)
 
@@ -1347,7 +1349,14 @@ def _entry_semantic_noop(entry) -> bool:
     if _entry_failed(entry):
         return False  # already counted on the failed axis; don't double-count
     finish = str(entry.get("finishReason") or "").lower()
-    return finish == "length"
+    if finish != "length":
+        return False
+    # A length-capped completion is a SEMANTIC no-op only when it ALSO dropped its body — an
+    # ordinary capped-but-usable completion still carried text / tool output and DID apply
+    # something (counting it would trip a false `semantic-noop-storm` RED alarm). The LLMIO ring
+    # stores the (clipped) completion body under `result` (llm_trace._push_ring); empty/absent ⇒
+    # nothing usable came back.
+    return not str(entry.get("result") or "").strip()
 
 
 def _is_auto_corrected(entry) -> bool:
@@ -1384,10 +1393,16 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     tools: dict = {}
     guards: dict = {}
 
-    def _bump(bucket, key, failed, ts, *, semantic_noop=False):
-        d = bucket.setdefault(
-            key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None,
-                  "lastSemanticNoOpAt": None})
+    def _bump(bucket, key, failed, ts, *, semantic_noop=False, llm=False):
+        # The semantic-no-op fields are LLM-only: seed them in the default shape ONLY for the LLM
+        # rollup so TOOL/guard buckets stay `{total, failed, lastFailureAt}` and don't carry the
+        # LLM-only `semanticNoOps`/`lastSemanticNoOpAt`. LLM buckets keep all five keys always.
+        if llm:
+            d = bucket.setdefault(
+                key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None,
+                      "lastSemanticNoOpAt": None})
+        else:
+            d = bucket.setdefault(key, {"total": 0, "failed": 0, "lastFailureAt": None})
         d["total"] += 1
         if failed:
             d["failed"] += 1
@@ -1408,7 +1423,7 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
         if _norm_user(e.get("user")) != want_user:
             continue  # cross-user isolation: this LLM call counts for THIS user only
         _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"),
-              semantic_noop=_entry_semantic_noop(e))
+              semantic_noop=_entry_semantic_noop(e), llm=True)
 
     try:
         _, io_lines = log_rings.IO.since(0, limit=_BUNDLE_RING_LIMIT)
@@ -1770,12 +1785,24 @@ def setup_admin_health_routes() -> APIRouter:
             return await _health_snapshot(user)
         except Exception as e:
             logger.warning("admin health snapshot failed (degraded): %s", e)
+            # Keep the response SHAPE consistent with the healthy snapshot even when degraded — the
+            # top-level `faithfulness` key must be present. Build it fail-soft (a cheap best-effort
+            # DB resolve); a safe static "unknown" posture if it raises. This branch must NEVER
+            # raise: the status page polls it every 10s and depends on a 200.
+            try:
+                faithfulness = _faithfulness_section(user)
+            except Exception:
+                faithfulness = None
+            if faithfulness is None:
+                faithfulness = {"mode": "unknown", "enabled": False,
+                                "modelResolvable": False, "dark": False}
             return {
                 "generatedAt": datetime.now(timezone.utc).isoformat(),
                 "engine": {"ok": False, "error": f"{type(e).__name__}: {e}"},
                 "frontend": {"lastError": None, "store": {}},
                 "tiersAgree": False,
                 "images": {"available": False},
+                "faithfulness": faithfulness,
                 "healthRollup": {},
                 "alarms": [],
                 "versions": _versions(),  # build/PR is git-derived — still resolvable when the DB/engine is down

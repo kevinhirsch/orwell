@@ -15,15 +15,24 @@ def _clear():
         ring.buf.clear()
 
 
-def _push_llm(*, ok, finish, cls="background-authoring", user=None):
-    log_rings.LLMIO.push({
+def _push_llm(*, ok, finish, cls="background-authoring", user=None, result=None):
+    entry = {
         "ts": None, "level": "INFO" if ok else "ERROR", "logger": "llm-io", "msg": "x",
         "kind": "llm", "callClass": cls, "finishReason": finish, "ok": ok, "user": user,
-    })
+    }
+    if result is not None:
+        entry["result"] = result
+    log_rings.LLMIO.push(entry)
 
 
 def test_semantic_noop_entry_detection():
+    # length + NO usable body (empty/absent result) ⇒ a semantic no-op
     assert ahr._entry_semantic_noop({"ok": True, "finishReason": "length"}) is True
+    assert ahr._entry_semantic_noop({"ok": True, "finishReason": "length", "result": ""}) is True
+    assert ahr._entry_semantic_noop({"ok": True, "finishReason": "length", "result": "   "}) is True
+    # length BUT the completion still carried usable text/output ⇒ NOT a no-op (it applied something)
+    assert ahr._entry_semantic_noop(
+        {"ok": True, "finishReason": "length", "result": "some usable text"}) is False
     assert ahr._entry_semantic_noop({"ok": True, "finishReason": "stop"}) is False
     # an already-failed call is counted on the failed axis, not double-counted as semantic
     assert ahr._entry_semantic_noop({"ok": False, "finishReason": "length"}) is False
@@ -31,7 +40,8 @@ def test_semantic_noop_entry_detection():
 
 def test_rollup_counts_ok_but_dropped_completions():
     _clear()
-    # 4 HTTP-ok completions, all truncated by the output cap (applied nothing): failed axis stays 0.
+    # 4 HTTP-ok completions, all truncated by the output cap AND empty-bodied (applied nothing):
+    # failed axis stays 0.
     for _ in range(4):
         _push_llm(ok=True, finish="length")
     _push_llm(ok=True, finish="stop")  # a clean one
@@ -40,6 +50,21 @@ def test_rollup_counts_ok_but_dropped_completions():
     assert cls["failed"] == 0, "the ok/failed axis is blind to these — that was the bug"
     assert cls["semanticNoOps"] == 4, "the semantic no-op is surfaced separately"
     assert cls["total"] == 5
+
+
+def test_length_capped_but_usable_completion_is_not_a_noop():
+    _clear()
+    # 4 completions truncated by the cap but carrying usable body: NOT no-ops, no false storm.
+    for _ in range(4):
+        _push_llm(ok=True, finish="length", result="a real, usable reply body")
+    rollup = ahr._compute_health_rollup()
+    cls = rollup["llm"]["background-authoring"]
+    assert cls["semanticNoOps"] == 0, "capped-but-usable completions applied something — not no-ops"
+    assert cls["failed"] == 0
+    assert cls["total"] == 4
+    alarms = ahr._compute_alarms(rollup)
+    assert not any(a["code"] == "semantic-noop-storm" for a in alarms), \
+        "ordinary capped-but-usable completions must NOT trip the storm alarm"
 
 
 def test_semantic_noop_storm_raises_red_alarm():
@@ -58,3 +83,22 @@ def test_occasional_truncation_below_threshold_does_not_alarm():
     _push_llm(ok=True, finish="length")  # a single truncation
     alarms = ahr._compute_alarms(ahr._compute_health_rollup())
     assert not any(a["code"] == "semantic-noop-storm" for a in alarms)
+
+
+def test_tool_bucket_has_no_llm_only_fields():
+    """Finding 1: `_bump` seeds `semanticNoOps`/`lastSemanticNoOpAt` ONLY for the LLM rollup — TOOL
+    (and guard) buckets stay `{total, failed, lastFailureAt}` and never carry the LLM-only fields."""
+    _clear()
+    log_rings.IO.push({
+        "ts": None, "level": "INFO", "logger": "engine-io", "msg": "advanceGame ok",
+        "tool": "advanceGame", "ok": True, "user": None,
+    })
+    _push_llm(ok=True, finish="stop")  # so the llm bucket exists too
+    rollup = ahr._compute_health_rollup()
+    tool = rollup["tools"]["advanceGame"]
+    assert set(tool.keys()) == {"total", "failed", "lastFailureAt", "failureRate"}, \
+        "tool buckets must not carry LLM-only semanticNoOps/lastSemanticNoOpAt"
+    # the LLM bucket keeps all five keys ALWAYS (even with zero semantic no-ops)
+    llm = rollup["llm"]["background-authoring"]
+    for k in ("total", "failed", "semanticNoOps", "lastFailureAt", "lastSemanticNoOpAt"):
+        assert k in llm
