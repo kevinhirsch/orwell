@@ -155,7 +155,15 @@ def _log_path(name: str) -> str:
 
 # Env keys worth bundling (the deploy-relevant knobs). Values matching _SECRET_RE are redacted.
 _ENV_PREFIXES = ("ORWELL_", "BBAI_", "AUTH_")
-_SECRET_RE = re.compile(r"token|secret|key|password|passwd|credential|pat\b", re.IGNORECASE)
+
+# BL-057: 'secret' is AMBIGUOUS — `client_secret` / `SECRET_KEY` / a trailing `_secret` are
+# credentials, but a feature FLAG like `ORWELL_SECRET_PACING` is not. Match 'secret' ONLY as a
+# credential-shaped token: standalone/trailing, or `secret[_-](key|token|id|access[_-]?key)` —
+# NEVER as a prefix adjective on a non-credential word (…SECRET_PACING / SECRET_SAUCE), so a
+# harmless flag value crosses the debug bundle intact instead of being spuriously redacted.
+_SECRET_WORD = r"secret(?:[_-](?:key|token|id|access(?:[_-]?key)?))?(?![_-]?[a-z0-9])"
+_SECRET_RE = re.compile(
+    r"token|" + _SECRET_WORD + r"|key|password|passwd|credential|pat\b", re.IGNORECASE)
 REDACTED = "***REDACTED***"
 
 
@@ -575,6 +583,12 @@ def _session_metadata(limit: int = 25) -> dict:
     return out
 
 
+# F11/BL-056: a sane per-game spend-alert threshold used when the admin left `token_spend_alert_usd`
+# at its 0.0 default (which `check_soft_alert` reads as "disabled"). A single game is a handful of
+# cents to a few dollars of tokens, so ~$10 is a comfortable "something is runaway" tripwire.
+_DEFAULT_SPEND_ALERT_USD = 10.0
+
+
 def _token_economy(user: str | None) -> dict:
     """ADR 0010 / feature 0069 — the admin token-economy view for one user.
 
@@ -595,7 +609,16 @@ def _token_economy(user: str | None) -> dict:
         threshold = float(get_setting("token_spend_alert_usd", 0.0) or 0.0)
     except (TypeError, ValueError):
         threshold = 0.0
+    # F11/BL-056: the shipped default is 0.0, which `check_soft_alert` treats as "disabled" — so the
+    # ops view showed `spendAlertThresholdUsd: 0.0`, reading as an UNSET/misconfigured alert rather
+    # than an armed cost guard. Arm a sane per-game default when the admin left it at 0 (or set a
+    # non-positive value); an explicit positive admin value always wins. Surfaced with
+    # `spendAlertThresholdDefaulted` so the UI can show it's the default, not an operator choice.
+    defaulted = threshold <= 0
+    if defaulted:
+        threshold = _DEFAULT_SPEND_ALERT_USD
     out["spendAlertThresholdUsd"] = threshold
+    out["spendAlertThresholdDefaulted"] = defaulted
 
     entries: list = []
     try:
@@ -676,8 +699,14 @@ _BUNDLE_RING_LIMIT = 100_000        # "everything the ring holds" (rings cap the
 # survive while `token`/`access_token`/`api_token` values are masked (same discriminator as
 # src/llm_trace._scrub). Booleans/numbers are never redacted (presence flags like `hasApiKey`
 # and numeric budgets are not secrets).
+# BL-057: 'secret' is credential-shaped ONLY (standalone/trailing or `secret[_-](key|token|id|
+# access[_-]?key)`), never a prefix adjective on a non-credential word (…SECRET_PACING) — so a
+# feature flag whose NAME merely contains "secret" isn't spuriously value-redacted. `token(?!s)`
+# already keeps the plural *_tokens COUNT fields (inputTokens/maxTokens) intact.
 _BUNDLE_SECRET_KEY_RE = re.compile(
-    r"authorization|api[-_]?key|token(?!s)|secret|password|passwd|credential|bearer",
+    r"authorization|api[-_]?key|token(?!s)|"
+    r"secret(?:[_-](?:key|token|id|access(?:[_-]?key)?))?(?![_-]?[a-z0-9])|"
+    r"password|passwd|credential|bearer",
     re.IGNORECASE)
 
 
@@ -1307,6 +1336,21 @@ def _entry_failed(entry) -> bool:
     return str(entry.get("level") or "").upper() in ("ERROR", "CRITICAL")
 
 
+# F7 (#1599 follow-on): a SEMANTIC no-op is an HTTP-ok LLM call whose OUTPUT was semantically
+# dropped — the ok/failed axis can't see it, so the rollup reports 0 failures for a call that
+# "applied nothing" (a reasoning-channel length-cut that left no usable body; the doubled-JSON
+# identity parse). `record_llm_call` already flips a genuinely-EMPTY/timeout completion to
+# ok:False (S6a), so the remaining blind spot is an ok record TRUNCATED by the output cap
+# (finishReason == "length") — the classic reasoning-channel length-cut behind "genesis calls
+# died to reasoning-channel length-cuts". Counted alongside `failed` so a clean-looking failure
+# rate no longer hides a stream of dropped completions.
+def _entry_semantic_noop(entry) -> bool:
+    if _entry_failed(entry):
+        return False  # already counted on the failed axis; don't double-count
+    finish = str(entry.get("finishReason") or "").lower()
+    return finish == "length"
+
+
 def _is_auto_corrected(entry) -> bool:
     """A soft-failure OVERSEER entry that record_soft_failure marked auto-corrected (a belt/lever/
     floor stood): the ``lever`` carries the correction and the diagnosis carries the marker."""
@@ -1341,12 +1385,18 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     tools: dict = {}
     guards: dict = {}
 
-    def _bump(bucket, key, failed, ts):
-        d = bucket.setdefault(key, {"total": 0, "failed": 0, "lastFailureAt": None})
+    def _bump(bucket, key, failed, ts, *, semantic_noop=False):
+        d = bucket.setdefault(
+            key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None})
         d["total"] += 1
         if failed:
             d["failed"] += 1
             d["lastFailureAt"] = ts
+        # F7: an ok-but-dropped completion. Counted separately from `failed` so an operator can see
+        # "the calls are 200-ok but N of them applied nothing" — the silent semantic no-op.
+        if semantic_noop:
+            d["semanticNoOps"] = d.get("semanticNoOps", 0) + 1
+            d["lastSemanticNoOpAt"] = ts
 
     try:
         _, llm_lines = log_rings.LLMIO.since(0, limit=_BUNDLE_RING_LIMIT)
@@ -1357,7 +1407,8 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
             continue
         if _norm_user(e.get("user")) != want_user:
             continue  # cross-user isolation: this LLM call counts for THIS user only
-        _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"))
+        _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"),
+              semantic_noop=_entry_semantic_noop(e))
 
     try:
         _, io_lines = log_rings.IO.since(0, limit=_BUNDLE_RING_LIMIT)
@@ -1424,7 +1475,7 @@ def _is_guard_down_class(kind: str) -> bool:
 
 
 def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_totals=None,
-                    sandbox=None) -> list:
+                    sandbox=None, faithfulness=None) -> list:
     """WI3 — derive the RED alarms for game-breaking signals from the rollup + the snapshot reads.
     Pure over its inputs (unit-testable): returns a list of ``{code, severity:'red', label, count,
     detail, autoCorrected}``. Vault-free — every input is a count / flag / class token."""
@@ -1455,6 +1506,19 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
             "narration-failure", "Narration call failure", nar["failed"],
             "narration LLM failed (5xx / timeout / empty completion) — "
             f"{nar['failed']}/{nar.get('total', '?')} in-window"))
+
+    # 2b) Semantic no-op STORM (F7). HTTP-ok LLM calls whose output was dropped (reasoning-channel
+    #     length-cut / applied-nothing) — the ok/failed axis reports these clean, so without this the
+    #     rollup showed 0 failures while a stream of completions applied nothing. Fires at the storm
+    #     threshold so an occasional truncation is not alarming, but a burst surfaces.
+    semantic = sum(int(v.get("semanticNoOps", 0)) for v in llm.values() if isinstance(v, dict))
+    if semantic >= _STORM_THRESHOLD:
+        worst = ", ".join(sorted(
+            k for k, v in llm.items() if isinstance(v, dict) and v.get("semanticNoOps")))
+        alarms.append(_alarm(
+            "semantic-noop-storm", "Semantic no-op storm", semantic,
+            f"{semantic} HTTP-ok LLM call(s) applied nothing (output dropped / length-cut) "
+            f"in-window — class(es): {worst or '?'}"))
 
     # 3) Write-back / enrichment refusal STORM. The provider/runtime classes (search-provider /
     #    narrator-http / reasoning-misroute) have their OWN alarm (4c) and are excluded here so a
@@ -1511,6 +1575,16 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
             f"{provider} provider/runtime failure(s) in-window (search-provider down / narrator "
             "HTTP 4xx / reasoning-channel misroute)"))
 
+    # 4d) Faithfulness judge DARK (F10 / BL-019). The operator enabled the anti-hallucination judge
+    #     (shadow/active) but no model resolves, so it silently no-ops on every turn. An unconfigured
+    #     guard the operator ASKED for is a coverage loss — fire at threshold 1 so it can never be an
+    #     invisible no-op again.
+    if isinstance(faithfulness, dict) and faithfulness.get("dark"):
+        alarms.append(_alarm(
+            "faithfulness-judge-dark", "Faithfulness judge unconfigured", 1,
+            f"the faithfulness judge is '{faithfulness.get('mode')}' but no model resolves "
+            "(faithfulness/utility/default all unset) — the anti-hallucination guard is a silent no-op"))
+
     # 5) Embeddings degraded (semantic recall fell back).
     if isinstance(embeddings, dict) and embeddings.get("degraded"):
         alarms.append(_alarm(
@@ -1550,7 +1624,20 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
     return alarms
 
 
-async def _rollup_and_alarms(user: str | None, engine: dict) -> tuple[dict, list]:
+def _faithfulness_section(user: str | None) -> dict | None:
+    """F10 / BL-019 — the faithfulness-judge health posture for the status page. Best-effort +
+    Vault-free (mode / config-presence / resolvability booleans — never a secret). A DARK judge
+    (enabled but no model resolves) surfaces here AND lights the ``faithfulness-judge-dark`` RED alarm,
+    so an active-but-unconfigured anti-hallucination judge is never a silent no-op again."""
+    try:
+        from src import faithfulness as _f
+        return _f.judge_health(user)
+    except Exception:
+        return None
+
+
+async def _rollup_and_alarms(user: str | None, engine: dict,
+                             faithfulness: dict | None = None) -> tuple[dict, list]:
     """Assemble the WI2 rollup + the WI3 RED alarms for the health snapshot. Best-effort throughout
     (a broken read simply contributes nothing) — the 10s poll must never hard-fail."""
     try:
@@ -1577,7 +1664,8 @@ async def _rollup_and_alarms(user: str | None, engine: dict) -> tuple[dict, list
         sandbox = None
     try:
         alarms = _compute_alarms(rollup, embeddings=engine.get("embeddings"),
-                                 sync_recent=sync_recent, belt_totals=belt_totals, sandbox=sandbox)
+                                 sync_recent=sync_recent, belt_totals=belt_totals, sandbox=sandbox,
+                                 faithfulness=faithfulness)
     except Exception:
         alarms = []
     return rollup, alarms
@@ -1635,9 +1723,13 @@ async def _health_snapshot(user: str | None) -> dict:
     except Exception:
         enrichment = None
 
+    # F10 / BL-019 — faithfulness-judge posture (mode + whether a model resolves). A DARK judge
+    # (enabled but unconfigured) surfaces here AND lights the RED alarm below. Vault-free/best-effort.
+    faithfulness = _faithfulness_section(user)
+
     # #1599 WI2/WI3 — the per-class/-tool failure-rate rollup + the RED alarms, both Vault-free and
     # best-effort (a broken read contributes nothing; the poll must never hard-fail).
-    health_rollup, alarms = await _rollup_and_alarms(user, engine)
+    health_rollup, alarms = await _rollup_and_alarms(user, engine, faithfulness=faithfulness)
 
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -1647,6 +1739,8 @@ async def _health_snapshot(user: str | None) -> dict:
         "images": images,
         "castAuthoring": cast_authoring,
         "enrichment": enrichment,
+        # F10 / BL-019 — the faithfulness-judge health posture (dark ⇒ the RED alarm above fires).
+        "faithfulness": faithfulness,
         # #1599 — the per-class/-tool rolling failure-rate rollup (WI2) and the RED game-breaking
         # alarms (WI3). Vault-free: counts / class tokens / booleans only.
         "healthRollup": health_rollup,
