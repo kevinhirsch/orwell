@@ -359,6 +359,32 @@
     });
   }
 
+  // Reject the outstanding UP-FRAME requests (turn/decision) whose socket just died. `_request`
+  // registers a pending promise with NO timeout of its own (unlike `hello`, which `_helloTimer`
+  // guards). The awaiting caller — `handleChatSubmit`'s `await OrwellWs.sendTurn(...)` (chat.js) and
+  // `orwellDecision`'s `await OrwellWs.sendDecision(...)` — therefore hangs FOREVER when the ack can
+  // never arrive because the socket that would carry it is gone (a mid-turn drop: laptop sleep, a
+  // network blip, a uvicorn worker idle-recycle reaping the connection). That stranded `await` never
+  // completes its try-block, so the stream-end `finally` that resets `chatState.isStreaming` and
+  // re-enables the composer never runs: the composer stays disabled / stuck on Stop and the player
+  // must RELOAD the page to continue (the reproducible FE freeze). Reject those pendings so the
+  // caller's catch runs — it reconciles from history (softReloadHistory) and returns, letting the
+  // finally recover the UI; a reconnect independently resumes the run's frames via the gap cursor.
+  // Handshake/subscribe pendings ("hello"/"bind"/"subscribe") are deliberately LEFT to the existing
+  // reconnect / `_helloTimer` machinery — their internal `.then` chains assume they never reject.
+  function _rejectPending(reason) {
+    var code = reason || "ws-closed";
+    for (var cid in _pending) {
+      if (!Object.prototype.hasOwnProperty.call(_pending, cid)) continue;
+      var p = _pending[cid];
+      if (!p || (p.t !== "turn" && p.t !== "decision")) continue;
+      delete _pending[cid];
+      var err = new Error(code);
+      err.code = code;
+      try { p.reject(err); } catch (_) {}
+    }
+  }
+
   // ── the handshake (§2) ──────────────────────────────────────────────────
   function _hello(perTabId) {
     return _request("hello", null, { perTabId: perTabId, protocol: PROTOCOL }, "hello");
@@ -600,6 +626,10 @@
     _closingForGood = true;
     try { if (_sock) _sock.close(); } catch (_) {}
     _sock = null;
+    // A permanent WS→SSE downgrade also strands an in-flight up-frame: its ack rides the socket we
+    // just closed (and `_closingForGood` makes onclose early-return before it can reject). Reject here
+    // so the caller falls through to its catch and the SSE stack / history reconcile takes over.
+    _rejectPending("ws-fallback");
     // Hand the resume cursor forward for a mid-session WS→SSE downgrade (§6):
     // the SSE resume path replays the run buffer from 0 and the client discards
     // the already-rendered prefix up to `fromSeq`; `beatSeq` keeps the next
@@ -791,6 +821,8 @@
       _rebinding = null;
       _clearHelloTimer();
       if (_closingForGood) return;
+      // A genuine mid-session drop: strand no in-flight turn/decision (its ack died with the socket).
+      _rejectPending("ws-closed");
       if (_mode === "ws") {
         // We were live — reconnect with the gap cursor (fromSeq = highest+1) and
         // resume the buffered tail (§3.3 monotonicity). Bounded retries; past the
