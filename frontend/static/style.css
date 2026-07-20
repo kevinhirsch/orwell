@@ -15239,7 +15239,16 @@ body:not(.email-doc-split-active) #email-lib-modal.email-lib-fullscreen:not(.mod
   padding: 8px 10px;
   border: none;
   background: none;
-  color: var(--color-muted);
+  /* BL-043 (WCAG 1.4.3 AA, inactive tab ink): the previous `var(--color-muted)` is
+     stuck at the DARK :root value (#9aa0a8) on LIGHT themes — nothing toggles a
+     `:root.light` class and `applyColors()`/the head-boot script never set
+     `--color-muted`, so the light-theme `--color-muted: #667080` override never
+     applies. On the near-white settings sidebar (`--fg` 2% wash) #9aa0a8 measured
+     ~2.50:1 — below the 4.5:1 floor. Derive the muted ink from the theme's OWN `--fg`
+     blended toward `--bg` so it stays de-emphasised yet clears AA in BOTH polarities
+     (dark ≈5.4:1, light ≈5.2:1) regardless of theme — no per-theme override needed.
+     The frosted glass tier keeps its own higher-specificity scoped ink (~L21338). */
+  color: color-mix(in srgb, var(--fg) 72%, var(--bg));
   font-family: inherit;
   font-size: var(--fs-sm);
   font-weight: 500;
