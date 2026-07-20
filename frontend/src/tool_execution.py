@@ -1685,6 +1685,65 @@ _FORMATTER_HANDLED_KEYS = {
     "error", "output",
 }
 
+# ── The casting Vault Wall — ADR 0019 ("context is not knowledge") / mandate #2 ──────────────────
+# The player's CASTING INTERVIEW backstory/motivation are PRODUCER-ONLY: an OOC channel with no
+# in-game pathway to any houseguest (like the Diary Room). The engine's Vault-free game VIEW carries
+# them anyway — `player.castingCard.story` / `player.castingCard.motivation` — because that view feeds
+# the PLAYER's own casting-card reveal (getGameState/createCharacter). The MODEL, however, must never
+# receive them: EVERY engine tool that returns the view (getGameState, createCharacter, advanceGame,
+# submitDecision, runCompetition, gameStatus, turnIn, the social tools …) serializes it into the tool
+# result the model reads, and a live playtest proved a houseguest then echoed the player's backstory
+# ("you've got a counselor vibe"). This is the STRUCTURAL wall (not prompt wording): `format_tool_result`
+# is the ONE seam every tool result crosses on its way into the narrator's context, so redacting the
+# producer fields HERE walls them from the model for EVERY current and future view-returning tool at
+# once — the model "cannot leak what it never receives". The player's reveal is unaffected: it is
+# narrated in the finalize round (which still holds the interview) and rendered from the FE's own stored
+# view (`remember_pending` keeps the full result), never from this model-facing string.
+_PLAYER_PRODUCER_FIELDS = ("story", "motivation", "backstory", "privateStrategy", "persona")
+
+
+def redact_player_producer_fields(view: dict) -> dict:
+    """Return a copy of a game VIEW with the player's producer-only casting material removed.
+
+    Strips `player.castingCard.{story,motivation}` and any producer-only field that ever rides on the
+    player object itself (`backstory`/`motivation`/`privateStrategy`/`persona`). A non-view dict, or a
+    view without a player object, passes through UNCHANGED (same object). Never mutates the input — the
+    FE's own stored copy stays whole for the player's card reveal."""
+    if not isinstance(view, dict):
+        return view
+    player = view.get("player")
+    if not isinstance(player, dict):
+        return view
+    new_player = {k: v for k, v in player.items() if k not in _PLAYER_PRODUCER_FIELDS}
+    card = new_player.get("castingCard")
+    if isinstance(card, dict):
+        new_player["castingCard"] = {k: v for k, v in card.items() if k not in _PLAYER_PRODUCER_FIELDS}
+    out = dict(view)
+    out["player"] = new_player
+    return out
+
+
+def _redact_producer_view_output(output: str) -> str:
+    """If `output` is a serialized game VIEW carrying the player's producer material, return it with
+    those fields stripped; otherwise return it unchanged. Fail-open: a non-JSON output (bash/python
+    results, non-view tool payloads) or a parse hiccup passes straight through — the wall never breaks a
+    normal tool result. This is the model-facing enforcement point (see the block comment above)."""
+    if not output or not isinstance(output, str) or "castingCard" not in output:
+        return output
+    try:
+        view = json.loads(output)
+    except (ValueError, TypeError):
+        return output
+    if not isinstance(view, dict) or not isinstance(view.get("player"), dict):
+        return output
+    redacted = redact_player_producer_fields(view)
+    if redacted is view:
+        return output
+    try:
+        return json.dumps(redacted, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return output
+
 
 def format_tool_result(description: str, result: Dict) -> str:
     """Format a tool result into text for feeding back to the LLM."""
@@ -1697,8 +1756,11 @@ def format_tool_result(description: str, result: Dict) -> str:
             parts.append(f"**stderr:**\n```\n{result['stderr']}\n```")
         parts.append(f"**exit_code:** {result.get('exit_code', 'unknown')}")
     elif "output" in result:
-        # bash / python canonical result shape: {"output": ..., "exit_code": ...}
-        parts.append(f"```\n{result['output']}\n```")
+        # bash / python canonical result shape: {"output": ..., "exit_code": ...}. When the output is a
+        # serialized game VIEW, redact the player's producer-only casting material BEFORE it reaches the
+        # model (the casting Vault Wall — see `_redact_producer_view_output`). Fail-open for every other
+        # tool's output, so this is byte-identical for anything that isn't a leaky view.
+        parts.append(f"```\n{_redact_producer_view_output(result['output'])}\n```")
         if result.get("exit_code") not in (0, None):
             parts.append(f"**exit_code:** {result['exit_code']}")
     elif "content" in result:
