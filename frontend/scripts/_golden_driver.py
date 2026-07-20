@@ -1008,6 +1008,19 @@ def run_once(**kw) -> GoldenDriver:
         d.walk()
         if d.mode == "replay":
             d.assert_replay_contract()
+    except Exception:
+        # Diagnostic (issue #1713): on ANY play failure, dump the engine + FE log tails BEFORE
+        # shutdown, so CI reveals WHICH engine call blocked — e.g. the casting-finalize →
+        # champagne-premiere ~300s ORWELL_ENGINE_TIMEOUT hang, whose blocking call is otherwise
+        # invisible in the job's stdout. Best-effort + read-only; it re-raises, never masks.
+        for lbl, path, keep in (("engine", d.engine_log, 5000), ("fe", d.fe_log, 3000)):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    tail = fh.read()[-keep:]
+                print(f"\n──── {lbl}.log tail (run_once failure) ────\n{tail}", flush=True)
+            except Exception:
+                pass
+        raise
     finally:
         d.shutdown()
     return d
