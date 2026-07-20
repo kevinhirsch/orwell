@@ -81,6 +81,9 @@ describe("0130 — fires every staged eviction + resurfaces in the retrospective
       expect(x.evictee.name).toBeTruthy();          // humanized, first-person account
       expect(EXIT_STANCES).toContain(x.stance);     // a legal grounded stance
       expect(x.week).toBeGreaterThan(0);
+      // When the evictee authored their own words (the player's account), they round-trip non-empty.
+      // NPC accounts ARE the narrated beat content (canaried in the Vault test), not a stored reel field.
+      if (x.message !== undefined) expect(x.message.length).toBeGreaterThan(0);
     }
   });
 });
@@ -124,7 +127,12 @@ describe("0130 — the player's exit interview is their own pending decision", (
       for (let i = 0; i < 8000; i++) {
         const v = s.advanceGame();
         if (v.pending?.kind === "exit-interview") {
+          const pendingBefore = JSON.stringify(s.snapshot().live?.pending ?? null);
+          const interviewsBefore = JSON.stringify(s.snapshot().live?.exitInterviews ?? []);
           expect(() => s.submitDecision({ kind: "exit-interview", vote: "smug" } as SubmitDecisionReq)).toThrow();
+          // A refused submit is a strict no-op: the pending still stands and nothing was recorded.
+          expect(JSON.stringify(s.snapshot().live?.pending ?? null)).toBe(pendingBefore);
+          expect(JSON.stringify(s.snapshot().live?.exitInterviews ?? [])).toBe(interviewsBefore);
           hit = true;
           break;
         }
@@ -151,6 +159,9 @@ describe("0130 — Vault-safe + deterministic + calibration-neutral", () => {
       if (v.finished) break;
     }
     blobs.push(JSON.stringify(s.seasonRetrospective()?.exitInterviews ?? []));
+    // Mandate #2: the admin/God-Mode debug unseal (producerVaultDump) is the ONE admin-facing
+    // projection of the exit interviews — prove IT stays Vault-free too (the same scrubbed reel).
+    blobs.push(JSON.stringify(s.producerVaultDump()?.exitInterviews ?? []));
     const all = blobs.join("|");
     // No hidden number crosses (a public NamedRef {id,name} is fine — the id is not Vault state).
     expect(/"(physical|mental|social|trust|affinity|threat)"\s*:\s*[\d.]/.test(all)).toBe(false);

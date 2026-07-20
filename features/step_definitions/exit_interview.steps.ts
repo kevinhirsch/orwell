@@ -145,6 +145,8 @@ When("the exit-interview stages and the retrospective reel are read", function (
     if (v.finished) break;
   }
   blobs.push(JSON.stringify(s.seasonRetrospective()?.exitInterviews ?? []));
+  // The admin/God-Mode debug unseal is the ONE admin-facing exit-interview projection — canary it too.
+  blobs.push(JSON.stringify(s.producerVaultDump()?.exitInterviews ?? []));
   this.xiBlob = blobs.join("|");
 });
 Then("no hidden stat, score, or sealed state appears anywhere in them", function (this: BbWorld) {
