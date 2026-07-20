@@ -1352,6 +1352,33 @@ export function renderGameContext(view: GameStateView): string {
     );
   };
   const narratableDiaryRoom = (view.playerDiaryRoom ?? []).filter((e) => !drNamesPresentHouseguest(e));
+  // ADR 0019 Layer 2 — bake each PRESENT houseguest's OWN knowledge scope into the built context. The
+  // model voices every NPC from ONE shared completion, so "in context" reads as "known" unless the
+  // context is per-NPC-scoped. This is that scope, PER present houseguest: their own `knows`/`suspects`
+  // (the SAME Vault-free set `npcVoice` returns), labelled under THEIR name so the narrator voices them
+  // from a bounded set BY DEFAULT — not by remembering to call the under-called `npcVoice`. "Context is
+  // not knowledge": a fact witnessed only by B appears ONLY under B's block, never A's. Prompt-honoured
+  // defence-in-depth (Layer 3's post-hoc guard is the backstop), never the sole wall. Present only when
+  // someone in the room actually holds/suspects something ⇒ absent otherwise (byte-identical).
+  const presentKnowledgeLines: string[] = (view.presentKnowledge ?? []).length
+    ? [
+        "- WHAT EACH HOUSEGUEST IN THE ROOM LEGITIMATELY KNOWS (voice each ONLY from THEIR OWN block —",
+        "  a person can reference or \"recall\" only what THEY witnessed or were told; never put one",
+        "  houseguest's knowledge in another's mouth, and never a fact no one here holds):",
+        ...(view.presentKnowledge ?? []).flatMap((e) => {
+          // Route each knowledge string through `neutralizeForPrompt` (as the diary-room entries above
+          // do): these are model-adjacent content the guest "knows", so a prompt-injection control
+          // sequence in one can't forge a prompt line. Defence-in-depth — the block is per-NPC scoped.
+          // NB: arrow-wrap `neutralizeForPrompt` — a bare `.map(neutralizeForPrompt)` would pass the
+          // array INDEX as the `max` arg (index 0 ⇒ max 0 ⇒ everything truncated). The DR block above
+          // wraps it for the same reason.
+          const lines = [`    · ${neutralizeForPrompt(e.name)}:`];
+          if (e.knows.length) lines.push(`        knows: ${e.knows.map((k) => neutralizeForPrompt(k)).join("; ")}`);
+          if (e.suspects.length) lines.push(`        suspects (a hunch, not fact): ${e.suspects.map((s) => neutralizeForPrompt(s)).join("; ")}`);
+          return lines;
+        }),
+      ]
+    : [];
   return [
     "GAME CONTEXT:",
     `- Week: ${view.week}`,
@@ -1366,6 +1393,7 @@ export function renderGameContext(view: GameStateView): string {
     "  do your own arithmetic about how many are left, on podiums, etc.).",
     ...ceremonyLines,
     ...whereaboutsLines,
+    ...presentKnowledgeLines,
     ...premiereLines,
     // 0059/L40 — the ONLY romantic pairs the narrator may voice as a showmance: the public (visible)
     // ones the engine has surfaced. Everything else is friendship/strategy (the SHOWMANCES ARE RARE pin).

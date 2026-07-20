@@ -139,6 +139,50 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
 
   const RESEARCH_TIMEOUT_MS = 360000;
   const DEFAULT_TIMEOUT_MS = 120000;
+
+  // ── STREAM IDLE-ABORT bound (SSE/poll fallback freeze fix) ────────────────────────────────────
+  // The whole-turn abort is an ACTIVITY-RESET IDLE timer, not a one-shot-cleared timer (see
+  // `_makeStreamIdleGuard`). These name the max gap between ANY two stream activities (deltas / tool
+  // events) before the abort fires. They REUSE the established per-mode whole-turn budget on purpose:
+  // before this fix that budget already bounded the pre-first-token wait, so reusing it as the idle
+  // bound can NEVER false-positive a case the shipped timeout wouldn't already have aborted. Agent /
+  // research keep the generous 6-min bound specifically because a single slow tool call (web fetch,
+  // a deep-research step) legitimately emits nothing for minutes — the exact false-positive the old
+  // one-shot-clear was reaching for, now handled by resetting on every activity instead.
+  const STREAM_IDLE_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;        // chat mode
+  const STREAM_IDLE_TIMEOUT_AGENT_MS = RESEARCH_TIMEOUT_MS; // agent / research mode
+
+  // A mid-stream SSE stall (the server stops emitting deltas partway through a turn) must ABORT +
+  // recover, never leave `await reader.read()` blocked forever with `chatState.isStreaming` stuck
+  // true — the same reload-forcing freeze class as the WS-orphaned-pending one (PR #1718), but on the
+  // fallback transport. Before this fix the whole-turn abort timer was a ONE-SHOT:
+  // `clearResponseTimeout()` fired on the FIRST stream activity and permanently disarmed it, so
+  // nothing bounded a mid-stream stall (only the tab-return `visibilitychange` recovery caught it, and
+  // only after a manual tab switch). This converts that abort into an ACTIVITY-RESET IDLE timer:
+  // `.activity()` (re)arms the countdown on stream START and on EVERY subsequent delta/tool event, so
+  // it fires only after a genuine IDLE gap (`idleMs` of no activity). A long-but-ACTIVE agent turn
+  // keeps resetting it and is never tripped (the false-positive the one-shot-clear originally avoided);
+  // only real silence aborts, driving the SAME recovery the turn already has (abort → catch →
+  // reconcile from history → finally resets `isStreaming` + re-enables the composer + flushes the
+  // outbox). `.disarm()` is the permanent turn-end clear (finally / WS handoff / pre-stream refusal).
+  // Self-contained (no closure deps beyond its two args) so it is unit-testable in isolation.
+  function _makeStreamIdleGuard(idleMs, onIdle) {
+    let timer = null;
+    let disarmed = false;
+    const _clear = () => { if (timer !== null) { clearTimeout(timer); timer = null; } };
+    return {
+      // Called on stream START and on EVERY stream activity: (re)arm the idle countdown.
+      activity() {
+        if (disarmed) return;
+        _clear();
+        timer = setTimeout(() => { timer = null; if (!disarmed) onIdle(); }, idleMs);
+      },
+      // Permanent disarm on turn end (finally / WS handoff / refusal): no idle abort after the turn.
+      disarm() { disarmed = true; _clear(); },
+      // Introspection for tests: is the idle countdown currently armed?
+      _armed() { return timer !== null; },
+    };
+  }
   const RESEARCH_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>';
   // B11 (2026-07-05): the ONE canonical diegetic "production interruption" line for a raw
   // engine/backend failure the player must never see rendered as machinery text (I9). Originally
@@ -1077,8 +1121,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     let _renderStream = () => {};
     let _cancelThinkingTimer = () => {};
     let _removeThinkingSpinner = () => {};
-    let timeoutId = null;
-    let responseTimeoutCleared = false;
+    // The whole-turn abort is an ACTIVITY-RESET IDLE timer (`_makeStreamIdleGuard`), not a one-shot.
+    // `resetIdleTimeout` re-arms the idle countdown on each stream activity; `clearResponseTimeout`
+    // is the permanent turn-end disarm (finally / WS handoff / refusal). Both are function-scoped
+    // no-op stubs until the transport dispatch below wires the real guard.
+    let resetIdleTimeout = () => {};
     let clearResponseTimeout = () => {};
     const clearProcessingProbe = () => {
       if (processingProbeTimer) {
@@ -1384,9 +1431,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       const _tState = Storage.loadToggleState();
       const _isAgent = (_tState.mode || 'chat') === 'agent';
 
-      // Timeout: 6 min for research and agent mode, 3 min otherwise
-      const timeoutMs = el('research-toggle').checked || _isAgent ? RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
-      timeoutId = setTimeout(() => {
+      // Idle-abort bound: 6 min for research/agent mode, 2 min otherwise. This bounds the max gap
+      // between ANY two stream activities (the pre-first-token wait AND every mid-stream gap), so a
+      // mid-stream SSE stall aborts + recovers instead of hanging reader.read() forever (freeze fix).
+      const idleMs = (el('research-toggle').checked || _isAgent)
+        ? STREAM_IDLE_TIMEOUT_AGENT_MS : STREAM_IDLE_TIMEOUT_MS;
+      const _idleGuard = _makeStreamIdleGuard(idleMs, () => {
+        // Fired only after a genuine IDLE gap. Drive the SAME recovery the whole-turn timeout always
+        // had: mark timed-out, tell the server to stop the run, and abort the reader — the catch's
+        // `timedOut || abortReason==='timeout'` branch preserves any partial + the finally recovers UI.
         if (!abortCtrl.signal.aborted) {
           timedOut = true;
           abortCtrl._reason = 'timeout';
@@ -1400,13 +1453,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           } catch (_) {}
           abortCtrl.abort();
         }
-      }, timeoutMs);
-      clearResponseTimeout = () => {
-        if (responseTimeoutCleared) return;
-        responseTimeoutCleared = true;
-        clearTimeout(timeoutId);
-      };
-      
+      });
+      _idleGuard.activity();                 // initial arm — bounds the pre-first-token wait as before
+      resetIdleTimeout = () => { _idleGuard.activity(); };   // re-arm on each stream activity
+      clearResponseTimeout = () => { _idleGuard.disarm(); }; // permanent turn-end disarm
+
       const box = el('chat-history');
       holder = document.createElement('div');
       holder.className = 'msg msg-ai streaming';
@@ -2064,7 +2115,10 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 break;
               }
               if (json.delta || json.type === 'tool_start' || json.type === 'tool_output' || json.type === 'tool_progress' || json.type === 'agent_step' || json.type === 'doc_stream_open' || json.type === 'doc_stream_delta' || json.type === 'research_progress') {
-                clearResponseTimeout();
+                // Stream activity: RESET the idle countdown (was a one-shot permanent clear — that
+                // left a mid-stream stall unbounded). A long-but-active turn keeps re-arming and is
+                // never tripped; only a genuine idle gap aborts + recovers.
+                resetIdleTimeout();
                 clearProcessingProbe();
               }
               if (json.delta) {

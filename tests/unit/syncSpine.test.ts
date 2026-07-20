@@ -301,6 +301,46 @@ describe("0065 Part B — idempotency keys on progression tools", () => {
     expect(replay).toEqual(first);
     expect(replay.beatSeq).toBe(first.beatSeq);
   });
+
+  // BL-003 (2026-07-16 full playtest audit) — the engine-side contract the FE's `retry_progression_after_stale`
+  // (do_advance_game) depends on: the mechanical root cause of the audit was an un-retried `advanceGame`
+  // `StaleBeatError` that let the engine FREEZE at premiere while narration ran a fabricated HOH/removal arc
+  // on top of it. The FE fix reconciles + re-fires ONCE against the fresh beatSeq with the SAME idempotency
+  // key; that is only safe because the engine (a) throws the stale conflict BEFORE caching the key (so the
+  // retry genuinely advances, never short-circuits to a stale cached view) and (b) then dedups a further
+  // replay of the key (at-most-once, so the bounded retry can never double-advance). This pins BOTH halves.
+  it("BL-003 — a STALE advanceGame throws WITHOUT caching the key, so the reconciled retry advances EXACTLY once", () => {
+    const { sb, session } = startedRuntime();
+    const seen = session.gameStatus().beatSeq;           // the beatSeq the FE last saw / computed against
+    // A belt commit (the 0055/0065 back-fill) lands between the model's read and its advanceGame — the exact
+    // stale-beat trigger. beatSeq moves by one; the model's `seen` token is now stale.
+    sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a belt", kind: "bonding", expectedBeatSeq: seen });
+    const moved = session.gameStatus().beatSeq;
+    expect(moved).toBe(seen + 1);
+
+    const KEY = "advance-after-stale";
+    // (1) The model-driven advanceGame fires against the STALE token + a key. The engine refuses BEFORE any
+    //     mutation AND before caching the key (`guardBeatSeq` throws on the cache MISS) — the beat does NOT
+    //     advance and the key is NOT poisoned with a stale/no-op view.
+    expect(() => session.advanceGame({ expectedBeatSeq: seen, idempotencyKey: KEY })).toThrow(StaleBeatError);
+    expect(session.gameStatus().beatSeq).toBe(moved);     // stale throw changed NO state (fail-closed)
+
+    // (2) The FE reconciles to the fresh beatSeq and RE-FIRES the SAME key. Because the stale throw cached
+    //     nothing, this genuinely ADVANCES — it is NOT short-circuited to a cached stale view. This is the
+    //     difference between the engine advancing and the BL-003 freeze. (The returned VIEW's `beatSeq` is
+    //     the pre-commit-funnel value, per the sibling test above, so the committed advance is read off the
+    //     live `gameStatus()` counter.)
+    const applied = session.advanceGame({ expectedBeatSeq: moved, idempotencyKey: KEY });
+    const liveAfterRetry = session.gameStatus().beatSeq;
+    expect(liveAfterRetry).toBeGreaterThan(moved);        // the advance really committed against the fresh board
+
+    // (3) A FURTHER replay of the SAME key (a flaky-socket double-send, or the FE's own belt-and-suspenders)
+    //     returns the applied view verbatim WITHOUT advancing again — 0065 Part B at-most-once. The bounded
+    //     reconcile-and-retry can never double-progress the season.
+    const replay = session.advanceGame({ idempotencyKey: KEY });
+    expect(replay).toEqual(applied);
+    expect(session.gameStatus().beatSeq).toBe(liveAfterRetry);  // no second advance
+  });
 });
 
 describe("0065 Part A — the HTTP edge maps stale-beat to 409 with code + beatSeq + board", () => {

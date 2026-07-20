@@ -176,13 +176,15 @@ def test_auto_move_npc_is_wired_into_the_finishing_block():
                            "src", "agent_loop.py"), encoding="utf-8").read()
     assert "async def _auto_move_npc" in js
     # gated on: model didn't moveHouseguest + the per-turn cap + the cheap movement pre-filter over the
-    # whole turn's NARRATION (where NPCs move).
+    # whole turn's NARRATION (where NPCs move). CodeRabbit (BL-013/033, finding 1): the pre-filter reads
+    # the VISIBLE narration (<think> reasoning stripped) so a "move X to the kitchen" inside reasoning
+    # can't drive a persisted NPC relocation the player never saw.
     assert '_npc_moved = "moveHouseguest" in _tool_names' in js
     assert "_want_npc_move = ((not _npc_moved)" in js
-    assert "_MOVE_SIGNAL_RE.search(_turn_narration)" in js
-    # the fetch-guard includes the NPC-move belt, and the call site fires inside it
+    assert "_MOVE_SIGNAL_RE.search(_turn_narration_visible)" in js
+    # the fetch-guard includes the NPC-move belt, and the call site fires inside it — VISIBLE narration
     assert "_want_move or _want_npc_move" in js
-    assert "await _auto_move_npc(_turn_narration, _last_user_for_move" in js
+    assert "await _auto_move_npc(_turn_narration_visible, _last_user_for_move" in js
     # model-driven moveHouseguest always wins (_npc_moved short-circuits _want_npc_move)
 
 
