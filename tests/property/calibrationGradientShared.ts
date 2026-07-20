@@ -78,6 +78,8 @@ function passiveAnswer(p: PendingView): Record<string, unknown> {
       return { kind: "juror-vote", vote: p.options[0]!.id };
     case "goodbye-message":
       return { kind: "goodbye-message", vote: "respectful" };
+    case "exit-interview": // 0130 — the player-evictee's posture rides `vote`, like a goodbye tone.
+      return { kind: "exit-interview", vote: "gracious" };
     case "juror-question":
       return { kind: "juror-question", statement: "What was your biggest move?" };
     default:

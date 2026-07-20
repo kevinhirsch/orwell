@@ -36,6 +36,7 @@
     "final-eviction": "vote",
     "juror-vote": "vote",
     "goodbye-message": "vote", // E34: the chosen tone rides `vote` (options are the tones)
+    "exit-interview": "vote", // 0130: the chosen exit stance rides `vote` (options are the stances)
     "deal-offer": "vote", // 0123: accept/decline of an NPC's floated deal rides `vote` (options are the two)
     "replacement": "replacement",
   };
@@ -414,8 +415,8 @@
     if (kind === "nominations") return sel.length === 2 ? { kind, choice: sel } : null;
     if (kind === "finale-statement") return { kind, statement: freeText || "" };
     if (kind === "juror-question") return { kind, statement: freeText || "" }; // E37: scoreless free text
-    if (kind === "goodbye-message") {
-      // E34: a tone is required; the optional message text rides `statement`.
+    if (kind === "goodbye-message" || kind === "exit-interview") {
+      // E34/0130: a tone/stance is required; the optional message text rides `statement`.
       return sel.length === 1 ? { kind, vote: sel[0], statement: freeText || "" } : null;
     }
     if (kind === "finale-answer") return sel.length === 1 ? { kind, appeal: sel[0] } : null;
@@ -457,6 +458,7 @@
       "tie-break": "Tied vote — as HOH, you decide",
       "final-eviction": "Final 3 — you evict, personally",
       "goodbye-message": "Goodbye message — your tone, your words",
+      "exit-interview": "Exit interview — your posture, your words",
       "finale-statement": "Opening statement — address the jury",
       "finale-answer": "Jury question — choose your appeal",
       "juror-question": "Your jury question — ask the finalist",
@@ -479,6 +481,7 @@
   function disabledHintFor(kind, pick, multi) {
     if (kind === "nominations") return "Select 2 houseguests to enable Confirm.";
     if (kind === "goodbye-message") return "Pick a tone to enable Confirm — your written message is optional.";
+    if (kind === "exit-interview") return "Pick a posture to enable Confirm — your written words are optional.";
     if (kind === "veto-decision") return "Choose to use the veto (and who to save) or not, to enable Confirm.";
     if (multi) return `Select ${pick} to enable Confirm.`;
     return "Make your selection above to enable Confirm.";
@@ -495,6 +498,7 @@
       "juror-question": "I've decided what to ask — let's hear their answer.",
       "finale-answer": "I've cast my jury vote — let's see who takes it.",
       "goodbye-message": "I've recorded my goodbye message — let's see how the house reacts.",
+      "exit-interview": "I've given my exit interview — that's my side of it.",
       "comp-intent": "I've set my approach for this competition — let's compete.",
       "comp-round": "I'm committing to this round — let's push on.",
       "self-evict": "I've made my choice to walk — let's see how the house takes it.",
@@ -726,6 +730,14 @@
       textarea = document.createElement("textarea");
       textarea.placeholder = "Your goodbye message (optional — the tone is what binds)…";
       textarea.setAttribute("aria-label", "Your goodbye message (optional)"); // J5-02
+      textarea.addEventListener("input", sync);
+      card.appendChild(textarea);
+    } else if (kind === "exit-interview") {
+      // 0130: the player-evictee's own exit interview — pick a posture (the binding part) + optional words.
+      (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
+      textarea = document.createElement("textarea");
+      textarea.placeholder = "Your exit interview (optional — the posture is what binds)…";
+      textarea.setAttribute("aria-label", "Your exit interview (optional)"); // J5-02
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
     } else if (kind === "finale-answer") {

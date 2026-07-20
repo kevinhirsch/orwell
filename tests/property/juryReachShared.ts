@@ -86,6 +86,9 @@ function passiveAnswer(p: PendingView): Record<string, unknown> {
     // The 0046/0037 player-agency pendings (PR #217): tone rides `vote`, free text rides `statement`.
     case "goodbye-message":
       return { kind: "goodbye-message", vote: "respectful" };
+    // 0130 — the player-evictee's exit interview (posture rides `vote`, like a goodbye tone).
+    case "exit-interview":
+      return { kind: "exit-interview", vote: "gracious" };
     case "juror-question":
       return { kind: "juror-question", statement: "What was your biggest move?" };
     default:

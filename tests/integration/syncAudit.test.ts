@@ -38,7 +38,7 @@ import type {
 // The complete set of player decision kinds (mirrors PendingDecisionView.kind).
 const KNOWN_PENDING_KINDS = new Set<string>([
   "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice", "replacement",
-  "eviction-vote", "tie-break", "final-eviction", "goodbye-message", "finale-statement",
+  "eviction-vote", "tie-break", "final-eviction", "goodbye-message", "exit-interview", "finale-statement",
   "finale-answer", "juror-question", "juror-vote",
 ]);
 
@@ -61,6 +61,7 @@ function resolve(s: GameSessionAdapter, p: Pending): void {
     case "tie-break": s.submitDecision({ kind: "tie-break", vote: o(0) }); break;
     case "final-eviction": s.submitDecision({ kind: "final-eviction", vote: o(0) }); break;
     case "goodbye-message": s.submitDecision({ kind: "goodbye-message", vote: o(0), statement: "x" }); break;
+    case "exit-interview": s.submitDecision({ kind: "exit-interview", vote: o(0), statement: "x" }); break;
     case "finale-statement": s.submitDecision({ kind: "finale-statement", statement: "x" }); break;
     case "finale-answer": s.submitDecision({ kind: "finale-answer", appeal: p.appeals?.[0] ?? "own-game" }); break;
     case "juror-question": s.submitDecision({ kind: "juror-question", statement: "x" }); break;

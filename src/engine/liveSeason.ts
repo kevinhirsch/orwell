@@ -110,6 +110,10 @@ export type Beat =
   | "finale-reveal" | "finale-result"
   // eviction sub-loop events (0047) — emitted on BeatEvent only; the staged reveal/goodbye/result.
   | "eviction-reveal" | "eviction-goodbye" | "eviction-result"
+  // the evictee's exit interview (0130) — emitted on BeatEvent only; a presentation/retrospective beat
+  // that draws NO rng and mutates NO seeded state (the NPC stance is a read of the already-fixed manner;
+  // the record feeds only the 0048 retrospective), so it never perturbs the seeded trajectory.
+  | "exit-interview"
   // the player's voluntary walk-out (0061) — a recorded, witnessed, non-hidden exit event; emitted
   // on BeatEvent only (the structural transition is the player's removal + the terminal `selfEvicted`).
   | "self-eviction"
@@ -128,8 +132,13 @@ export type Beat =
  * `stagedTrajectoryNeutral`). The crown keeps its comp beat key (so its consequence still folds) and
  * is NOT inert. Callers that gate substantive side-effects (e.g. the ADR-0006 clock, #537) consult this
  * so an inert reveal can never perturb game state the same way it can never perturb the seeded stream.
+ *
+ * `exit-interview` (0130) joins the set: it is a presentation-only producer sit-down (no rng, no fold —
+ * the NPC stance is a read of the already-fixed manner, the record feeds only the 0048 retrospective), so
+ * it must NOT advance the ADR-0006 clock either — an extra eviction-night tick would shift fatigue/rest
+ * into later competitions when time-of-day is enabled, contradicting the feature's no-seeded-state contract.
  */
-const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "day-break"]);
+const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "day-break", "exit-interview"]);
 
 /** Whether a beat is an inert, presentation-only staged reveal (no rng / no fold / no clock advance). */
 export function isInertBeat(beat: Beat): boolean {
@@ -156,6 +165,8 @@ export type PendingDecision =
   | { kind: "final-eviction"; by: EntityId; options: [EntityId, EntityId] }
   // --- eviction night (0047/E34): the player's own goodbye message to the evictee ---
   | { kind: "goodbye-message"; by: EntityId; evictee: EntityId; tones: GoodbyeTone[] }
+  // --- exit interview (0130): the player, as the EVICTEE, answers the producers in their own words/posture ---
+  | { kind: "exit-interview"; by: EntityId; evictee: EntityId; stances: ExitStance[] }
   // --- finale (0037) ---
   | { kind: "finale-statement"; by: EntityId }
   | { kind: "finale-answer"; by: EntityId; juror: EntityId; appeals: FinaleAppeal[] }
@@ -198,7 +209,17 @@ export interface FinaleProgress {
 }
 
 /** Which stage of the live eviction sub-loop (0047) we are advancing. */
-export type EvictionStage = "votes" | "goodbye" | "result";
+export type EvictionStage = "votes" | "goodbye" | "exit-interview" | "result";
+
+/**
+ * The evictee's own public posture on the way out (0130 exit interviews): DERIVED for an NPC from the
+ * manner of their eviction (0037 §4.2), the PLAYER's own choice. A grounded reaction — a betrayed
+ * houseguest leaves bitter, a blindsided one defiant, a clean exit gracious.
+ */
+export type ExitStance = "gracious" | "defiant" | "bitter";
+
+/** The legal exit-interview stances offered to the player-evictee (their own words, their own posture). */
+export const EXIT_STANCES: readonly ExitStance[] = ["gracious", "defiant", "bitter"];
 
 /**
  * The live eviction sub-state machine (0047): the weekly eviction staged like the finale (0037) —
@@ -222,6 +243,11 @@ export interface EvictionProgress {
   goodbyeFrom: EntityId[];
   /** Cursor into `goodbyeFrom` (goodbye stage). */
   goodbyeIx: number;
+  /**
+   * 0130 — set once the evictee's exit interview has been given (the single beat in the exit-interview
+   * stage). Prevents re-emitting it on the advance that transitions the stage to `result`.
+   */
+  exitInterviewDone?: boolean;
 }
 
 /**
@@ -378,6 +404,13 @@ export interface LiveSeasonState {
    * the season lives; the attribution surfaces only through the post-season retrospective.
    */
   voteRecord?: Array<{ week: number; evictee: EntityId; voteOf: Record<EntityId, EntityId> }>;
+  /**
+   * 0130 — each evictee's exit interview, week by week: their public posture on the way out (a `stance`
+   * DERIVED from their manner for an NPC, or the PLAYER's own chosen stance + words). Recorded as the
+   * exit-interview beat resolves; resurfaced in the 0048 retrospective as first-person exit accounts.
+   * Expressive/retrospective ONLY — it feeds no seeded decision, so it never perturbs the game trajectory.
+   */
+  exitInterviews?: Array<{ week: number; evictee: EntityId; stance: ExitStance; message?: string }>;
   /**
    * The in-progress STAGED competition sub-loop (0006 staged-rounds evolution); set while an
    * endurance-style HOH/veto comp plays out its elimination rounds, cleared when a winner remains.
@@ -644,6 +677,7 @@ export type DecisionInput =
   | { kind: "final-eviction"; evict: EntityId }
   // --- eviction night (E34): the tone is the player's CHOICE; the prose is the model's to voice ---
   | { kind: "goodbye-message"; tone: GoodbyeTone; message?: string }
+  | { kind: "exit-interview"; stance: ExitStance; message?: string }
   // --- finale (0037) ---
   | { kind: "finale-statement"; statement: string }
   | { kind: "finale-answer"; appeal: FinaleAppeal }
@@ -1720,6 +1754,25 @@ export function goodbyeMannerFor(tone: GoodbyeTone): EvictionManner {
 }
 
 /**
+ * An NPC evictee's exit-interview stance (0130), DERIVED from the manner of their eviction
+ * (anti-sycophancy — the reaction is grounded in what happened, never free-authored): a houseguest who
+ * feels BETRAYED leaves bitter, one who was BLINDSIDED leaves defiant, an evictee moved out cleanly
+ * (respected) leaves gracious. Read-only over the already-recorded manner rows toward the responsible
+ * houseguests — it draws NO rng and mutates NO state, so it can never perturb the seeded trajectory.
+ */
+export function npcExitStance(evictee: EntityId, s: LiveSeasonState): ExitStance {
+  const rows = Object.values(s.mannerByEvictee?.[evictee] ?? {});
+  if (rows.some((m) => m.betrayed || m.disrespected)) return "bitter";
+  if (rows.some((m) => m.blindsided)) return "defiant";
+  return "gracious";
+}
+
+/** The deterministic exit-interview beat line (0130) — the narrator voices it richly from the moment. */
+function exitInterviewContent(evictee: EntityId, stance: ExitStance): string {
+  return `${evictee} sits with the producers for their exit interview, leaving ${stance}`;
+}
+
+/**
  * The seeded houseguests who leave a goodbye message (from the house remaining after the eviction).
  * E34: the PLAYER is never engine-selected here — the engine must not author the player's goodbye
  * or assert a tone computed from their hidden edge. A surviving player is appended as the LAST
@@ -1804,6 +1857,27 @@ function advanceEviction(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
         const row = (s.mannerByEvictee![e.evictee!] ??= {});
         row[sender] = { ...(row[sender] ?? {}), ...goodbyeMannerFor(tone) };
         return { beat: "eviction-goodbye", content: `${sender} leaves ${e.evictee} a ${tone} goodbye message`, participants: [sender, e.evictee!] };
+      }
+      e.stage = "exit-interview";
+      return advanceEviction(s, ctx, rng);
+    }
+    case "exit-interview": {
+      // 0130 — after the house's goodbyes, the evictee is interviewed by the producers: they see + react
+      // to their goodbye messages and tell their side. Fires for EVERY staged eviction (the same scope as
+      // the goodbye stage). INERT to the seeded spine: it draws no rng and mutates no seeded state — the
+      // NPC stance is a read-only derivation of the already-fixed manner; the record feeds only the 0048
+      // retrospective. So the eviction order / finalists / winner are byte-identical to the pre-0130 model.
+      if (!e.exitInterviewDone) {
+        if (e.evictee === ctx.player) {
+          // The player IS the evictee: their exit interview is their own — a real pending decision (never
+          // engine-authored), exactly like the E34 goodbye message. No beat fires until they answer.
+          s.pending = { kind: "exit-interview", by: ctx.player, evictee: e.evictee, stances: [...EXIT_STANCES] };
+          return null;
+        }
+        const stance = npcExitStance(e.evictee!, s);
+        (s.exitInterviews ??= []).push({ week: s.week, evictee: e.evictee!, stance });
+        e.exitInterviewDone = true;
+        return { beat: "exit-interview", content: exitInterviewContent(e.evictee!, stance), participants: [e.evictee!] };
       }
       e.stage = "result";
       return advanceEviction(s, ctx, rng);
@@ -2341,6 +2415,10 @@ export function autoDecision(s: LiveSeasonState, ctx: SeasonCtx, rng: Randomness
     case "goodbye-message":
       // The same relationship-derived tone an NPC sender would use (no second rulebook).
       return { kind: "goodbye-message", tone: goodbyeTone(p.by, p.evictee, ctx) };
+    case "exit-interview":
+      // 0130 — the same manner-derived stance an NPC evictee would take (auto-play default; the live
+      // player answers for themselves through submitDecision).
+      return { kind: "exit-interview", stance: npcExitStance(p.evictee, s) };
     case "finale-statement":
       return { kind: "finale-statement", statement: "" };
     case "finale-answer":
@@ -2485,6 +2563,23 @@ export function applyDecision(
         beat: "eviction-goodbye",
         content: `${p.by} leaves ${e.evictee} a ${input.tone} goodbye message`,
         participants: [p.by, e.evictee!],
+      };
+    }
+    case "exit-interview": {
+      // 0130: the player, as the EVICTEE, gives their own exit interview — the posture (and their words)
+      // are THEIRS (the engine never authors them), recorded for the 0048 retrospective exactly as an NPC
+      // stance is. Expressive only: it mutates no seeded state.
+      const p = s.pending;
+      if (!p || p.kind !== "exit-interview") throw new Error("no pending exit interview");
+      if (!EXIT_STANCES.includes(input.stance)) throw new Error("a legal exit stance is required (gracious / defiant / bitter)");
+      const e = s.eviction!;
+      s.pending = undefined;
+      e.exitInterviewDone = true;
+      (s.exitInterviews ??= []).push({ week: s.week, evictee: e.evictee!, stance: input.stance, ...(input.message ? { message: input.message } : {}) });
+      return {
+        beat: "exit-interview",
+        content: exitInterviewContent(e.evictee!, input.stance),
+        participants: [e.evictee!],
       };
     }
     // --- secret veto (0025 reactive redesign) ---------------------------------

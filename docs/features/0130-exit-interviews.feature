@@ -1,47 +1,47 @@
-# spec-only: this .feature is a design contract, NOT wired into the BDD gate (absent from cucumber.cjs paths; no step definitions). Its behavior is verified elsewhere — see the per-feature status index in docs/features/README.md. (TEST-3, #628)
-# Feature 0130 — Exit interviews. Expands 0047 (eviction night); feeds 0048 (retrospective). HARD rule:
-# roles only (evictee, producer, player, juror). NOT YET BUILT — spec authored 2026-07-13 during the 0047
-# PO review.
+# Executable spec — IMPLEMENTED & green; BDD-gated in cucumber.cjs. (Originally drafted spec-only 2026-07-13,
+# built 2026-07-13.) Feature 0130 — Exit interviews: expands 0047. Every staged eviction ends with the
+# producers' exit interview — the evictee's posture leaving (NPC: derived from manner; player: their own
+# pending decision), recorded for the 0048 retrospective. Inert to the seeded spine. HARD rule: roles only
+# (evictee, producer, player, juror).
 
 Feature: Exit interviews (the producer's eviction-night sit-down)
 
-  Every eviction ends with the evictee interviewed by the producers on their way out: they see their goodbye
-  messages, react in the moment, and tell their side. For an NPC it is grounded narration; for the player it
-  is a real say at their lowest point. Each exit interview is recorded and resurfaces in the season-end
-  retrospective. The evictee speaks only to what they know and their own goodbye messages — nothing hidden.
+  Every staged eviction ends with the evictee interviewed by the producers: they react to how they went out
+  and tell their side. For an NPC the posture is grounded in the manner of their eviction; for the player it
+  is their own say. Each interview is recorded and resurfaces in the season-end retrospective. Nothing hidden
+  crosses the wall, and the beat never moves a seeded outcome.
 
-  Scenario: Every eviction ends with an exit interview
-    Given an eviction whose result has landed
-    When the eviction night continues past the goodbye messages
-    Then the evicted houseguest is interviewed by the producers
-    And this happens for every eviction, NPC or player
+  Scenario: An NPC's exit posture is grounded in the manner, not invented
+    Given an evictee who was betrayed on the way out
+    And an evictee who was cleanly, respectfully evicted
+    When each gives their exit interview
+    Then the betrayed evictee leaves bitter
+    And the respectfully evicted one leaves gracious
 
-  Scenario: The evictee sees and reacts to their goodbye messages
-    Given an evictee at their exit interview
-    When the goodbye messages are surfaced to them
-    Then the evictee reacts to what the house said
-    And a houseguest who later returns via a battle-back keeps that memory
-
-  Scenario: An NPC exit interview is grounded, not invented
-    Given an NPC evicted with a recorded eviction manner
-    When they are interviewed on the way out
-    Then their reaction reflects that manner and their own knowledge of the season
-    And a blindsided evictee reacts differently than a respected one
-    And no hidden scheme or number appears in the interview
+  Scenario: Every staged eviction is interviewed and resurfaces in the retrospective
+    Given a seeded season played to completion
+    When the season-end retrospective is read
+    Then every staged eviction has a recorded exit interview
+    And each is a first-person account with a legal posture
 
   Scenario: The player's exit interview is their own decision
-    Given the player has been evicted
+    Given a seeded season in which the player is evicted through the staged path
     When the exit interview reaches the player
-    Then the loop pauses for the player's own answer through the decision seam
-    And the engine never authors the player's words for them
+    Then the loop pauses for the player's own answer
+    And nothing is recorded for the player until they answer
+    And the player's chosen posture and words are recorded
 
-  Scenario: Exit interviews resurface in the season-end retrospective
-    Given a season in which several houseguests were evicted and interviewed
-    When the end-of-season retrospective is read
-    Then it replays each evictee's exit interview as a first-person account
+  Scenario: An illegal exit posture is refused
+    Given the player at their exit interview
+    When they submit a posture that is not offered
+    Then the decision is refused
 
-  Scenario: The exit interview leaks nothing and moves no seeded outcome
-    Given a seeded season played to completion with exit interviews
-    Then no Vault sentinel value appears in any exit interview
-    And the player's exit interview reaches no active houseguest still in the game
-    And the eviction order, finalists, and jury result are byte-identical to the pre-feature model
+  Scenario: The exit interview leaks nothing hidden
+    Given a seeded season played to completion
+    When the exit-interview stages and the retrospective reel are read
+    Then no hidden stat, score, or sealed state appears anywhere in them
+
+  Scenario: The exit interview moves no seeded outcome
+    Given the same seed played to completion twice
+    Then the eviction order is identical both times
+    And it matches the trajectory from before the feature existed

@@ -44,6 +44,7 @@ function autoResolve(p) {
     case 'finale-statement': return { kind: 'finale-statement', statement: 'I played my own game.' };
     case 'finale-answer': return { kind: 'finale-answer', appeal: (p.appeals && p.appeals[0]) || 'own-game' };
     case 'juror-question': return { kind: 'juror-question', statement: 'What was your biggest move?' };
+    case 'exit-interview': return { kind: 'exit-interview', stance: (p.stances && p.stances[0]) || 'gracious', message: 'Take care.' };
     case 'juror-vote': return { kind: 'juror-vote', vote: p.options[0].id };
     default: return { kind: p.kind };
   }

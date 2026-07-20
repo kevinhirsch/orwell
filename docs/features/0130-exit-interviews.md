@@ -1,11 +1,20 @@
 # 0130 — Exit interviews (the producer's eviction-night sit-down)
 
-> **Status:** 📝 **Spec only** — authored during the 0047 PO review (2026-07-13), **not yet built** (PO: build
-> later). **Expands 0047** (eviction night live). Every eviction ends with the show's signature beat we don't
-> model: the evicted houseguest sits down with the **producers** and is interviewed on the way out — they see
-> their **goodbye messages**, react in the moment, and tell their side. This fires **every** eviction, is a
-> real **agency beat when the *player* is evicted**, and its content is **carried into the 0048 season-end
-> retrospective**.
+> **Status:** ✅ **Built & green** (2026-07-13; BDD-gated in `cucumber.cjs`). **Expands 0047** (eviction night
+> live). Every staged eviction ends with the show's signature beat: the evicted houseguest sits down with the
+> **producers** and is interviewed on the way out — they see their **goodbye messages**, react in the moment,
+> and tell their side. Fires on **every staged eviction**, is a real **agency beat when the *player* is
+> evicted** (a pending decision — their own words), and is **carried into the 0048 season-end retrospective**.
+> **Calibration-neutral** (no flag): the beat draws no rng and mutates no seeded state (the NPC stance is a
+> read of the already-fixed manner; the record feeds only the retrospective), so the seeded spine is
+> byte-identical — proven against a pre-feature eviction-order baseline + `juryReach` re-run green.
+> **Built in** `liveSeason.ts` (`EvictionStage` `exit-interview`, `ExitStance`/`npcExitStance`, the stage +
+> the player pending), `GameSession.ts` (the `exit-interview` pending/submit + `RetrospectiveView.exitInterviews`),
+> `GameSessionAdapter.ts` (projection + retrospective reel), `momentPrompts.ts` (the narration fragment), and the
+> FE decision card `frontend/static/js/orwellDecision.js` (the player's own posture + optional words, mirroring the
+> E34 goodbye-message card) + the `🎤` beat chip in `orwellToolBeats.js`.
+> **Tests:** `tests/unit/exitInterview.test.ts` + BDD `0130-exit-interviews.feature` (`exit_interview.steps.ts`)
+> + FE `frontend/tests/test_m3_4_decision_faces.py` (buildPayload byte-parity for the new kind).
 > **Executable spec:** [`0130-exit-interviews.feature`](./0130-exit-interviews.feature)
 
 ## 1. Summary
@@ -14,7 +23,7 @@
 evictee. But the evictee never gets to *speak*: the house talks to them, then they're gone. In the show, the
 evictee's exit is a **producer interview** — they watch their goodbye messages, react (vindicated, blindsided,
 bitter, gracious), and answer the producers' pointed questions about what just happened. 0130 adds that beat:
-after every eviction, the producers sit the evictee down. For an **NPC** it's narration grounded in their soul
+after every eviction, the producers sit the evictee down. For an **NPC** it's narration whose posture is grounded in the recorded manner of their eviction
 and how they went out; for the **player** it's an interactive moment — a real say at their lowest point. The
 exit interview is recorded and **resurfaces in the 0048 retrospective**, so a season closes with every
 houseguest's own account of their exit.
@@ -37,9 +46,10 @@ houseguest's own account of their exit.
 - **The producer interviews the evictee.** Using the existing diegetic producer/Diary-Room voice, the evictee
   is asked pointed, beat-grounded questions ("What happened? Who blindsided you? Any regrets?") and **shown
   their goodbye messages** (0047), reacting to them.
-- **NPC evictee → narration.** The evictee's answers are **grounded** in their soul + the recorded eviction
-  **manner** (bitter / blindsided / respected, 0037 §4.2) — a blindsided houseguest is stunned, a respected
-  one gracious. Engine-grounded, narrator-voiced (anti-sycophancy).
+- **NPC evictee → narration.** The evictee's **posture** (`npcExitStance`) is **derived from the recorded
+  eviction manner** (betrayed/disrespected ⇒ bitter, blindsided ⇒ defiant, respected ⇒ gracious, 0037 §4.2) —
+  a blindsided houseguest is stunned, a respected one gracious. Engine-grounded (the stance is a read of the
+  manner flags, no soul lookup); the narrator then voices it in the houseguest's own persona (anti-sycophancy).
 - **Player evictee → an interactive agency beat.** When the **player** is evicted, the exit interview is a
   real **pending decision** through the 0034 seam (mirroring the player's own goodbye-message authoring, 0047
   E34): the producer asks; the player answers in their own words / chosen tone; the engine never speaks for
@@ -58,8 +68,9 @@ retrospective mechanic itself (0048 — this adds content to it, doesn't rebuild
   `goodbye`: the goodbye messages are surfaced **to the evictee**, then the producer's questions. For an NPC,
   the beat resolves as narration; for the player, it **pauses** for the player's answer (a pending decision),
   then resolves — the same shape as the player's own goodbye message.
-- **Grounded, not invented (anti-sycophancy).** An NPC's exit-interview content is computed from their soul +
-  manner + what they legitimately know (0002) — a houseguest blindsided by an ally they trusted reacts to
+- **Grounded, not invented (anti-sycophancy).** An NPC's exit-interview **stance** is computed from the recorded
+  eviction **manner** flags (`npcExitStance`, no soul lookup); the narrator voices that stance in the houseguest's
+  persona, bounded to what they legitimately know (0002) — a houseguest blindsided by an ally they trusted reacts to
   *that*, read through their own belief. The narrator voices it; it is never sycophantic or free-authored.
 - **The player's mic.** The player's exit interview is theirs — tone and content their choice (validated
   through 0034). It has **no in-game pathway to any active houseguest** (the evictee is out; like the Diary

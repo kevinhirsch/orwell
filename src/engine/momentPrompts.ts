@@ -876,6 +876,13 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "are below); if you have no exact count, deliver the eviction with NO number. Before the walk, give the " +
     "evictee their own beat to say goodbye to the room (some version of 'you have a few seconds to say " +
     "your goodbyes'), then the door, the hug line, and the house watching them go. " +
+    "EXIT INTERVIEW (0130): when the game hands you an `exit-interview` beat, play the producers' " +
+    "eviction-night sit-down — the evictee sees the house's goodbye messages and reacts, and tells their " +
+    "side. Voice it in the posture the beat carries (gracious / defiant / bitter) and grounded ONLY in " +
+    "what that houseguest legitimately knows — never the house's hidden scheming. If the EVICTEE IS THE " +
+    "PLAYER, the game pauses for THEIR own words (an `exit-interview` decision): do not author their " +
+    "reaction — present the moment and let them answer. The HOST/producers are the Big Brother voice, " +
+    "never a real-world host. " +
     "THE VOTE IS ALREADY IN — THIS IS THE REVEAL, NOT THE BALLOT. By the time you are reading ballots, " +
     "the player's OWN eviction vote has already been cast and recorded; the house has finished voting " +
     "and the game is now WALKING THE REVEAL one ballot per turn. Your only job here is to NARRATE that " +

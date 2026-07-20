@@ -147,7 +147,7 @@ export const ORWELL_MAX_VISIBLE_BEATS = 10;
 const _BEAT_ICON = {
   'hoh-competition': '🏆', 'veto-competition': '💎', 'veto-draw': '🎟️', 'nominations': '🔨',
   'veto-ceremony': '💎', 'eviction': '🗳️', 'eviction-result': '🗳️', 'eviction-reveal': '🗳️',
-  'eviction-goodbye': '💌', 'final-eviction': '🗳️', 'finale': '👑', 'finale-reveal': '👑',
+  'eviction-goodbye': '💌', 'exit-interview': '🎤', 'final-eviction': '🗳️', 'finale': '👑', 'finale-reveal': '👑',
   'finale-result': '👑', 'twist-reveal': '🌀',
 };
 

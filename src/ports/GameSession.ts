@@ -1085,6 +1085,10 @@ export interface BeatEventView {
 export interface PendingDecisionView {
   kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- exit interview (0130): the player, as the evictee, answers the producers on the way out with their
+    // own posture (gracious / defiant / bitter) + optional words, never engine-authored. `evictee` echoes who
+    // is being interviewed (the player); `stances` carries the legal postures. Resolved via submitDecision. ---
+    | "exit-interview"
     // --- self-eviction (0061): the player-level/OOC confirmation to voluntarily walk out / quit ---
     | "self-evict"
     // --- secret veto (0025 reactive redesign): the player is on the block and secretly holds a
@@ -1114,6 +1118,12 @@ export interface PendingDecisionView {
   finalist?: NamedRef;
   /** The evictee receiving the player's goodbye, for a `goodbye-message` (E34); absent otherwise. */
   evictee?: NamedRef;
+  /**
+   * 0130 — the legal exit-interview STANCES for an `exit-interview` decision (Vault-free enum values:
+   * "gracious" | "defiant" | "bitter"); absent for every other kind. The player's own posture leaving —
+   * the engine records the chosen stance, never the prose.
+   */
+  stances?: string[];
   /**
    * 0123 — the NPC-initiated deal offer detail, for a `deal-offer` decision; absent otherwise. Vault-free:
    * who floated it (public name), the deal `kind`, and a Vault-safe `terms` paraphrase — no number, no
@@ -1662,6 +1672,14 @@ export interface RetrospectiveView {
     finalists: NamedRef[];
     votes: Array<{ juror: NamedRef; votedFor: NamedRef }>;
   };
+  /**
+   * 0130 — each evictee's EXIT INTERVIEW, week by week: their public posture leaving (`stance`) and,
+   * for the player, their own words (`message`). The season told through its exits, in the evictees'
+   * own voices. Not a Vault read — an exit interview is a witnessed, public broadcast beat (the evictee
+   * spoke it on the way out); it surfaces here as the retrospective's first-person exit reel. Empty when
+   * no eviction was interviewed (e.g. a Final-3 atomic eviction outside the staged 0047 path).
+   */
+  exitInterviews?: Array<{ week: number; evictee: NamedRef; stance: string; message?: string }>;
 }
 
 /**
@@ -1717,6 +1735,10 @@ export interface BehavioralFlags {
 export interface SubmitDecisionReq {
   kind: "nominations" | "veto-decision" | "comp-intent" | "comp-round" | "houseguests-choice" | "replacement" | "eviction-vote" | "tie-break" | "final-eviction"
     | "goodbye-message" | "finale-statement" | "finale-answer" | "juror-question" | "juror-vote"
+    // --- exit interview (0130): the player-evictee's own posture leaving (gracious / defiant / bitter)
+    // rides the shared `vote` field like a goodbye tone, with optional words on `statement`. Recorded for
+    // the 0048 retrospective, never engine-authored. ---
+    | "exit-interview"
     // --- self-eviction (0061): the explicit, confirmed voluntary walk-out / quit ---
     | "self-evict"
     // --- secret veto (0025 reactive redesign): the player plays or holds their one-time safety.

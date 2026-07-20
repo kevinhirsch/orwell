@@ -90,7 +90,10 @@ describe("E34 — the engine never authors the player's goodbye message", () => 
     const rng = new SeededRandom(3);
     const beats: BeatEvent[] = [];
     for (let g = 0; g < 100 && s.beat === "eviction"; g++) {
-      expect(s.pending).toBeUndefined(); // the evicted player has no goodbye decision
+      // 0130 — the evicted player gives their OWN exit interview (a pending they answer); resolve it and
+      // move on. What they never get is a goodbye decision to THEMSELVES (0046 intact) — asserted below.
+      if (s.pending?.kind === "exit-interview") { applyDecision(s, { kind: "exit-interview", stance: "gracious" }, ctx); continue; }
+      expect(s.pending?.kind, "the evicted player has no goodbye decision").not.toBe("goodbye-message");
       const ev = advance(s, ctx, rng);
       if (ev) beats.push(ev);
     }

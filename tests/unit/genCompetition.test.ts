@@ -107,6 +107,7 @@ function play(active: EntityId[], ctx: SeasonCtx, seed: number, withFiction: boo
       else if (p.kind === "final-eviction") ev = applyDecision(s, { kind: "final-eviction", evict: p.options[0]! }, ctx, rng);
       else if (p.kind === "houseguests-choice") ev = applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng);
       else if (p.kind === "goodbye-message") ev = applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx, rng);
+      else if (p.kind === "exit-interview") ev = applyDecision(s, { kind: "exit-interview", stance: p.stances[0]! }, ctx, rng);
       else if (p.kind === "finale-statement") ev = applyDecision(s, { kind: "finale-statement", statement: "" }, ctx, rng);
       else if (p.kind === "finale-answer") ev = applyDecision(s, { kind: "finale-answer", appeal: p.appeals[0]! }, ctx, rng);
       else if (p.kind === "juror-question") ev = applyDecision(s, { kind: "juror-question", question: "" }, ctx, rng);

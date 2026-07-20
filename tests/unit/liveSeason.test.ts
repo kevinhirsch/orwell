@@ -46,6 +46,7 @@ function playToEnd(s: LiveSeasonState, ctx: SeasonCtx, seed: number): BeatEvent[
       // 0006 staged-rounds: the player declares an approach PER elimination round while still in.
       else if (p.kind === "comp-round") events.push(applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng));
       else if (p.kind === "goodbye-message") events.push(applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx));
+      else if (p.kind === "exit-interview") events.push(applyDecision(s, { kind: "exit-interview", stance: p.stances[0]! }, ctx));
       else if (p.kind === "juror-question") events.push(applyDecision(s, { kind: "juror-question", question: "q" }, ctx));
       else if (p.kind === "juror-vote") events.push(applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx));
     } else {
@@ -115,6 +116,7 @@ describe("live weekly loop (incremental 0011)", () => {
           else if (p.kind === "comp-intent") applyDecision(s, { kind: "comp-intent", intent: "compete" }, ctx, rng);
           else if (p.kind === "comp-round") applyDecision(s, { kind: "comp-round", intent: "compete" }, ctx, rng);
           else if (p.kind === "goodbye-message") applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx);
+          else if (p.kind === "exit-interview") applyDecision(s, { kind: "exit-interview", stance: p.stances[0]! }, ctx);
           else if (p.kind === "juror-question") applyDecision(s, { kind: "juror-question", question: "q" }, ctx);
           else if (p.kind === "juror-vote") applyDecision(s, { kind: "juror-vote", vote: p.finalists[0] }, ctx);
         } else {
