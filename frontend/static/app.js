@@ -3867,6 +3867,13 @@ function startOrwellApp() {
         // Collapse pill if expanded, then spin arrow in (same as + spin-in)
         if (wasExpanded) sendBtn.classList.remove('newchat-expanded');
         const delay = wasExpanded ? 300 : 0;
+        // BL-044: the SEND action is live immediately (dataset.mode is set to
+        // 'send' below); only the ICON swap is animation-delayed by `delay`.
+        // Set the accessible name + tooltip to the real action NOW so a screen
+        // reader never announces the stale 'New chat' during the 300ms window
+        // (the line-3903 title→aria mirror then stays consistent).
+        sendBtn.title = 'Send message';
+        sendBtn.setAttribute('aria-label', 'Send message');
         setTimeout(() => {
           if (sendBtn.dataset.mode !== 'send') return;
           sendBtn.innerHTML = _sendIcon;
@@ -3955,6 +3962,11 @@ function startOrwellApp() {
       if (!hasText && !hasFiles && _isSttEnabled()) {
         sendBtn.innerHTML = _stopIcon;
         sendBtn.title = 'Stop recording';
+        // BL-044: this transition mutates the button directly (outside the
+        // updateSendButton title→aria mirror), so keep the accessible name in
+        // lock-step here too — a screen reader must announce "Stop recording",
+        // not the stale "Record voice".
+        sendBtn.setAttribute('aria-label', 'Stop recording');
         sendBtn.dataset.mode = 'recording';
         sendBtn.classList.add('recording');
         voiceRecorderModule.startRecording(

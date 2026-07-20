@@ -496,7 +496,7 @@ function ensureCss() {
        freshly-mounted sheet can present an EMPTY translucent body for a beat while the
        backdrop-filter composites and the content paints (audit: ≥1.2s of blank body;
        live-repro owed). Hold the body invisible until the open path clears the
-       `ow-sheet-content-pending` flag (removed on the next painted frame, with a hard
+       "ow-sheet-content-pending" flag (removed on the next painted frame, with a hard
        timeout fallback so it can NEVER stay hidden), then fade it in. Scoped to the
        FROSTED sheet body only — the flat sheet (verified correct, "sheets done right")
        is untouched; reduced-motion snaps instead of fading. */
