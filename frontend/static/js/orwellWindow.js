@@ -492,6 +492,19 @@ function ensureCss() {
       .ow-anim-sheet-in, .ow-anim-sheet-out { animation: none; }
       .ow-window.ow-sheet-mode.ow-sheet-settling { transition: none !important; }
     }
+    /* BL-046 (frosted mobile sheet content-ready gate): on the frosted GLASS theme a
+       freshly-mounted sheet can present an EMPTY translucent body for a beat while the
+       backdrop-filter composites and the content paints (audit: ≥1.2s of blank body;
+       live-repro owed). Hold the body invisible until the open path clears the
+       "ow-sheet-content-pending" flag (removed on the next painted frame, with a hard
+       timeout fallback so it can NEVER stay hidden), then fade it in. Scoped to the
+       FROSTED sheet body only — the flat sheet (verified correct, "sheets done right")
+       is untouched; reduced-motion snaps instead of fading. */
+    body.theme-frosted .ow-window.ow-sheet-mode.ow-sheet-content-pending > .ow-body { opacity: 0; }
+    body.theme-frosted .ow-window.ow-sheet-mode > .ow-body { transition: opacity .18s ease; }
+    @media (prefers-reduced-motion: reduce) {
+      .ow-window.ow-sheet-mode > .ow-body { transition: none !important; }
+    }
     /* the dock/undock toggle reads as a quieter control than min/close */
     .ow-controls .ow-dock { font-size: .9rem; }
     /* ── loading affordance (perf/resilience) ─────────────────────────────────
@@ -1416,6 +1429,25 @@ export class OrwellWindow {
       const animCls = this._sheet ? 'ow-anim-sheet-in' : 'ow-anim-open';
       el.classList.add(animCls);
       setTimeout(() => el.classList.remove(animCls), this._sheet ? 360 : 220);
+    }
+    // BL-046: gate the frosted sheet body reveal on a painted frame so it never flashes an
+    // empty translucent void during mount/composite (see the CSS above). Runs regardless of
+    // reduced-motion (the CSS strips the fade there) and is FAIL-OPEN — the class is always
+    // removed by the rAF, backed by a hard timeout, so a missed frame can't leave a blank body.
+    if (this._sheet) {
+      el.classList.add('ow-sheet-content-pending');
+      let _bl046Revealed = false;
+      const _revealSheetBody = () => {
+        if (_bl046Revealed) return;
+        _bl046Revealed = true;
+        el.classList.remove('ow-sheet-content-pending');
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(_revealSheetBody));
+      } else {
+        _revealSheetBody();
+      }
+      setTimeout(_revealSheetBody, 400);
     }
     // J1-25: a modal window mounts its backdrop scrim + inerts the background + traps
     // focus BEFORE the raise (which pins it to the modal tier above the scrim).

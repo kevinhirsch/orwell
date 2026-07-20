@@ -3867,10 +3867,18 @@ function startOrwellApp() {
         // Collapse pill if expanded, then spin arrow in (same as + spin-in)
         if (wasExpanded) sendBtn.classList.remove('newchat-expanded');
         const delay = wasExpanded ? 300 : 0;
+        // BL-044: the SEND action is live immediately (dataset.mode is set to
+        // 'send' below); only the ICON swap is animation-delayed by `delay`.
+        // Set the accessible name + tooltip to the real action NOW so a screen
+        // reader never announces the stale 'New chat' during the 300ms window
+        // (the line-3903 title→aria mirror then stays consistent).
+        sendBtn.title = 'Send message';
+        sendBtn.setAttribute('aria-label', 'Send message');
         setTimeout(() => {
           if (sendBtn.dataset.mode !== 'send') return;
           sendBtn.innerHTML = _sendIcon;
           sendBtn.title = 'Send message';
+          sendBtn.setAttribute('aria-label', 'Send message');
           sendBtn.classList.remove('mic-mode', 'newchat-mode', 'anim-spin-swap');
           sendBtn.classList.add('anim-spin');
           sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
@@ -3894,6 +3902,12 @@ function startOrwellApp() {
         sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
       }
     }
+    // BL-044: keep the accessible name in lock-step with the visible tooltip so a
+    // screen reader announces the button's ACTUAL current action (send / attach /
+    // record voice / new chat) instead of the stale static "New chat" aria-label
+    // that the composer chrome shipped with. The `title` is the single source of
+    // truth for the button's current meaning; mirror it onto aria-label.
+    if (sendBtn.title) sendBtn.setAttribute('aria-label', sendBtn.title);
     sendBtn.dataset.mode = newMode;
   }
 
@@ -3948,6 +3962,11 @@ function startOrwellApp() {
       if (!hasText && !hasFiles && _isSttEnabled()) {
         sendBtn.innerHTML = _stopIcon;
         sendBtn.title = 'Stop recording';
+        // BL-044: this transition mutates the button directly (outside the
+        // updateSendButton title→aria mirror), so keep the accessible name in
+        // lock-step here too — a screen reader must announce "Stop recording",
+        // not the stale "Record voice".
+        sendBtn.setAttribute('aria-label', 'Stop recording');
         sendBtn.dataset.mode = 'recording';
         sendBtn.classList.add('recording');
         voiceRecorderModule.startRecording(

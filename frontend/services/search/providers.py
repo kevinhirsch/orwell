@@ -49,6 +49,22 @@ def _get_search_instance() -> str:
     return SEARXNG_INSTANCE
 
 
+def searxng_configured() -> bool:
+    """True iff SearXNG is actually reachable-by-config (BL-058 / F8).
+
+    On a fresh install ``search_url`` is empty, so ``_get_search_instance`` falls back to the
+    ``http://localhost:8080`` default — which nothing is serving — and every SearXNG attempt dies to
+    ``[Errno 111] Connection refused`` (twice per query, plus the HTML fallback), spamming the log and
+    starving the zeitgeist enrichment lane. SearXNG counts as configured ONLY when the operator has set
+    an explicit ``search_url`` OR overridden ``SEARXNG_INSTANCE`` in the environment; otherwise the
+    provider chain must short-circuit SearXNG and degrade cleanly to the no-key fallback (DuckDuckGo).
+    """
+    settings = _get_search_settings()
+    if (settings.get("search_url") or "").strip():
+        return True
+    return bool((os.environ.get("SEARXNG_INSTANCE") or "").strip())
+
+
 def _get_provider_key(provider: str) -> str:
     """Return the API key for a specific provider, with legacy fallback."""
     settings = _get_search_settings()

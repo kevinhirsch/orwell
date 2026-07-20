@@ -322,7 +322,15 @@ def generation_progress(user: Optional[str]) -> Optional[dict]:
     if not isinstance(rec, dict):
         return None
     active = bool(rec.get("active")) and (time.time() - float(rec.get("updatedAt", 0))) <= _GEN_PROGRESS_STALE_S
-    return {"total": int(rec.get("total", 0)), "done": int(rec.get("done", 0)), "active": active}
+    total = int(rec.get("total", 0))
+    done = int(rec.get("done", 0))
+    # F11/BL-056 accounting guard: a retry / re-backfill can `_progress_tick` past the run's `total`,
+    # so the raw counter could report `done > total` ("7 / 5") — nonsensical to the operator and a
+    # progress bar that overshoots 100%. Clamp the REPORTED done to total (when total is known); the
+    # internal counter is left untouched (it is a pure heartbeat).
+    if total > 0:
+        done = min(done, total)
+    return {"total": total, "done": done, "active": active}
 
 
 # ── G9 backfill debounce: at most ONE backfill attempt per user per process per window ────
