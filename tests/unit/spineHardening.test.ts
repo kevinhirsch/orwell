@@ -60,7 +60,11 @@ describe("E57/R5 — one bounded off-screen tick per player TURN, not per tool c
     const { reg, count } = tickCounter();
     const sb = reg.sandboxFor("turn");
     sb.session.createCharacter({ playerName: "The Player", seed: 4 });
+    const beforeChampagneClose = count();
     sb.session.advanceGame(); // 0111: close the premiere champagne circle (a pure close earns NO tick)
+    // The pure champagne close is a zero-tick commit (isPureChampagneClose): it resolves no beat, so it must
+    // NOT advance the off-screen society — assert it added nothing on top of the game-start move-in tick.
+    expect(count()).toBe(beforeChampagneClose);
     const afterCreate = count();
 
     // The measured R5 amplification: a 4-tool-call turn used to run 4 ticks (12 hidden scenes).

@@ -735,6 +735,9 @@ export const MOMENT_PROMPTS: Record<string, string> = {
     "advanceGame does NOT start the game or bring up the HOH — it only settles the toast; only AFTER it " +
     "does moveTo work for the bedroom pick. (If the player wants to wander before you have closed the " +
     "circle, that IS the cue the toast is done — close it, then honor the move.) " +
+    "OVERRIDE — ONCE THE CIRCLE HAS CLOSED (the engine truth reports it DONE): treat beats (1)–(2) as " +
+    "finished — do NOT re-run the gathered-circle introductions or the toast; go straight to the bedroom " +
+    "pick and move only to the room the player selects. " +
     "(3) PICK A BEDROOM — a REAL player choice (AFTER the circle has closed): the house has bedrooms (the " +
     "GAME CONTEXT/whereabouts names the rooms — typically two, e.g. \"bedroom a\" and \"bedroom b\"). " +
     "Invite the player to go claim a bed and settle in; when they choose one, call moveTo {that room} so " +
@@ -1300,6 +1303,9 @@ export function renderGameContext(view: GameStateView): string {
         ? [
             `- PREMIERE — THE CIRCLE HAS CLOSED: the toast is done; move on to the bedroom pick and settling ` +
               `in (moveTo works now). A later advanceGame brings up the first HOH.`,
+            `- PREMIERE — OVERRIDE (circle closed): ignore the gathered-circle and introduction instructions ` +
+              `above — do NOT continue the toast or the roll-call. Offer the bedroom choice and move only to ` +
+              `the room the player selects.`,
           ]
         : []),
     `- PREMIERE — FIRST POWER: ` +
