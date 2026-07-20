@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   validateDossierCoherence,
   repairDossierCoherence,
+  scrubSelfReferentialPronouns,
   type DossierForCoherence,
 } from "../../src/engine/castingIntake";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
@@ -149,6 +150,132 @@ describe("validateDossierCoherence — name/ethnicity divergence is SOFT (never 
       vocation: "teacher",
     });
     expect(res.ok).toBe(true);
+  });
+});
+
+describe("F5 — name↔gender is asserted as a SOFT flag (surfaced, never rejected)", () => {
+  it("a given name reading the OPPOSITE binary gender is a SOFT contradiction, ok stays true", () => {
+    // A man-reading given name pinned 'woman' — surfaced (the #1140 re-pick that should have cohered it
+    // upstream degraded), but SOFT so the dossier is not rejected and no re-author is forced.
+    const res = validateDossierCoherence({ genderPresentation: "woman", name: "James Rivera", age: 29 });
+    const flag = res.contradictions.find((c) => c.field === "name");
+    expect(flag).toBeTruthy();
+    expect(flag!.severity).toBe("soft");
+    expect(res.ok).toBe(true); // soft never fails ok
+    expect(res.repairFields).not.toContain("name"); // and never enters the repair set
+  });
+
+  it("a UNISEX name never trips the assertion (coherent with any presentation)", () => {
+    for (const g of ["man", "woman", "nonbinary"] as const) {
+      const res = validateDossierCoherence({ genderPresentation: g, name: "Jordan Rivera", age: 30 });
+      expect(res.contradictions.some((c) => c.field === "name")).toBe(false);
+    }
+  });
+
+  it("a NONBINARY pin is never flagged for a gendered name (nonbinary is never flattened)", () => {
+    const res = validateDossierCoherence({ genderPresentation: "nonbinary", name: "James Rivera", age: 26 });
+    expect(res.contradictions.some((c) => c.field === "name")).toBe(false);
+    expect(res.ok).toBe(true);
+  });
+
+  it("a same-gender name is clean", () => {
+    expect(validateDossierCoherence({ genderPresentation: "man", name: "James Rivera", age: 33 }).ok).toBe(true);
+  });
+});
+
+describe("F5 — appearance / distinguishing-mark self-pronouns are SCRUBBED to the pin (not blanked)", () => {
+  it("scrubSelfReferentialPronouns rewrites opposite-gender pronouns, preserving detail + case", () => {
+    // woman pin: masculine → feminine, keeping the descriptive detail and leading-cap.
+    expect(scrubSelfReferentialPronouns("His left eyebrow is scarred; he squints.", "woman"))
+      .toBe("Her left eyebrow is scarred; she squints.");
+    // man pin: feminine → masculine; a matching pronoun is left alone.
+    expect(scrubSelfReferentialPronouns("her hazel eyes and his easy smile", "man"))
+      .toBe("his hazel eyes and his easy smile");
+    // nonbinary pin: BOTH genders neutralized to singular they/their — never flattened to a binary.
+    expect(scrubSelfReferentialPronouns("his broad shoulders and her delicate hands", "nonbinary"))
+      .toBe("their broad shoulders and their delicate hands");
+  });
+
+  it("repair SCRUBS the appearance pronoun instead of clearing the field, and re-validates clean", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "woman",
+      appearance: "athletic build; his left eyebrow carries a faint scar",
+      age: 28,
+    };
+    const { repaired, repairedFields } = repairDossierCoherence(d);
+    expect(repairedFields).toContain("appearance");
+    // The descriptive detail SURVIVES with the corrected pronoun — the field is NOT blanked.
+    expect(repaired.appearance).toBe("athletic build; her left eyebrow carries a faint scar");
+    expect(validateDossierCoherence(repaired).ok).toBe(true);
+  });
+
+  it("repair SCRUBS the structured distinguishing mark the portrait prompt reads", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "man",
+      physicalCharacteristics: { distinguishingMark: "a tattoo running down her left forearm" },
+      age: 31,
+    };
+    const { repaired } = repairDossierCoherence(d);
+    expect(repaired.physicalCharacteristics?.distinguishingMark).toBe("a tattoo running down his left forearm");
+    expect(validateDossierCoherence(repaired).ok).toBe(true);
+  });
+});
+
+describe("nonbinary pin — a lone BINARY self-pronoun is flagged for repair (SOFT, ok stays true)", () => {
+  it("flags a nonbinary appearance carrying a masculine self-pronoun, without failing ok", () => {
+    // Greptile P1: a nonbinary pin has no OPPOSITE binary gender, so the man/woman branch never fires — yet
+    // "his left eyebrow" ships a binary pronoun on a nonbinary houseguest. It must be flagged for repair.
+    const res = validateDossierCoherence({
+      genderPresentation: "nonbinary",
+      appearance: "his left eyebrow is scarred",
+      age: 26,
+    });
+    expect(res.ok).toBe(true); // SOFT — never fails ok (the dossier is not rejected)
+    expect(res.repairFields).toContain("appearance");
+    const flag = res.contradictions.find((c) => c.field === "appearance");
+    expect(flag).toBeTruthy();
+    expect(flag!.severity).toBe("soft");
+  });
+
+  it("flags a feminine self-pronoun on a nonbinary pin the same way", () => {
+    const res = validateDossierCoherence({
+      genderPresentation: "nonbinary",
+      distinguishingMark: "a scar on her left forearm",
+      age: 30,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.repairFields).toContain("distinguishingMark");
+  });
+
+  it("repair SCRUBS a nonbinary appearance's binary pronoun to singular they/their, keeping the detail", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "nonbinary",
+      appearance: "his left eyebrow is scarred",
+      age: 26,
+    };
+    const { repaired, repairedFields } = repairDossierCoherence(d);
+    expect(repairedFields).toContain("appearance");
+    expect(repaired.appearance).toBe("their left eyebrow is scarred");
+    // The repaired dossier no longer flags the field.
+    expect(validateDossierCoherence(repaired).repairFields).not.toContain("appearance");
+  });
+
+  it("ALREADY-neutral nonbinary prose is untouched (no false repair)", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "nonbinary",
+      appearance: "their left eyebrow is scarred",
+      demeanor: "they keep the room at arm's length",
+      distinguishingMark: "a scar on their forearm",
+      age: 26,
+    };
+    const res = validateDossierCoherence(d);
+    expect(res.ok).toBe(true);
+    expect(res.repairFields).toHaveLength(0);
+    expect(res.contradictions).toHaveLength(0);
+    // Repair is a byte-neutral no-op.
+    const { repaired, repairedFields } = repairDossierCoherence(d);
+    expect(repairedFields).toHaveLength(0);
+    expect(repaired.appearance).toBe("their left eyebrow is scarred");
   });
 });
 

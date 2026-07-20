@@ -95,6 +95,45 @@ def test_parser_is_fenced_json_tolerant_and_empty_on_garbage():
     assert I.parse_identity_facets("", valid) == {}
 
 
+# ── F1: the doubled-object failure shape (the gender-drop root cause) ───────────
+
+def test_extract_json_returns_the_first_object_of_a_doubled_reply():
+    """The identity utility model sometimes emits its object TWICE (``{obj}{obj}``). The old brittle
+    first-``{``→last-``}`` slice spliced that into invalid JSON → the whole parse collapsed to None → the
+    engine's gender re-cohere never ran → 8/15 houseguests shipped the wrong gender. The robust extractor
+    decodes and STOPS at the first complete object."""
+    obj = '{"npc:1": {"genderPresentation": "woman"}}'
+    doubled = obj + obj
+    got = I._extract_json(doubled)
+    assert got == {"npc:1": {"genderPresentation": "woman"}}
+    # A single well-formed object is byte-identical (the common case must not regress).
+    assert I._extract_json(obj) == {"npc:1": {"genderPresentation": "woman"}}
+
+
+def test_doubled_reply_still_seeds_every_gender_end_to_end():
+    """The failure shape drove the bug all the way through: a doubled reply used to parse to ``{}`` and
+    ``parse_identity_facets`` returned nothing, so ``recordCastIdentity`` was never called. It must now
+    yield the full facet map for EVERY houseguest (incl. a diverse spread — nonbinary preserved)."""
+    valid = {"npc:1", "npc:2", "npc:3"}
+    one = (
+        '{"npc:1": {"genderPresentation": "woman"},'
+        ' "npc:2": {"genderPresentation": "man"},'
+        ' "npc:3": {"genderPresentation": "nonbinary"}}'
+    )
+    doubled = one + one  # the exact `{obj}{obj}` shape from the live debug bundle
+    facets = I.parse_identity_facets(doubled, valid)
+    assert facets == {
+        "npc:1": {"genderPresentation": "woman"},
+        "npc:2": {"genderPresentation": "man"},
+        "npc:3": {"genderPresentation": "nonbinary"},  # diversity preserved, not flattened
+    }
+
+
+def test_extract_json_tolerates_chatter_around_a_doubled_object():
+    text = 'Sure! Here is the cast:\n{"npc:1": {"age": 33}}{"npc:1": {"age": 99}}\nHope that helps.'
+    assert I._extract_json(text) == {"npc:1": {"age": 33}}
+
+
 # ── the orchestrator (best-effort, fail-soft) ──────────────────────────────────
 
 def test_seed_writes_the_proposal_back_and_returns_applied():

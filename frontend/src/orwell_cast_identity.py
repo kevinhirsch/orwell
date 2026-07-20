@@ -110,23 +110,44 @@ def build_identity_messages(cast: list[dict]) -> list[dict]:
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
 
 
+def _first_json_object(s: str) -> Optional[dict]:
+    """Decode the FIRST COMPLETE (balanced) JSON object in ``s``, scanning from the first ``{`` with
+    ``raw_decode`` (which decodes exactly ONE value and STOPS at its end). This is the fix for the
+    gender-drop bug: the identity utility model sometimes emits its object TWICE (``{obj}{obj}``), and
+    the old brittle first-``{``→last-``}`` SLICE spliced that into ``{obj}{obj}`` — invalid JSON — so
+    ``json.loads`` raised, the whole parse collapsed to ``None`` → ``{}``, ``recordCastIdentity`` was
+    never called, and the engine's post-genesis gender re-cohere (#1140) never ran, shipping the stale
+    floor gender for 8/15 houseguests. ``raw_decode`` from the first ``{`` yields the FIRST object of a
+    ``{obj}{obj}`` reply. Chatter/garbage that fails to decode at a ``{`` is skipped by advancing to the
+    next ``{`` and retrying."""
+    decoder = json.JSONDecoder()
+    idx = s.find("{")
+    while idx != -1:
+        try:
+            obj, _end = decoder.raw_decode(s, idx)
+        except ValueError:
+            idx = s.find("{", idx + 1)
+            continue
+        if isinstance(obj, dict):
+            return obj
+        # Decoded a valid non-object value at this `{` (unreachable — `{` opens an object) — keep looking.
+        idx = s.find("{", idx + 1)
+    return None
+
+
 def _extract_json(text: str) -> Optional[dict]:
-    """Pull the first JSON object out of the model's reply (tolerant of ```json fences / chatter)."""
+    """Pull the first COMPLETE JSON object out of the model's reply (tolerant of ```json fences, leading/
+    trailing chatter, AND a model that emits its object twice — ``{obj}{obj}``). Prefers a fenced block
+    when present, else scans the whole reply. Robust by construction — never a first-``{``→last-``}`` slice
+    (which corrupts a doubled/concatenated object into invalid JSON; see ``_first_json_object``)."""
     if not text:
         return None
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
-    raw = fenced.group(1) if fenced else None
-    if raw is None:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        raw = text[start:end + 1]
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else None
-    except (ValueError, TypeError):
-        return None
+    if fenced:
+        obj = _first_json_object(fenced.group(1))
+        if obj is not None:
+            return obj
+    return _first_json_object(text)
 
 
 def parse_identity_facets(text: str, valid_ids: set[str]) -> dict:

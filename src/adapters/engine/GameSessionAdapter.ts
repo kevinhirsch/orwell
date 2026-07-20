@@ -2550,6 +2550,18 @@ export class GameSessionAdapter implements GameSession {
       if (touched) committed++;
     }
 
+    // F2 — re-cohere each committed given name against its pinned `genderPresentation` BY CONSTRUCTION,
+    // right here after the model's NAMES land. `recordCastGenesis` folds the AI name but NEVER re-ran the
+    // #1140 name↔gender re-pick — it relied ENTIRELY on the LATER, best-effort FE-driven `recordCastIdentity`
+    // call to repair an incoherent name. When that identity call degrades (no utility model, or its reply
+    // fails to parse — the exact gender-drop failure this branch also hardens), a clearly-wrong-gender name
+    // ("Emma" on a man) shipped straight into the portrait + narration. Running the SAME re-pick machinery
+    // the identity fold uses closes that hole even when the identity call never arrives. Idempotent: a later
+    // `recordCastIdentity` fold re-runs the identical re-pick against the (possibly repaired) gender and
+    // converges; a name that already coheres — every UNISEX name (coherent with any presentation) and every
+    // nonbinary pin — is left untouched, so the deterministic floor cast is a byte-identical no-op.
+    this.cohereGenesisNames(cast);
+
     // The validated tie graph → stored for `seedSeededRelationships` to prefer over the floor draw at
     // createCharacter (where the move-in edges exist, so TIE_AFFINITY_BIAS folds + the ties seal). The
     // seeded season brief + provenance ride the prewarm as the persisted world-gen artifact (mandate #4).
@@ -2566,6 +2578,34 @@ export class GameSessionAdapter implements GameSession {
       scope: v.scope, ...(v.npcId ? { npcId: v.npcId } : {}), field: v.field, rule: v.rule, action: v.action,
     }));
     return { accepted: true, committed, violations, varianceOk: result.varianceOk };
+  }
+
+  /**
+   * F2 — re-pick any warmed given name that reads UNAMBIGUOUSLY as the OPPOSITE binary gender of its
+   * pinned `genderPresentation`, keeping the surname, off a dedicated descriptive-only sub-stream (never
+   * the outcome/vote stream — calibration-neutral, the `decollidePriorNames`/#1140 discipline). Only a
+   * clear man↔woman mismatch is re-picked: a UNISEX name (coherent with ANY presentation) and a
+   * `nonbinary` pin are left untouched, so nonbinary is never flattened and a coherent cast is a
+   * byte-identical no-op. This is the SAME machinery `recordCastIdentity` runs, hoisted so gender
+   * coherence holds BY CONSTRUCTION at genesis — not only if the later identity call succeeds.
+   */
+  private cohereGenesisNames(cast: PrewarmCast): void {
+    const rng = new SeededRandom(hashSeed(`${cast.seed}:genesis-gender-cohere`));
+    // Keep given names unique across the cast, mirroring the main-stream draw (a re-pick avoids collisions).
+    const used = new Set<string>();
+    for (const n of cast.npcs) used.add(n.name.split(" ")[0]!);
+    for (const n of cast.npcs) {
+      const gender = n.character.genderPresentation;
+      if (gender !== "man" && gender !== "woman") continue; // only a binary pin can be contradicted by a name
+      const parts = n.name.split(" ");
+      const given = parts[0]!;
+      const opposite = gender === "man" ? "woman" : "man";
+      if (nameGenderOf(given) !== opposite) continue; // coherent (same-gender OR unisex) — leave the name
+      used.delete(given); // free the wrong-gender given before picking its replacement
+      const next = pickGivenNameFor(gender, rng, used);
+      used.add(next);
+      n.name = parts.length > 1 ? `${next} ${parts.slice(1).join(" ")}` : next;
+    }
   }
 
   /** The season's public arc from the event record (0048) — Vault-free, stores-not-memory. */
@@ -4481,6 +4521,7 @@ export class GameSessionAdapter implements GameSession {
       // the safety net, not a fast-path — but the byte-neutrality of the floor path is what keeps golden green.
       const project = (): DossierForCoherence => ({
         ...(c.genderPresentation ? { genderPresentation: c.genderPresentation } : {}),
+        ...(n.name ? { name: n.name } : {}), // F5 — the name↔gender SOFT assertion (never fails ok/floors)
         ...(c.appearance ? { appearance: c.appearance } : {}),
         ...(c.demeanor ? { demeanor: c.demeanor } : {}),
         ...(c.background ? { background: c.background } : {}),
@@ -4499,11 +4540,24 @@ export class GameSessionAdapter implements GameSession {
           : {}),
       });
       const first = validateDossierCoherence(project());
-      if (first.ok) continue;
+      // Skip ONLY when there is genuinely nothing to do. A SOFT-but-repairable result (a nonbinary pin
+      // carrying a stray binary self-pronoun) returns ok:true WITH a non-empty `repairFields` — it must
+      // still fall through to repair, or the nonbinary houseguest keeps "his …/her …" prose into the
+      // portrait. Short-circuiting on `ok` alone would defeat that (Greptile P1 — soft repairs skipped).
+      if (first.ok && first.repairFields.length === 0) continue;
       // REPAIR — clear only the contradicting self-referential fields, then RE-VALIDATE. The repaired
       // dossier is a projection; write the cleared fields back onto the byte-stable Character.
-      const { repairedFields } = repairDossierCoherence(project());
+      const { repaired, repairedFields } = repairDossierCoherence(project());
       this.clearCoherenceFields(c, repairedFields);
+      // F5 — restore the portrait-facing prose the repair SCRUBBED to the pin (appearance + distinguishing
+      // mark). `clearCoherenceFields` blanked them just above; write the pronoun-corrected text back so the
+      // descriptive detail ("… left eyebrow") survives coherent into the portrait prompt instead of being
+      // lost. Non-repair-field prose is byte-identical here (a harmless no-op).
+      if (typeof repaired.appearance === "string" && repaired.appearance.trim()) c.appearance = repaired.appearance;
+      const scrubbedMark = repaired.physicalCharacteristics?.distinguishingMark;
+      if (c.physicalCharacteristics && typeof scrubbedMark === "string" && scrubbedMark.trim()) {
+        c.physicalCharacteristics.distinguishingMark = scrubbedMark;
+      }
       const after = validateDossierCoherence(project());
       let action: "repaired" | "floored" = "repaired";
       let fields = [...repairedFields];
