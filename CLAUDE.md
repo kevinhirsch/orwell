@@ -54,7 +54,7 @@ MUST compose the kit.)* The game is **folded into the main chat**: the player-fa
 `docs/features/` (through **0110**; the 0067–0074 launch band is 0067/0068 public-internet exposure + ADR 0007, 0069 token economy,
 0070 off-screen texture enrichment, 0071 defensive hardening (redaction + URL/path guards), 0072 the
 multi-platform gateway, 0073 the structural anti-sycophancy game-build wall (a CI gate), and 0074 local &
-tunable HTTPS (ADR 0014); past the launch band, **0075–0096, 0099–0102, 0104–0110** are built and **0097/0098/0103** remain frozen (owner-parked, preserved not deleted) — 0108's PR replay gate is now **armed** (fixture committed #1251; the `golden-path` CI job runs the replay and is blocking);
+tunable HTTPS (ADR 0014); past the launch band, **0075–0096, 0099–0102, 0104–0110** are built and **0097/0098/0103** remain frozen (owner-parked, preserved not deleted) — 0108's PR replay gate is now **armed** (fixture committed #1251; the `golden-path` CI job runs the replay — **advisory / non-gating**, excluded from `ci-gate.needs` per the owner ruling 2026-07-12);
 0052 — the house themes — shipped FE-side from the audit
 spec with no standalone file; 0051 in-character images shipped 2026-06-11, PR #235, and its
 follow-on **portrait/headshot lane** — Lane G — extended it FE-side: cast-portrait generation &
