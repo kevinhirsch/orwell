@@ -2455,8 +2455,14 @@ async def fetch_sealed_from_house(user) -> list:
         # generalized knowledge-scope manifest (every fact held by a BOUNDED subset of the house, each
         # with its real pathway-holder set as names). Both are Vault-free; the guard drops a sentence
         # whenever a STAGED houseguest voices a fact whose `knownTo` excludes them (for a DR fact the
-        # set is empty ⇒ any staged houseguest). Either call failing is tolerated (the other still holds).
-        raw = list(await orwell_engine.sealed_from_house(user=user) or [])
+        # set is empty ⇒ any staged houseguest). Each fetch is INDEPENDENT (its own try, Greptile #1723)
+        # so an RPC failure in ONE never skips the OTHER — the generalized Layer 3 guard stays active
+        # even if the DR-seal fetch hiccups, and vice versa (the fail-soft intent above).
+        raw: list = []
+        try:
+            raw += list(await orwell_engine.sealed_from_house(user=user) or [])
+        except Exception as e1:
+            logger.debug("[orwell] sealed-from-house fetch skipped for user=%s: %s", user, _exc_detail(e1))
         try:
             raw += list(await orwell_engine.knowledge_scope_manifest(user=user) or [])
         except Exception as e2:
