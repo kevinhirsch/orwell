@@ -854,6 +854,35 @@ _STALE_BEAT_REGROUND = (
 )
 
 
+# F1 ANTI-STALE NARRATION GUARD (2026-07-20 live playtest) — the CLOSED-SET re-ground the forced-advance
+# belt queues whenever it silently moved the board PAST what the chat last voiced. The engine advanced
+# (the belt pulled `advanceGame` for a model that would not) while the narration stayed frozen on an
+# earlier beat — so the NEXT turn is OBLIGATED to voice the engine's CURRENT moment instead of repeating
+# the beat it was stuck on. This is the mirror of `_STALE_BEAT_REGROUND` for the "narration behind the
+# engine" direction. Purely closed-set (ADR 0005): it points the model at the engine's live moment (which
+# apply_game_framing already rebuilds authoritatively into the GAME CONTEXT above it) and authors NO prose.
+_ANTI_STALE_NARRATION_REGROUND = (
+    "THE BOARD MOVED — CATCH UP. The game was advanced while your narration stayed on an EARLIER beat, so "
+    "the house has moved on: the GAME CONTEXT above is the CURRENT, authoritative moment (read gameStatus / "
+    "getGameState to confirm the live state). Narrate THAT moment now — the beat the engine is ACTUALLY on. "
+    "Do NOT repeat, replay, or return to the premiere / champagne-circle / introductions or any prior beat "
+    "you already narrated, and never a result you guessed — voice only what the engine's live state shows."
+)
+
+
+def stash_anti_stale_reground(user) -> bool:
+    """F1 anti-stale guard: OBLIGATE the next narration turn to voice the engine's CURRENT moment after a
+    silent forced-advance moved the board past what the chat last voiced. Appends the closed-set directive
+    onto the existing BL-004 re-ground queue (`_reground_enqueue`, drained by apply_game_framing into the GM
+    prompt) — deduped, bounded, never clobbering a distinct queued correction. Closed-set board re-ground
+    only (ADR 0005): it points the model at the engine's live moment, authoring no prose. Fail-soft (never
+    raises — a broken guard must not break a turn). Returns True iff the directive is queued."""
+    try:
+        return _reground_enqueue(_desync_key(user), _ANTI_STALE_NARRATION_REGROUND)
+    except Exception:  # pragma: no cover - defence in depth
+        return False
+
+
 # #1045 — the STABLE per-turn desync-state key for `_LAST_BEAT_SIG` / `_DESYNC_REGROUND`.
 #
 # The desync spine keys its per-turn BEFORE-signature on the `user` identity. Under a single-tenant
