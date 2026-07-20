@@ -555,6 +555,17 @@ export function repairDossierCoherence<T extends DossierForCoherence>(d: T): { r
       }
       continue;
     }
+    // No pin to scrub toward — clear the mark at BOTH locations. The validator labels this field
+    // "distinguishingMark" (flat) but the value may live top-level OR under physicalCharacteristics,
+    // so the generic top-level clear below would leave the nested facet contradicting the name.
+    if (field === "distinguishingMark") {
+      out.distinguishingMark = undefined;
+      const pc = out.physicalCharacteristics;
+      if (pc && typeof pc === "object") {
+        out.physicalCharacteristics = { ...(pc as Record<string, unknown>), distinguishingMark: undefined };
+      }
+      continue;
+    }
     if (field.includes(".")) {
       const [root, leaf] = field.split(".") as [string, string];
       const nested = out[root];
