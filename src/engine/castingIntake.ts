@@ -336,7 +336,8 @@ export interface DossierCoherenceResult {
   /** True iff NO hard contradiction exists — a dossier that fails this must be rejected/repaired. */
   ok: boolean;
   contradictions: CoherenceContradiction[];
-  /** The DISTINCT fields to re-author (hard contradictions only) — repair clears only these. */
+  /** The DISTINCT fields to re-author — every hard contradiction PLUS a nonbinary pin's stray binary
+   * self-pronouns (soft, `ok` stays true, but still scrubbed) — repair touches only these. */
   repairFields: string[];
 }
 
@@ -406,6 +407,10 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
   let anyFem = false;
   const oppositeFields = new Set<string>();
   const bothInOne = new Set<string>();
+  // A `nonbinary` pin has no OPPOSITE binary gender, so the man/woman branch never fires for it — but a lone
+  // binary self-pronoun ("his left eyebrow") still ships the wrong pronoun on a nonbinary houseguest. Track
+  // those fields to flag for a SOFT repair (neutralized to singular they/their by the scrub) below.
+  const nonbinaryBinaryFields = new Set<string>();
   for (const [field, value] of selfRefFields) {
     if (typeof value !== "string" || value.trim().length === 0) continue;
     const masc = MASC_PRONOUN_RE.test(value);
@@ -416,6 +421,8 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
     // Opposite-of-pin pronoun in a self-referential field ⇒ this field must be re-authored.
     if (gender === "man" && fem) oppositeFields.add(field);
     if (gender === "woman" && masc) oppositeFields.add(field);
+    // Nonbinary pin: ANY binary self-pronoun (he/him/his OR she/her/hers) is a mismatch to neutralize.
+    if (gender === "nonbinary" && (masc || fem)) nonbinaryBinaryFields.add(field);
   }
   for (const field of oppositeFields) {
     contradictions.push({ field, rule: `self-referential pronoun contradicts genderPresentation '${gender}'`, severity: "hard" });
@@ -438,6 +445,13 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
     for (const field of carriers) {
       contradictions.push({ field, rule: "cast dossier self-references both masculine and feminine", severity: "hard" });
     }
+  }
+  // Nonbinary binary-pronoun mismatches: SOFT (never fails `ok`, mirroring the name flag) but still flagged
+  // for REPAIR — the scrub's nonbinary mapping rewrites he/she → singular they/their in place. Skip a field
+  // already reported (a both-in-one or cross-field HARD contradiction) so it is not double-reported.
+  for (const field of nonbinaryBinaryFields) {
+    if (contradictions.some((c) => c.field === field)) continue;
+    contradictions.push({ field, rule: "self-referential binary pronoun contradicts genderPresentation 'nonbinary'", severity: "soft" });
   }
 
   // (ii) Age vs biography year-spans + grandparent self-reference.
@@ -482,8 +496,10 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
   const hard = contradictions.filter((c) => c.severity === "hard");
   return {
     ok: hard.length === 0,
+    // Repair every HARD-contradicting field PLUS a nonbinary pin's stray binary self-pronouns (a SOFT signal
+    // that never fails `ok` but is still scrubbed to singular they/their).
+    repairFields: [...new Set([...hard.map((c) => c.field), ...nonbinaryBinaryFields])],
     contradictions,
-    repairFields: [...new Set(hard.map((c) => c.field))],
   };
 }
 

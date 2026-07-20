@@ -221,6 +221,64 @@ describe("F5 — appearance / distinguishing-mark self-pronouns are SCRUBBED to 
   });
 });
 
+describe("nonbinary pin — a lone BINARY self-pronoun is flagged for repair (SOFT, ok stays true)", () => {
+  it("flags a nonbinary appearance carrying a masculine self-pronoun, without failing ok", () => {
+    // Greptile P1: a nonbinary pin has no OPPOSITE binary gender, so the man/woman branch never fires — yet
+    // "his left eyebrow" ships a binary pronoun on a nonbinary houseguest. It must be flagged for repair.
+    const res = validateDossierCoherence({
+      genderPresentation: "nonbinary",
+      appearance: "his left eyebrow is scarred",
+      age: 26,
+    });
+    expect(res.ok).toBe(true); // SOFT — never fails ok (the dossier is not rejected)
+    expect(res.repairFields).toContain("appearance");
+    const flag = res.contradictions.find((c) => c.field === "appearance");
+    expect(flag).toBeTruthy();
+    expect(flag!.severity).toBe("soft");
+  });
+
+  it("flags a feminine self-pronoun on a nonbinary pin the same way", () => {
+    const res = validateDossierCoherence({
+      genderPresentation: "nonbinary",
+      distinguishingMark: "a scar on her left forearm",
+      age: 30,
+    });
+    expect(res.ok).toBe(true);
+    expect(res.repairFields).toContain("distinguishingMark");
+  });
+
+  it("repair SCRUBS a nonbinary appearance's binary pronoun to singular they/their, keeping the detail", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "nonbinary",
+      appearance: "his left eyebrow is scarred",
+      age: 26,
+    };
+    const { repaired, repairedFields } = repairDossierCoherence(d);
+    expect(repairedFields).toContain("appearance");
+    expect(repaired.appearance).toBe("their left eyebrow is scarred");
+    // The repaired dossier no longer flags the field.
+    expect(validateDossierCoherence(repaired).repairFields).not.toContain("appearance");
+  });
+
+  it("ALREADY-neutral nonbinary prose is untouched (no false repair)", () => {
+    const d: DossierForCoherence = {
+      genderPresentation: "nonbinary",
+      appearance: "their left eyebrow is scarred",
+      demeanor: "they keep the room at arm's length",
+      distinguishingMark: "a scar on their forearm",
+      age: 26,
+    };
+    const res = validateDossierCoherence(d);
+    expect(res.ok).toBe(true);
+    expect(res.repairFields).toHaveLength(0);
+    expect(res.contradictions).toHaveLength(0);
+    // Repair is a byte-neutral no-op.
+    const { repaired, repairedFields } = repairDossierCoherence(d);
+    expect(repairedFields).toHaveLength(0);
+    expect(repaired.appearance).toBe("their left eyebrow is scarred");
+  });
+});
+
 describe("validateDossierCoherence — N generated coherent casts pass clean", () => {
   it("zero cross-field contradictions across a swept, gender-mixed cast", () => {
     const genders: Array<"man" | "woman" | "nonbinary"> = ["man", "woman", "nonbinary"];
