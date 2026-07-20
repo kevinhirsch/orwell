@@ -429,6 +429,16 @@ export class BbWorld extends World {
   enColdLean?: number;
   /** T2: the staged eviction's electorate size, read from the engine's own state. */
   enElectorate?: number;
+  // --- exit interviews (0130) scratch state (exit_interview.steps.ts) ---
+  xiSession?: import("../../src/adapters/engine/GameSessionAdapter").GameSessionAdapter;
+  xiRetro?: import("../../src/ports/GameSession").RetrospectiveView | null;
+  xiPending?: NonNullable<import("../../src/ports/GameSession").AdvanceView["pending"]>;
+  xiBetrayed?: string;
+  xiRespected?: string;
+  xiThrew?: boolean;
+  xiBlob?: string;
+  xiOrderA?: string[];
+  xiOrderB?: string[];
   // --- E34/E37 player-agency beats (player_agency.steps.ts) ---
   agS?: import("../../src/engine/liveSeason").LiveSeasonState;
   agCtx?: import("../../src/engine/liveSeason").SeasonCtx;

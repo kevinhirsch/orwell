@@ -29,7 +29,11 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
  * HARD rule: roles only — no names; all fixtures generated.
  */
 
-const SEED = 7;
+// Seed re-selected 2026-07-13 (0130): the exit-interview beat adds one step per eviction, shifting this
+// harness's 1-beat:1-tick interleave so the dedicated trigger rng reaches the reactive-twist window in a
+// different state — seed 7 no longer erupts within the bounded run (an opt-in-twist harness-timing artifact,
+// NOT a calibration change: triggers are OFF in every seeded gate). Seed 42 erupts under the new interleave.
+const SEED = 42;
 
 /** Drive a bounded, fully-deterministic sequence of orchestrator off-screen ticks + live-loop steps; capture
  *  the SHARED-rng-driven content (every recorded event) and the layer's own additive eruptions, separately. */
@@ -45,7 +49,9 @@ function runAndHash(triggersOn: boolean): { sharedStream: string; fullStream: st
   // Bounded (not to the finale) — long enough to exercise many off-screen ticks + several ceremonies, short
   // enough to keep the parallel unit lane's memory in check.
   let finished = false;
-  for (let i = 0; i < 90 && !finished; i++) {
+  // Bounded (memory-conscious) but large enough to reach the reactive-twist eruption window for SEED (see
+  // the seed note above — 0130's per-eviction beat shifted the beat:tick interleave).
+  for (let i = 0; i < 120 && !finished; i++) {
     finished = stepLoop(sb);
     if (!finished) orch.advance(user, "offscreen-tick");
   }

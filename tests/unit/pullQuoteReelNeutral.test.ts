@@ -92,7 +92,8 @@ describe("#1396 — the pull-quote reel is calibration-neutral (read-only projec
       return o;
     };
     expect(JSON.stringify(strip(ra)), "the non-reel retrospective is untouched by the reel").toBe(JSON.stringify(strip(rb)));
-    const PRE_FEATURE_KEYS = new Set(["winner", "playerConfessionals", "hiddenStory", "twists", "evictionVotes", "juryVotes"]);
+    // Includes "exitInterviews" (0130) — a separate additive key, not the pull-quote reel's doing.
+    const PRE_FEATURE_KEYS = new Set(["winner", "playerConfessionals", "hiddenStory", "twists", "evictionVotes", "juryVotes", "exitInterviews"]);
     for (const k of Object.keys(ra)) {
       if (k !== "pullQuoteReel") expect(PRE_FEATURE_KEYS.has(k), `unexpected new retrospective key "${k}"`).toBe(true);
     }

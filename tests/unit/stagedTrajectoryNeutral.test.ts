@@ -104,6 +104,7 @@ function playStaged(active: EntityId[], ctx: StagedCtx, seed: number): Trajector
       else if (p.kind === "final-eviction") ev = applyStaged(s, { kind: "final-eviction", evict: p.options[0]! }, ctx);
       else if (p.kind === "houseguests-choice") ev = applyStaged(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng);
       else if (p.kind === "goodbye-message") ev = applyStaged(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx);
+      else if (p.kind === "exit-interview") ev = applyStaged(s, { kind: "exit-interview", stance: p.stances[0]! }, ctx);
       else if (p.kind === "finale-statement") ev = applyStaged(s, { kind: "finale-statement", statement: "" }, ctx);
       else if (p.kind === "finale-answer") ev = applyStaged(s, { kind: "finale-answer", appeal: p.appeals[0]! }, ctx);
       else if (p.kind === "juror-question") ev = applyStaged(s, { kind: "juror-question", question: "" }, ctx);

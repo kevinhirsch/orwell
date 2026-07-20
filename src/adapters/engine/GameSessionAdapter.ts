@@ -211,12 +211,12 @@ import { EngineRefusal, StaleBeatError } from "../../domain/errors";
 import { RelationshipModel, relationshipLabel, currentReadOf } from "../../engine/relationships";
 import type { Stats } from "../../engine/season";
 import {
-  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, deriveNpcCompIntent, GOODBYE_TONES,
+  newLiveSeason, advance as advanceBeat, applyDecision, autoDecision, recordDealBetrayal, peekCompetition, COMP_INTENTS, deriveNpcCompIntent, GOODBYE_TONES, EXIT_STANCES,
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, advanceClockPerScene, resetSceneClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
   competitionStagingData, validateCompetitionFiction,
-  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone,
+  type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone, type ExitStance,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
 import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
@@ -2786,6 +2786,15 @@ export class GameSessionAdapter implements GameSession {
     // surface (the Vault Wall, mandate #2; `pullQuoteReel.test.ts` sentinel). Names/ids resolved through
     // the same `retroScrub` the rest of the unseal uses, so no raw id crosses.
     const pullQuoteReel = buildPullQuoteReel(events, { nameOf, scrub: (c) => this.retroScrub(c) });
+    // 0130 — the exit-interview reel: each evictee's posture leaving (+ the player's own words), the
+    // season told through its exits. A witnessed, public beat (not a Vault read); the free-text message
+    // is scrubbed like every other unsealed line so no raw id crosses. Empty when nothing was interviewed.
+    const exitInterviews = (this.live.exitInterviews ?? []).map((x) => ({
+      week: x.week,
+      evictee: { id: x.evictee, name: this.nameOf(x.evictee) },
+      stance: x.stance,
+      ...(x.message ? { message: this.retroScrub(x.message) } : {}),
+    }));
     return {
       winner: this.live.winner ? this.named(this.live.winner) : null,
       hiddenStory: coalesceDumpRows(ordered),
@@ -2794,6 +2803,7 @@ export class GameSessionAdapter implements GameSession {
       ...(juryVotes ? { juryVotes } : {}),
       playerConfessionals,
       pullQuoteReel,
+      ...(exitInterviews.length ? { exitInterviews } : {}),
     };
   }
 
@@ -2862,6 +2872,8 @@ export class GameSessionAdapter implements GameSession {
         return { kind: "final-eviction", vote: input.evict };
       case "goodbye-message":
         return { kind: "goodbye-message", vote: input.tone, ...(input.message ? { statement: input.message } : {}) };
+      case "exit-interview":
+        return { kind: "exit-interview", vote: input.stance, ...(input.message ? { statement: input.message } : {}) };
       case "finale-statement":
         return { kind: "finale-statement", statement: input.statement };
       case "finale-answer":
@@ -9552,6 +9564,13 @@ export class GameSessionAdapter implements GameSession {
         }
         return { kind: "goodbye-message", tone, ...(req.statement ? { message: req.statement } : {}) };
       }
+      case "exit-interview": { // 0130: the stance is surfaced as options/pick — accept `vote` OR `choice`.
+        const stance = singlePickId(req) as ExitStance | undefined;
+        if (!stance || !(EXIT_STANCES as readonly string[]).includes(stance)) {
+          throw new Error("a legal exit stance is required (gracious / defiant / bitter)");
+        }
+        return { kind: "exit-interview", stance, ...(req.statement ? { message: req.statement } : {}) };
+      }
       // --- finale (0037) ---
       case "finale-statement":
         return { kind: "finale-statement", statement: req.statement ?? "" };
@@ -9657,6 +9676,14 @@ export class GameSessionAdapter implements GameSession {
           prompt: `${this.nameOf(p.evictee)} has been evicted — record your goodbye message. Choose its tone; your own words carry it.`,
           options: p.tones.map((t) => ({ id: t, name: t })),
           evictee: this.named(p.evictee)!, pick: 1,
+        };
+      // --- exit interview (0130): the player IS the evictee — their posture leaving is THEIRS to choose ---
+      case "exit-interview":
+        return {
+          kind: p.kind, by,
+          prompt: "You have been evicted — the producers sit you down for your exit interview. Choose the posture you leave on; your own words carry it.",
+          options: p.stances.map((st) => ({ id: st, name: st })),
+          stances: [...p.stances], evictee: this.named(p.evictee)!, pick: 1,
         };
       // --- finale (0037) ---
       case "finale-statement":

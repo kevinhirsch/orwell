@@ -93,6 +93,8 @@ FIXTURE = [
      {"kind": "juror-question", "statement": "What was your biggest move?"}),
     ("goodbye-message", ["warm"], "Take care.", None,
      {"kind": "goodbye-message", "vote": "warm", "statement": "Take care."}),
+    ("exit-interview", ["defiant"], "I'm not done.", None,
+     {"kind": "exit-interview", "vote": "defiant", "statement": "I'm not done."}),
     ("finale-answer", ["own-game"], None, None,
      {"kind": "finale-answer", "appeal": "own-game"}),
     ("comp-intent", ["compete"], None, None,

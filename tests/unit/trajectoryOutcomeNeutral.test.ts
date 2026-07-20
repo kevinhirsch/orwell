@@ -163,6 +163,7 @@ function playGame(active: EntityId[], ctx: SeasonCtx, seed: number): Trajectory2
       else if (p.kind === "final-eviction") rec(applyDecision(s, { kind: "final-eviction", evict: p.options[0]! }, ctx));
       else if (p.kind === "houseguests-choice") rec(applyDecision(s, { kind: "houseguests-choice", pick: p.options[0]! }, ctx, rng));
       else if (p.kind === "goodbye-message") rec(applyDecision(s, { kind: "goodbye-message", tone: p.tones[0]! }, ctx));
+      else if (p.kind === "exit-interview") rec(applyDecision(s, { kind: "exit-interview", stance: p.stances[0]! }, ctx));
       else if (p.kind === "finale-statement") rec(applyDecision(s, { kind: "finale-statement", statement: "" }, ctx));
       else if (p.kind === "finale-answer") rec(applyDecision(s, { kind: "finale-answer", appeal: p.appeals[0]! }, ctx));
       else if (p.kind === "juror-question") rec(applyDecision(s, { kind: "juror-question", question: "" }, ctx));

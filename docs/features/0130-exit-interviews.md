@@ -1,11 +1,20 @@
 # 0130 — Exit interviews (the producer's eviction-night sit-down)
 
-> **Status:** 📝 **Spec only** — authored during the 0047 PO review (2026-07-13), **not yet built** (PO: build
-> later). **Expands 0047** (eviction night live). Every eviction ends with the show's signature beat we don't
-> model: the evicted houseguest sits down with the **producers** and is interviewed on the way out — they see
-> their **goodbye messages**, react in the moment, and tell their side. This fires **every** eviction, is a
-> real **agency beat when the *player* is evicted**, and its content is **carried into the 0048 season-end
-> retrospective**.
+> **Status:** ✅ **Built & green** (2026-07-13; BDD-gated in `cucumber.cjs`). **Expands 0047** (eviction night
+> live). Every staged eviction ends with the show's signature beat: the evicted houseguest sits down with the
+> **producers** and is interviewed on the way out — they see their **goodbye messages**, react in the moment,
+> and tell their side. Fires on **every staged eviction**, is a real **agency beat when the *player* is
+> evicted** (a pending decision — their own words), and is **carried into the 0048 season-end retrospective**.
+> **Calibration-neutral** (no flag): the beat draws no rng and mutates no seeded state (the NPC stance is a
+> read of the already-fixed manner; the record feeds only the retrospective), so the seeded spine is
+> byte-identical — proven against a pre-feature eviction-order baseline + `juryReach` re-run green.
+> **Built in** `liveSeason.ts` (`EvictionStage` `exit-interview`, `ExitStance`/`npcExitStance`, the stage +
+> the player pending), `GameSession.ts` (the `exit-interview` pending/submit + `RetrospectiveView.exitInterviews`),
+> `GameSessionAdapter.ts` (projection + retrospective reel), `momentPrompts.ts` (the narration fragment), and the
+> FE decision card `frontend/static/js/orwellDecision.js` (the player's own posture + optional words, mirroring the
+> E34 goodbye-message card) + the `🎤` beat chip in `orwellToolBeats.js`.
+> **Tests:** `tests/unit/exitInterview.test.ts` + BDD `0130-exit-interviews.feature` (`exit_interview.steps.ts`)
+> + FE `frontend/tests/test_m3_4_decision_faces.py` (buildPayload byte-parity for the new kind).
 > **Executable spec:** [`0130-exit-interviews.feature`](./0130-exit-interviews.feature)
 
 ## 1. Summary

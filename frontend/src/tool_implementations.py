@@ -5208,6 +5208,8 @@ async def do_submit_decision(content: str, owner: Optional[str] = None) -> Dict:
         "replacement", "eviction-vote", "tie-break", "final-eviction",
         "goodbye-message", "finale-statement", "finale-answer",
         "juror-question", "juror-vote",
+        # 0130: the player-evictee's own exit interview (posture + optional words) rides the same seam.
+        "exit-interview",
         # 0061: the confirmed self-eviction rides the same validated decision seam.
         "self-evict",
     }
