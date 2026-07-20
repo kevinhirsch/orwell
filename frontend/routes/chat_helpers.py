@@ -765,6 +765,95 @@ _LAST_BEAT_SIG: dict = {}
 _DESYNC_REGROUND: dict = {}
 
 
+# ── BL-004 (2026-07-16 full-playtest audit) — the bounded RE-GROUND correction QUEUE ────────── #
+#
+# `_DESYNC_REGROUND[key]` holds a `\n\n`-joined FIFO of the closed-set corrections queued for a game's
+# NEXT framed turn — each `\n\n` segment is one slot, drained together into the next moment prompt.
+# The audited premiere behaved as a SINGLE slot: a fresh correction OVERWROTE an unconsumed one and a
+# second correction "in flight" was silently DEFERRED, dropping 17/24 queued prose corrections. The
+# queue below never drops a DISTINCT correction silently: `_reground_enqueue` APPENDS a new segment,
+# de-dupes an EXACT repeat (a guard re-detecting the same drift across turns must not nag-spam), and at
+# a hard cap drops the OLDEST segment WITH A `log()` (no silent truncation — CLAUDE.md "no silent
+# caps"). Closed-set ONLY (ADR 0005): every caller passes a board/state re-ground, never creative
+# prose. The value stays a STRING so every existing reader (`in`, `.get`, `.pop`, substring checks)
+# is unchanged; the segments ARE the multi-slot queue.
+_REGROUND_SEP = "\n\n"
+_REGROUND_QUEUE_CAP = 8  # generous — a turn rarely queues >1–2; the cap only guards a runaway.
+
+
+def _reground_segments(key):
+    """The queued correction segments for `key` (FIFO order), or []. Tolerates a legacy single string
+    or a list value (defence in depth)."""
+    val = _DESYNC_REGROUND.get(key)
+    if not val:
+        return []
+    if isinstance(val, str):
+        return val.split(_REGROUND_SEP)
+    try:
+        return [str(v) for v in val]
+    except TypeError:
+        return [str(val)]
+
+
+def _reground_enqueue(key, directive) -> bool:
+    """Append ONE closed-set re-ground correction to `key`'s bounded FIFO queue (BL-004).
+
+    Never clobbers a distinct correction already queued (the audited single-slot drop): a new distinct
+    directive is appended as its own `\\n\\n` segment; an EXACT repeat is de-duplicated (a guard that
+    re-detects the same drift must not stack the identical nag). At the hard cap the OLDEST segment is
+    dropped WITH A `log()` — never a silent truncation. Returns True iff the directive is queued (now
+    or already present). Fail-soft: never raises (a broken guard must not break a turn)."""
+    try:
+        if not directive:
+            return False
+        # NOTE: `key` MAY be None — under a userless single-tenant path with no resolvable game session
+        # `_desync_key` returns None, and the store's readers pop/consume that same None key. Preserving
+        # None-keying keeps the degenerate single-tenant fallback working (it was the prior behaviour).
+        directive = str(directive)
+        segs = _reground_segments(key)
+        if directive in segs:
+            _DESYNC_REGROUND[key] = _REGROUND_SEP.join(segs)  # normalise (legacy value → canonical)
+            return True  # already queued — de-duped, but it IS queued
+        segs.append(directive)
+        while len(segs) > _REGROUND_QUEUE_CAP:
+            dropped = segs.pop(0)
+            logger.warning(
+                "[orwell] _DESYNC_REGROUND queue at cap=%d for key=%s — dropped the OLDEST queued "
+                "correction (no silent truncation): %.120s", _REGROUND_QUEUE_CAP, key, dropped)
+        _DESYNC_REGROUND[key] = _REGROUND_SEP.join(segs)
+        return True
+    except Exception:  # pragma: no cover - defence in depth; a guard must never hurt a turn
+        return False
+
+
+def _reground_remove(key, directive) -> None:
+    """Remove ONE specific queued correction segment (the stale-beat compare-and-clear case) without
+    disturbing the rest of the queue; pop the key when the queue empties. Fail-soft."""
+    try:
+        if not directive:
+            return
+        segs = _reground_segments(key)
+        directive = str(directive)
+        if directive in segs:
+            segs.remove(directive)
+        if segs:
+            _DESYNC_REGROUND[key] = _REGROUND_SEP.join(segs)
+        else:
+            _DESYNC_REGROUND.pop(key, None)
+    except Exception:  # pragma: no cover - defence in depth
+        pass
+
+
+# The stale-beat reconcile's re-ground directive as a NAMED constant so `retry_progression_after_stale`
+# can compare-and-clear EXACTLY its own segment (BL-004: append the queue, then remove only ours).
+_STALE_BEAT_REGROUND = (
+    "RE-GROUND ON THE BOARD — a game action was computed against a stale view of the board (it had "
+    "already moved on), so the engine (the source of truth) refused it and nothing changed. Re-read the "
+    "live state with gameStatus / getGameState and pick up from where the game ACTUALLY is — do NOT "
+    "repeat or build on the outcome you were about to narrate."
+)
+
+
 # #1045 — the STABLE per-turn desync-state key for `_LAST_BEAT_SIG` / `_DESYNC_REGROUND`.
 #
 # The desync spine keys its per-turn BEFORE-signature on the `user` identity. Under a single-tenant
@@ -1159,13 +1248,7 @@ async def _handle_stale_beat(user, exc) -> None:
         # canonical-session fallback gives a real key even when user=None, where this used to no-op).
         _sb_key = _desync_key(user)
         if _sb_key is not None:
-            _DESYNC_REGROUND[_sb_key] = (
-                "RE-GROUND ON THE BOARD — a game action was computed against a stale view of the "
-                "board (it had already moved on), so the engine (the source of truth) refused it and "
-                "nothing changed. Re-read the live state with gameStatus / getGameState and pick up "
-                "from where the game ACTUALLY is — do NOT repeat or build on the outcome you were "
-                "about to narrate."
-            )
+            _reground_enqueue(_sb_key, _STALE_BEAT_REGROUND)
         logger.info("[orwell] reconciled a stale-beat 409 for user=%s (count=%d)",
                     user, _STALE_BEAT_REJECTIONS)
     except Exception as e:
@@ -1206,7 +1289,10 @@ async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
     # can advance `_LAST_BEAT_SEQ` and/or re-stash `_DESYNC_REGROUND[_dk]`. Capture WHAT OUR reconcile
     # just stashed BEFORE we await, so on completion we can tell our own re-ground apart from a NEWER one.
     _dk = _desync_key(owner)
-    _reground_ours = _DESYNC_REGROUND.get(_dk) if _dk is not None else None
+    # BL-004: our reconcile stashed EXACTLY `_STALE_BEAT_REGROUND` as one queue segment — track that
+    # specific segment so we compare-and-clear only OUR own, never a peer's newer directive nor a
+    # distinct correction that was already queued alongside ours.
+    _reground_ours = _STALE_BEAT_REGROUND
     try:
         res = await retry_fn(last_beat_seq(owner))   # RE-FIRE once against the reconciled token, SAME idem key
     except Exception as _e2:
@@ -1237,8 +1323,8 @@ async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
     # the model must NOT be told "nothing changed / do not build on the outcome" next turn. But if a
     # concurrent same-owner flow REPLACED it with a DIFFERENT directive during the await, PRESERVE that
     # newer one — only pop when the stored value is STILL exactly what our reconcile stashed.
-    if _dk is not None and _DESYNC_REGROUND.get(_dk) == _reground_ours:
-        _DESYNC_REGROUND.pop(_dk, None)
+    if _dk is not None:
+        _reground_remove(_dk, _reground_ours)
     return res
 
 
@@ -2039,7 +2125,7 @@ async def record_post_turn_desync_check(user, narration: str, this_turn_progress
             return
         directive = _narration_claims_outcome(narration or "", before, after)
         if directive:
-            _DESYNC_REGROUND[_dkey] = directive
+            _reground_enqueue(_dkey, directive)  # BL-004: append (never clobber a prior distinct one)
             logger.warning(
                 "[orwell] beat-signature desync detected for user=%s — re-grounding next turn", user,
             )
@@ -2223,8 +2309,7 @@ async def record_post_turn_presence_check(user, narration: str) -> None:
         directive = _presence_desync_directive(narration or "", facts)
         if not directive:
             return
-        existing = _DESYNC_REGROUND.get(_dkey)
-        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
         logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
     except Exception as e:
         logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
@@ -2351,8 +2436,7 @@ async def record_post_turn_roster_check(user, narration: str) -> None:
             "getGameState) and voice ONLY the houseguests who are actually in the season — use their "
             "EXACT names, and never introduce a name that is not on the roster."
         )
-        existing = _DESYNC_REGROUND.get(_dkey)
-        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
         logger.warning(
             "[orwell] invented-houseguest detected for user=%s (%s) — re-grounding next turn",
             user, ", ".join(invented),
@@ -2513,8 +2597,7 @@ def stash_knowledge_wall_reground(user) -> None:
             "voice a houseguest, call npcVoice and speak ONLY from what THAT houseguest legitimately "
             "knows — never the player's diary thoughts, never a secret no pathway gave them."
         )
-        existing = _DESYNC_REGROUND.get(_dkey)
-        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
     except Exception:
         pass
 
@@ -2638,7 +2721,7 @@ async def screen_streamed_outcome(user, sentence: str) -> bool:
         # next-turn re-ground as a backstop (reuse the existing desync mechanism, do not invent a
         # second one). The post-turn check would otherwise have produced this same directive a turn
         # too late; Part C just gets there one turn earlier.
-        _DESYNC_REGROUND[_dkey] = directive
+        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (never clobber a prior distinct one)
         logger.warning(
             "[orwell] pre-emission guard HELD a phantom closed-set outcome for user=%s — "
             "dropped before emission, re-grounding next turn", user,
@@ -2692,7 +2775,7 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
             # The engine is unreadable WHILE a board change is claimed → fail CLOSED (mandate #3). This
             # is the deliberate divergence from the sentence guard's fail-open: an unverifiable outcome
             # must not stream.
-            _DESYNC_REGROUND[_dkey] = _ENGINE_UNREACHABLE_REGROUND
+            _reground_enqueue(_dkey, _ENGINE_UNREACHABLE_REGROUND)  # BL-004: bounded append
             logger.warning("[orwell] scene circuit-breaker: engine unreadable while a board change was "
                            "narrated — cutting the scene for user=%s", user)
             return _ENGINE_UNREACHABLE_REGROUND
@@ -2704,7 +2787,7 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
         _absent = _unbacked_outcome_absent(text, live)
         if _absent:
             _dir = _overclaim_directive(_absent, live)
-            _DESYNC_REGROUND[_dkey] = _dir
+            _reground_enqueue(_dkey, _dir)  # BL-004: bounded append
             logger.warning("[orwell] scene circuit-breaker HELD a pre-ceremony board-absence fabrication "
                            "for user=%s — cutting the whole scene (%s)", user, _absent)
             return _dir
@@ -2714,7 +2797,7 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
             return None
         directive = _narration_claims_outcome(text, before, live)
         if directive:
-            _DESYNC_REGROUND[_dkey] = directive
+            _reground_enqueue(_dkey, directive)  # BL-004: bounded append
             logger.warning("[orwell] scene circuit-breaker HELD a phantom board change for user=%s — "
                            "cutting the whole scene, re-grounding next turn", user)
             return directive
@@ -2933,8 +3016,7 @@ def _stash_overclaim_reground(user, directive: str) -> None:
     clobber an existing one). Fail-open."""
     try:
         _dkey = _desync_key(user)
-        existing = _DESYNC_REGROUND.get(_dkey)
-        _DESYNC_REGROUND[_dkey] = (existing + "\n\n" + directive) if existing else directive
+        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
     except Exception:
         pass
 
@@ -3198,12 +3280,12 @@ async def screen_streamed_location(user, sentence: str) -> bool:
         who = _sentence_places_evicted(sentence, evicted_names)
         if not who:
             return True
-        _DESYNC_REGROUND[_dkey] = (
+        _reground_enqueue(_dkey, (  # BL-004: bounded append (never clobber a prior distinct one)
             "RE-GROUND ON THE BOARD — last turn you placed " + who + " in a room, but they have been "
             "EVICTED and are no longer in the house — an evicted houseguest cannot appear in any room. "
             "The engine is the source of truth: re-read the live roster and voice only the houseguests "
             "who are still in the game; never place someone who has left the house back in it."
-        )
+        ))
         logger.warning(
             "[orwell] pre-emission guard HELD an evicted-houseguest-in-a-room claim for user=%s — "
             "dropped before emission, re-grounding next turn", user,
@@ -3292,13 +3374,13 @@ async def screen_streamed_nominee(user, sentence: str) -> bool:
         who = _sentence_names_wrong_nominee(sentence, nom_names, active_names)
         if not who:
             return True
-        _DESYNC_REGROUND[_dkey] = (
+        _reground_enqueue(_dkey, (  # BL-004: bounded append (never clobber a prior distinct one)
             "RE-GROUND ON WHO IS ON THE BLOCK — last turn you named " + who + " as a nominee, but the "
             "engine's nominees are " + _join_names(sorted(nom_names)) + " (the same names the House "
             "Status panel shows). Who is on the block is engine truth, not yours to improvise: re-read "
             "the live `nominees` and name ONLY those houseguests as up for eviction — never a houseguest "
             "who is not on the block, and never drop a real nominee."
-        )
+        ))
         logger.warning(
             "[orwell] pre-emission guard HELD a wrong-nominee claim for user=%s — dropped before "
             "emission, re-grounding next turn", user,
@@ -4068,6 +4150,9 @@ async def apply_game_framing(
             _reground = _DESYNC_REGROUND.pop(_dkey, None)
             if _reground:
                 gm_prompt = gm_prompt + "\n\n" + _reground
+                # BL-004: the queued correction(s) are now VOICED (drained into the prompt). The
+                # SUCCESS-GATED belt (one per segment) makes voiced-vs-queued measurable.
+                _note_belt(user, "desync-reground-voiced", _reground.count(_REGROUND_SEP) + 1)
             _LAST_BEAT_SIG[_dkey] = await _capture_beat_signature(user)
         except Exception as e:
             logger.warning("[orwell] beat-signature checkpoint skipped for user=%s: %s", _gkey, e)

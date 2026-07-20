@@ -3093,10 +3093,15 @@ def _faith_queue_reground(owner, directive) -> bool:
         key = _ch._desync_key(owner)
         if key is None:
             return False  # no owner AND no resolvable game session — nothing to key on
+        # A faith reframe is REDUNDANT with an in-flight board re-ground (both say "re-ground to the
+        # board"), so deferring to one already queued is intentional dedup — NOT the BL-004 drop. The
+        # harmful capacity loss was DISTINCT corrections clobbering each other at the chat_helpers store
+        # sites, now a bounded append queue.
         if key in store:
             return False  # a re-ground is already queued (board correction in flight) — leave it
-        store[key] = directive
-        return True
+        # BL-004: route the store through the shared bounded FIFO queue rather than a raw single-slot
+        # assignment, so this seam shares the cap + telemetry with every other correction site.
+        return bool(_ch._reground_enqueue(key, directive))
     except Exception:
         return False
 
