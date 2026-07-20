@@ -610,13 +610,19 @@ class _PreparedChatTurn:
     FUNCTION — call it once to get the SSE-string stream ``agent_runs.start`` drains. A distinct type (not
     a bare tuple) so the wrapper can cleanly tell a prepared turn from an early ``_sse_error_response``."""
 
-    __slots__ = ("producer", "session", "ctx", "compare_mode")
+    # F1 (concurrent-session consistency): `sess`/`message`/`client_msg_id` carry the framed-turn
+    # metadata the HTTP tail needs to seed the ordered lead user-message event (`_build_lead_user_event`).
+    # They are populated only where in scope (the prepare step); default None keeps early/other builders safe.
+    __slots__ = ("producer", "session", "ctx", "compare_mode", "sess", "message", "client_msg_id")
 
-    def __init__(self, producer, session, ctx, compare_mode):
+    def __init__(self, producer, session, ctx, compare_mode, sess=None, message=None, client_msg_id=None):
         self.producer = producer
         self.session = session
         self.ctx = ctx
         self.compare_mode = compare_mode
+        self.sess = sess
+        self.message = message
+        self.client_msg_id = client_msg_id
 
 
 def _resolve_fastapi_app():
@@ -2025,7 +2031,8 @@ def setup_chat_routes(
         # _prepare_chat_stream ends here: hand the built producer + the turn metadata the tail needs
         # (session / ctx / compare_mode) back to the caller. The WS `turn` relay reuses `producer` only;
         # the HTTP route below runs the run-keying / casting / subscribe tail.
-        return _PreparedChatTurn(_safe_stream, session, ctx, compare_mode)
+        return _PreparedChatTurn(_safe_stream, session, ctx, compare_mode,
+                                 sess=sess, message=message, client_msg_id=client_msg_id)
 
     @router.post("/api/chat_stream")
     async def chat_stream(request: Request) -> StreamingResponse:
@@ -2113,7 +2120,8 @@ def setup_chat_routes(
         # receives this event too and adopts its own optimistic bubble by clientMsgId (never a
         # duplicate); a peer renders the user bubble ahead of the reply. Vault-free (the player's own
         # words); None ⇒ byte-identical prior behavior.
-        _lead_event = _build_lead_user_event(sess, message, client_msg_id) if _framed else None
+        _lead_event = _build_lead_user_event(
+            prepared.sess, prepared.message, prepared.client_msg_id) if _framed else None
         agent_runs.start(run_key, _safe_stream(), queue=_framed, lead_event=_lead_event)
         # Tell every other device viewing the canonical session that a new run started, so they
         # reconcile (load the new user message + attach to the live reply). Keyed on run_key so an

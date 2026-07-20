@@ -41,7 +41,12 @@ def test_chat_routes_builds_and_passes_the_lead_event_only_for_framed_turns():
     assert "def _build_lead_user_event(" in src
     assert '"type": "user_message"' in src
     # Framed-only: a plain chat has no observer, so it does not seed (and the sender never dupes).
-    assert "_lead_event = _build_lead_user_event(sess, message, client_msg_id) if _framed else None" in src
+    # The framed-turn metadata is threaded through _PreparedChatTurn — `sess`/`message`/`client_msg_id`
+    # are NOT in chat_stream's own scope, so the call reads them off `prepared` (a bare `sess`/`message`
+    # reference here NameErrors on every framed turn → HTTP 500, the golden-replay break).
+    assert "_lead_event = _build_lead_user_event(" in src
+    assert "prepared.sess" in src and "prepared.message" in src and "prepared.client_msg_id" in src
+    assert "if _framed else None" in src
     assert "agent_runs.start(run_key, _safe_stream(), queue=_framed, lead_event=_lead_event)" in src
 
 
