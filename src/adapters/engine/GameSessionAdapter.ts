@@ -2034,11 +2034,14 @@ export class GameSessionAdapter implements GameSession {
     // Group by lineage across holders: representative content, the holder-id set, and a recency stamp.
     const groups = new Map<string, { content: string; raw: string; holders: Set<EntityId>; ts: number }>();
     for (const id of holderIds) {
-      // Cap EACH holder's contribution to their most-recent facts BEFORE grouping (mirroring the voice
-      // path's `VOICE_KNOWS_CAP`), so the manifest is O(holders × cap), never O(total accumulated
-      // knowledge) — the final `SCOPE_MANIFEST_CAP` then trims the recombined set. Facts arrive
-      // oldest→newest, so the tail slice keeps the most-recent-facts semantics.
-      for (const f of this.npcKnowledge.known(id).slice(-GameSessionAdapter.VOICE_KNOWS_CAP)) {
+      // Scan EVERY fact each holder holds — NEVER a per-holder pre-cap. A pre-cap (reverted, Greptile
+      // #1723) truncated `knownTo` MEMBERSHIP: if A learned fact X long ago (sliced off A's capped list)
+      // and B learned it recently, the group would record `knownTo: [B]` only, and the FE wall would then
+      // DROP a legitimate A sentence voicing X — a false hold on real speech (ADR 0005 #1, worse than a
+      // missed phantom). The final POST-grouping `SCOPE_MANIFEST_CAP` bounds the manifest's DISTINCT-fact
+      // count WITHOUT dropping any holder from a surviving fact. The read is fetched once per turn and
+      // TTL-cached FE-side, and total knowledge is bounded by season length, so the O(total) scan is fine.
+      for (const f of this.npcKnowledge.known(id)) {
         // The Diary-Room OOC class is `sealedFromHouse`'s job (empty holder set); never here.
         if (f.pathway === NO_NPC_PATHWAY) continue;
         const raw = (f.content ?? "").trim();

@@ -159,6 +159,33 @@ describe("ADR 0019 Layer 3 — knowledgeScopeManifest is the full per-fact known
     expect(blob).not.toContain(VAULTED);
   });
 
+  it("keeps EVERY holder in knownTo even when one learned the fact long ago (no per-holder cap truncation — Greptile #1723)", () => {
+    // The regression the reverted per-holder pre-cap would cause: A learned fact X FIRST, then learned
+    // many more recent facts (X falls outside A's most-recent window), while B learned X recently. A
+    // per-holder cap would slice X off A's list and record knownTo: [B] only — and the FE wall would
+    // then wrongly DROP a legitimate A sentence voicing X. The full scan must keep BOTH holders.
+    const { sb } = liveGame("adr0019-l3-holders", 2);
+    const A = npc(1);
+    const B = npc(2);
+    const SHARED = "SENTINEL_0019_shared_final_two_pact_token";
+    // A learns X first…
+    sb.engine.knowledge.seedBelief(A, { content: SHARED, factId: "0019:shared" }, "witnessed");
+    // …then A accumulates far more than the voice window of newer, unrelated facts, burying X.
+    for (let i = 0; i < 30; i++) {
+      sb.engine.knowledge.seedBelief(A, { content: `A_filler_fact_${i}`, factId: `0019:filler:${i}` }, "witnessed");
+    }
+    // B learns the SAME fact (same factId) recently.
+    sb.engine.knowledge.seedBelief(B, { content: SHARED, factId: "0019:shared" }, "witnessed");
+
+    const entry = sb.session.knowledgeScopeManifest().find((s) => s.content.includes("final_two_pact_token"));
+    expect(entry, "the shared fact survives in the manifest").toBeDefined();
+    const aName = sb.session.snapshot().house!.npcs[0]!.name;
+    const bName = sb.session.snapshot().house!.npcs[1]!.name;
+    // BOTH holders are in knownTo — a per-holder pre-cap would have dropped A (its early fact sliced off).
+    expect(entry!.knownTo).toContain(aName);
+    expect(entry!.knownTo).toContain(bName);
+  });
+
   it("returns [] before a game is started", () => {
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor("adr0019-l3-pregame");
