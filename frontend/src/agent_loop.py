@@ -2567,15 +2567,40 @@ _HOUSE_ROOMS = (
 # static-presence vocabulary `_EVICTED_PRESENCE_RE` already enumerates anchors it; the constrained
 # extraction still returns moves:[] when nothing actually relocated and the engine refuses illegal
 # moves, so broadening here never risks creative prose.
+#
+# PARITY-2 / BL-013 (2026-07-16 presence-parity lane): the player-move belt was defeated by common
+# relocation verbs the regex never listed ("follow/explore/meet/find/join/visit/check/hunt") AND by
+# typos ("movining", "goining"). Widen the verb set and add typo-tolerant stems (go+ing→goin/goining
+# via an optional inner char, move→movin/movining). A false hit only costs one extraction that returns
+# room:null, so erring wide is safe — the constrained extraction stays the gatekeeper.
 _MOVE_SIGNAL_RE = re.compile(
     r"\b("
-    r"go|going|head(?:ing)?|walk(?:ing)?|moves?|moving|wander(?:ing)?|stroll(?:ing)?|"
-    r"drift(?:ing)?|slip(?:ping)?|steps?|stepping|"
+    r"go(?:ining|ing|in)?|head(?:ed|ing)?|walk(?:ed|ing)?|mov(?:ining|ing|es|ed|in|e)?|wander(?:ed|ing)?|stroll(?:ed|ing)?|"
+    r"drift(?:ed|ing)?|slip(?:ped|ping)?|steps?|stepping|stepped|"
+    # CodeRabbit (BL-013/033): past-tense forms too — "you followed them out back" has no room token,
+    # so without `followed`/`met`/`found`/etc. a narrated past-tense move stays unpersisted.
+    r"follow(?:ed|ing)?|explor(?:e|ed|ing)|meet(?:ing)?|met|find(?:ing)?|found|join(?:ed|ing)?|visit(?:ed|ing)?|"
+    r"check(?:ed|ing)?|hunt(?:ed|ing)?|"
     r"sits?|sitting|sat|stands?|standing|stood|leans?|leaning|leaned|lounges?|lounging|lounged|"
     r"perched|sprawled|lingers?|lingering|lingered|"
     r"kitchen|living[\s-]?room|lounge|backyard|back ?yard|bedrooms?|bathroom|"
     r"hoh[\s-]?room|head of household|storage[\s-]?room|diary[\s-]?room"
     r")\b", re.I)
+
+# CodeRabbit (BL-013/033): the movement belts must read the player-VISIBLE narration, not raw
+# round_texts, which RETAIN `<think>` reasoning (kept for the thinking accordion). Private reasoning
+# like "I should move the player to the kitchen" is not what the player saw; letting it drive a
+# PERSISTED move (via the pre-filter or the `_auto_move_*` extraction) is a reasoning-leak-INTO-
+# behavior. This mirrors the loop's local `_THINK_RE` scrub, kept module-level so the movement
+# pre-filter is unit-testable in isolation.
+_MOVE_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _visible_move_narration(text: str) -> str:
+    """The player-VISIBLE narration for the movement belts: the turn's narration with `<think>`
+    reasoning removed, so movement language that lived ONLY in the reasoning channel can never trip
+    the pre-filter or feed the `_auto_move_*` extraction (BL-013/033)."""
+    return _MOVE_THINK_RE.sub("", text or "").strip()
 
 
 # P2-15 (prompt audit) — the UNTRUSTED-DATA FENCE for every utility-EXTRACTION prompt. These calls
@@ -6683,6 +6708,20 @@ async def _stream_agent_loop_impl(
                 # a generic scene — the high-bar extraction (struck=false for loose talk) is the real
                 # gatekeeper against phantom deals, not these gates.
                 _turn_narration = "\n".join(t for t in round_texts if t)
+                # CodeRabbit (BL-013/033): the MOVEMENT belts must read the PLAYER-VISIBLE narration —
+                # `full_response`, the text actually emitted to the player. `round_texts` is the RAW
+                # per-round text: it retains `<think>` reasoning AND every sentence the visibility guards
+                # dropped from the emitted stream (`_scrub_game_leak` operator-aside/`npc:<id>` scrub, the
+                # `screen_streamed_scene_break` scene-cut, and the `_knowledge_wall_guard`). `full_response`
+                # accumulates ONLY the post-scrub, post-guard emitted text (reasoning deltas go to
+                # `round_reasoning`, never here). Gating a PERSISTED move — or feeding the `_auto_move_*`
+                # extraction — on a sentence the player never saw (a reasoning "I should move the player
+                # to the kitchen", or a knowledge-wall-excised move) would drive a relocation the visible
+                # narration never made: a reasoning/visibility-leak-INTO-behavior. So derive from
+                # `full_response`, and KEEP the `<think>`-strip as belt-and-suspenders (idempotent — an
+                # inline `<think>` in the CONTENT channel can survive the game-scrub). The OTHER belts
+                # (deal/confide/expose/trade) keep raw `_turn_narration` — pre-existing, out of scope.
+                _turn_narration_visible = _visible_move_narration(full_response)
                 _want_deal = (_turn_deal_nudges < 1
                               and bool(_DEAL_SIGNAL_RE.search(_turn_narration)))
                 # 0075 confide belt: the player PRESSED an ally to open up but the model never called
@@ -6716,9 +6755,17 @@ async def _stream_agent_loop_impl(
                 # constrained extraction (room:null when the player didn't actually move) is the real
                 # gatekeeper. Model-driven moveTo always wins (`_moved` short-circuits).
                 _last_user_for_move = _extract_last_user_message(messages) or ""
+                # PARITY-2 / BL-013: the player-move belt read ONLY the player's own message while the
+                # NPC belt (below) gates on the NARRATION — the asymmetry was the bug. The narrator names
+                # the player's destination precisely ("you follow them out back") even when the player's
+                # own message missed it ("follow them", a typo), so a narrated player relocation had NO
+                # corrective pathway. Gate on the player's message OR the narration (mirroring the NPC
+                # belt); the constrained `_auto_move_player` extraction — which already reads BOTH and
+                # returns room:null when the PLAYER did not move — stays the gatekeeper.
                 _want_move = ((not _moved)
                               and _turn_move_nudges < _MAX_MOVE_NUDGES_PER_TURN
-                              and bool(_MOVE_SIGNAL_RE.search(_last_user_for_move)))
+                              and bool(_MOVE_SIGNAL_RE.search(_last_user_for_move)
+                                       or _MOVE_SIGNAL_RE.search(_turn_narration_visible)))
                 # ADR 0009 NPC auto-move belt: the turn's NARRATION walked one or more houseguests to a
                 # room but the model never called moveHouseguest, so the engine's open presence still has
                 # them in their seeded room and the whereabouts gadget snaps them back. Gated on a cheap
@@ -6728,7 +6775,7 @@ async def _stream_agent_loop_impl(
                 # Model-driven moveHouseguest always wins (`_npc_moved` short-circuits).
                 _want_npc_move = ((not _npc_moved)
                                   and _turn_npc_move_nudges < _MAX_NPC_MOVE_NUDGES_PER_TURN
-                                  and bool(_MOVE_SIGNAL_RE.search(_turn_narration)))
+                                  and bool(_MOVE_SIGNAL_RE.search(_turn_narration_visible)))
                 # NPC-approach nudge (0036/0049): the house lives between the player's beats — NPCs play
                 # THEIR game and come to the player, not only the other way around. With the "Wants a
                 # word" notification panel removed (owner ruling 2026-06-18 — that intent must never reach
@@ -6841,7 +6888,7 @@ async def _stream_agent_loop_impl(
                     # always wins (`_moved` short-circuits `_want_move`). Vault-free (whereabouts).
                     if _want_move:
                         _turn_move_nudges += 1  # once per turn
-                        if await _auto_move_player(_turn_narration, _last_user_for_move,
+                        if await _auto_move_player(_turn_narration_visible, _last_user_for_move,
                                                    _belt_endpoint, _belt_model, _belt_headers, owner):
                             # gap #3 telemetry — count only a REAL applied move (a room:null
                             # extraction / failed call is a no-op, not a correction)
@@ -6855,7 +6902,7 @@ async def _stream_agent_loop_impl(
                     # that also advances a beat. Model-driven moveHouseguest wins (`_npc_moved` gate).
                     if _want_npc_move:
                         _turn_npc_move_nudges += 1  # once per turn
-                        _npc_moves_applied = int(await _auto_move_npc(_turn_narration, _last_user_for_move,
+                        _npc_moves_applied = int(await _auto_move_npc(_turn_narration_visible, _last_user_for_move,
                                                                       _house, _belt_endpoint, _belt_model,
                                                                       _belt_headers, owner) or 0)
                         if _npc_moves_applied:

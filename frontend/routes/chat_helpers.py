@@ -2296,8 +2296,29 @@ def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
     """A gentle re-ground directive when the narration STAGED an off-scene/evicted houseguest as
     acting in the scene, or None. Bounded name lists; closed-set only."""
     text = narration or ""
-    staged_evicted = sorted(n for n in facts["evicted"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
-    staged_offscene = sorted(n for n in facts["active_offscene"] if _stages_in_scene(text, n))[:_PRESENCE_MOVE_MAX_NAMES]
+    # PARITY-4 (2026-07-16 presence-parity lane): narration overwhelmingly stages houseguests by FIRST
+    # name ("Mara perched on the bunk"), but feeding only the FULL roster name to `_stages_in_scene`
+    # missed it. Also match a first name — but ONLY when it is UNIQUE across the WHOLE roster, so a
+    # shared first name (ambiguous — the staged one may be the legitimately in-view houseguest) never
+    # produces a false flag (ADR 0005 #1: a false hold on creative prose is worse than a missed phantom).
+    _roster = set(facts["in_view"]) | set(facts["active_offscene"]) | set(facts["evicted"])
+    _first_counts: dict = {}
+    for _full in _roster:
+        _fp = _full.split()
+        if _fp:
+            _first_counts[_fp[0].lower()] = _first_counts.get(_fp[0].lower(), 0) + 1
+
+    def _staged(full: str) -> bool:
+        if _stages_in_scene(text, full):
+            return True
+        parts = full.split()
+        # Fall back to the FIRST name only when it unambiguously identifies this houseguest.
+        if len(parts) > 1 and _first_counts.get(parts[0].lower(), 0) == 1:
+            return _stages_in_scene(text, parts[0])
+        return False
+
+    staged_evicted = sorted(n for n in facts["evicted"] if _staged(n))[:_PRESENCE_MOVE_MAX_NAMES]
+    staged_offscene = sorted(n for n in facts["active_offscene"] if _staged(n))[:_PRESENCE_MOVE_MAX_NAMES]
     if not staged_evicted and not staged_offscene:
         return None
     room_label = str(facts["room"]).replace("-", " ")

@@ -122,6 +122,42 @@ def test_clean_turn_yields_no_directive():
         "An Ally nods. You wonder where A Schemer and A Ghost stand.", facts) is None
 
 
+# ── PARITY-4 (first-name staging): narration stages by FIRST name; the guard must catch it ────
+
+def test_flags_an_offscene_houseguest_staged_by_first_name_only():
+    # PARITY-4: the narration overwhelmingly stages houseguests by FIRST name ("Mara perched"), but
+    # the guard fed the FULL roster name to `_stages_in_scene` and missed it. A first name that is
+    # UNIQUE across the whole roster unambiguously refers to that houseguest, so staging it flags.
+    facts = {"room": "bedroom-a", "in_view": {"An Ally"},
+             "active_offscene": {"Mara Quinn"}, "evicted": set()}
+    directive = chat_helpers._presence_desync_directive("Mara perched on the edge of the bunk.", facts)
+    assert directive is not None and "Mara Quinn" in directive and "elsewhere" in directive
+
+
+def test_flags_an_evicted_houseguest_staged_by_first_name_only():
+    facts = {"room": "living-room", "in_view": {"An Ally"},
+             "active_offscene": set(), "evicted": {"Devon Hale"}}
+    directive = chat_helpers._presence_desync_directive("Devon smirks from the couch.", facts)
+    assert directive is not None and "Devon Hale" in directive and "EVICTED" in directive
+
+
+def test_ambiguous_shared_first_name_is_not_flagged_by_first_name():
+    # Two houseguests share the first name "Alex" — one in view, one off-scene. Staging the bare first
+    # name is AMBIGUOUS (it may be the in-view one), so it must NOT be flagged by first name (a false
+    # flag on a legitimate scene is worse than a missed one — ADR 0005 #1).
+    facts = {"room": "kitchen", "in_view": {"Alex Kim"},
+             "active_offscene": {"Alex Diaz"}, "evicted": set()}
+    assert chat_helpers._presence_desync_directive("Alex leans against the counter.", facts) is None
+
+
+def test_first_name_staging_still_ignores_a_bare_mention():
+    facts = {"room": "living-room", "in_view": {"An Ally"},
+             "active_offscene": {"Mara Quinn"}, "evicted": set()}
+    # Only MENTIONED, never staged → no nag (the staging binding still gates the first-name path).
+    assert chat_helpers._presence_desync_directive(
+        "An Ally nods. You wonder where Mara and the others land on the vote.", facts) is None
+
+
 # ── the post-turn entry point: skips, combines, fail-open ─────────────────────────────────────
 
 def test_post_turn_skips_when_the_player_changed_rooms(monkeypatch):
