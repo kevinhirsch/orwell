@@ -92,8 +92,11 @@ describe("A1 — recordCastProfile can never rename an already-introduced houseg
     for (const h of activeNpcs) s.markHouseguestMet(h.id);
     expect(s.premiereIntros()!.complete).toBe(true);
 
-    // Advance past the premiere — the vestigial meet-everyone tracker is cleared (by design)...
-    s.advanceGame();
+    // Advance past the premiere — the vestigial meet-everyone tracker is cleared (by design). 0111: the
+    // FIRST advanceGame closes the champagne circle (still premiere); the SECOND begins the first HOH,
+    // ending the premiere and clearing the tracker.
+    s.advanceGame(); // close the champagne circle
+    s.advanceGame(); // begin the first HOH — the premiere is over
     expect(s.premiereIntros()).toBeNull();
     expect(s.snapshot().premiereIntros).toBeUndefined();
 

@@ -431,6 +431,13 @@ export class Orchestrator {
   private maybeTurnDrivenTick(user: string, baseline: SessionSnapshot | undefined, candidate: SessionSnapshot): void {
     if (!this.turnDriven) return;
     if (!candidate.started) return; // E2: no off-screen life before move-in
+    // 0111: a PURE champagne-circle close (`champagneCircle` gathered→done, the model's first advanceGame
+    // that ends the opening toast) resolves NO beat — it only un-pins the player into free-roam premiere.
+    // It must earn NO off-screen society tick in ANY config: an extra premiere-night tick would perturb
+    // the seeded society and break calibration byte-identity (the tie/UAT gates). Fully skip it here (the
+    // real HOH-staging advance, which also clears the flag but ADDS a comp pending, is NOT a pure close and
+    // still earns its tick).
+    if (this.isPureChampagneClose(baseline, candidate)) return;
     // Did the live loop move? Beat commits change the loop state; aux commits (an interaction, a
     // DR entry, a deal) never touch it. The loop state is small — this is NOT an events re-export.
     const progressed = !baseline || !baseline.started
@@ -488,6 +495,23 @@ export class Orchestrator {
     // R3: the commit just exported this. A9: a supplementary tick — an empty society this tick is
     // a clean no-op, not a daily-event fault (the live loop owns that invariant via its beats).
     this.advance(user, "offscreen-tick", { baseline: candidate, supplementary: true });
+  }
+
+  /**
+   * 0111 — is this commit a PURE champagne-circle close? True iff the ONLY live-loop change is the
+   * premiere's `champagneCircle` transitioning gathered→done (the model's first advanceGame that ends the
+   * opening toast, un-pinning the player) — no week/phase change and every other live field byte-identical.
+   * Such a commit resolves no beat, so it must earn no off-screen society tick (calibration byte-identity).
+   * A real HOH-staging advance clears the flag AND adds a comp pending, so it fails this check and ticks.
+   */
+  private isPureChampagneClose(baseline: SessionSnapshot | undefined, candidate: SessionSnapshot): boolean {
+    if (!baseline || !baseline.started || !candidate.started) return false;
+    if (baseline.week !== candidate.week || baseline.phase !== candidate.phase) return false;
+    const b = baseline.live, c = candidate.live;
+    if (!b || !c) return false;
+    if (b.champagneCircle !== "gathered" || c.champagneCircle !== "done") return false;
+    // Every other live field must be byte-identical (compare with the flag normalized out of both).
+    return JSON.stringify({ ...b, champagneCircle: undefined }) === JSON.stringify({ ...c, champagneCircle: undefined });
   }
 
   /**

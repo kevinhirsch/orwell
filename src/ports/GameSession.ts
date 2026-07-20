@@ -1269,7 +1269,14 @@ export interface PremiereIntrosView {
   /** How many of the cast (player + NPCs) have been met so far, and the total to meet. */
   metCount: number;
   total: number;
-  /** The houseguests STILL to introduce (the producer drives the next one) — name + observable persona. */
+  /**
+   * @deprecated BL-005 — VESTIGIAL under the champagne circle (0111). The whole house is met at the
+   * opening toast (`meetWholeHouseAtChampagneCircle`), so this is ALWAYS `[]` during a live premiere —
+   * there is no roll-call left to grind through. Kept only as an always-empty back-compat field (a
+   * removal would break existing consumers/snapshots); it no longer advertises a progressive tracker.
+   * Read `met` for the whole cast; never treat this as a checklist to work through (the narrator prompt
+   * says "you do NOT track introductions").
+   */
   remaining: FirstImpressionView[];
   /** Everyone met so far — the player's early observable reads, for a "first impressions" surface. */
   met: FirstImpressionView[];
@@ -1288,6 +1295,15 @@ export interface PremiereIntrosView {
    * outcome (anti-sycophancy, mandate #3).
    */
   powerReachable: boolean;
+  /**
+   * FEATURE 0111 — the champagne-circle sub-state of the premiere. `"gathered"` = the game has convened
+   * the whole house in the living room for the opening toast (the player is PINNED there and
+   * `whereabouts()` reports a `champagne-circle` house event) — the narrator voices THE TOAST and cannot
+   * stage it elsewhere or fire it while the player is away. `"done"` = the toast has resolved (the model's
+   * first advanceGame); the player is released into free-roam premiere (bedroom pick, settling in) before
+   * the first HOH. Absent only on a pre-0111 save mid-premiere. Vault-free (a projection flag).
+   */
+  champagneCircle?: "gathered" | "done";
 }
 
 /**
@@ -1363,7 +1379,17 @@ export interface WhereaboutsView {
    * A purely OBSERVATIONAL projection (it never mutates the seeded sim) ⇒ calibration-identical.
    */
   houseEvent?: {
-    kind: "hoh-competition" | "veto-competition" | "nominations" | "veto-ceremony" | "eviction";
+    kind:
+      | "hoh-competition"
+      | "veto-competition"
+      | "nominations"
+      | "veto-ceremony"
+      | "eviction"
+      // FEATURE 0111 — the premiere's GATHERED champagne circle. The whole house is convened in the
+      // living room for the opening toast, so (exactly like a comp/ceremony) `present` lists everyone,
+      // `nearby` is empty, and the player cannot wander off until the toast resolves. Carries no
+      // competing/spectating split (nobody competes — the house simply gathers to toast). Vault-free.
+      | "champagne-circle";
     competing?: NamedRef[];
     spectating?: NamedRef[];
     youAreCompeting?: boolean;
@@ -2222,15 +2248,15 @@ export interface GameSession {
   premiereIntros(): PremiereIntrosView | null;
 
   /**
-   * Mark a houseguest as INTRODUCED/met during the premiere (feature #380 follow-on) — the structural
-   * tracker the producer drives so all 15 NPCs are met before the first HOH. Idempotent; a no-op for
-   * an unknown houseguest, the player (auto-met), or once the premiere is over. Returns the resulting
-   * meet-everyone progress (or `null` outside the premiere) so the caller can voice who is left.
+   * @deprecated BL-005 — VESTIGIAL under the champagne circle (0111). The whole house is met at the
+   * opening toast (`meetWholeHouseAtChampagneCircle`), so this is now a DORMANT, idempotent BACKSTOP:
+   * every active NPC is already met, so a call never changes the tally. Kept wired (the FE name-belt /
+   * the model may still call it) but it no longer drives a progressive roll-call — do not build a
+   * meet-everyone checklist on it. A no-op for an unknown houseguest, the player (auto-met), or once
+   * the premiere is over. Returns the resulting meet-everyone progress (or `null` outside the premiere).
    *
-   * #1318 — `opts.via` distinguishes a genuine player-formed read (`player`, the default — it counts
-   * toward the asymmetric power gate's `hotReads`) from the FE regex auto-belt (`belt` — meet-list only,
-   * never a hot read). Backward-compatible: an omitted `opts` is `player`, byte-identical to the prior
-   * single-arg call (existing model-driven introductions still form hot reads).
+   * #1318 — `opts.via` distinguishes a genuine player-formed read (`player`, the default) from the FE
+   * regex auto-belt (`belt`). Backward-compatible: an omitted `opts` is `player`.
    */
   markHouseguestMet(id: EntityId, opts?: MarkHouseguestMetOpts): PremiereIntrosView | null;
 

@@ -78,6 +78,9 @@ describe("0077 tracked occupancy — persists across a save/restore (0007 non-de
     const core0 = s.snapshot();
     const subject = npc(1);
     core0.presence = { [PLAYER]: "living-room", [subject]: "hallway" } as Record<EntityId, Room>;
+    // 0111: clear the premiere's gathered champagne-circle flag so whereabouts reads the seated presence
+    // (and the tracked/eyeshot layer), not the opening toast (which pins the whole house co-present).
+    (core0.live as { champagneCircle?: string }).champagneCircle = undefined;
     s.restore(core0);
     s.recordHouseguestMove(subject, "bedroom-a"); // witnessed (living-room sees the hallway mouth)
     const before = s.whereabouts()!.tracked;
@@ -102,6 +105,7 @@ describe("0077 conspicuousness — Vault-safe (who/where/how-long, never the con
     const s = adrFixture("u-consp", 7).sb.session;
     const core0 = s.snapshot();
     core0.presence = { [PLAYER]: "living-room", [npc(1)]: "hallway", [npc(2)]: "hallway" } as Record<EntityId, Room>;
+    (core0.live as { champagneCircle?: string }).champagneCircle = undefined; // 0111: see the note above
     s.restore(core0);
     s.recordHouseguestMove(npc(1), "lounge");
     s.recordHouseguestMove(npc(2), "lounge");

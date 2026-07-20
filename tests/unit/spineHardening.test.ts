@@ -60,6 +60,7 @@ describe("E57/R5 — one bounded off-screen tick per player TURN, not per tool c
     const { reg, count } = tickCounter();
     const sb = reg.sandboxFor("turn");
     sb.session.createCharacter({ playerName: "The Player", seed: 4 });
+    sb.session.advanceGame(); // 0111: close the premiere champagne circle (a pure close earns NO tick)
     const afterCreate = count();
 
     // The measured R5 amplification: a 4-tool-call turn used to run 4 ticks (12 hidden scenes).
@@ -67,7 +68,7 @@ describe("E57/R5 — one bounded off-screen tick per player TURN, not per tool c
       initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "a kitchen chat", kind: "bonding",
     });
     sb.commands.diaryRoom({ entry: "private read on the week" });
-    sb.session.advanceGame(); // the turn's explicit progressing act — the ONE tick anchor
+    sb.session.advanceGame(); // the turn's explicit progressing act (the first HOH beat) — the ONE tick anchor
 
     expect(count() - afterCreate).toBe(1);
   });

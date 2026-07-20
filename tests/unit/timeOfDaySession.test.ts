@@ -29,6 +29,9 @@ function resolveLegally(s: Pick<GameSession, "submitDecision">, p: NonNullable<A
 function started(seed = 7): GameSessionAdapter {
   const s = new GameSessionAdapter();
   s.createCharacter({ playerName: "The Player", seed });
+  // 0111: close the premiere champagne circle so the session is in free-roam premiere — these tests
+  // drive the weekly loop / clock, not the opening toast, so the first advance below is a real beat.
+  s.advanceGame();
   return s;
 }
 

@@ -110,19 +110,105 @@ describe("premiere champagne circle — the first HOH", () => {
     expect(sb.session.getGameState().moment).toBe("premiere");
   });
 
-  it("once the first HOH begins, the premiere tracker is gone (the read returns null)", () => {
+  it("the FIRST advanceGame closes the toast (releases into premiere) — it does NOT start the HOH", () => {
+    const { sb } = liveGame("circle-close-edge", 6);
+    // 0111: the premiere opens with the circle GATHERED.
+    expect(sb.session.premiereIntros()!.champagneCircle).toBe("gathered");
+
+    // The FIRST advanceGame CLOSES the champagne circle (the toast resolves) but the premiere is NOT
+    // over — the bedroom-pick / settling-in beats still run (ADR 0003: guide, don't force-march).
+    sb.session.advanceGame();
+    expect(sb.session.getGameState().phase).toBe("premiere");
+    expect(sb.session.premiereIntros()!.champagneCircle).toBe("done"); // released to free-roam
+    expect(sb.session.premiereIntros()!.complete).toBe(true);
+  });
+
+  it("a LATER advanceGame begins the first HOH and the premiere tracker is gone (returns null)", () => {
     const { sb } = liveGame("circle-after-hoh", 6);
     expect(sb.session.premiereIntros()!.complete).toBe(true);
 
-    // Advance into the first HOH competition — the premiere is over.
+    // First advanceGame closes the circle (still premiere); the second brings up the first HOH.
+    sb.session.advanceGame();
+    expect(sb.session.getGameState().phase).toBe("premiere");
     sb.session.advanceGame();
     expect(sb.session.getGameState().phase).not.toBe("premiere");
     expect(sb.session.premiereIntros()).toBeNull();
     // The view no longer carries the premiere block.
     expect(sb.session.getGameState().premiere).toBeUndefined();
-    // And the stale trackers were cleared from the durable snapshot (non-degradation hygiene).
+    // And the stale trackers were cleared from the durable snapshot (non-degradation hygiene) — the
+    // champagne-circle flag is premiere-scoped, so it is gone from the live state too.
     expect(sb.session.snapshot().premiereIntros).toBeUndefined();
     expect(sb.session.snapshot().premiereHotReads).toBeUndefined();
+    expect(sb.session.snapshot().live?.champagneCircle).toBeUndefined();
+  });
+});
+
+describe("premiere champagne circle — the GATHERED scene (the toast pins the whole house)", () => {
+  it("whereabouts seats the whole house co-present in the living room under a champagne-circle event", () => {
+    const { sb } = liveGame("circle-gathered", 9);
+    const activeNpcs = sb.session.getGameState().house.filter((h) => h.status === "active");
+
+    const wa = sb.session.whereabouts()!;
+    // The GAME has gathered the house — the player is in the living room, the whole house is present,
+    // there are no side rooms to slip into, and the event is the champagne circle.
+    expect(wa.room).toBe("living-room");
+    expect(wa.houseEvent?.kind).toBe("champagne-circle");
+    expect(wa.nearby).toEqual([]);
+    expect(wa.present.map((p) => p.id).sort()).toEqual(activeNpcs.map((h) => h.id).sort());
+    // No competition split on a gathered toast (nobody competes — the house simply toasts).
+    expect(wa.houseEvent?.competing).toBeUndefined();
+    expect(wa.houseEvent?.youAreCompeting).toBeUndefined();
+  });
+
+  it("movePlayer is a no-op while the circle is gathered, and works once the toast has closed", () => {
+    const { sb } = liveGame("circle-pin", 12);
+    // Pinned: a moveTo during the gathered toast leaves the player in the living room.
+    const afterMove = sb.session.movePlayer("bedroom a")!;
+    expect(afterMove.room).toBe("living-room");
+    expect(afterMove.houseEvent?.kind).toBe("champagne-circle");
+
+    // Close the circle (the first advanceGame), then the player is free to move — the bedroom pick works.
+    sb.session.advanceGame();
+    expect(sb.session.getGameState().phase).toBe("premiere"); // still the premiere
+    const wa = sb.session.whereabouts()!;
+    expect(wa.houseEvent).toBeUndefined(); // no longer gathered
+    const moved = sb.session.movePlayer("bedroom a")!;
+    expect(moved.room).not.toBe("living-room"); // the move now takes effect
+  });
+
+  it("snapshot/restore round-trips the gathered flag (a reload mid-toast resumes gathered)", () => {
+    const { sb, reg } = liveGame("circle-snap", 11);
+    const core = sb.session.snapshot();
+    expect(core.live?.champagneCircle).toBe("gathered");
+
+    // Restore into a FRESH sandbox — the flag survives and the pin still holds.
+    const sb2 = reg.sandboxFor("circle-snap-2");
+    sb2.session.restore(core);
+    expect(sb2.session.premiereIntros()!.champagneCircle).toBe("gathered");
+    expect(sb2.session.whereabouts()!.houseEvent?.kind).toBe("champagne-circle");
+  });
+
+  it("the gathered whereabouts carries NO Vault/soul/hidden content (sentinel sweep)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("circle-gathered-sentinel");
+    sb.session.createCharacter({ playerName: "The Player", seed: 13 });
+
+    const SENTINELS = {
+      vault: "SENTINEL-CIRCLE-vault-confessional",
+      soul: "SENTINEL-CIRCLE-soul-memory",
+      hidden: "SENTINEL-CIRCLE-hidden-element-motive",
+    };
+    sb.engine.vault.writeHidden({ id: "circle:v", kind: "confessional", content: SENTINELS.vault });
+    const core = sb.session.snapshot();
+    core.house!.npcs[0]!.soul.memory.push(SENTINELS.soul);
+    core.house!.npcs[0]!.character.hiddenElements.push({ kind: "secret-motive", detail: SENTINELS.hidden });
+    sb.session.restore(core);
+
+    const blob = JSON.stringify(sb.session.whereabouts());
+    expect(sb.session.whereabouts()!.houseEvent?.kind).toBe("champagne-circle");
+    for (const s of Object.values(SENTINELS)) {
+      expect(blob, `the gathered whereabouts must not leak ${s}`).not.toContain(s);
+    }
   });
 });
 

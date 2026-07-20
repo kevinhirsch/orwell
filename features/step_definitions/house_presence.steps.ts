@@ -117,6 +117,9 @@ Then("both games produce identical occupancy trajectories", function (this: BbWo
 
 Given("the player is in a room with some houseguests and others in adjacent rooms", function (this: BbWorld) {
   newPresenceGame(this, 8);
+  // 0111: close the premiere champagne circle so whereabouts reads the seated presence + sightline rooms
+  // (this scenario checks room/adjacency fog-of-war, not the opening gathered toast).
+  this.hpSandbox!.session.advanceGame();
   // Plant a sentinel into hidden state so the read can be swept.
   this.hpSentinel = "SENTINEL-0049-whereabouts-bdd";
   const core = this.hpSandbox!.session.snapshot();

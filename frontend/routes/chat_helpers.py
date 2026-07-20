@@ -666,6 +666,11 @@ def _premiere_progress_directive(premiere) -> Optional[str]:
     exactly as before."""
     if not isinstance(premiere, dict):
         return None
+    # CHAMPAGNE CIRCLE (0111): while the circle is GATHERED (the game has convened the whole house for the
+    # opening toast), NEVER redirect toward power — the player is pinned in the living room for the toast
+    # and the moment prompt already frames the gathered scene + the close edge. Stay silent here.
+    if premiere.get("champagneCircle") == "gathered":
+        return None
     # CHAMPAGNE CIRCLE (0111): the whole house is met at the toast, so `complete`/`powerReachable` are
     # true throughout a live premiere ⇒ STOP redirecting (the model is free to start the game the instant
     # the player is ready). This is now the normal path — the branch below is a defensive fail-open remnant.
@@ -3539,6 +3544,8 @@ _MOMENT_PHASE_LABELS = {
     "veto-ceremony": "Veto ceremony", "eviction": "Eviction night",
     "final-eviction": "Final eviction", "finale": "The finale", "jury": "Jury",
     "social": "A day in the house", "twist-reveal": "A twist!",
+    # 0111 — graceful label for the premiere's gathered champagne-circle whole-house event kind.
+    "champagne-circle": "Champagne circle",
 }
 # ADR 0006 — the in-game clock band (no wall-clock, no emoji in the transcript stamp).
 _MOMENT_TOD_LABELS = {
