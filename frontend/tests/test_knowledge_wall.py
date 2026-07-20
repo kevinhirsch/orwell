@@ -226,6 +226,25 @@ def test_scope_manifest_fetch_failure_still_yields_sealed(monkeypatch):
     assert any(_DIARY in f["content"] for f in facts)
 
 
+def test_sealed_fetch_failure_still_yields_scope_manifest(monkeypatch):
+    """The REVERSE of the above (Greptile #1723): if the DR-seal fetch fails, the ADR 0019 Layer 3
+    scope manifest is STILL delivered — the two fetches are independent, so one failing never skips
+    the other (before the per-source try split, a sealed_from_house blip killed both)."""
+    chat_helpers._KW_SEALED_CACHE.pop(chat_helpers._kw_key(_USER), None)
+
+    async def _sealed(user=None):
+        raise RuntimeError("engine blip")
+
+    async def _scope(user=None):
+        return [{"content": "I am in a secret final two with the HOH", "knownTo": ["HOH"]}]
+
+    monkeypatch.setattr(orwell_engine, "sealed_from_house", _sealed)
+    monkeypatch.setattr(orwell_engine, "knowledge_scope_manifest", _scope)
+
+    facts = _run(chat_helpers.fetch_sealed_from_house(_USER))
+    assert any("secret final two" in f["content"] for f in facts)
+
+
 def test_bounded_fact_voiced_by_a_non_holder_is_dropped_end_to_end():
     """The room-to-room asymmetry the ADR closes: a fact bounded to the HOH, voiced by a STAGED
     Nominee who has no pathway to it, is stripped exactly as a Diary-Room recital is."""

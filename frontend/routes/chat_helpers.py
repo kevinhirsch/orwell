@@ -2441,7 +2441,10 @@ def _sealed_signatures(content: str) -> list:
 async def fetch_sealed_from_house(user) -> list:
     """The sealed-from-house manifest for this game, TTL-cached for the streaming turn. Each entry:
     ``{content, knownTo, signatures}``. Vault-free (the engine projection is the player's OWN
-    knowledge). Fail-open: any hiccup ⇒ ``[]`` (the guard then never holds anything)."""
+    knowledge). Fail-SOFT and PER-SOURCE (Greptile #1723): the two fetches — the always-sealed
+    DR-seal class and the ADR-0019 knowledge-scope manifest — are INDEPENDENT, so a failure in one
+    still returns (and caches) the other's facts. Only a total failure (or the engine import) ⇒
+    ``[]`` (the guard then holds nothing that turn)."""
     import time
     key = _kw_key(user)
     now = time.monotonic()
