@@ -6987,8 +6987,8 @@ async def _stream_agent_loop_impl(
                                         "advanced past the frozen narration; surface the gap instead of "
                                         "racing further ahead",
                                         lever="reground", ok=True, user=owner)
-                                except Exception:
-                                    pass
+                                except Exception as _cap_ov_err:
+                                    logger.debug(f"[orwell] anti-stale cap overseer-log skipped: {_cap_ov_err}")
                                 return False  # caller reads _silent_advance_capped and ends the turn
                             try:
                                 from src import orwell_engine as _oe3
@@ -7118,8 +7118,8 @@ async def _stream_agent_loop_impl(
                                             "ignored the anti-stale reground — a forced voice, not an advance "
                                             "(the engine stays pinned at the cap)",
                                             lever="reground", ok=True, user=owner)
-                                    except Exception:
-                                        pass
+                                    except Exception as _rv_ov_err:
+                                        logger.debug(f"[orwell] anti-stale release overseer-log skipped: {_rv_ov_err}")
                                     messages.append({"role": "system", "content": _voice})
                                     yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                                     continue
