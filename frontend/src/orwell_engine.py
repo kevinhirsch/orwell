@@ -986,6 +986,15 @@ async def sealed_from_house(user: str | None = None):
     return await _call("sealedFromHouse", {}, user=user)
 
 
+async def knowledge_scope_manifest(user: str | None = None):
+    """ADR 0019 Layer 3 knowledge-scope manifest — every distinctive fact held by a BOUNDED subset of
+    the house, each with its complete pathway-holder set (houseguest names). Vault-free (the legitimate
+    witnessed-or-told layer). The narration guard reads it to drop any line in which a houseguest voices
+    a fact no in-game pathway gave them (the room-to-room asymmetry: the player told B, A must not
+    recall it). Returns a list of ``{content, knownTo}``; ``[]`` pre-game or when nothing is bounded."""
+    return await _call("knowledgeScopeManifest", {}, user=user)
+
+
 async def whereabouts(user: str | None = None):
     """The Vault-free presence read (0049): the player's room, who is in it, and who is in each
     ADJACENT room — names only, never motives or non-adjacent rooms. ``None`` pre-game."""

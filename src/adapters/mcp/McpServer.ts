@@ -515,6 +515,8 @@ export class McpServer {
         return this.deps.session.npcVoice(args["id"] as EntityId);
       case "sealedFromHouse":
         return this.deps.session.sealedFromHouse();
+      case "knowledgeScopeManifest":
+        return this.deps.session.knowledgeScopeManifest();
       case "getPortraitPrompt":
         return this.deps.session.getPortraitPrompt(args["id"] as EntityId);
       case "askProducers":

@@ -58,7 +58,7 @@ READ_ONLY_TOOLS = frozenset({
     "getGameState", "gameStatus", "stateDelta", "playerTagline", "finaleView",
     "getMomentPrompt", "recallSceneMemories", "getVisibleStateFor", "renderScene",
     "socialRead", "socialInitiatives", "whereabouts", "premiereIntros", "seasonRecap",
-    "dailyRecap", "seasonRetrospective", "npcVoice", "sealedFromHouse", "getPortraitPrompt",
+    "dailyRecap", "seasonRetrospective", "npcVoice", "sealedFromHouse", "knowledgeScopeManifest", "getPortraitPrompt",
     "askProducers", "endOfSessionSummary", "worldSnapshotView", "getOffscreenSceneSkeletons",
     "competitionStagingView",
     # State changes the player HUD does NOT render: raised/cleared confirmations, hidden /

@@ -452,6 +452,17 @@ export interface GameStateView {
    */
   playerDiaryRoom?: string[];
   /**
+   * ADR 0019 Layer 2 — the per-PRESENT-NPC knowledge scope. For each houseguest actually in the
+   * scene (`whereabouts.present`), the SAME Vault-free `knows`/`suspects` sets `npcVoice` returns —
+   * baked into the built context so the narrator voices each present houseguest from THEIR bounded
+   * knowledge BY DEFAULT, without depending on the reliably-under-called `npcVoice` tool. "Context is
+   * not knowledge": a fact witnessed only by B appears here ONLY under B's block, never A's — so the
+   * model is not handed (and cannot voice) what a given present houseguest has no in-game pathway to.
+   * Vault-free by construction (mirrors `npcVoice.knows/suspects` — humanized content only, never a
+   * number, never the hidden layer). Absent pre-game / when nobody is present ⇒ byte-identical.
+   */
+  presentKnowledge?: PresentKnowledgeView[];
+  /**
    * 0118 — the DAY'S SHAPE, telegraphed: the next scheduled ceremony milestone, the in-game phase it is
    * set for ("this afternoon"), and whether the clock has reached it (`due`). Vault-free by construction —
    * a pure read of the live loop state + the day clock (no secret, no number beyond the public schedule).
@@ -1521,8 +1532,30 @@ export interface NpcVoiceView {
 export interface SealedFact {
   /** The private content the player disclosed / recorded (humanized — no raw ids/slugs). */
   content: string;
-  /** The houseguests (if any) who legitimately hold this via a real in-game pathway. Empty ⇒ Diary Room / sealed from the whole house. */
+  /**
+   * The houseguests (if any) who legitimately hold this via a real in-game pathway. Empty ⇒ Diary
+   * Room / sealed from the whole house. For `sealedFromHouse()` these are ids (always empty in
+   * practice — the DR class). For the ADR 0019 `knowledgeScopeManifest()` these are houseguest DISPLAY
+   * NAMES (the front-end staging guard matches a staged speaker by name), so a staged speaker whose
+   * name is NOT here is voicing content no pathway gave them and the sentence is dropped.
+   */
   knownTo: EntityId[];
+}
+
+/**
+ * ADR 0019 Layer 2 — one PRESENT houseguest's own knowledge scope, baked into the built context so
+ * the narrator voices them from THEIR bounded set by default. The SAME Vault-free `knows`/`suspects`
+ * content `npcVoice` returns (humanized, capped, most-recent-first) — never a number, never the hidden
+ * layer, never another houseguest's knowledge. "Context is not knowledge": a fact appears here only
+ * under the block of a houseguest who legitimately holds it.
+ */
+export interface PresentKnowledgeView {
+  id: EntityId;
+  name: string;
+  /** What THIS houseguest legitimately KNOWS (witnessed or was told) — content only. */
+  knows: string[];
+  /** What THIS houseguest merely SUSPECTS (a hunch with no pathway backing it) — content only. */
+  suspects: string[];
 }
 
 /**
@@ -2342,6 +2375,21 @@ export interface GameSession {
    * pathway to ANY npc, ever). Empty array when no game is started or nothing is sealed.
    */
   sealedFromHouse(): SealedFact[];
+
+  /**
+   * ADR 0019 Layer 3 — the GENERALIZED knowledge-scope manifest (the post-hoc guard's backstop). Every
+   * distinctive fact currently held by a BOUNDED subset of the house (someone in the house does NOT
+   * hold it), grouped by lineage, each with its complete pathway-holder set as houseguest DISPLAY NAMES
+   * (`knownTo`). The narration guard drops a sentence in which a STAGED houseguest voices a fact whose
+   * `knownTo` excludes them — generalizing `sealedFromHouse`'s always-sealed Diary-Room drop to the
+   * full asymmetric case (the player told B in one room; A must not "recall" it in another).
+   *
+   * Vault-free by construction: it reads ONLY the KnowledgeService (the legitimate "witnessed-or-told"
+   * layer that `npcVoice.knows` already projects outward per-NPC), never the Vault/soul. Diary-Room
+   * facts are left to `sealedFromHouse` (their `knownTo` is empty by definition). Public facts the
+   * whole house holds are omitted (there is no non-holder who could leak them). `[]` pre-game.
+   */
+  knowledgeScopeManifest(): SealedFact[];
 
   /**
    * Return the portrait prompt for a specific houseguest by id (0051) — Vault-free; uses public

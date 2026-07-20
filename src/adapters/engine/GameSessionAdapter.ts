@@ -1832,12 +1832,15 @@ export class GameSessionAdapter implements GameSession {
    *  the originating `sourceEventId` (#843) so the Vault dump can join a gossip/surfacing breadcrumb
    *  event back to the real belief it lodged — voicing only ever reads `content`, so this is additive. */
   private npcKnowledge?: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
+    // ADR 0019 Layer 3 widens this read with `factId`/`pathway`/`ts` (already on every `KnowledgeFact`
+    // — the registry passes the full fact through) so the knowledge-scope manifest can group a fact by
+    // lineage across holders and skip the Diary-Room class. Optional ⇒ back-compatible with any caller.
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string; factId?: string; pathway?: string; ts?: number }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   };
 
   setNpcKnowledgeProviders(p: {
-    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string }>;
+    known: (id: EntityId) => ReadonlyArray<{ content: string; sourceEventId?: string; factId?: string; pathway?: string; ts?: number }>;
     suspicions: (id: EntityId) => ReadonlyArray<{ content: string }>;
   }): void {
     this.npcKnowledge = p;
@@ -2003,6 +2006,70 @@ export class GameSessionAdapter implements GameSession {
       if (content) out.push({ content, knownTo: [] });
     }
     return out;
+  }
+
+  /** Cap the scope manifest so a long season's guard payload stays bounded (most-recent facts kept). */
+  private static readonly SCOPE_MANIFEST_CAP = 80;
+
+  /**
+   * ADR 0019 Layer 3 — the generalized knowledge-scope manifest. Every distinctive fact currently held
+   * by a BOUNDED subset of the house (someone who could hold it does NOT), grouped by lineage
+   * (`factId`, else normalized content), each with its complete pathway-holder set as houseguest
+   * DISPLAY NAMES. The FE narration guard drops any sentence in which a STAGED houseguest voices a fact
+   * whose `knownTo` excludes them — closing the room-to-room asymmetry the ADR names (the player tells
+   * B in one room; A must not "recall" it elsewhere).
+   *
+   * Vault-free by construction: reads ONLY the KnowledgeService `known(id)` projection (the legitimate
+   * "witnessed-or-told" layer `npcVoice.knows` already surfaces per-NPC), never the Vault/soul. The
+   * Diary-Room class is left to `sealedFromHouse` (its holder set is empty by definition), and facts the
+   * WHOLE living house holds are omitted (no non-holder could leak them ⇒ nothing to guard).
+   */
+  knowledgeScopeManifest(): SealedFact[] {
+    if (!this.house || !this.npcKnowledge) return [];
+    // Everyone who could legitimately hold a fact right now: the player + every non-evicted houseguest.
+    const evicted = new Set(this.live?.evictionOrder ?? []);
+    const holderIds: EntityId[] = [this.house.player.id, ...this.house.npcs.map((n) => n.id)]
+      .filter((id) => !evicted.has(id));
+    const universe = new Set(holderIds);
+    // Group by lineage across holders: representative content, the holder-id set, and a recency stamp.
+    const groups = new Map<string, { content: string; raw: string; holders: Set<EntityId>; ts: number }>();
+    for (const id of holderIds) {
+      // Scan EVERY fact each holder holds — NEVER a per-holder pre-cap. A pre-cap (reverted, Greptile
+      // #1723) truncated `knownTo` MEMBERSHIP: if A learned fact X long ago (sliced off A's capped list)
+      // and B learned it recently, the group would record `knownTo: [B]` only, and the FE wall would then
+      // DROP a legitimate A sentence voicing X — a false hold on real speech (ADR 0005 #1, worse than a
+      // missed phantom). The final POST-grouping `SCOPE_MANIFEST_CAP` bounds the manifest's DISTINCT-fact
+      // count WITHOUT dropping any holder from a surviving fact. The read is fetched once per turn and
+      // TTL-cached FE-side, and total knowledge is bounded by season length, so the O(total) scan is fine.
+      for (const f of this.npcKnowledge.known(id)) {
+        // The Diary-Room OOC class is `sealedFromHouse`'s job (empty holder set); never here.
+        if (f.pathway === NO_NPC_PATHWAY) continue;
+        const raw = (f.content ?? "").trim();
+        if (!raw) continue;
+        const key = f.factId ?? raw.toLowerCase().replace(/\s+/g, " ");
+        const g = groups.get(key);
+        if (g) {
+          g.holders.add(id);
+          if ((f.ts ?? 0) > g.ts) g.ts = f.ts ?? g.ts;
+        } else {
+          groups.set(key, { content: this.humanize(raw).trim(), raw, holders: new Set([id]), ts: f.ts ?? 0 });
+        }
+      }
+    }
+    const out: Array<SealedFact & { ts: number }> = [];
+    for (const g of groups.values()) {
+      if (!g.content) continue;
+      // Public facts the whole living house holds have no non-holder to leak them — nothing to guard.
+      let bounded = false;
+      for (const id of universe) if (!g.holders.has(id)) { bounded = true; break; }
+      if (!bounded) continue;
+      // Holder DISPLAY NAMES — the FE guard matches a staged speaker by name.
+      const knownTo = [...g.holders].map((id) => this.nameOf(id));
+      out.push({ content: g.content, knownTo, ts: g.ts });
+    }
+    // Most-recent first, capped — a backstop guard needs the live secrets, not the whole history.
+    out.sort((a, b) => b.ts - a.ts);
+    return out.slice(0, GameSessionAdapter.SCOPE_MANIFEST_CAP).map(({ content, knownTo }) => ({ content, knownTo }));
   }
 
   /**
@@ -9851,8 +9918,32 @@ export class GameSessionAdapter implements GameSession {
     };
   }
 
+  /**
+   * ADR 0019 Layer 2 — each PRESENT houseguest's OWN knowledge scope, for the NARRATION prompt only.
+   * The SAME Vault-free `knows`/`suspects` projection `npcVoice` returns, per houseguest actually in the
+   * player's room (`whereabouts.present`) — so `renderGameContext` voices each present houseguest from
+   * THEIR bounded set by default, without depending on the reliably-under-called `npcVoice`. "Context is
+   * not knowledge": a fact witnessed only by B rides under B's labelled block, never A's.
+   *
+   * Deliberately confined to the moment prompt (the narration model's context, the SAME place `npcVoice`
+   * feeds): it is NOT folded onto the general `GameStateView` the HUD/FE reads (`getGameState`/
+   * `gameStatus`), which stays free of any houseguest's private knowledge (the B42 canary's line).
+   */
+  private presentKnowledgeForPrompt(): import("../../ports/GameSession").PresentKnowledgeView[] {
+    return (this.whereabouts()?.present ?? [])
+      .map((p) => {
+        const v = this.npcVoice(p.id);
+        return v ? { id: p.id, name: v.houseguest.name, knows: v.knows, suspects: v.suspects } : null;
+      })
+      .filter((e): e is NonNullable<typeof e> => e !== null && (e.knows.length > 0 || e.suspects.length > 0));
+  }
+
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
-    const view = this.view();
+    const baseView = this.view();
+    // ADR 0019 Layer 2: augment the NARRATION view (only) with each present houseguest's own knowledge
+    // scope. Absent when nobody present holds anything ⇒ byte-identical prompt.
+    const pk = this.presentKnowledgeForPrompt();
+    const view = pk.length ? { ...baseView, presentKnowledge: pk } : baseView;
     const moment = req.moment ?? view.moment;
     return {
       moment,
