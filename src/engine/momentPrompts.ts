@@ -1359,9 +1359,15 @@ export function renderGameContext(view: GameStateView): string {
         "  a person can reference or \"recall\" only what THEY witnessed or were told; never put one",
         "  houseguest's knowledge in another's mouth, and never a fact no one here holds):",
         ...(view.presentKnowledge ?? []).flatMap((e) => {
-          const lines = [`    · ${e.name}:`];
-          if (e.knows.length) lines.push(`        knows: ${e.knows.join("; ")}`);
-          if (e.suspects.length) lines.push(`        suspects (a hunch, not fact): ${e.suspects.join("; ")}`);
+          // Route each knowledge string through `neutralizeForPrompt` (as the diary-room entries above
+          // do): these are model-adjacent content the guest "knows", so a prompt-injection control
+          // sequence in one can't forge a prompt line. Defence-in-depth — the block is per-NPC scoped.
+          // NB: arrow-wrap `neutralizeForPrompt` — a bare `.map(neutralizeForPrompt)` would pass the
+          // array INDEX as the `max` arg (index 0 ⇒ max 0 ⇒ everything truncated). The DR block above
+          // wraps it for the same reason.
+          const lines = [`    · ${neutralizeForPrompt(e.name)}:`];
+          if (e.knows.length) lines.push(`        knows: ${e.knows.map((k) => neutralizeForPrompt(k)).join("; ")}`);
+          if (e.suspects.length) lines.push(`        suspects (a hunch, not fact): ${e.suspects.map((s) => neutralizeForPrompt(s)).join("; ")}`);
           return lines;
         }),
       ]

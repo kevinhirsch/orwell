@@ -2034,7 +2034,11 @@ export class GameSessionAdapter implements GameSession {
     // Group by lineage across holders: representative content, the holder-id set, and a recency stamp.
     const groups = new Map<string, { content: string; raw: string; holders: Set<EntityId>; ts: number }>();
     for (const id of holderIds) {
-      for (const f of this.npcKnowledge.known(id)) {
+      // Cap EACH holder's contribution to their most-recent facts BEFORE grouping (mirroring the voice
+      // path's `VOICE_KNOWS_CAP`), so the manifest is O(holders × cap), never O(total accumulated
+      // knowledge) — the final `SCOPE_MANIFEST_CAP` then trims the recombined set. Facts arrive
+      // oldest→newest, so the tail slice keeps the most-recent-facts semantics.
+      for (const f of this.npcKnowledge.known(id).slice(-GameSessionAdapter.VOICE_KNOWS_CAP)) {
         // The Diary-Room OOC class is `sealedFromHouse`'s job (empty holder set); never here.
         if (f.pathway === NO_NPC_PATHWAY) continue;
         const raw = (f.content ?? "").trim();
