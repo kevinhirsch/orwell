@@ -276,7 +276,7 @@ DEFAULT_SETTINGS = {
     "cast_authoring_model_source": "narration",
     # Owner directive 2026-07-11 — the cast-authoring SAMPLING TEMPERATURE (per-class: applied to the
     # cast-authoring calls ONLY). Default 1.0 (owner ruling 2026-07-20: hot character generation out of
-    # the box, dialed back from 1.1); clamped at read time to 0.0–2.0, so ≥1.5 stays admin-reachable and a
+    # the box, dialed back from 1.1); clamped at read time to 0.0-2.0, so >=1.5 stays admin-reachable and a
     # fat-fingered 40 can never become the live temperature. Runtime-editable like the sibling
     # per-class knobs; read per-run via orwell_cast_authoring.cast_authoring_temperature(). The other
     # background-utility lanes (zeitgeist / off-screen texture / identity) keep their own moderate

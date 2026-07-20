@@ -1015,7 +1015,7 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
     if not valid_ids:
         return {"committed": 0, "accepted": False, "varianceOk": True, "rerolls": 0, "reason": "empty-roster"}
     brief = generate_season_brief(seed)
-    # The seeded per-slot casting cards (pronouns / archetype 1–3× / accented 20–30% / delivery axes) —
+    # The seeded per-slot casting cards (role/archetype 1-3x / accented 20-30% / delivery axes) --
     # the cross-cast constraints computed up front and injected per slot (each per-NPC call sees only its own).
     roster_ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
     slot_list = assign_genesis_slots(seed, len(roster_ids))
