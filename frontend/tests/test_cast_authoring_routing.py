@@ -4,7 +4,7 @@ Gates for the cast-authoring call-class upgrade:
   * ROUTING — `resolve_authoring_llm_fn` routes to the NARRATION model (`default_*`) by default,
     with the utility chain APPENDED as the EXPLICIT fallback (never silent); the runtime-editable
     `cast_authoring_model_source="utility"` restores the legacy utility-first routing.
-  * TEMPERATURE — the per-class `cast_authoring_temperature` knob (default 1.1 — owner: hot
+  * TEMPERATURE — the per-class `cast_authoring_temperature` knob (default 1.0 — owner: hot
     character generation out of the box; clamped 0.0–2.0 so >=1.5 stays reachable) applies to the
     cast-authoring calls ONLY; the shared background-utility default (0.6) is untouched for the
     other `_resolve_llm_fn` consumers.
@@ -52,9 +52,9 @@ def test_model_source_garbage_falls_back(monkeypatch):
     assert ca.cast_authoring_model_source() == "narration"
 
 
-def test_temperature_defaults_to_1_1(monkeypatch):
+def test_temperature_defaults_to_1_0(monkeypatch):
     _pin_setting(monkeypatch, "cast_authoring_temperature", None)
-    assert ca.cast_authoring_temperature() == pytest.approx(1.1)
+    assert ca.cast_authoring_temperature() == pytest.approx(1.0)
 
 
 def test_temperature_is_runtime_editable_and_allows_hot_values(monkeypatch):
@@ -69,9 +69,9 @@ def test_temperature_is_clamped_and_garbage_safe(monkeypatch):
     _pin_setting(monkeypatch, "cast_authoring_temperature", -3)
     assert ca.cast_authoring_temperature() == pytest.approx(0.0)
     _pin_setting(monkeypatch, "cast_authoring_temperature", "not-a-number")
-    assert ca.cast_authoring_temperature() == pytest.approx(1.1)
+    assert ca.cast_authoring_temperature() == pytest.approx(1.0)
     _pin_setting(monkeypatch, "cast_authoring_temperature", True)  # a stray bool is never a temp
-    assert ca.cast_authoring_temperature() == pytest.approx(1.1)
+    assert ca.cast_authoring_temperature() == pytest.approx(1.0)
 
 
 def test_shared_utility_temperature_untouched():
@@ -83,7 +83,7 @@ def test_shared_utility_temperature_untouched():
 def test_defaults_present_in_settings():
     from src.settings import DEFAULT_SETTINGS
     assert DEFAULT_SETTINGS["cast_authoring_model_source"] == "narration"
-    assert DEFAULT_SETTINGS["cast_authoring_temperature"] == pytest.approx(1.1)
+    assert DEFAULT_SETTINGS["cast_authoring_temperature"] == pytest.approx(1.0)
     assert "enrichment_policy" in DEFAULT_SETTINGS
 
 
@@ -128,7 +128,7 @@ def test_default_routing_is_narration_first_with_explicit_utility_fallback(monke
     assert "utility-model" in models and "utility-fallback-model" in models, \
         "the utility chain must be appended as the EXPLICIT fallback — never silent"
     assert models.index("narrator-model") < models.index("utility-model")
-    assert captured["kwargs"].get("temperature") == pytest.approx(1.1), \
+    assert captured["kwargs"].get("temperature") == pytest.approx(1.0), \
         "the hot per-class temperature must ride the authoring call"
 
 

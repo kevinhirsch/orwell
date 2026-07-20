@@ -178,17 +178,17 @@ def test_chunked_gather_commits_the_full_cast_in_one_write():
     assert len(writes) == 1 and writes[0] == 15, "the chunks combine into ONE atomic write-back"
 
 
-def test_failed_chunk_is_retried_alone_not_the_whole_cast():
-    """A chunk that returns nothing on the first try is retried ONCE alone; other chunks are untouched."""
-    state = {"calls": 0, "chunk2_first": True}
+def test_failed_npc_call_is_retried_alone_not_the_whole_cast():
+    """A per-NPC call that returns nothing on the first try is retried ONCE alone; others are untouched."""
+    state = {"calls": 0, "npc6_first": True}
 
     async def llm(messages):
         state["calls"] += 1
         user = " ".join(str(m.get("content", "")) for m in messages)
         ids = [i for i in range(1, 16) if f'"npc:{i}"' in user]
-        # The middle chunk (contains npc:6) fails its FIRST attempt, succeeds on the lone retry.
-        if 6 in ids and state["chunk2_first"]:
-            state["chunk2_first"] = False
+        # The npc:6 call fails its FIRST attempt, succeeds on the lone retry.
+        if ids == [6] and state["npc6_first"]:
+            state["npc6_first"] = False
             return "no json this pass"
         return json.dumps({"npcs": [_npc(i) for i in ids], "ties": []})
 
@@ -197,8 +197,8 @@ def test_failed_chunk_is_retried_alone_not_the_whole_cast():
 
     res = _run(G.seed_cast_genesis(_ROSTER, 7, llm, write, chunk_size=5))
     assert res["committed"] == 15
-    # 3 chunks + 1 lone retry for the failed middle chunk = 4 calls (never a whole-cast re-grind).
-    assert state["calls"] == 4, state["calls"]
+    # 15 per-NPC calls + 1 lone retry for the failed npc:6 = 16 calls (never a whole-cast re-grind).
+    assert state["calls"] == 16, state["calls"]
 
 
 def test_chunked_dedupes_names_across_chunks():

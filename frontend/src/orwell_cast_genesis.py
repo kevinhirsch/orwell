@@ -102,9 +102,14 @@ class _Mulberry32:
         return items[self.int(len(items))]
 
 
-# Mirror of src/engine/genesisConstants.ts (BRIEF_*). Keep in lockstep with the engine pools so the FE
-# steers with the same brief the engine records; a drift is only a cosmetic steering mismatch (the brief
-# never binds), but the parity test pins a few known seeds so a silent drift is caught.
+# Mirror of src/engine/genesisConstants.ts (BRIEF_* + the per-slot pools). Keep in lockstep with the
+# engine pools so the FE steers with the same brief the engine records AND deals the same per-slot casting
+# cards; a drift is only a cosmetic steering mismatch (none of this binds a validator), but the parity
+# tests pin a few known seeds so a silent drift is caught.
+#
+# The old house-wide `ensembleVibe` was REMOVED (it homogenized the whole cast); the ensemble mood now
+# rides per-slot as an ACCENT on a seeded 20–30% minority (`assign_genesis_slots`). The demographic +
+# regional pools are widened to real, higher-dimensional age-shape / US-region lines.
 BRIEF_DEMOGRAPHIC_SKEWS = (
     "skew younger — a twenties-heavy house with something to prove",
     "skew older — a cast of established adults with real lives on pause",
@@ -112,6 +117,14 @@ BRIEF_DEMOGRAPHIC_SKEWS = (
     "a mostly-thirties professional class at a crossroads",
     "a youth-forward house with a couple of seasoned outliers",
     "an evenly-mixed generational spread, no dominant cohort",
+    "a college-age-to-late-twenties house, few over thirty",
+    "a barbell split — a young contingent and a veteran contingent, little in between",
+    "a thirties-and-forties core with a couple of early-twenties wildcards",
+    "a house anchored by forty- and fifty-somethings with real careers",
+    "a Gen-Z-heavy cast raised online",
+    "a millennial-dominant house in the thick of career and family pressure",
+    "a late-twenties-to-mid-thirties cluster, everyone at a turning point",
+    "a multi-generational mix from twenty-one to the early sixties",
 )
 BRIEF_REGIONAL_FLAVORS = (
     "a heavy Gulf-coast contingent",
@@ -122,28 +135,184 @@ BRIEF_REGIONAL_FLAVORS = (
     "a coast-to-coast spread with no regional center",
     "a Mountain-West and desert-Southwest lean",
     "a mix of small-town roots and big-city transplants",
+    "a California-heavy cast, NorCal to SoCal",
+    "a Deep-South and Appalachian core",
+    "a Texas-and-the-Southwest contingent",
+    "a Great-Lakes and Rust-Belt skew",
+    "a Florida-and-Southeast lean",
+    "a New-England and Mid-Atlantic tilt",
+    "a Plains-and-prairie heartland cast",
+    "a mix of Sun-Belt transplants and lifelong locals",
 )
-BRIEF_ENSEMBLE_VIBES = (
-    "a house built for slow-burn grudges",
-    "a loud, clash-forward ensemble that never lets a fight rest",
-    "a warm, alliance-heavy crew that bonds fast and hard",
-    "a cerebral, strategy-first cast that plays quiet",
-    "a chaotic, unpredictable mix where nothing holds",
-    "a status-hungry room full of people used to being the main character",
-    "an underdog-heavy house of people written off before",
-    "a showmance-prone cast with romance in the air",
+# Per-slot ENSEMBLE ACCENTS (the de-homogenized replacement for the house-wide ensembleVibe): a distinct
+# house-mood carried by only a seeded 20–30% of the cast; broad + orthogonal so the accented minority
+# reads varied. Mirror of GENESIS_ENSEMBLE_ACCENTS.
+GENESIS_ENSEMBLE_ACCENTS = (
+    "a slow-burn grudge-holder who never forgets a slight",
+    "a loud, clash-forward instigator who won't let a fight rest",
+    "a warm, alliance-hungry connector who bonds fast and hard",
+    "a cerebral, quiet strategist who plays three moves ahead",
+    "a chaotic wildcard whose loyalties never quite hold",
+    "a status-hungry spotlight-chaser used to being the main character",
+    "a written-off underdog with a chip on their shoulder",
+    "a hopeless romantic wired for a showmance",
+    "a relentless optimist who reframes every disaster as a bonding moment",
+    "a deadpan cynic narrating the house like a nature documentary",
+    "a rule-obsessed traditionalist who polices etiquette and the chore wheel",
+    "a conspiracy-minded paranoiac who reads a threat into everything",
+    "a big-hearted house-parent who mothers everyone whether they like it or not",
+    "an unbothered floater who drifts through the drama untouched",
+    "a competitive gym-rat who turns every dish and doorway into a contest",
+    "a gossip-hungry information broker who trades secrets like currency",
+    "a theatrical drama-magnet forever narrating their own storyline",
+    "a stoic lone-wolf who keeps their cards close and their distance closer",
+    "a people-pleasing peacemaker terrified of being disliked",
+    "a blunt truth-teller with no interior monologue and no filter",
+    "a superstitious ritualist with a lucky charm for every competition",
+    "a homesick sweetheart who wears every emotion on their sleeve",
+    "a smooth operator who charms first and schemes later",
+    "a restless live-wire who cannot sit still or stay quiet",
 )
+# Per-slot DIVERSITY AXES — independent seeded delivery dials drawn for EVERY slot (wide + orthogonal so
+# per-person variety is seeded, not left to sampling temperature). Mirror of GENESIS_*_AXIS.
+GENESIS_ENERGY_AXIS = (
+    "subdued and low-key",
+    "calm and measured",
+    "steady and even-keeled",
+    "warm and animated",
+    "high-energy and bouncy",
+    "restless and wired",
+    "explosive and larger-than-life",
+    "mellow to the point of sleepy",
+)
+GENESIS_REGISTER_AXIS = (
+    "blunt and plainspoken",
+    "clipped and economical",
+    "dry and understated",
+    "folksy and colloquial",
+    "polished and articulate",
+    "ornate and theatrical",
+    "flowery and effusive",
+    "slangy and irreverent",
+)
+GENESIS_EXPRESSIVENESS_AXIS = (
+    "guarded and buttoned-up",
+    "reserved and hard to read",
+    "measured, reveals little",
+    "openly emotional",
+    "expressive and demonstrative",
+    "unfiltered and says everything out loud",
+    "loud and impossible to ignore",
+    "theatrically over-sharing",
+)
+# Three FURTHER orthogonal axes (owner casting-craft upgrade). Mirror of GENESIS_*_AXIS.
+GENESIS_EMOTIONAL_REGISTER_AXIS = (
+    "hot-reactive — quick to laugh, cry, or blow up",
+    "warm and easily moved",
+    "even-tempered",
+    "cool and slow to react",
+    "cold and hard to rattle",
+    "volatile — swings fast between extremes",
+)
+GENESIS_SELF_AWARENESS_AXIS = (
+    "deluded — certain they're the smartest strategist in the house",
+    "overconfident, always a step behind their own reputation",
+    "a clear, realistic read on themselves",
+    "sharply self-aware, clocks their own tells",
+    "insecure, quietly underrates themselves",
+)
+GENESIS_SOCIAL_GRAVITY_AXIS = (
+    "a magnetic main-character who fills the room",
+    "a natural center of attention",
+    "sociable, comfortable in any group",
+    "quietly present, part of the furniture",
+    "a loner who orbits the edges of the house",
+)
+# The LOUD ends of the amplifiable axes — an amplified "big personality" slot draws ONLY from these.
+GENESIS_ENERGY_LOUD = (
+    "warm and animated", "high-energy and bouncy", "restless and wired", "explosive and larger-than-life",
+)
+GENESIS_EXPRESSIVENESS_LOUD = (
+    "openly emotional", "expressive and demonstrative", "unfiltered and says everything out loud",
+    "loud and impossible to ignore", "theatrically over-sharing",
+)
+GENESIS_EMOTIONAL_REGISTER_LOUD = (
+    "hot-reactive — quick to laugh, cry, or blow up", "volatile — swings fast between extremes",
+    "warm and easily moved",
+)
+GENESIS_SOCIAL_GRAVITY_LOUD = (
+    "a magnetic main-character who fills the room", "a natural center of attention",
+)
+GENESIS_AMPLIFIED_MIN = 4
+GENESIS_AMPLIFIED_SPAN = 2  # 4 or 5 amplified per cast (owner: guarantee 3-4+ loud)
+
+# The seeded AGE curve (owner casting-craft upgrade) — mirror of GENESIS_AGE_BANDS: [lo, hi, count].
+GENESIS_AGE_BANDS = ((21, 26, 4), (27, 33, 5), (34, 45, 4), (46, 60, 2))
+
+# The CASTING-ROLE vocabulary + quota — mirror of GENESIS_CASTING_ROLES. Each: (role, archetype, cerebral,
+# physical, note). `archetype` maps the rich role to one of the 12 mechanical archetype tags the engine
+# owns (the enum is NOT expanded — that would shift the deterministic floor + calibration).
+GENESIS_CASTING_ROLES = (
+    ("comp-beast (humble)", "comp-beast", False, True,
+     "a genuine physical/endurance threat who lets the wins speak — quietly dangerous"),
+    ("comp-threat self-mastermind", "comp-beast", False, True,
+     "a physical player convinced he is ALSO a strategic genius — narrates himself as the mastermind"),
+    ("mastermind", "mastermind", True, False,
+     "the quiet architect running the house three moves ahead"),
+    ("under-the-radar assassin", "floater", False, False,
+     "a floater FACADE with a mastermind underneath — harmless-looking, quietly lethal"),
+    ("analyst", "analyst", True, False,
+     "reads the board like a spreadsheet, all logic and probabilities"),
+    ("floater", "floater", False, False,
+     "drifts to whoever holds power, never a target, never a leader"),
+    ("villain", "villain", False, False,
+     "the willing bad guy — but SECRETLY believes they're the hero, the loyal one, or the victim"),
+    ("underdog", "underdog", False, False,
+     "written off early, playing with a chip on their shoulder"),
+    ("showmance instigator", "flirt", False, False,
+     "here to spark a romance — flirts hard, wants a showmance nucleus"),
+    ("flirt", "flirt", False, False,
+     "charming and touchy, plays the social-romantic angle"),
+    ("hothead", "hothead", False, True,
+     "a short fuse who detonates the house on a dime"),
+    ("america's sweetheart", "social-butterfly", False, False,
+     "beloved, warm, non-threatening — everyone's friend, floats on goodwill"),
+    ("mom/dad figure", "peacemaker", False, False,
+     "the house parent who feeds and mediates everyone — and is SECRETLY cutthroat underneath"),
+    ("wildcard", "wildcard", False, False,
+     "chaotic and unpredictable, loyal to nothing, capable of anything"),
+    ("loyalist", "loyalist", False, False,
+     "rides for their ride-or-die to a fault, loyalty over logic"),
+    ("superfan gamebot", "analyst", True, False,
+     "an over-studied superfan who quotes past seasons and over-plays their BB knowledge"),
+)
+GENESIS_ROLE_MAX_PER_CAST = 2
+GENESIS_CEREBRAL_MAX_PER_CAST = 3
+# The believable BB casting recipe (essential→optional order) + the seeded underdog flex. Mirror of the
+# engine's GENESIS_CASTING_RECIPE / GENESIS_UNDERDOG_FLEX.
+_GENESIS_CASTING_RECIPE = (
+    "comp-beast (humble)", "mastermind", "floater", "villain", "showmance instigator", "flirt",
+    "hothead", "america's sweetheart", "mom/dad figure", "underdog", "comp-threat self-mastermind",
+    "under-the-radar assassin", "wildcard", "loyalist", "floater", "analyst",
+)
+_GENESIS_UNDERDOG_FLEX = ("underdog", "analyst", "superfan gamebot")
+
+# The seeded accent-fraction band. Mirror of GENESIS_ACCENT_FRACTION. GENDER/pronouns are deliberately
+# NOT seeded — the identity model proposes correct, diverse, name-coherent genders and diversity.ts is the
+# coherence authority; genesis only asks (in prose) that each houseguest's chosen pronouns stay consistent.
+GENESIS_ACCENT_FRACTION_MIN = 0.2
+GENESIS_ACCENT_FRACTION_MAX = 0.3
 
 
 def generate_season_brief(seed: int) -> dict:
     """Derive the seeded season brief — byte-identical to src/engine/castGenesis.generateSeasonBrief.
-    Same seed ⇒ same brief; player-INDEPENDENT (seed-only). Returns
-    ``{demographicSkew, regionalFlavor, ensembleVibe}``."""
+    Same seed ⇒ same brief; player-INDEPENDENT (seed-only). Returns ``{demographicSkew, regionalFlavor}``
+    (the old house-wide ``ensembleVibe`` is gone — the ensemble mood now rides per-slot, see
+    ``assign_genesis_slots``)."""
     rng = _Mulberry32(_hash_seed(f"{seed}:genesis:brief"))
     return {
         "demographicSkew": rng.pick(BRIEF_DEMOGRAPHIC_SKEWS),
         "regionalFlavor": rng.pick(BRIEF_REGIONAL_FLAVORS),
-        "ensembleVibe": rng.pick(BRIEF_ENSEMBLE_VIBES),
     }
 
 
@@ -151,8 +320,164 @@ def render_season_brief(b: dict) -> str:
     """One short casting-direction line for the sketch prompt (mirrors engine renderSeasonBrief)."""
     if not isinstance(b, dict):
         return ""
-    return (f"This season: {b.get('demographicSkew', '')}; {b.get('regionalFlavor', '')}; "
-            f"{b.get('ensembleVibe', '')}.")
+    return f"This season: {b.get('demographicSkew', '')}; {b.get('regionalFlavor', '')}."
+
+
+# ── the seeded PER-SLOT casting directives (the cross-cast constraints, computed up front) ──────────────
+# Genesis authors ONE houseguest per LLM call (a call cannot see its siblings), so EVERY cross-cast
+# constraint — the casting-role quota, the age curve, the accented minority, the amplified-loud contingent —
+# is dealt HERE, seeded + deterministic, and injected into each per-NPC prompt as a fixed casting card.
+# Byte-identical to src/engine/castGenesis.assignGenesisSlots (same side-streams, same Fisher–Yates, same
+# rounding). GENDER is NOT seeded (the identity model proposes coherent, diverse genders — course-correction).
+
+def _seeded_shuffle(arr: list, rng: "_Mulberry32") -> None:
+    """Fisher–Yates in place, driven by the seeded RNG (identical stream ⇒ identical permutation)."""
+    i = len(arr) - 1
+    while i > 0:
+        j = rng.int(i + 1)
+        arr[i], arr[j] = arr[j], arr[i]
+        i -= 1
+
+
+_ROLE_BY_LABEL = {r[0]: r for r in GENESIS_CASTING_ROLES}
+
+
+def _build_casting_plan(rng: "_Mulberry32", count: int) -> list:
+    """Build the seeded casting PLAN — a believable role multiset honoring the per-role + cerebral caps.
+    Mirrors the engine's buildCastingPlan."""
+    plan = []
+    role_counts: dict = {}
+    cerebral = [0]
+
+    def try_add(label: str) -> bool:
+        r = _ROLE_BY_LABEL[label]
+        if role_counts.get(label, 0) >= GENESIS_ROLE_MAX_PER_CAST:
+            return False
+        if r[2] and cerebral[0] >= GENESIS_CEREBRAL_MAX_PER_CAST:  # r[2] = cerebral
+            return False
+        plan.append(r)
+        role_counts[label] = role_counts.get(label, 0) + 1
+        if r[2]:
+            cerebral[0] += 1
+        return True
+
+    for label in _GENESIS_CASTING_RECIPE:
+        if len(plan) >= count:
+            break
+        try_add(label)
+    guard = 0
+    while len(plan) < count and guard < count * len(_GENESIS_CASTING_RECIPE):
+        guard += 1
+        added = False
+        for label in _GENESIS_CASTING_RECIPE:
+            if len(plan) >= count:
+                break
+            if try_add(label):
+                added = True
+        if not added:
+            break
+    # Seeded flex: swap the (first) underdog for a seeded alternate — inter-season cerebral-slot variety.
+    flex = _GENESIS_UNDERDOG_FLEX[rng.int(len(_GENESIS_UNDERDOG_FLEX))]
+    if flex != "underdog":
+        idx = next((k for k, r in enumerate(plan) if r[0] == "underdog"), -1)
+        alt = _ROLE_BY_LABEL[flex]
+        if idx >= 0 and not (alt[2] and cerebral[0] >= GENESIS_CEREBRAL_MAX_PER_CAST):
+            plan[idx] = alt
+    _seeded_shuffle(plan, rng)
+    return plan
+
+
+def _build_age_plan(rng: "_Mulberry32", count: int) -> list:
+    """Build the seeded AGE plan — the real-world cast age curve, one (lo, hi) per slot, shuffled. Mirrors
+    the engine's buildAgePlan."""
+    bands = []
+    base_total = sum(b[2] for b in GENESIS_AGE_BANDS)
+    for lo, hi, cnt in GENESIS_AGE_BANDS:
+        n = max(0, round((cnt / base_total) * count))
+        bands.extend([(lo, hi)] * n)
+    while len(bands) < count:
+        bands.append((GENESIS_AGE_BANDS[0][0], GENESIS_AGE_BANDS[0][1]))
+    bands = bands[:count]
+    _seeded_shuffle(bands, rng)
+    return bands
+
+
+def assign_genesis_slots(seed: int, count: int) -> list[dict]:
+    """Deal the seeded per-slot casting cards for ``count`` houseguests (roster order) — byte-identical to
+    the engine's ``assignGenesisSlots``. Each cross-cast constraint runs on its OWN dedicated side-stream
+    (RNG isolation) so adding/removing one never perturbs the others. Returns a list of
+    ``{role, roleNote, archetype, physical, ageLo, ageHi, accent, amplified, energy, register,
+    expressiveness, emotionalRegister, selfAwareness, socialGravity}``. GENDER is deliberately NOT seeded
+    — the identity model proposes correct, diverse, name-coherent genders. PURE + player-blind."""
+    if count <= 0:
+        return []
+
+    # 1. ROLE — the believable casting plan (rich roles mapped to mechanical archetype tags).
+    role_plan = _build_casting_plan(_Mulberry32(_hash_seed(f"{seed}:genesis:roles")), count)
+    # 2. AGE — the real-world age curve.
+    age_plan = _build_age_plan(_Mulberry32(_hash_seed(f"{seed}:genesis:ages")), count)
+
+    # 3. ACCENT — a seeded 20–30% carry a distinct ensemble accent; the rest are their own people.
+    c_rng = _Mulberry32(_hash_seed(f"{seed}:genesis:accent"))
+    fraction = GENESIS_ACCENT_FRACTION_MIN + c_rng.next() * (GENESIS_ACCENT_FRACTION_MAX - GENESIS_ACCENT_FRACTION_MIN)
+    accent_count = max(0, min(count, int(count * fraction + 0.5)))
+    carry = ([True] * accent_count) + ([False] * (count - accent_count))
+    _seeded_shuffle(carry, c_rng)
+    accent_pool = list(GENESIS_ENSEMBLE_ACCENTS)
+    _seeded_shuffle(accent_pool, c_rng)
+    accent_cursor = 0
+
+    # 4. AXES — six delivery dials; a seeded 4–5 "amplified" slots draw ONLY from the loud ends.
+    x_rng = _Mulberry32(_hash_seed(f"{seed}:genesis:axes"))
+    amplified_count = max(0, min(count, GENESIS_AMPLIFIED_MIN + x_rng.int(GENESIS_AMPLIFIED_SPAN + 1)))
+    amplified = ([True] * amplified_count) + ([False] * (count - amplified_count))
+    _seeded_shuffle(amplified, x_rng)
+
+    def pick(full, loud, amp):
+        pool = loud if amp else full
+        return pool[x_rng.int(len(pool))]
+
+    out = []
+    for i in range(count):
+        role = role_plan[i]
+        amp = amplified[i]
+        accent = None
+        if carry[i]:
+            accent = accent_pool[accent_cursor % len(accent_pool)]
+            accent_cursor += 1
+        out.append({
+            "role": role[0],
+            "roleNote": role[4],
+            "archetype": role[1],
+            "physical": role[3],
+            "ageLo": age_plan[i][0],
+            "ageHi": age_plan[i][1],
+            "accent": accent,
+            "amplified": amp,
+            "energy": pick(GENESIS_ENERGY_AXIS, GENESIS_ENERGY_LOUD, amp),
+            "register": GENESIS_REGISTER_AXIS[x_rng.int(len(GENESIS_REGISTER_AXIS))],
+            "expressiveness": pick(GENESIS_EXPRESSIVENESS_AXIS, GENESIS_EXPRESSIVENESS_LOUD, amp),
+            "emotionalRegister": pick(GENESIS_EMOTIONAL_REGISTER_AXIS, GENESIS_EMOTIONAL_REGISTER_LOUD, amp),
+            "selfAwareness": GENESIS_SELF_AWARENESS_AXIS[x_rng.int(len(GENESIS_SELF_AWARENESS_AXIS))],
+            "socialGravity": pick(GENESIS_SOCIAL_GRAVITY_AXIS, GENESIS_SOCIAL_GRAVITY_LOUD, amp),
+        })
+    return out
+
+
+def render_slot_directive(hid: str, d: dict) -> str:
+    """Render one slot's casting card as a compact fixed-input line for the sketch prompt (mirrors the
+    engine's renderSlotDirective)."""
+    accent = f"house-accent: {d.get('accent')}" if d.get("accent") else "no house-accent (their own person)"
+    phys = (" PHYSICAL COMPETITOR (give a high physical stat + an athletic/first-responder/performer "
+            "vocation).") if d.get("physical") else ""
+    big = (" BIG PERSONALITY — write them genuinely loud/reactive/unfiltered; do NOT let the accent tone "
+           "them down.") if d.get("amplified") else ""
+    return (f"{hid} — cast as: {d.get('role')} ({d.get('roleNote')}); archetype tag: {d.get('archetype')}; "
+            f"age ~{d.get('ageLo')}-{d.get('ageHi')} (name from that birth era); {accent}; "
+            f"energy: {d.get('energy')}; register: {d.get('register')}; "
+            f"expressiveness: {d.get('expressiveness')}; reactivity: {d.get('emotionalRegister')}; "
+            f"self-awareness: {d.get('selfAwareness')}; social-gravity: {d.get('socialGravity')}."
+            + phys + big)
 
 
 # ── the envelope vocabulary (mirrors src/engine/castGenesis.ts + genesisConstants.ts) ───────────────────
@@ -163,7 +488,7 @@ _ARCHETYPES = (
     "comp-beast", "mastermind", "social-butterfly", "floater", "villain", "underdog",
     "flirt", "loyalist", "wildcard", "analyst", "hothead", "peacemaker",
 )
-_TIE_NATURES = ("casting-callback", "mutual-friend", "shared-hometown", "old-acquaintance")
+_TIE_NATURES = ("casting-callback", "mutual-friend", "shared-hometown", "old-acquaintance", "showmance")
 # The freely-authorable hidden-element kinds. `concealed-aptitude` is engine-stat-gated (a free-text one
 # is stripped) and `trigger` is engine-armed (never proposable), so we steer the model AWAY from both —
 # the engine strips them regardless; omitting them keeps the per-NPC count above the 3-min floor.
@@ -189,34 +514,54 @@ _TOTAL_LO, _TOTAL_HI = 1.47, 2.1
 # and the calibration balance (juryReach) is preserved: the model authors WHO people are; the engine keeps
 # HOW MUCH anything weighs (every hidden game weight stays engine-seeded).
 _SYSTEM = (
-    "You are the CASTING DIRECTOR for a Big Brother season, designing the ENTIRE cast of houseguests "
-    "from scratch. Invent a vivid, believable, reality-TV-plausible ENSEMBLE of distinct people — no two "
-    "alike, each with their own life, look, voice, and secret game. Output STRICT JSON only (no prose "
-    "around it): an object with two keys, \"npcs\" and \"ties\".\n"
-    "\"npcs\": an array, ONE object PER houseguest id given below (keep the SAME ids, same order), each with:\n"
+    "You are the CASTING DIRECTOR for a Big Brother season, designing houseguests from scratch. Invent "
+    "vivid, distinctive, reality-TV-plausible people — no two alike, each with their own life, look, "
+    "voice, and secret game. Author ONLY the houseguest id(s) you are given below. Output STRICT JSON "
+    "only (no prose around it): an object with two keys, \"npcs\" and \"ties\".\n"
+    "Each houseguest comes with a CASTING CARD — fixed inputs you MUST honor for that person:\n"
+    "  * CAST AS: a Big Brother casting type + a one-line note. Build this person AS that type; if the "
+    "note names a hidden belief or twist (e.g. a villain who secretly believes they're the hero, a "
+    "house-parent who is secretly cutthroat, a self-styled 'genius'), FOLD it into their identity and a "
+    "hidden element.\n"
+    "  * ARCHETYPE TAG: the exact mechanical tag to put in the \"archetype\" field (do not substitute).\n"
+    "  * AGE ~lo-hi: put an integer age in that band and pick a given name from that BIRTH ERA.\n"
+    "  * HOUSE-ACCENT: a distinct house mood — if one is given, let it color this person; if 'no "
+    "house-accent', they are simply their own person, not colored by any single mood.\n"
+    "  * DELIVERY DIALS (energy / register / expressiveness / reactivity / self-awareness / "
+    "social-gravity): push them to their FULL extreme — a 'loud and impossible to ignore', 'hot-reactive', "
+    "'deluded', or 'main-character' card means a genuinely loud/reactive/deluded/spotlight-hogging person, "
+    "NOT a muted version; a 'guarded'/'cold'/'loner' card means someone genuinely closed-off. If a card "
+    "says PHYSICAL COMPETITOR, give a high physical stat + an athletic / first-responder / military / "
+    "performer vocation. If it says BIG PERSONALITY, do NOT let the accent or anything else tone them "
+    "down. The cast should span the WHOLE range, never cluster in a polite reserved middle.\n"
+    "\"npcs\": an array, ONE object PER houseguest id given below (keep the SAME ids), each with:\n"
     '  "id": the exact houseguest id from the roster below (echo it verbatim).\n'
-    '  "name": an ordinary, everyday, pronounceable FIRST and LAST name (EXACTLY two words) for a real '
-    "modern American reality-TV contestant — the kind of unremarkable name you meet daily. HARD NAME "
-    "RULES (a name that breaks ANY of these is REJECTED and forces the whole cast to be redrawn — get "
-    "them right the FIRST time): (1) EXACTLY two plain words, a given name then a surname — NEVER a "
-    "single word, NEVER three-plus words, NEVER a lone name. (2) NO titles, honorifics, initials, "
-    "middle names, nicknames-in-quotes, hyphenated compounds, numerals, punctuation, emoji, or ANY "
-    "markup — letters only, plausible everyday human length (roughly 3-12 letters per word). "
-    "(3) NEVER invented, fantasy, gibberish, or stage-name shaped. (4) UNIQUE across the ENTIRE cast — "
-    "no two houseguests may share a first name OR a surname; scan the names you have already written "
-    "before adding each new one. (5) Prefer common CONTEMPORARY American given names and AVOID overtly "
-    "Biblical / scriptural given names (e.g. do NOT use Ryne, Marcus, or Felix, and steer clear of the "
-    "old-testament / gospel name set generally).\n"
+    '  "name": a normal, real, everyday FIRST and LAST name (EXACTLY two words) that a modern American '
+    "reality-TV contestant could actually have. Ordinary surnames are SOMETIMES a little distinctive and "
+    "sometimes perfectly plain — both are fine; don't force blandness, and don't reach for anything "
+    "flashy either. A familiar short-form or nickname given name (Mike, Liz, Gabe, Nat, Cass) is totally "
+    "fine. Pick a given name that fits this houseguest's AGE and BIRTH ERA (people are named in different "
+    "decades — a name that fits a 24-year-old need not fit a 55-year-old), fits their region/heritage, and "
+    "AVOID overtly Biblical / scriptural given names (e.g. not Ryne, Marcus, or Felix). NAME SHAPE (just "
+    "get each name right on its own — a single bad name only falls back to a default for THAT one "
+    "houseguest, it never redraws the cast): (1) EXACTLY two plain words, a given name then a surname — "
+    "never a single word, never three-plus words. (2) letters only — NO titles, honorifics, initials, "
+    "middle names, quoted nicknames, hyphenated compounds, numerals, punctuation, emoji, or markup "
+    "(roughly 3-12 letters per word). (3) not invented, fantasy, gibberish, or stage-name shaped. "
+    "(4) do NOT reuse any first name OR surname already listed as taken by an earlier houseguest.\n"
     '  "identity": ONE vivid sentence capturing who this person IS — their concept in your own words '
     "(this is what the show voices; make each unmistakably distinct).\n"
-    f'  "archetype": the single nearest fit from EXACTLY this list: {", ".join(_ARCHETYPES)}.\n'
-    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter").\n'
+    '  "archetype": use EXACTLY the archetype tag given in this houseguest\'s casting card (do not '
+    "substitute a different one).\n"
+    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter") — honor a PHYSICAL COMPETITOR '
+    "card with an athletic/first-responder/military/performer job; favor castable, story-rich jobs over "
+    "generic desk work.\n"
     '  "hometown": a US hometown (city, state) that fits the season\'s regional flavor.\n'
     '  "demeanor": a short phrase for how they carry themselves (e.g. "warm but guarded").\n'
     '  "background": a short phrase of life context.\n'
     '  "biography": a 2-3 sentence presentable backstory (their life outside the house).\n'
-    '  "appearance": a short concrete phrase describing their look.\n'
-    '  "age": an integer age, 21-60, fitting the season\'s demographic skew.\n'
+    '  "appearance": a short concrete phrase describing their look (consistent with their pronouns).\n'
+    '  "age": an integer age inside the casting card\'s age band.\n'
     '  "stats": { "physical", "mental", "social" } — three numbers, EACH between '
     f"{_STAT_MIN} and {_STAT_MAX}, whose TOTAL lands roughly between {_TOTAL_LO} and {_TOTAL_HI}. "
     "VARY the totals WIDELY across the cast — real competition beasts (high totals) AND real floaters "
@@ -225,10 +570,9 @@ _SYSTEM = (
     '{ "kind", "detail" } where kind is one of "secret-motive" (AT MOST ONE per houseguest), '
     '"pre-game-tie", or "divergent-persona", and detail is one vivid sentence in your own words. '
     "Ground each secret in THIS person's specific life. "
-    f"HARD REQUIREMENT: EVERY houseguest MUST have AT LEAST {GENESIS_HIDDEN_MIN} hidden elements "
-    f"(aim for {GENESIS_HIDDEN_MIN}-{GENESIS_HIDDEN_MAX}). A houseguest with fewer than "
-    f"{GENESIS_HIDDEN_MIN} is INVALID and forces the ENTIRE cast to be re-rolled — count the array "
-    "for each houseguest before moving to the next.\n"
+    f"EVERY houseguest MUST have AT LEAST {GENESIS_HIDDEN_MIN} hidden elements "
+    f"(aim for {GENESIS_HIDDEN_MIN}-{GENESIS_HIDDEN_MAX}) — count the array for each houseguest before "
+    "moving to the next.\n"
     '"ties": an array of 0 to ' + str(GENESIS_TIE_BUDGET) + " pre-show connections between houseguests "
     '(sparse by design — often just one, sometimes none), each { "a", "b", "nature", "backstory" } '
     "where a and b are two DIFFERENT houseguest ids from the roster, nature is one of "
@@ -236,13 +580,14 @@ _SYSTEM = (
     "one tie.\n"
     "COHERE every houseguest's name, look, hometown, vocation, and age with each other and with the "
     "season brief. Make the cast reflect a real, diverse American crew. Assign EVERY id in the roster.\n"
-    "IDENTITY COHERENCE (HARD — a contradiction is REJECTED): pin each houseguest's gender presentation "
-    "FIRST, then keep EVERY self-reference consistent with it. Within a SINGLE houseguest, NEVER mix "
-    "masculine and feminine pronouns for that same person across their identity, biography, appearance, "
-    "and secrets (no 'her shyness' beside 'his forearm'). Keep their age consistent with their life story "
-    "(do not write 'spent thirty years' or 'grandmother' for someone in their twenties), and keep their "
-    "stated occupation the same throughout (the biography and secrets must not name a different job than "
-    "the vocation).\n"
+    "IDENTITY COHERENCE (HARD): pin each houseguest's CHOSEN PRONOUNS FIRST (you decide them — make the "
+    "cast's genders varied and realistic, women, men, and the occasional nonbinary houseguest), then give "
+    "them a name and an appearance that match, and keep EVERY self-reference to that houseguest — across "
+    "their identity, biography, appearance, and secrets — consistent with those pronouns. Within a SINGLE "
+    "houseguest, NEVER refer to the houseguest with pronouns other than their chosen pronouns (no 'her "
+    "shyness' beside 'his forearm'). Keep their age consistent with their life story (do not write 'spent "
+    "thirty years' or 'grandmother' for someone in their twenties), and keep their stated occupation the "
+    "same throughout (the biography and secrets must not name a different job than the vocation).\n"
     "OUTPUT CONTRACT (HARD): reply with a SINGLE raw JSON object and NOTHING else — no prose, no "
     "markdown, no ```json fences, no preamble. The first character MUST be '{' and the last MUST be '}'."
 )
@@ -254,18 +599,38 @@ _STRICT_RETRY = (
 
 
 def build_genesis_messages(roster: list, brief: dict,
-                           violation_feedback: Optional[str] = None) -> list[dict]:
-    """The producer prompt for the WHOLE cast. Seeds the model with the season BRIEF (player-independent
-    steering) and the roster IDS ONLY — never the floor identities (so the model designs fresh, not
-    anchored to the pool it is replacing) and NEVER any player field (player-blind, a structural gate).
-    ``violation_feedback`` — on a bounded re-roll — quotes back the engine's structured violations so the
-    model fixes exactly what failed. Returns chat messages for the utility/narration model."""
+                           violation_feedback: Optional[str] = None,
+                           directives: Optional[dict] = None,
+                           used_names: Optional[list] = None) -> list[dict]:
+    """The producer prompt for the WHOLE cast (or, in the live per-NPC path, one houseguest). Seeds the
+    model with the season BRIEF (player-independent steering), the roster IDS, and — when supplied — each
+    id's seeded CASTING CARD (role / age / accent / delivery axes: the cross-cast constraints dealt up
+    front by ``assign_genesis_slots`` and injected as fixed inputs, since a per-NPC call cannot see the
+    rest of the cast). ``used_names`` (F3): the display names ALREADY committed by EARLIER calls — injected
+    as an in-prompt ledger so the model avoids cross-call first-name/surname COLLISIONS in the first place
+    (a collision otherwise gets floored to a gender-blind pool name, which is the personality↔gender
+    mismatch root cause). Never the floor identities (so the model designs fresh) and NEVER any player field
+    (player-blind, a structural gate). ``violation_feedback`` — on a bounded re-roll — quotes back the
+    engine's structured violations so the model fixes exactly what failed. ``directives`` maps id → the
+    ``assign_genesis_slots`` card; omitted (unit tests) ⇒ no card injection (back-compatible). Returns chat
+    messages for the utility/narration model."""
     ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
     lines = [
         f"Design the full cast — {len(ids)} houseguests. {render_season_brief(brief)}",
         "Roster ids (author ONE houseguest object per id, echoing the id verbatim, same order):",
         json.dumps(ids, ensure_ascii=False),
     ]
+    taken = [str(n).strip() for n in (used_names or []) if str(n).strip()]
+    if taken:
+        lines.append(
+            "Names ALREADY taken by earlier houseguests in THIS cast — do NOT reuse any of these first "
+            "names OR surnames (every houseguest needs a distinct given name and surname): "
+            + ", ".join(taken) + ".")
+    if directives:
+        cards = [render_slot_directive(hid, directives[hid]) for hid in ids if hid in directives]
+        if cards:
+            lines.append("CASTING CARDS (fixed inputs — honor each one for its houseguest):")
+            lines.extend(cards)
     if violation_feedback:
         lines.append(
             "Your previous proposal had these problems (fix EXACTLY these, keep everything else): "
@@ -529,90 +894,106 @@ def _reroll_feedback(violations: list) -> Optional[str]:
 LlmFn = Callable[[list[dict]], Awaitable[str]]
 WriteFn = Callable[[dict], Awaitable[dict]]
 
-#: S3c (RC3): the roster chunk size for the production genesis path. Splitting the 15-NPC sketch into
-#: smaller per-chunk completions (3×5) makes any ONE call far less likely to end finish_reason=length
-#: (each chunk is ~5× smaller than the whole skeleton), and a failing chunk is retried ALONE instead of
-#: re-grinding the whole cast. The per-chunk proposals are combined into ONE atomic write-back so the
-#: engine still validates the whole cast at once (its cross-cast name dedupe + tie sanity stay
-#: authoritative). ``seed_cast_genesis`` defaults to NO chunking (one whole-cast call) so direct-call
-#: unit tests stay byte-identical; the live ``_run_genesis_once`` opts in.
+#: PER-NPC generation (owner directive 2026-07-20): genesis authors ONE houseguest per LLM call — this
+#: maximizes per-NPC independence (killing the batch self-harmonization that made every houseguest read
+#: "reserved") AND eliminates cross-call name collisions at the source. To keep the casting wait no worse
+#: than the old 3-chunk path, the single-NPC calls run with BOUNDED CONCURRENCY: `GENESIS_CHUNK_SIZE` is
+#: now the number IN FLIGHT at once (a "wave"), so a 15-NPC cast runs in 3 waves ≈ the old 3 sequential
+#: chunk calls (and each call is far smaller, so per-call latency drops). Cross-cast coordination comes
+#: from the seeded per-slot pre-assignment (`assign_genesis_slots`) + the used-names ledger threaded
+#: forward between waves + the engine's authoritative cross-cast dedupe backstop. ``seed_cast_genesis``
+#: defaults to NO concurrency (one whole-cast call) so direct-call unit tests stay byte-identical; the
+#: live ``_run_genesis_once`` opts in.
 GENESIS_CHUNK_SIZE = 5
 
 
 async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, valid_ids: set,
-                                   feedback: Optional[str], chunk_size: int) -> dict:
-    """S3c: gather a whole-cast proposal by sketching the roster in CHUNKS (default 5 NPCs each), then
-    COMBINE the per-chunk proposals into one ``{npcs, ties}`` for a single atomic write-back. Each chunk
-    is proposed with ONLY its own ids valid (so a chunk can't hallucinate a sibling slot), a FAILED chunk
-    is retried ONCE alone (strict-JSON), and names are de-duped across chunks (a colliding name field is
-    dropped so the engine floors that slot — its authoritative dedupe still runs). A chunk that fails both
-    tries is skipped (the engine floors its slots). Ties are combined, kept sparse (≤ budget), and no NPC
-    is allowed into two ties. Returns the combined proposal, or ``{}`` when EVERY chunk failed."""
-    ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
-    chunks = [roster[i:i + chunk_size] for i in range(0, len(roster), chunk_size)] if roster else []
+                                   feedback: Optional[str], chunk_size: int,
+                                   directives: Optional[dict] = None) -> dict:
+    """Gather a whole-cast proposal by authoring ONE houseguest per LLM call, run in WAVES of
+    ``chunk_size`` concurrent calls (bounded concurrency), then COMBINE into one ``{npcs, ties}`` for a
+    single atomic write-back. Each call is proposed with ONLY its own id valid (it can't hallucinate a
+    sibling), a FAILED call is retried ONCE alone (strict-JSON), and names are de-duped across calls (a
+    colliding name field is dropped so the engine floors that slot). The used-names ledger is frozen per
+    wave and threaded FORWARD into the next wave so later houseguests avoid earlier names. A call that
+    fails both tries is skipped (the engine floors its slot); a PARTIAL cast still commits. Ties are not
+    authored per-NPC (a single-id call can't form a valid pair) — the engine's seeded floor tie graph
+    stands. Returns the combined proposal, or ``{}`` when EVERY call failed."""
+    concurrency = chunk_size if (isinstance(chunk_size, int) and chunk_size > 0) else 5
+    entries = [n for n in (roster or []) if isinstance(n, dict) and n.get("id")]
+    ids = [str(n.get("id")) for n in entries]
     combined_npcs: list = []
     combined_ties: list = []
     used_given: set = set()
     used_surname: set = set()
     used_full: set = set()
+    used_display: list = []  # F3: the running name ledger, threaded forward between waves
     tied: set = set()
     any_ok = False
-    for ci, chunk in enumerate(chunks):
-        chunk_ids = {str(n.get("id")) for n in chunk if isinstance(n, dict) and n.get("id")}
-        if not chunk_ids:
-            continue
-        messages = build_genesis_messages(chunk, brief, feedback)
+
+    async def _author_one(entry: dict, ledger_snapshot: list) -> Optional[dict]:
+        """Author ONE houseguest (its own single-id call), retried alone once on a miss. Best-effort."""
+        one_ids = {str(entry.get("id"))}
+        messages = build_genesis_messages([entry], brief, feedback, directives, ledger_snapshot)
         try:
             text = await llm_fn(messages)
         except Exception as e:
-            logger.warning(f"[cast-genesis] chunk {ci} llm failed: {e}")
+            logger.warning(f"[cast-genesis] npc {entry.get('id')} llm failed: {e}")
             text = ""
-        prop = parse_genesis_proposal(text or "", chunk_ids)
+        prop = parse_genesis_proposal(text or "", one_ids)
         if not prop:
-            # Retry ONLY this failed chunk once (strict-JSON) — never re-grind the whole cast.
-            try:
+            try:  # retry ONLY this houseguest once (strict-JSON) — never re-grind the cast
                 text = await llm_fn(messages + [{"role": "user", "content": _STRICT_RETRY}])
             except Exception as e:
-                logger.warning(f"[cast-genesis] chunk {ci} strict retry failed: {e}")
+                logger.warning(f"[cast-genesis] npc {entry.get('id')} strict retry failed: {e}")
                 text = ""
-            prop = parse_genesis_proposal(text or "", chunk_ids)
-        if not prop:
-            logger.info(f"[cast-genesis] chunk {ci} produced nothing usable — the engine floors its slots")
-            continue
-        any_ok = True
-        for npc in prop.get("npcs") or []:
-            name = npc.get("name")
-            if isinstance(name, str) and name.strip():
-                toks = name.strip().lower().split()
-                given = toks[0] if toks else ""
-                surname = toks[-1] if toks else ""
-                full = name.strip().lower()
-                if full in used_full or (given and given in used_given) or (surname and surname in used_surname):
-                    npc.pop("name", None)  # cross-chunk collision — drop the name; the engine floors it
-                else:
-                    used_full.add(full)
-                    if given:
-                        used_given.add(given)
-                    if surname:
-                        used_surname.add(surname)
-            combined_npcs.append(npc)
-        for tie in prop.get("ties") or []:
-            if len(combined_ties) >= GENESIS_TIE_BUDGET:
-                break
-            a = tie.get("a")
-            b = tie.get("b")
-            if not a or not b or a == b or a in tied or b in tied:
-                continue  # no NPC in two ties (sparse-by-design)
-            combined_ties.append(tie)
-            tied.add(a)
-            tied.add(b)
+            prop = parse_genesis_proposal(text or "", one_ids)
+        return prop or None
+
+    waves = [entries[i:i + concurrency] for i in range(0, len(entries), concurrency)] if entries else []
+    for wave in waves:
+        # The ledger is FROZEN for the whole wave (concurrent calls can't see each other's names); the
+        # seeded pre-assignment + the engine dedupe backstop cover any within-wave collision.
+        ledger_snapshot = list(used_display)
+        results = await asyncio.gather(*[_author_one(e, ledger_snapshot) for e in wave])
+        for prop in results:
+            if not prop:
+                continue
+            any_ok = True
+            for npc in prop.get("npcs") or []:
+                name = npc.get("name")
+                if isinstance(name, str) and name.strip():
+                    toks = name.strip().lower().split()
+                    given = toks[0] if toks else ""
+                    surname = toks[-1] if toks else ""
+                    full = name.strip().lower()
+                    if full in used_full or (given and given in used_given) or (surname and surname in used_surname):
+                        npc.pop("name", None)  # collision — drop the name; the engine floors it
+                    else:
+                        used_full.add(full)
+                        used_display.append(name.strip())  # feed forward to the next wave (F3 ledger)
+                        if given:
+                            used_given.add(given)
+                        if surname:
+                            used_surname.add(surname)
+                combined_npcs.append(npc)
+            for tie in prop.get("ties") or []:
+                if len(combined_ties) >= GENESIS_TIE_BUDGET:
+                    break
+                a = tie.get("a")
+                b = tie.get("b")
+                if not a or not b or a == b or a in tied or b in tied:
+                    continue  # no NPC in two ties (sparse-by-design)
+                combined_ties.append(tie)
+                tied.add(a)
+                tied.add(b)
     if not any_ok or not combined_npcs:
         return {}
     out: dict = {"npcs": combined_npcs}
     if combined_ties:
         out["ties"] = combined_ties[:GENESIS_TIE_BUDGET]
-    logger.info(f"[cast-genesis] chunked gather combined {len(combined_npcs)} of {len(ids)} "
-                f"houseguest proposal(s) across {len(chunks)} chunk(s)")
+    logger.info(f"[cast-genesis] per-NPC gather combined {len(combined_npcs)} of {len(ids)} "
+                f"houseguest proposal(s) across {len(waves)} wave(s) of ≤{concurrency}")
     return out
 
 
@@ -623,10 +1004,10 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
     Best-effort + fail-soft: any failure leaves the engine's deterministic FLOOR cast in place
     (byte-neutral). Returns ``{committed, accepted, varianceOk, rerolls, reason?}`` — Vault-free counts.
 
-    ``chunk_size`` (S3c/RC3): when set (e.g. 5), the sketch is gathered in CHUNKS — smaller completions
-    that rarely truncate, with a failed chunk retried alone — then combined into ONE atomic write-back.
-    ``None`` (the default) keeps the single whole-cast call (byte-identical to before; the live path opts
-    into chunking, direct-call unit tests do not).
+    ``chunk_size`` (per-NPC concurrency): when set (e.g. 5), the sketch is authored ONE houseguest per
+    call, run in bounded-concurrency WAVES of ``chunk_size`` — maximal per-NPC independence, a failed call
+    retried alone — then combined into ONE atomic write-back. ``None`` (the default) keeps the single
+    whole-cast call (byte-identical to before; the live path opts into per-NPC, direct-call unit tests do not).
 
     PLAYER-BLIND: the roster is the warmed FLOOR cast's Vault-free cards; only the IDS are used to bind
     proposals — no player field is threaded in, and the model never sees the floor identities."""
@@ -634,18 +1015,24 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
     if not valid_ids:
         return {"committed": 0, "accepted": False, "varianceOk": True, "rerolls": 0, "reason": "empty-roster"}
     brief = generate_season_brief(seed)
+    # The seeded per-slot casting cards (pronouns / archetype 1–3× / accented 20–30% / delivery axes) —
+    # the cross-cast constraints computed up front and injected per slot (each per-NPC call sees only its own).
+    roster_ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
+    slot_list = assign_genesis_slots(seed, len(roster_ids))
+    directives = {hid: slot_list[i] for i, hid in enumerate(roster_ids)} if slot_list else None
     feedback: Optional[str] = None
     best = {"committed": 0, "accepted": False, "varianceOk": True, "rerolls": 0, "reason": "no-usable-proposal"}
     _chunked = isinstance(chunk_size, int) and 0 < chunk_size < len(valid_ids)
     for attempt in range(1 + GENESIS_MAX_REROLLS):
         if _chunked:
-            proposal = await _gather_chunked_proposal(roster, brief, llm_fn, valid_ids, feedback, chunk_size)
+            proposal = await _gather_chunked_proposal(roster, brief, llm_fn, valid_ids, feedback, chunk_size,
+                                                      directives)
             if not proposal:
                 logger.debug("[cast-genesis] every chunk failed — keeping the deterministic floor")
                 best["reason"] = "no-usable-proposal"
                 break
         else:
-            messages = build_genesis_messages(roster, brief, feedback)
+            messages = build_genesis_messages(roster, brief, feedback, directives)
             try:
                 text = await llm_fn(messages)
             except Exception as e:  # the model can fail — carry on, the floor stands
@@ -884,9 +1271,10 @@ async def _run_genesis_once(roster: list, seed: int, owner: Optional[str], *,
     async def _write(proposal: dict) -> dict:
         return await orwell_engine.record_cast_genesis(proposal, user=owner)
 
-    # S3c: the LIVE path chunks the roster (3×5) — smaller completions rarely truncate, and a failed
-    # chunk is retried alone instead of re-grinding the whole cast (RC3). The combined proposal is still
-    # written back in one atomic call (the engine's cross-cast dedupe + variance floor stay authoritative).
+    # The LIVE path authors ONE houseguest per call in bounded-concurrency waves (GENESIS_CHUNK_SIZE in
+    # flight) — maximizing per-NPC independence + killing cross-call name collisions; a failed call is
+    # retried alone. The combined proposal is still written back in one atomic call (the engine's
+    # cross-cast dedupe + variance floor stay authoritative).
     result = await seed_cast_genesis(roster, seed, llm_fn, write or _write, chunk_size=GENESIS_CHUNK_SIZE)
     # STRICT: a run that committed NOTHING (all already logged inside seed_cast_genesis) is ledgered
     # loudly + latches the pre-finalize gate. Soft: byte-identical legacy silent floor.

@@ -62,19 +62,17 @@ def _valid_proposal_json() -> str:
 def test_season_brief_matches_the_engine_byte_for_byte():
     # Reference values captured from src/engine/castGenesis.generateSeasonBrief (NODE_OPTIONS=--import tsx).
     # Same seed ⇒ same brief, so the FE steers with the SAME brief the engine records as the artifact.
+    # (The old house-wide `ensembleVibe` was removed — the ensemble mood now rides per-slot as an accent,
+    # see assign_genesis_slots; the demographic + regional pools were widened, re-pinning these values.)
     ref = {
-        108108: {"demographicSkew": "a wide age range, early-twenties up through the fifties",
-                 "regionalFlavor": "a Pacific-Northwest-leaning cast",
-                 "ensembleVibe": "a status-hungry room full of people used to being the main character"},
-        0: {"demographicSkew": "skew older — a cast of established adults with real lives on pause",
-            "regionalFlavor": "a Southern-heavy house",
-            "ensembleVibe": "a loud, clash-forward ensemble that never lets a fight rest"},
-        5: {"demographicSkew": "a mostly-thirties professional class at a crossroads",
-            "regionalFlavor": "a Midwest-heartland core",
-            "ensembleVibe": "a chaotic, unpredictable mix where nothing holds"},
-        2147483647: {"demographicSkew": "a wide age range, early-twenties up through the fifties",
-                     "regionalFlavor": "a heavy Gulf-coast contingent",
-                     "ensembleVibe": "a house built for slow-burn grudges"},
+        108108: {"demographicSkew": "a youth-forward house with a couple of seasoned outliers",
+                 "regionalFlavor": "a Midwest-heartland core"},
+        0: {"demographicSkew": "a mostly-thirties professional class at a crossroads",
+            "regionalFlavor": "a Deep-South and Appalachian core"},
+        5: {"demographicSkew": "a house anchored by forty- and fifty-somethings with real careers",
+            "regionalFlavor": "a mix of small-town roots and big-city transplants"},
+        2147483647: {"demographicSkew": "a college-age-to-late-twenties house, few over thirty",
+                     "regionalFlavor": "a Pacific-Northwest-leaning cast"},
     }
     for seed, want in ref.items():
         assert G.generate_season_brief(seed) == want, seed
@@ -85,6 +83,61 @@ def test_season_brief_is_deterministic_and_seed_dependent():
     # Different seeds steer different directions (the finite space can collide, but not everywhere).
     briefs = {tuple(sorted(G.generate_season_brief(s).items())) for s in range(0, 40)}
     assert len(briefs) > 10, "the brief should vary meaningfully across seeds"
+
+
+def test_per_slot_directives_match_the_engine_byte_for_byte():
+    # Reference captured from src/engine/castGenesis.assignGenesisSlots(108108, 15) (NODE_OPTIONS=--import tsx).
+    # The seeded CROSS-CAST constraints (casting-role quota / age curve / accented 20-30% / delivery axes /
+    # amplified-loud contingent) are dealt up front and injected per NPC; the FE must mirror the engine
+    # byte-for-byte.
+    slots = G.assign_genesis_slots(108108, 15)
+    assert slots[0] == {
+        "role": "floater", "roleNote": "drifts to whoever holds power, never a target, never a leader",
+        "archetype": "floater", "physical": False, "ageLo": 21, "ageHi": 26,
+        "accent": "a hopeless romantic wired for a showmance", "amplified": True,
+        "energy": "high-energy and bouncy", "register": "polished and articulate",
+        "expressiveness": "loud and impossible to ignore",
+        "emotionalRegister": "hot-reactive — quick to laugh, cry, or blow up",
+        "selfAwareness": "insecure, quietly underrates themselves",
+        "socialGravity": "a natural center of attention"}
+    assert slots[4] == {
+        "role": "flirt", "roleNote": "charming and touchy, plays the social-romantic angle",
+        "archetype": "flirt", "physical": False, "ageLo": 27, "ageHi": 33,
+        "accent": "a stoic lone-wolf who keeps their cards close and their distance closer",
+        "amplified": False, "energy": "steady and even-keeled", "register": "clipped and economical",
+        "expressiveness": "reserved and hard to read", "emotionalRegister": "cold and hard to rattle",
+        "selfAwareness": "insecure, quietly underrates themselves",
+        "socialGravity": "a magnetic main-character who fills the room"}
+    assert G.assign_genesis_slots(7, 15) == G.assign_genesis_slots(7, 15)  # deterministic
+
+
+def test_casting_plan_respects_quota_and_extremes():
+    from collections import Counter
+    _CEREBRAL = {"mastermind", "analyst", "superfan gamebot"}
+    for seed in (108108, 0, 5, 7, 42, 999, 2147483647):
+        slots = G.assign_genesis_slots(seed, 15)
+        roles = Counter(s["role"] for s in slots)
+        # cap ANY casting role at 2 across the cast (owner quota)
+        assert all(v <= G.GENESIS_ROLE_MAX_PER_CAST for v in roles.values()), (seed, dict(roles))
+        # combined cerebral (mastermind + analyst + superfan) capped at ~3
+        assert sum(v for r, v in roles.items() if r in _CEREBRAL) <= G.GENESIS_CEREBRAL_MAX_PER_CAST, seed
+        # 3-4 genuine physical comp threats exist (not a desk-job-only cast)
+        assert 3 <= sum(1 for s in slots if s["physical"]) <= 4, seed
+        # the ensemble accent is a seeded 20-30% minority
+        assert 0.20 * 15 - 0.5 <= sum(1 for s in slots if s["accent"]) <= 0.30 * 15 + 0.5, seed
+        # a loud/reactive/main-character contingent is GUARANTEED (>=4 amplified big personalities)
+        assert sum(1 for s in slots if s["amplified"]) >= G.GENESIS_AMPLIFIED_MIN, seed
+        louds = sum(1 for s in slots
+                    if any(w in s["expressiveness"] for w in ("loud", "unfiltered", "over-sharing"))
+                    or "main-character" in s["socialGravity"])
+        assert louds >= 4, (seed, louds, "the cast must not be uniformly reserved")
+
+
+def test_age_curve_fills_the_middle():
+    # the seeded age curve targets a believable real-world spread and explicitly fills the 27-45 zone.
+    slots = G.assign_genesis_slots(108108, 15)
+    mids = sum(1 for s in slots if 27 <= s["ageLo"] <= 45 or 27 <= s["ageHi"] <= 45)
+    assert mids >= 6, mids  # the un-tuned cast left this empty; the curve fills it
 
 
 # ── the producer prompt (player-BLIND, producer-framed) ─────────────────────────────────────────────────
@@ -99,16 +152,38 @@ def test_prompt_is_producer_framed_banded_and_player_blind():
     assert "physical" in system and "mental" in system and "social" in system
     for kind in ("secret-motive", "pre-game-tie", "divergent-persona"):
         assert kind in system, kind
-    # the legacy-Bible deny-list names are called out.
+    # the legacy-Bible deny-list names are called out; the pronoun-consistency wording is present.
     assert "ryne" in system and "marcus" in system and "felix" in system
+    assert "chosen pronouns" in system
+    # the softened name policy: no whole-cast redraw threat, no centripetal anchoring language.
+    assert "unremarkable" not in system
+    assert "redrawn" not in system and "re-rolled" not in system
+    assert "contemporary american" not in system  # dropped "prefer common CONTEMPORARY American"
     user = msgs[1]["content"]
     # the brief steers the sketch; the roster ids bind the proposals.
-    assert brief["ensembleVibe"] in user
+    assert brief["demographicSkew"] in user and brief["regionalFlavor"] in user
     assert "npc:1" in user and "npc:15" in user
     # PLAYER-BLIND: no player identity anywhere (the whole cast is designed as if the player doesn't exist).
     whole = (msgs[0]["content"] + user).lower()
     for leak in ("the player", "player's name", "casting answer", "player profile"):
         assert leak not in whole, leak
+
+
+def test_prompt_injects_per_slot_casting_cards_and_used_names_ledger():
+    brief = G.generate_season_brief(108108)
+    slots = G.assign_genesis_slots(108108, len(_ROSTER))
+    directives = {n["id"]: slots[i] for i, n in enumerate(_ROSTER)}
+    msgs = G.build_genesis_messages(_ROSTER, brief, None, directives, ["Dana Whitfield"])
+    user = msgs[1]["content"]
+    # the seeded casting card is injected per slot (role + archetype tag + axes present, no pronoun token).
+    assert "CASTING CARDS" in user
+    assert "cast as:" in user and "archetype tag:" in user and "energy:" in user and "social-gravity:" in user
+    assert "pronouns:" not in user  # gender is NOT seeded — the model chooses it (course-correction)
+    # F3: the cross-chunk used-names ledger is injected so later chunks avoid collisions.
+    assert "Dana Whitfield" in user and "ALREADY taken" in user
+    # back-compatible: omitting directives/used_names ⇒ no card / no ledger.
+    plain = G.build_genesis_messages(_ROSTER, brief)[1]["content"]
+    assert "CASTING CARDS" not in plain and "ALREADY taken" not in plain
 
 
 def test_reroll_prompt_echoes_the_violations():
@@ -349,9 +424,9 @@ def test_run_genesis_is_idempotent_per_seed(monkeypatch):
         return {"accepted": True, "committed": len(proposal["npcs"]), "violations": [], "varianceOk": True}
 
     monkeypatch.setattr(G, "_resolve_llm_fn", _model)
-    # S3c: the LIVE path chunks the 15-NPC roster into ceil(15/GENESIS_CHUNK_SIZE) per-chunk sketch
-    # calls, so one committed run makes that many llm calls (not one whole-cast call).
-    per_run = -(-15 // G.GENESIS_CHUNK_SIZE)  # ceil
+    # The LIVE path authors ONE houseguest per call (run in bounded-concurrency waves), so one committed
+    # run makes len(roster) llm calls (not one whole-cast call).
+    per_run = len(_ROSTER)
     r1 = _run(G.run_genesis(_ROSTER, 7, "u-idem", write=write))
     assert r1["accepted"] is True and r1["committed"] == 15
     assert G.genesis_committed("u-idem", 7) is True

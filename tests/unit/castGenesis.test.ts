@@ -5,8 +5,11 @@ import { ARCHETYPES } from "../../src/engine/characterFactory";
 import { GIVEN_NAMES } from "../../src/engine/data/givenNames";
 import {
   validateCastGenesis, clampStatsIntoBand, castVarianceOk, isPlausibleGenesisName,
-  hitsLegacyDenyList, generateSeasonBrief, LEGACY_BIBLE_NAMES,
+  hitsLegacyDenyList, generateSeasonBrief, assignGenesisSlots, LEGACY_BIBLE_NAMES,
 } from "../../src/engine/castGenesis";
+import {
+  GENESIS_ROLE_MAX_PER_CAST, GENESIS_CEREBRAL_MAX_PER_CAST, GENESIS_AMPLIFIED_MIN,
+} from "../../src/engine/genesisConstants";
 import type {
   CastGenesisProposal, GenesisContext, GenesisNpcContext, GenesisNpcProposal,
 } from "../../src/engine/castGenesis";
@@ -61,6 +64,38 @@ describe("0116 — the seeded season brief (§2 DECIDED #5)", () => {
   it("different seeds steer (usually) different briefs", () => {
     const briefs = new Set(Array.from({ length: 12 }, (_, i) => JSON.stringify(generateSeasonBrief(1000 + i))));
     expect(briefs.size).toBeGreaterThan(1); // finite space, but distinct seeds spread
+  });
+});
+
+describe("0116 — the seeded per-slot casting cards (assignGenesisSlots)", () => {
+  const CEREBRAL = new Set(["mastermind", "analyst", "superfan gamebot"]);
+  it("is deterministic + honors the casting quota, physical floor, accent minority, and loud contingent", () => {
+    for (const seed of [108108, 0, 5, 7, 42, 999, 2147483647]) {
+      const slots = assignGenesisSlots(seed, 15);
+      expect(assignGenesisSlots(seed, 15)).toEqual(slots); // deterministic
+      // cap ANY casting role at 2; combined cerebral capped at 3.
+      const roleCounts = new Map<string, number>();
+      for (const s of slots) roleCounts.set(s.role, (roleCounts.get(s.role) ?? 0) + 1);
+      for (const v of roleCounts.values()) expect(v).toBeLessThanOrEqual(GENESIS_ROLE_MAX_PER_CAST);
+      let cerebral = 0;
+      for (const [r, v] of roleCounts) if (CEREBRAL.has(r)) cerebral += v;
+      expect(cerebral).toBeLessThanOrEqual(GENESIS_CEREBRAL_MAX_PER_CAST);
+      // 3–4 genuine physical comp threats.
+      const physical = slots.filter((s) => s.physical).length;
+      expect(physical).toBeGreaterThanOrEqual(3);
+      expect(physical).toBeLessThanOrEqual(4);
+      // the accent is a seeded 20–30% minority.
+      const accented = slots.filter((s) => s.accent !== null).length;
+      expect(accented).toBeGreaterThanOrEqual(Math.round(0.2 * 15) - 1);
+      expect(accented).toBeLessThanOrEqual(Math.round(0.3 * 15) + 1);
+      // a loud/reactive/main-character contingent is GUARANTEED (never a uniformly reserved cast).
+      expect(slots.filter((s) => s.amplified).length).toBeGreaterThanOrEqual(GENESIS_AMPLIFIED_MIN);
+      const louds = slots.filter((s) =>
+        /loud|unfiltered|over-sharing/.test(s.expressiveness) || /main-character/.test(s.socialGravity)).length;
+      expect(louds).toBeGreaterThanOrEqual(4);
+      // every archetype tag is a valid mechanical enum member (the role→archetype map stays in the 12).
+      for (const s of slots) expect(ARCHETYPES.some((a) => a.archetype === s.archetype)).toBe(true);
+    }
   });
 });
 
