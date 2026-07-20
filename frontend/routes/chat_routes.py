@@ -115,6 +115,60 @@ def _sse_error_response(message: str, status: int = 400) -> StreamingResponse:
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
+def _build_lead_user_event(sess, message, client_msg_id) -> Optional[str]:
+    """F1 (concurrent-session consistency — the causal-inversion fix): build the SSE event that SEEDS
+    the detached run buffer with the prompting USER turn as its FIRST event, so replay-then-tail
+    delivers cause-before-effect to every observer/mirror window.
+
+    The live channel (`agent_runs` run buffer, fanned over the WS `chat` channel and SSE resume)
+    carries ONLY the assistant reply; the user turn is not broadcast on it. So a peer window's only
+    live signal (`run-started` → resume) mounts the reply holder before the user bubble exists — the
+    reply can render before its cause. Leading the buffer with the persisted user message fixes the
+    ordering atomically for BOTH transports (the WS ``_sse_to_payload`` turns this into the same
+    ``event.d`` body the SSE reader parses).
+
+    Vault-free by construction — the payload is the player's OWN words plus the authoritative
+    ``{id, seq}`` and the round-tripped optimistic ``clientMsgId`` (so the settle reconcile adopts the
+    live bubble with zero churn, never a duplicate). Reads the just-persisted user row off
+    ``sess.history`` (``_persist_message`` stamps ``metadata['_db_id']`` / ``['_seq']`` synchronously).
+    Returns ``None`` (⇒ no seed, byte-identical prior behavior) if the user row can't be located."""
+    try:
+        text = message if isinstance(message, str) else ""
+        db_id = None
+        seq = None
+        cid = client_msg_id
+        found = False
+        for _m in reversed(getattr(sess, "history", []) or []):
+            if getattr(_m, "role", None) != "user":
+                continue
+            _md = getattr(_m, "metadata", None) or {}
+            db_id = _md.get("_db_id")
+            seq = _md.get("_seq")
+            cid = _md.get("client_msg_id") or client_msg_id
+            # Prefer the persisted user text if the raw `message` is empty (e.g. attachment-only sends),
+            # but only when it is a plain string (multimodal content is a list — leave the bubble to the
+            # settle reconcile, which renders the full row).
+            if not text and isinstance(getattr(_m, "content", None), str):
+                text = _m.content
+            found = True
+            break
+        # No identifiable persisted user row ⇒ seed NOTHING (an event with no db id / clientMsgId is an
+        # unadoptable orphan the settle reconcile would have to rebuild away). None ⇒ prior behavior.
+        if not found or (db_id is None and not cid):
+            return None
+        payload = {
+            "type": "user_message",
+            "id": db_id,
+            "seq": seq,
+            "content": text,
+            "clientMsgId": cid,
+            "role": "user",
+        }
+        return f"data: {json.dumps(payload)}\n\n"
+    except Exception:
+        return None
+
+
 def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
     """Clear a session model if its endpoint was deleted from ModelEndpoint.
 
@@ -2053,7 +2107,14 @@ def setup_chat_routes(
         # (one reasoning chain at a time, the live turn is never stomped) and each turn fans out to
         # every window. Plain chats keep cancel-on-double-send. `ctx.framed` covers in-character,
         # casting, and feeds-down turns.
-        agent_runs.start(run_key, _safe_stream(), queue=_framed)
+        # F1 (concurrent-session consistency): for a FRAMED turn (the only turns with observer/mirror
+        # windows — a plain chat has no peer), lead the run buffer with the persisted USER message so
+        # replay-then-tail delivers cause BEFORE effect to every subscriber (WS + SSE). The sender
+        # receives this event too and adopts its own optimistic bubble by clientMsgId (never a
+        # duplicate); a peer renders the user bubble ahead of the reply. Vault-free (the player's own
+        # words); None ⇒ byte-identical prior behavior.
+        _lead_event = _build_lead_user_event(sess, message, client_msg_id) if _framed else None
+        agent_runs.start(run_key, _safe_stream(), queue=_framed, lead_event=_lead_event)
         # Tell every other device viewing the canonical session that a new run started, so they
         # reconcile (load the new user message + attach to the live reply). Keyed on run_key so an
         # idle peer on the canonical game chat is invited to attach to THIS shared run.

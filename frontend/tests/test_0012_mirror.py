@@ -98,7 +98,9 @@ def test_framed_run_keyed_on_canonical_session():
     assert '_framed = bool(getattr(ctx, "framed", False))' in src
     assert 'run_key = (getattr(ctx, "canonical_session", None) or session) if _framed else session' in src
     # all three fan-out keys use run_key (the start, the run-started invitation, the subscribe).
-    assert "agent_runs.start(run_key, _safe_stream(), queue=_framed)" in src
+    # F1: the start also seeds the run buffer's leading user-message event (`lead_event`) so an
+    # observer renders cause before effect — still keyed on run_key + queue=_framed.
+    assert "agent_runs.start(run_key, _safe_stream(), queue=_framed, lead_event=_lead_event)" in src
     assert 'session_events.publish(run_key, "run-started")' in src
     assert "agent_runs.subscribe(run_key)" in src
 

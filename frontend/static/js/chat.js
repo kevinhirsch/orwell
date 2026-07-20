@@ -2742,6 +2742,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   continue;
                 }
 
+              } else if (json.type === 'user_message') {
+                // F1 (concurrent-session consistency): the run buffer now leads with the persisted
+                // USER turn so OBSERVER windows render cause before effect. The SENDER already painted
+                // its optimistic user bubble — renderObserverUserMessage dedups by clientMsgId and only
+                // STAMPS the authoritative {id, seq} onto that existing bubble (never a second bubble),
+                // so the settle reconcile adopts it with zero churn. Background stream ⇒ skip (no DOM).
+                if (_isBg) continue;
+                try { renderObserverUserMessage(json, { beforeEl: currentHolder || holder }); } catch (_) {}
+
               } else if (json.type === 'message_saved') {
                 // Wire the persisted DB id onto the just-streamed bubble so it
                 // can be edited/deleted immediately, without reloading the chat.
@@ -4192,12 +4201,26 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
               try { if (holder && holder.parentNode) holder.remove(); } catch (_) {}
             }
           }
+          // F3 (concurrent-session consistency): drop-recovery must key on the ABSENCE of a
+          // COMPLETION event, not on a channel close. A transport close AFTER the turn is
+          // server-confirmed complete — a `[DONE]` sentinel (`_streamSawDone`), a persisted
+          // `message_saved` (`_sawMessageSaved`), or a DB id already stamped on the holder (also
+          // the ADR-0008 `message-added` completion broadcast the observer adopts) — is NOT an
+          // incomplete turn. The reply is already produced and PERSISTED, so a persisted assistant
+          // message is treated as AUTHORITATIVE completion. Recovering it re-narrates finished
+          // content: a duplicate reply + a player-visible "stream dropped …" machinery leak (the
+          // confirmed live-bundle symptom: `finishReason:stop`, `ok:true`, full text, yet recovery
+          // fired). Skip BOTH recovery and the generic error surface so the settled live content
+          // stands and the finally's reconcile adopts it. (This is the reader's own "Stream closed
+          // before completion" throw when `message_saved` arrived without a trailing `[DONE]`.)
+          const _serverConfirmedDone = _streamSawDone || _sawMessageSaved ||
+            !!(holder && holder.dataset && holder.dataset.dbId);
           // Stream died unexpectedly — the "silently died" case. Re-engage the
           // model immediately (no wait) with a completion handshake, up to the
           // cap. Only auto-recover from connection-class failures; deterministic
           // errors (unsupported tools, 4xx/5xx, parse failures) surface right away
           // instead of burning the nudge budget on a guaranteed-to-fail retry.
-          if (!_requeuedOffline &&
+          if (!_requeuedOffline && !_serverConfirmedDone &&
               !(_isRecoverableStreamErr(err) && _tryAutoRecover(holder, accumulated, streamSessionId))) {
             const errorHolder = document.querySelector('.msg-ai:last-of-type .body');
             if (errorHolder) {
@@ -4731,6 +4754,57 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   }
 
   /**
+   * F1 (concurrent-session consistency — the causal-inversion fix): render the prompting USER bubble
+   * from the run buffer's LEADING `user_message` event, so an observer/mirror window shows the cause
+   * (the player's message) BEFORE the effect (the reply). The live channel carries only the assistant
+   * deltas; without this the reply could paint before its user turn.
+   *
+   * ONE dedup key per role (F2): the user message keys on `clientMsgId` (with the db id as a backstop).
+   * If a bubble with that key already exists — the SENDER's own optimistic bubble, or a bubble a prior
+   * reconcile already rendered — we do NOT create a second one; we only stamp the authoritative
+   * {id, seq, clientMsgId} so the settle reconcile (softReloadHistory) adopts it with ZERO churn. A
+   * peer window with no such bubble renders it, inserted BEFORE the reply holder (`beforeEl`) so cause
+   * precedes effect; with no holder yet it lands in seq order. Skippable production-cue / continuation
+   * prompts are filtered exactly as softReloadHistory does, so the live view never flashes a cue bubble
+   * the reconcile would then remove. Returns the element (new or existing), or null when nothing renders.
+   */
+  export function renderObserverUserMessage(ev, opts) {
+    opts = opts || {};
+    const box = document.getElementById('chat-history');
+    if (!box || !ev) return null;
+    const cid = ev.clientMsgId || (ev.metadata && ev.metadata.client_msg_id) || null;
+    const dbId = (ev.id != null && ev.id !== '') ? String(ev.id) : null;
+    const _attr = (v) => String(v).replace(/["\\]/g, '\\$&');
+    // Dedup by role key — clientMsgId first (the user's stable optimistic id), db id as backstop.
+    let existing = null;
+    if (cid) existing = box.querySelector('.msg[data-client-msg-id="' + _attr(cid) + '"]');
+    if (!existing && dbId) existing = box.querySelector('.msg[data-db-id="' + _attr(dbId) + '"]');
+    if (existing) {
+      // Adopt the authoritative {id, seq} onto the bubble that already exists (the sender's optimistic
+      // send, or a peer's earlier reconcile) so it is never re-rendered and the settle adopt is a no-op.
+      if (dbId) existing.dataset.dbId = dbId;
+      if (ev.seq != null) existing.dataset.seq = String(ev.seq);
+      if (cid) existing.dataset.clientMsgId = cid;
+      return existing;
+    }
+    const content = typeof ev.content === 'string' ? ev.content : '';
+    // Same filter softReloadHistory applies — hidden production cues / interrupt prompts never show.
+    if (_isSkippableUserPrompt(content)) return null;
+    const meta = { _db_id: dbId, _seq: ev.seq, client_msg_id: cid };
+    const elx = chatRenderer.addMessage('user', markdownModule.renderContent(content), null, meta);
+    if (!elx) return null;
+    // addMessage appends to the bottom; move the bubble AHEAD of the reply holder so the observer
+    // renders cause-before-effect. With no holder pinned yet, place it in authoritative seq order.
+    if (opts.beforeEl && opts.beforeEl.parentNode === box && opts.beforeEl !== elx) {
+      box.insertBefore(elx, opts.beforeEl);
+    } else {
+      _insertBySeq(box, elx);
+    }
+    try { uiModule.scrollHistory(); } catch (_) {}
+    return elx;
+  }
+
+  /**
    * Live-resume a chat run still streaming detached on the server (#2539).
    *
    * On session re-entry, GET /api/chat/resume/{id} replays the run's buffer then
@@ -4882,6 +4956,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           }
           let json;
           try { json = JSON.parse(payload); } catch (_) { continue; }
+          if (json.type === 'user_message') {
+            // F1: the run buffer leads with the prompting user turn — render the OBSERVER's user
+            // bubble BEFORE this reply holder so cause precedes effect. Idempotent + dedup-by-key
+            // (clientMsgId / db id), so a reconcile that already rendered it is a no-op.
+            try { renderObserverUserMessage(json, { beforeEl: holder }); } catch (_) {}
+            continue;
+          }
           if (json.delta) {
             // Route reasoning (thinking:true) to its own buffer so it lands in the collapsed
             // accordion, exactly like the primary stream path — never raw into the bubble.
@@ -5683,6 +5764,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
         return sp;
       } catch (_) { return null; }
     },
+    // F1: the observer's user-bubble renderer (cause-before-effect on the WS `chat` leg). Same
+    // dedup-by-clientMsgId + skip-cue contract the SSE resume path uses.
+    renderUserMessage: renderObserverUserMessage,
   });
   // #1414 (R3 PR5): inject the three chat.js-internal deps the message-actions cluster
   // (chatMessageActions.js) needs — handleChatSubmit (the headless send + stream loop, which STAYS
@@ -5720,6 +5804,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     detachCurrentStream,
     checkBackgroundStream,
     resumeStream,
+    // F1 (concurrent-session consistency): the observer's leading-user-message renderer — exposed for
+    // the two-window ordering browser gate (cause-before-effect) and the WS-splice injection.
+    renderObserverUserMessage,
     hideWelcomeScreen: chatRenderer.hideWelcomeScreen,
     showWelcomeScreen: chatRenderer.showWelcomeScreen,
     checkPendingResearch,
