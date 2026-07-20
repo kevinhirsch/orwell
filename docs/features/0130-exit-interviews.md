@@ -23,7 +23,7 @@
 evictee. But the evictee never gets to *speak*: the house talks to them, then they're gone. In the show, the
 evictee's exit is a **producer interview** — they watch their goodbye messages, react (vindicated, blindsided,
 bitter, gracious), and answer the producers' pointed questions about what just happened. 0130 adds that beat:
-after every eviction, the producers sit the evictee down. For an **NPC** it's narration grounded in their soul
+after every eviction, the producers sit the evictee down. For an **NPC** it's narration whose posture is grounded in the recorded manner of their eviction
 and how they went out; for the **player** it's an interactive moment — a real say at their lowest point. The
 exit interview is recorded and **resurfaces in the 0048 retrospective**, so a season closes with every
 houseguest's own account of their exit.
@@ -46,9 +46,10 @@ houseguest's own account of their exit.
 - **The producer interviews the evictee.** Using the existing diegetic producer/Diary-Room voice, the evictee
   is asked pointed, beat-grounded questions ("What happened? Who blindsided you? Any regrets?") and **shown
   their goodbye messages** (0047), reacting to them.
-- **NPC evictee → narration.** The evictee's answers are **grounded** in their soul + the recorded eviction
-  **manner** (bitter / blindsided / respected, 0037 §4.2) — a blindsided houseguest is stunned, a respected
-  one gracious. Engine-grounded, narrator-voiced (anti-sycophancy).
+- **NPC evictee → narration.** The evictee's **posture** (`npcExitStance`) is **derived from the recorded
+  eviction manner** (betrayed/disrespected ⇒ bitter, blindsided ⇒ defiant, respected ⇒ gracious, 0037 §4.2) —
+  a blindsided houseguest is stunned, a respected one gracious. Engine-grounded (the stance is a read of the
+  manner flags, no soul lookup); the narrator then voices it in the houseguest's own persona (anti-sycophancy).
 - **Player evictee → an interactive agency beat.** When the **player** is evicted, the exit interview is a
   real **pending decision** through the 0034 seam (mirroring the player's own goodbye-message authoring, 0047
   E34): the producer asks; the player answers in their own words / chosen tone; the engine never speaks for
@@ -67,8 +68,9 @@ retrospective mechanic itself (0048 — this adds content to it, doesn't rebuild
   `goodbye`: the goodbye messages are surfaced **to the evictee**, then the producer's questions. For an NPC,
   the beat resolves as narration; for the player, it **pauses** for the player's answer (a pending decision),
   then resolves — the same shape as the player's own goodbye message.
-- **Grounded, not invented (anti-sycophancy).** An NPC's exit-interview content is computed from their soul +
-  manner + what they legitimately know (0002) — a houseguest blindsided by an ally they trusted reacts to
+- **Grounded, not invented (anti-sycophancy).** An NPC's exit-interview **stance** is computed from the recorded
+  eviction **manner** flags (`npcExitStance`, no soul lookup); the narrator voices that stance in the houseguest's
+  persona, bounded to what they legitimately know (0002) — a houseguest blindsided by an ally they trusted reacts to
   *that*, read through their own belief. The narrator voices it; it is never sycophantic or free-authored.
 - **The player's mic.** The player's exit interview is theirs — tone and content their choice (validated
   through 0034). It has **no in-game pathway to any active houseguest** (the evictee is out; like the Diary

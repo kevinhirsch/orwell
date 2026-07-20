@@ -22,10 +22,12 @@ function resolve(s: GameSessionAdapter, p: NonNullable<AdvanceView["pending"]>):
   else if (p.kind === "veto-decision") submit({ kind: "veto-decision", use: false });
   else if (p.kind === "replacement") submit({ kind: "replacement", replacement: p.options[0]!.id });
   else if (p.kind === "comp-intent") submit({ kind: "comp-intent", intent: "compete" });
+  else if (p.kind === "comp-round") submit({ kind: "comp-round", intent: "compete" });
   else if (p.kind === "finale-statement") submit({ kind: "finale-statement", statement: "x" });
   else if (p.kind === "finale-answer") submit({ kind: "finale-answer", appeal: p.appeals![0]! });
   else if (p.kind === "juror-vote") submit({ kind: "juror-vote", vote: p.options[0]!.id });
-  else submit({ kind: p.kind, vote: p.options[0]!.id }); // exit-interview: options[0] = the first stance
+  else if (p.kind === "exit-interview") submit({ kind: "exit-interview", vote: p.stances![0]! });
+  else submit({ kind: p.kind, vote: p.options[0]!.id });
 }
 
 let userSeq = 0;
@@ -143,6 +145,8 @@ describe("0130 — Vault-safe + deterministic + calibration-neutral", () => {
     for (let i = 0; i < 8000; i++) {
       const v = s.advanceGame();
       if (v.eviction?.stage === "exit-interview") blobs.push(JSON.stringify(v.eviction));
+      // The producer narration rides the emitted beat's own content — canary it too (not just the view).
+      if (v.event && /exit-interview/.test(JSON.stringify(v.event))) blobs.push(JSON.stringify(v.event));
       if (v.pending) resolve(s, v.pending);
       if (v.finished) break;
     }
