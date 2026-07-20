@@ -1783,6 +1783,22 @@ _FORCED_ADVANCE_NUDGE = (
     "resolved, then voice ONLY what it returns — never a result you guessed. If a player decision is "
     "now pending, present its options and wait for their choice.")
 
+# F1 anti-stale RELEASE VALVE — the forced VOICE of the current moment (a re-prompt, NOT a forced
+# advance). When the belt has already held the advance at the cap AND the model IGNORED the queued
+# anti-stale reground (a second+ cap-hold), this drives the model to narrate WHERE THE ENGINE ACTUALLY
+# IS this turn, WITHOUT advancing further (the engine stays pinned at the cap — a forced advance here
+# would race further ahead, the exact thing the cap prevents). Closed-set (ADR 0005): it points the
+# model at the engine's live moment and forbids advancing/repeating; it authors no prose. On an
+# emitted-visible turn it is prefixed with `_CONTINUE_NEVER_REOPEN` like every other mid-turn re-prompt.
+_ANTI_STALE_FORCED_VOICE = (
+    "(Production note, not for the player.) The game has MOVED ON but your narration is stuck on an "
+    "EARLIER beat — you have re-narrated it repeatedly while the engine sits at a LATER moment, and a "
+    "correction was already given and ignored. Call gameStatus / getGameState NOW, read the CURRENT "
+    "moment, and voice THAT beat — where the game ACTUALLY is — in your next narration. Do NOT advance "
+    "the game (do NOT call advanceGame), do NOT repeat the premiere / introductions / the beat you were "
+    "stuck on, and never a result you guessed. Just bring the player to the present moment the engine "
+    "reports.")
+
 # 0079/0080 ACTIVE OVERSEER — the CONTINUE-NEVER-REOPEN contract (the "stuttering narrator" fix,
 # 2026-07-16). The active overseer's re-prompting levers (nudge / force-advance / reinject-delta) can
 # fire AFTER a scene has ALREADY streamed to the player this turn — e.g. a desync/stale-409 gets
@@ -4619,6 +4635,15 @@ _SILENT_FORCE_ADVANCE_STREAK: Dict[str, int] = {}
 # racing the engine further ahead of the chat. Small by design — the engine is never more than this
 # many beats ahead of narration before the decoupling is surfaced.
 _SILENT_FORCE_ADVANCE_CAP = 2
+# F1 release valve: how many times the cap has HELD for this key without narration catching up. The
+# cap alone would leave a *held freeze* — on an emitted-visible turn the stall block breaks at the cap
+# and never reaches the L39b/text escalation below, so a model that keeps re-narrating the stale beat
+# hits the cap → break every turn, pinned but never released. The first hold gives the queued anti-stale
+# reground one turn to work; a SECOND+ hold (the model ignored the reground) ESCALATES to an IN-TURN
+# forced VOICE of the current moment (a re-prompt, NOT a further advance — the engine stays pinned at the
+# cap). Cleared on the same signals as the streak (a genuine model advance, or a peer advance). Keyed via
+# `_belt_key`.
+_ANTI_STALE_CAP_HOLDS: Dict[str, int] = {}
 
 
 # ── Post-season re-approach (feature 0057, chunk 4) ───────────────────────────────────
@@ -6786,6 +6811,7 @@ async def _stream_agent_loop_impl(
                             _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
                             _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a peer moved the beat — clear session stall pressure
                             _SILENT_FORCE_ADVANCE_STREAK.pop(_belt_key(owner), None)  # F1: a peer moved the beat — narration/engine no longer decoupled by our forcing
+                            _ANTI_STALE_CAP_HOLDS.pop(_belt_key(owner), None)  # F1: peer moved the beat — reset the release-valve hold counter
                             logger.info(
                                 f"[orwell] ADR0011 peer-advance: beat moved {_framed_beat_key} -> "
                                 f"{_beat_key_at_read} with no progression this turn — suppressing "
@@ -6936,6 +6962,10 @@ async def _stream_agent_loop_impl(
                                     _SILENT_FORCE_ADVANCE_STREAK.get(_belt_key(owner), 0)
                                     >= _SILENT_FORCE_ADVANCE_CAP):
                                 _silent_advance_capped[0] = True
+                                # Count the hold (the release valve): the caller escalates a 2nd+ hold
+                                # from a silent break to an IN-TURN forced voice of the current moment.
+                                _ANTI_STALE_CAP_HOLDS[_belt_key(owner)] = (
+                                    _ANTI_STALE_CAP_HOLDS.get(_belt_key(owner), 0) + 1)
                                 try:
                                     from routes import chat_helpers as _ch_cap
                                     _ch_cap.stash_anti_stale_reground(owner)
@@ -6946,8 +6976,9 @@ async def _stream_agent_loop_impl(
                                     "[orwell] ANTI-STALE CAP — HELD silent advance "
                                     f"({_why}, phase={_phase}): engine is "
                                     f"{_SILENT_FORCE_ADVANCE_STREAK.get(_belt_key(owner), 0)} beats ahead "
-                                    f"of the frozen narration; forcing a reground instead of racing on "
-                                    f"round {round_num} user={owner}")
+                                    f"of the frozen narration (hold #"
+                                    f"{_ANTI_STALE_CAP_HOLDS.get(_belt_key(owner), 0)}); forcing a reground "
+                                    f"instead of racing on round {round_num} user={owner}")
                                 try:  # 0079: a notable overseer correction (surfaced the decoupling)
                                     from src import log_rings as _lr_cap
                                     _lr_cap.record_overseer(
@@ -7059,12 +7090,44 @@ async def _stream_agent_loop_impl(
                                 break
                             if _silent_advance_capped[0]:
                                 # F1 anti-stale CAP: the engine is already _SILENT_FORCE_ADVANCE_CAP beats
-                                # ahead of a narration that keeps re-narrating an earlier beat. HOLD — do
-                                # not advance further ahead. A scene was already shown this turn, so we do
-                                # NOT re-prompt (a second narration); we END the turn with the anti-stale
-                                # reground queued so the NEXT turn is obligated to voice the current moment.
-                                logger.info("[orwell] visible-scene turn ended at the anti-stale CAP — "
-                                            f"held the advance, reground queued round {round_num} user={owner}")
+                                # ahead of a narration that keeps re-narrating an earlier beat. HOLD — never
+                                # advance further ahead (a forced advanceGame here would race further, the
+                                # exact thing the cap prevents). But the cap alone is a *held freeze*: this
+                                # break is BELOW nothing that escalates, so a model that ignores the queued
+                                # reground would hit the cap → break every turn, pinned but never released.
+                                # THE RELEASE VALVE: on the FIRST hold, break and give the queued anti-stale
+                                # reground one turn to work; on a SECOND+ hold (the reground was ignored),
+                                # ESCALATE to an IN-TURN forced VOICE of the CURRENT moment — a re-prompt,
+                                # NOT a further advance — so the model narrates where the engine actually is.
+                                _holds = _ANTI_STALE_CAP_HOLDS.get(_belt_key(owner), 0)
+                                if _holds >= 2:
+                                    _voice = _ANTI_STALE_FORCED_VOICE
+                                    if _emitted_visible:
+                                        # A scene already streamed this turn — carry the CONTINUE-NEVER-REOPEN
+                                        # contract (same as every sibling mid-turn re-prompt) so the forced
+                                        # voice reads as "bring us to the present moment", not "re-narrate".
+                                        _voice = _CONTINUE_NEVER_REOPEN + "\n\n" + _voice
+                                    logger.info("[orwell] ANTI-STALE RELEASE VALVE — forcing an IN-TURN voice "
+                                                f"of the current moment (hold #{_holds}, phase={_phase}), NOT a "
+                                                f"further advance round {round_num} user={owner}")
+                                    try:  # 0079: a notable overseer correction (released a held freeze)
+                                        from src import log_rings as _lr_rv
+                                        _lr_rv.record_overseer(
+                                            "anomaly", "anti-stale-release",
+                                            "forced the model to voice the CURRENT engine moment after it "
+                                            "ignored the anti-stale reground — a forced voice, not an advance "
+                                            "(the engine stays pinned at the cap)",
+                                            lever="reground", ok=True, user=owner)
+                                    except Exception:
+                                        pass
+                                    messages.append({"role": "system", "content": _voice})
+                                    yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
+                                    continue
+                                # First hold: end the turn with the anti-stale reground queued so the NEXT
+                                # turn is obligated to voice the current moment (give the reground a chance).
+                                logger.info("[orwell] visible-scene turn ended at the anti-stale CAP (hold "
+                                            f"#{_holds}) — held the advance, reground queued round {round_num} "
+                                            f"user={owner}")
                                 break
                             # else: silent commit genuinely failed — fall through to the re-prompt below.
 
@@ -8207,6 +8270,7 @@ async def _stream_agent_loop_impl(
                 _ADVANCE_STALL_LEVEL.pop(_belt_key(owner), None)
                 _ADVANCE_STALL_FLAGS.pop(_belt_key(owner), None)  # R4: a genuine MODEL advance clears the session stall tally
                 _SILENT_FORCE_ADVANCE_STREAK.pop(_belt_key(owner), None)  # F1: the model voiced+advanced itself — narration has caught up, clear the anti-stale streak
+                _ANTI_STALE_CAP_HOLDS.pop(_belt_key(owner), None)  # F1: model advanced itself — reset the release-valve hold counter
                 _TURNS_SINCE_PROGRESS[_belt_key(owner)] = 0  # movement happened — restart the staleness clock
                 _turn_advance_nudges = 0
             if _is_live_game and block.tool_type in _RECORD_TOOLS:

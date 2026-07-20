@@ -145,14 +145,84 @@ def test_cap_holds_the_advance_and_forces_a_reground_instead_of_racing_on():
     assert "advance_game(" not in cap_block, "the CAP must NOT advance the engine — it holds"
 
 
-def test_emitted_visible_caller_ends_the_turn_on_the_cap():
-    """A scene was already shown this turn, so on the cap we must NOT re-prompt (a second narration):
-    end the turn with the reground queued for next turn."""
+def test_emitted_visible_caller_ends_the_turn_on_the_first_cap_hold():
+    """On the FIRST cap-hold a scene was already shown, so we do NOT re-prompt (a second narration):
+    end the turn with the reground queued, giving it one turn to work."""
     idx = AGENT_SRC.find("_silent_advance_capped[0]:")
     assert idx != -1, "the caller must check the capped flag"
-    window = AGENT_SRC[idx:idx + 1000]
-    assert "break" in window
-    assert "reground queued" in window.lower() or "held the advance" in window.lower()
+    end = AGENT_SRC.find("silent commit genuinely failed", idx)
+    assert end != -1
+    handler = AGENT_SRC[idx:end]
+    assert "break" in handler
+    assert "reground queued" in handler.lower() or "held the advance" in handler.lower()
+    # the first-hold path is gated on the hold count (only the 2nd+ hold escalates)
+    assert "_ANTI_STALE_CAP_HOLDS.get(_belt_key(owner), 0)" in handler
+
+
+# ── 4. THE RELEASE VALVE — Greptile's P1 repro (the held-freeze defect) ─────────────────────────
+#
+# Greptile (correct, verified): on an emitted-visible turn the whole stall handling is inside the
+# `if _emitted_visible:` block, and the cap path `break`s there — so the L39b forced-advance /
+# text-nudge escalation BELOW is never reached. A model that keeps re-narrating the stale beat after
+# the queued reground hits the cap → break EVERY turn: no longer a 2-week decoupling (fixed), but a
+# HELD freeze — pinned, never released. The genuine release is NOT "reach L39b" (that forces ANOTHER
+# advance — racing further ahead, the exact thing the cap prevents) but a forced VOICE of the CURRENT
+# (already-advanced) moment WITHOUT advancing.
+
+def test_release_valve_hold_counter_exists_and_resets():
+    al = importlib.import_module("src.agent_loop")
+    assert isinstance(al._ANTI_STALE_CAP_HOLDS, dict)
+    # reset beside the streak on BOTH catch-up signals (genuine model advance, peer advance)
+    assert AGENT_SRC.count("_ANTI_STALE_CAP_HOLDS.pop(_belt_key(owner), None)") >= 2
+
+
+def test_repeated_stale_narration_after_the_cap_escalates_to_a_forced_voice_not_a_further_advance():
+    """Greptile's repro as a gate: a SECOND+ cap-hold (the model ignored the reground and is STILL
+    re-narrating the stale beat) must ESCALATE — instead of silently breaking into a held loop, force
+    an IN-TURN VOICE of the current moment. The escalation must NOT advance the engine (no advanceGame
+    / advance_game) and must re-prompt (continue), not break."""
+    idx = AGENT_SRC.find("_silent_advance_capped[0]:")
+    assert idx != -1
+    # isolate the whole capped-flag handler (up to the fall-through comment that ends it)
+    end = AGENT_SRC.find("silent commit genuinely failed", idx)
+    assert end != -1
+    handler = AGENT_SRC[idx:end]
+    # the escalation is gated on a 2nd+ hold
+    assert "_holds = _ANTI_STALE_CAP_HOLDS.get(_belt_key(owner), 0)" in handler
+    assert "if _holds >= 2:" in handler
+    # it forces a VOICE re-prompt and CONTINUES the loop (does not break) — the release
+    assert "_ANTI_STALE_FORCED_VOICE" in handler
+    assert 'messages.append({"role": "system", "content": _voice})' in handler
+    assert "continue" in handler
+    # a scene already shown ⇒ carry the CONTINUE-NEVER-REOPEN contract (no re-narrate)
+    assert "_CONTINUE_NEVER_REOPEN + " in handler
+    # CRITICAL: the escalation must NOT advance the engine (that would race past the cap)
+    assert "advance_game(" not in handler
+    assert "_commit_advance_silently" not in handler.split("if _holds >= 2:")[1].split("continue")[0]
+
+
+def test_forced_voice_directive_is_closed_set_and_forbids_advancing():
+    """ADR 0005: the forced voice points the model at engine truth (read the live state, voice the
+    CURRENT moment) and authors NO prose — and it must EXPLICITLY forbid advancing (a forced advance
+    here would race the engine further ahead, defeating the cap)."""
+    al = importlib.import_module("src.agent_loop")
+    v = al._ANTI_STALE_FORCED_VOICE.lower()
+    assert "gamestatus" in v or "getgamestate" in v          # closed-set grounding
+    assert "current" in v and "moment" in v                  # voice where the engine actually is
+    assert "do not advance" in v and "advancegame" in v      # explicitly NOT a further advance
+    assert "do not repeat" in v                              # never re-narrate the stale beat
+    # it is a production note (not player-facing prose) and scripts no scene
+    assert "not for the player" in v
+
+
+def test_release_valve_bounded_per_turn():
+    """The escalation re-prompt is bounded per turn by the existing advance-nudge cap (the stall block
+    runs at most _MAX_ADVANCE_NUDGES_PER_TURN times/turn), so the in-turn forced voice cannot tight-loop
+    within a single turn — the hold counter climbs across TURNS, not unbounded within one."""
+    al = importlib.import_module("src.agent_loop")
+    assert al._MAX_ADVANCE_NUDGES_PER_TURN >= 1
+    # the escalation lives inside the `_want_advance` block, which is gated on the per-turn nudge cap
+    assert "_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN" in AGENT_SRC
 
 
 def test_streak_resets_on_a_genuine_model_advance():
