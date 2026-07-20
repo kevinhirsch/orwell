@@ -7018,7 +7018,11 @@ async def _stream_agent_loop_impl(
                                     try:
                                         from routes import chat_helpers as _ov_cha
                                         _ov_after_a = _ov_cha.last_beat_seq(owner)
-                                        _ov_desync_a = owner in getattr(_ov_cha, "_DESYNC_REGROUND", {})
+                                        # BL-004: the store keys under `_desync_key(owner)` (a truthy
+                                        # owner is itself; owner=None resolves to the canonical `gs:<id>`),
+                                        # so the reader MUST use the same key — a raw `owner in …` misses
+                                        # every single-tenant/auth-off queued correction (owner=None).
+                                        _ov_desync_a = _ov_cha._desync_key(owner) in getattr(_ov_cha, "_DESYNC_REGROUND", {})
                                     except Exception:
                                         pass
                                     _ov_sig_a = _OvSignals(
@@ -8490,7 +8494,9 @@ async def _stream_agent_loop_impl(
                 try:
                     from routes import chat_helpers as _ov_ch
                     _ov_beat_after = _ov_ch.last_beat_seq(owner)
-                    _ov_desync = owner in getattr(_ov_ch, "_DESYNC_REGROUND", set())
+                    # BL-004: match the store's `_desync_key(owner)` keying (owner=None ⇒ canonical
+                    # `gs:<id>`); a raw `owner in …` read misses single-tenant/auth-off corrections.
+                    _ov_desync = _ov_ch._desync_key(owner) in getattr(_ov_ch, "_DESYNC_REGROUND", set())
                 except Exception:
                     pass
                 _ov_sig = Signals(

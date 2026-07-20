@@ -210,3 +210,23 @@ def test_faith_queue_reground_routes_through_the_bounded_queue():
     chat_helpers._DESYNC_REGROUND.pop("owner", None)
     assert al._faith_queue_reground("owner", al._FAITH_REGROUND_DIRECTIVE) is True
     assert "owner" in chat_helpers._DESYNC_REGROUND
+
+
+def test_single_tenant_store_and_read_share_the_canonical_key(monkeypatch):
+    """A single-tenant/auth-off correction (owner=None) is stored under `_desync_key(None)` — the
+    canonical `gs:<id>`, NOT raw None. Every READER (the overseer desync signal in agent_loop, the
+    drain in apply_game_framing) must key off `_desync_key(owner)` too, or the queued correction is
+    invisible on the deploy-default AUTH_ENABLED=false path. Pins that contract."""
+    ogs = importlib.import_module("src.orwell_game_session")
+    monkeypatch.setattr(ogs, "get_game_session", lambda user=None: "sess-canon-42")
+    # owner=None resolves to the canonical session key — this is what every WRITER computes before
+    # enqueuing (the overseer fix + `_faith_queue_reground` both pass `_desync_key(owner)`).
+    key = chat_helpers._desync_key(None)
+    assert key == "gs:sess-canon-42", "owner=None must resolve to the canonical gs:<id> key"
+    assert chat_helpers._reground_enqueue(key, "RE-GROUND — single-tenant board drift.") is True
+    # The store lands under the canonical key — a raw `None in …` reader would MISS it.
+    assert key in chat_helpers._DESYNC_REGROUND
+    assert None not in chat_helpers._DESYNC_REGROUND
+    # The overseer reader pattern (matching agent_loop) finds it via _desync_key; the old raw one does not.
+    assert (chat_helpers._desync_key(None) in chat_helpers._DESYNC_REGROUND) is True
+    assert (None in chat_helpers._DESYNC_REGROUND) is False
