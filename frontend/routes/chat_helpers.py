@@ -2376,13 +2376,18 @@ async def record_post_turn_roster_check(user, narration: str) -> None:
 # from them (a speaker not in that fact's `knownTo`), the sentence is DROPPED — mirroring the 0065
 # pre-emission outcome guard's sentence-drop shape, never a new mechanism.
 #
-# Jurisdiction is TIGHT and zero-false-positive by construction: it fires only on the always-sealed
-# Diary-Room class (`knownTo` empty ⇒ no houseguest may EVER voice it), and only when a distinctive
-# multi-word shingle of the sealed content appears in a sentence where a houseguest is STAGED
-# (`_stages_in_scene`). The player restating their OWN plan (no houseguest staged) is never touched;
-# the diary-room BEAT itself (no houseguest present) is never touched. Non-diary player secrets are
-# deliberately OUT of scope here (they can diffuse NPC-to-NPC as legitimate gossip — enforced by the
-# per-NPC `npcVoice.knows` manifest, not a blunt content scrub). Fail-open: any hiccup emits verbatim.
+# Jurisdiction is TIGHT and near-zero-false-positive by construction: it fires only when a distinctive
+# multi-word shingle of a sealed fact appears in a sentence where a houseguest is STAGED
+# (`_stages_in_scene`) AND that houseguest is NOT in the fact's `knownTo`. The player restating their
+# OWN plan (no houseguest staged) is never touched; the diary-room BEAT itself (no houseguest present)
+# is never touched.
+#
+# ADR 0019 Layer 3 GENERALIZES the sealed set from the always-sealed Diary-Room class (`knownTo` empty
+# ⇒ no houseguest may EVER voice it) to the full per-fact `knownTo` manifest (`knowledgeScopeManifest`):
+# a distinctive fact bounded to a subset of the house, voiced by a STAGED houseguest OUTSIDE that
+# subset, is dropped exactly as the DR wall drops. This does NOT fight legitimate gossip diffusion —
+# the holder set is the LIVE pathway-holder set, so once a fact reaches A (any pathway), A is in
+# `knownTo` and A voicing it is never touched. Fail-open: any hiccup emits verbatim.
 
 # Common words dropped when building distinctive shingles — a shingle of only stopwords is not distinctive.
 _KW_STOPWORDS = frozenset((
@@ -2446,8 +2451,17 @@ async def fetch_sealed_from_house(user) -> list:
     facts: list = []
     try:
         from src import orwell_engine
-        raw = await orwell_engine.sealed_from_house(user=user)
-        for f in (raw or []):
+        # The always-sealed set (Diary-Room class, `knownTo` empty) AND — ADR 0019 Layer 3 — the
+        # generalized knowledge-scope manifest (every fact held by a BOUNDED subset of the house, each
+        # with its real pathway-holder set as names). Both are Vault-free; the guard drops a sentence
+        # whenever a STAGED houseguest voices a fact whose `knownTo` excludes them (for a DR fact the
+        # set is empty ⇒ any staged houseguest). Either call failing is tolerated (the other still holds).
+        raw = list(await orwell_engine.sealed_from_house(user=user) or [])
+        try:
+            raw += list(await orwell_engine.knowledge_scope_manifest(user=user) or [])
+        except Exception as e2:
+            logger.debug("[orwell] knowledge-scope manifest fetch skipped for user=%s: %s", user, _exc_detail(e2))
+        for f in raw:
             if not isinstance(f, dict):
                 continue
             content = str(f.get("content") or "").strip()

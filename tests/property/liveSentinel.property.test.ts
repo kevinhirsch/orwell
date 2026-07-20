@@ -137,10 +137,45 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         + JSON.stringify(reg.sandboxFor(user).engine.vault.readHidden());
       for (const s of sentinels) expect(engineSide.includes(s), `seed ${seed}: ${s} was not actually planted`).toBe(true);
 
+      // ADR 0019 Layer 2 — the moment prompt now carries each PRESENT houseguest's OWN knowledge under a
+      // labelled per-NPC block ("WHAT EACH HOUSEGUEST IN THE ROOM LEGITIMATELY KNOWS"). That is a
+      // SANCTIONED, per-NPC-scoped surface — the SAME Vault-free knowledge `npcVoice(thatNPC)` already
+      // returns to voice them, just baked in eagerly for the present houseguests (see the ADR's testability
+      // note: a token witnessed only by B deliberately appears in `renderGameContext` under B's block).
+      // So the sweep EXCISES that block before the sentinel scan: the `npcknow` sentinel (npc(2)'s own
+      // witnessed knowledge) may legitimately ride it, exactly as it may ride `npcVoice(npc:2)`. Everything
+      // else stays checked — the block only ever carries the knowledge layer (`knows`/`suspects`), so a
+      // soul / hidden-element / hidden-event / Vault sentinel can never hide inside it (those are planted in
+      // the soul/Vault/event layers, never the knowledge layer). The excision is TIGHT (header + its
+      // indented continuation lines only), so any leak OUTSIDE the block — including an NPC's knowledge
+      // surfacing in the roster/whereabouts prose, or on any non-prompt tool — is still caught.
+      const excisePresentKnowledgeBlock = (prompt: string): string => {
+        const lines = prompt.split("\n");
+        const start = lines.findIndex((l) => l.startsWith("- WHAT EACH HOUSEGUEST IN THE ROOM LEGITIMATELY KNOWS"));
+        if (start < 0) return prompt;
+        let end = start + 1;
+        while (end < lines.length && /^\s/.test(lines[end]!)) end++;
+        return [...lines.slice(0, start), ...lines.slice(end)].join("\n");
+      };
+      // ADR 0019 Layer 3 — `knowledgeScopeManifest` is FE-guard support: it deliberately hands the
+      // front-end the "who-legitimately-knows-what" manifest (bounded facts + their holder names) so the
+      // guard can DROP any narration in which a houseguest voices a fact no pathway gave them. It reads the
+      // KNOWLEDGE layer only (`engine.knowledge`, the SAME outward-safe layer `npcVoice.knows` projects —
+      // NEVER the Vault/soul), so the `npcknow` sentinel (npc(2)'s own witnessed knowledge) may legitimately
+      // ride it, exactly as it rides `npcVoice(npc:2)`. Every OTHER sentinel class — soul, hidden element,
+      // hidden event, Vault confessional — is planted OUTSIDE the knowledge layer and must still NEVER cross.
+      const KNOWLEDGE_LAYER_TAG = "-npcknow-";
+      const sentinelsFor = (name: string): string[] =>
+        name === "knowledgeScopeManifest" ? sentinels.filter((s) => !s.includes(KNOWLEDGE_LAYER_TAG)) : sentinels;
       const sweep = async (server: McpServer, name: string): Promise<void> => {
         swept.add(name);
-        const blob = JSON.stringify(await server.callTool(name, args(name, seed)));
-        for (const s of sentinels) expect(blob.includes(s), `seed ${seed}: tool ${name} leaked ${s}`).toBe(false);
+        const result = await server.callTool(name, args(name, seed));
+        // getMomentPrompt's systemPrompt carries the sanctioned per-present-NPC knowledge block; excise it.
+        const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object" && "systemPrompt" in result)
+          ? { ...(result as Record<string, unknown>), systemPrompt: excisePresentKnowledgeBlock(String((result as { systemPrompt: unknown }).systemPrompt)) }
+          : result;
+        const blob = JSON.stringify(scrubbed);
+        for (const s of sentinelsFor(name)) expect(blob.includes(s), `seed ${seed}: tool ${name} leaked ${s}`).toBe(false);
       };
 
       // Every NON-progression tool, with all houseguests still living (recordInteraction/makeDeal etc.).
@@ -200,11 +235,16 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         swept.add(name);
         let payload: string;
         try {
-          payload = JSON.stringify(await server.callTool(name, args(name, seed)));
+          const result = await server.callTool(name, args(name, seed));
+          // ADR 0019 Layer 2: excise the sanctioned per-present-NPC knowledge block from getMomentPrompt.
+          const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object" && "systemPrompt" in result)
+            ? { ...(result as Record<string, unknown>), systemPrompt: excisePresentKnowledgeBlock(String((result as { systemPrompt: unknown }).systemPrompt)) }
+            : result;
+          payload = JSON.stringify(scrubbed);
         } catch (err) {
           payload = String(err instanceof Error ? err.message : err); // the refusal text is the outward surface
         }
-        for (const s of sentinels) expect(payload.includes(s), `seed ${seed}: post-finish ${name} leaked ${s}`).toBe(false);
+        for (const s of sentinelsFor(name)) expect(payload.includes(s), `seed ${seed}: post-finish ${name} leaked ${s}`).toBe(false);
       };
       for (const t of toolsFor("player")) if (!POST_FINISH_EXCLUDED.has(t.name)) await sweepOrRefuse(player, t.name);
       for (const t of toolsFor("admin/God Mode")) await sweepOrRefuse(admin, t.name);

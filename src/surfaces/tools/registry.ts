@@ -37,6 +37,7 @@ export const PLAYER_TOOLS: readonly ToolDescriptor[] = [
   { name: "seasonRetrospective", channel: "player", readsVault: false, description: "POST-SEASON ONLY (0048): the finished season's unsealed hidden story — off-screen scheming, confessionals, the twists. Returns null while a season is live (gated on the terminal state in code)." },
   { name: "npcVoice", channel: "player", readsVault: false, description: "The knowledge-bounded voicing projection for ONE active houseguest (B65): persona + room/co-presence + what THEY legitimately know + hunches + organic stances (labels, never numbers). The model cannot voice what they never learned." },
   { name: "sealedFromHouse", channel: "player", readsVault: false, description: "A0 knowledge-wall manifest (FE guard support): the player's private disclosures sealed from the house — most sharply the Diary-Room entries (no in-game pathway to ANY houseguest). Vault-free (the player's OWN knowledge). The front-end reads it to strip any narration that puts sealed content in a houseguest's mouth." },
+  { name: "knowledgeScopeManifest", channel: "player", readsVault: false, description: "ADR 0019 Layer 3 knowledge-scope manifest (FE guard support): every distinctive fact held by a BOUNDED subset of the house, each with its complete pathway-holder set (houseguest names). Vault-free (the legitimate witnessed-or-told layer). The front-end reads it to drop any narration in which a houseguest voices a fact no in-game pathway gave them." },
   { name: "getPortraitPrompt", channel: "player", readsVault: false, description: "The Vault-free image-generation prompt for ONE houseguest's portrait (0051): built from PUBLIC appearance + authored storyline facets + the per-season photorealistic style anchor. Serves the live house, or pre-game the WARMED pre-seed cast (0065/ADR 0013 — the authored shoot reads the store as it stands). Null for an unknown id / no cast. No stat/soul/hidden element ever reaches the prompt." },
   { name: "askProducers", channel: "player", readsVault: false, description: "Direct interrogation; never confirms/denies Vault content." },
   { name: "endOfSessionSummary", channel: "player", readsVault: false, description: "Confirms only that updated save(s) exist." },
@@ -195,6 +196,10 @@ const INFRA_LEVERS: ReadonlySet<string> = new Set(["getMomentPrompt", "endOfSess
   // houseguest voicing the player's Diary-Room content), NOT a game-driving lever the GM model pulls —
   // so it stays OUT of the base prompt's lever manifest (the manifest↔registry drift test stays green).
   "sealedFromHouse",
+  // ADR 0019 Layer 3: `knowledgeScopeManifest` is FE-guard support (the narration guard reads it to
+  // drop a houseguest voicing a fact no pathway gave them), NOT a game-driving lever — so it stays OUT
+  // of the base prompt's lever manifest, exactly like `sealedFromHouse`.
+  "knowledgeScopeManifest",
   // BE-103: `worldSnapshotView` is the read counterpart of the FE-driven `recordWorldSnapshot` write-
   // back (0062) — background flavor context, not a game-driving decision lever the GM model pulls — so
   // it stays OUT of the base prompt's lever manifest, exactly like `recordWorldSnapshot` itself.

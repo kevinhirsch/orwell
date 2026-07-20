@@ -184,6 +184,81 @@ def test_scan_fires_single_tenant_with_owner_none():
         chat_helpers._DESYNC_REGROUND.pop(dkey, None)
 
 
+# ── ADR 0019 Layer 3 — the guard consumes the generalized knowledge-scope manifest ──────────── #
+
+
+def test_fetch_unions_sealed_and_scope_manifests(monkeypatch):
+    """`fetch_sealed_from_house` merges `sealedFromHouse` (DR class) AND ADR 0019 Layer 3's
+    `knowledgeScopeManifest` (bounded facts with their real holder set) into ONE guard manifest."""
+    chat_helpers._KW_SEALED_CACHE.pop(chat_helpers._kw_key(_USER), None)
+
+    async def _sealed(user=None):
+        return [{"content": _DIARY, "knownTo": []}]
+
+    async def _scope(user=None):
+        return [{"content": "I am in a secret final two with the HOH", "knownTo": ["HOH"]}]
+
+    monkeypatch.setattr(orwell_engine, "sealed_from_house", _sealed)
+    monkeypatch.setattr(orwell_engine, "knowledge_scope_manifest", _scope)
+
+    facts = _run(chat_helpers.fetch_sealed_from_house(_USER))
+    contents = [f["content"] for f in facts]
+    assert _DIARY in contents  # the always-sealed DR fact
+    assert any("secret final two" in c for c in contents)  # the bounded scope-manifest fact
+    scoped = next(f for f in facts if "secret final two" in f["content"])
+    assert scoped["knownTo"] == ["hoh"]  # holder names carried through (lowercased)
+
+
+def test_scope_manifest_fetch_failure_still_yields_sealed(monkeypatch):
+    """If the ADR 0019 manifest call fails, the always-sealed DR set is still delivered (fail-soft)."""
+    chat_helpers._KW_SEALED_CACHE.pop(chat_helpers._kw_key(_USER), None)
+
+    async def _sealed(user=None):
+        return [{"content": _DIARY, "knownTo": []}]
+
+    async def _scope(user=None):
+        raise RuntimeError("engine blip")
+
+    monkeypatch.setattr(orwell_engine, "sealed_from_house", _sealed)
+    monkeypatch.setattr(orwell_engine, "knowledge_scope_manifest", _scope)
+
+    facts = _run(chat_helpers.fetch_sealed_from_house(_USER))
+    assert any(_DIARY in f["content"] for f in facts)
+
+
+def test_bounded_fact_voiced_by_a_non_holder_is_dropped_end_to_end():
+    """The room-to-room asymmetry the ADR closes: a fact bounded to the HOH, voiced by a STAGED
+    Nominee who has no pathway to it, is stripped exactly as a Diary-Room recital is."""
+    secret = "the HOH and I have a secret final two deal"
+    _seed(
+        _USER,
+        sealed=[{"content": secret, "knownTo": ["HOH"]}],
+        active_names=["HOH", "Nominee"],
+    )
+    transcript = (
+        "The two of them lingered by the pool. "
+        'the Nominee grinned and said, "the HOH and I have a secret final two deal." '
+        "You filed it away."
+    )
+    out = _run(chat_helpers.screen_knowledge_wall(_USER, transcript))
+    assert "secret final two deal" not in out  # the Nominee had no pathway — dropped
+    assert "lingered by the pool" in out
+    assert "You filed it away." in out
+
+
+def test_bounded_fact_voiced_by_the_holder_is_kept_end_to_end():
+    """The holder voicing THEIR OWN bounded fact is legitimate — never stripped."""
+    secret = "the Nominee and I have a secret final two deal"
+    _seed(
+        _USER,
+        sealed=[{"content": secret, "knownTo": ["HOH"]}],
+        active_names=["HOH", "Nominee"],
+    )
+    transcript = 'the HOH murmured, "the Nominee and I have a secret final two deal." You nodded.'
+    out = _run(chat_helpers.screen_knowledge_wall(_USER, transcript))
+    assert out == transcript  # the HOH holds it — nothing stripped
+
+
 # ── the agent-loop wrapper is wired and fail-open ────────────────────────────────────────── #
 
 def test_agent_loop_wrapper_strips_the_leak():
