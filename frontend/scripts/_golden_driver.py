@@ -1015,10 +1015,15 @@ def run_once(**kw) -> GoldenDriver:
         # invisible in the job's stdout. Best-effort + read-only; it re-raises, never masks.
         for lbl, path, keep in (("engine", d.engine_log, 5000), ("fe", d.fe_log, 3000)):
             try:
-                with open(path, encoding="utf-8", errors="replace") as fh:
-                    tail = fh.read()[-keep:]
+                # Bounded read: seek near EOF and read only ~keep chars' worth of bytes (≤4 B/char
+                # in UTF-8) so a long-running replay's multi-MB log never spikes memory on the
+                # failure path.
+                with open(path, "rb") as fh:
+                    fh.seek(0, os.SEEK_END)
+                    fh.seek(max(0, fh.tell() - keep * 4))
+                    tail = fh.read().decode("utf-8", errors="replace")[-keep:]
                 print(f"\n──── {lbl}.log tail (run_once failure) ────\n{tail}", flush=True)
-            except Exception:
+            except OSError:
                 pass
         raise
     finally:
