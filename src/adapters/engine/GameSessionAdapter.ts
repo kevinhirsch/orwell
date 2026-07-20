@@ -4540,7 +4540,11 @@ export class GameSessionAdapter implements GameSession {
           : {}),
       });
       const first = validateDossierCoherence(project());
-      if (first.ok) continue;
+      // Skip ONLY when there is genuinely nothing to do. A SOFT-but-repairable result (a nonbinary pin
+      // carrying a stray binary self-pronoun) returns ok:true WITH a non-empty `repairFields` — it must
+      // still fall through to repair, or the nonbinary houseguest keeps "his …/her …" prose into the
+      // portrait. Short-circuiting on `ok` alone would defeat that (Greptile P1 — soft repairs skipped).
+      if (first.ok && first.repairFields.length === 0) continue;
       // REPAIR — clear only the contradicting self-referential fields, then RE-VALIDATE. The repaired
       // dossier is a projection; write the cleared fields back onto the byte-stable Character.
       const { repaired, repairedFields } = repairDossierCoherence(project());
