@@ -704,9 +704,8 @@ _BUNDLE_RING_LIMIT = 100_000        # "everything the ring holds" (rings cap the
 # feature flag whose NAME merely contains "secret" isn't spuriously value-redacted. `token(?!s)`
 # already keeps the plural *_tokens COUNT fields (inputTokens/maxTokens) intact.
 _BUNDLE_SECRET_KEY_RE = re.compile(
-    r"authorization|api[-_]?key|token(?!s)|"
-    r"secret(?:[_-](?:key|token|id|access(?:[_-]?key)?))?(?![_-]?[a-z0-9])|"
-    r"password|passwd|credential|bearer",
+    r"authorization|api[-_]?key|token(?!s)|" + _SECRET_WORD +
+    r"|password|passwd|credential|bearer",
     re.IGNORECASE)
 
 
@@ -1387,7 +1386,8 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
 
     def _bump(bucket, key, failed, ts, *, semantic_noop=False):
         d = bucket.setdefault(
-            key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None})
+            key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None,
+                  "lastSemanticNoOpAt": None})
         d["total"] += 1
         if failed:
             d["failed"] += 1

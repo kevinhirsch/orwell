@@ -66,7 +66,7 @@ def test_hidden_configured_utility_model_logs_substitution(_utility_settings, ca
     _seed_endpoint(cached_models=["qwen/qwen3.6-flash", "thinkingmachines/inkling"],
                    hidden_models=["qwen/qwen3.6-flash"])
     with caplog.at_level("WARNING"):
-        url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
+        _url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
     # served model is the endpoint's first enabled chat model (unchanged resolution)…
     assert model == "thinkingmachines/inkling"
     # …but the swap is now LOUD, not silent.
@@ -80,6 +80,6 @@ def test_configured_utility_model_served_logs_no_substitution(_utility_settings,
     _seed_endpoint(cached_models=["qwen/qwen3.6-flash", "thinkingmachines/inkling"],
                    hidden_models=[])
     with caplog.at_level("WARNING"):
-        url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
+        _url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
     assert model == "qwen/qwen3.6-flash"
     assert not any("substitution" in r.message.lower() for r in caplog.records)
