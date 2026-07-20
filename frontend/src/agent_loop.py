@@ -1955,6 +1955,72 @@ _CASTING_FORCED_NOTE = (
 #      present in messages[0] on the same-turn continuation because the frame was built pre-game.
 _CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
 
+# ADR 0019 / mandate #2 — the producer-only casting fields, scrubbed from anything the purge RETAINS.
+# Two retained carriers besides the interview turns: (a) the createCharacter/getGameState tool RESULT
+# JSON (the player's `castingCard.story`/`motivation`; already redacted at the model-facing seam in
+# tool_execution.format_tool_result, this is defense-in-depth), and (b) the model's OWN createCharacter
+# tool-call ARGUMENTS, which carry the raw `backstory`/`motivation`/`privateStrategy`/`interviewNotes`
+# the model passed — that assistant turn is NOT casting-stamped, so it survives the phase purge. Both are
+# JSON-ish strings; strip the string/array-valued producer entries (and any dangling comma) so no
+# producer material reaches the premiere continuation. These keys never name public roster facets (the
+# cast uses `background`/`biography`/`vocation`), so the scrub is safe on any pre-game→premiere content.
+_CASTING_PRODUCER_KEYS = ("story", "motivation", "backstory", "privateStrategy", "interviewNotes")
+# String-AWARE fallback regex — used only when the structural JSON parse below can't load the text (a
+# fragment embedded in prose). The string values already skip escaped quotes; the interviewNotes ARRAY is
+# matched as a sequence of quoted strings, so a `]` INSIDE a quoted note (e.g. "private ] secret") is
+# consumed by the string atom rather than mistaken for the array terminator (Greptile P1, #1707).
+_CASTING_PRODUCER_FIELD_RE = re.compile(
+    r',?\s*"(?:story|motivation|backstory|privateStrategy)"\s*:\s*"(?:[^"\\]|\\.)*"'
+    r'|,?\s*"interviewNotes"\s*:\s*\[(?:\s*"(?:[^"\\]|\\.)*"\s*,?)*\s*\]'
+)
+_CASTING_DANGLING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _deep_drop_producer_keys(obj):
+    """Recursively delete the producer-only keys anywhere in a parsed JSON structure (in place).
+    Returns True if anything was removed."""
+    removed = False
+    if isinstance(obj, dict):
+        for k in list(obj.keys()):
+            if k in _CASTING_PRODUCER_KEYS:
+                del obj[k]
+                removed = True
+            elif _deep_drop_producer_keys(obj[k]):
+                removed = True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _deep_drop_producer_keys(item):
+                removed = True
+    return removed
+
+
+def _scrub_producer_fields(text):
+    """Remove the producer-only casting key/value entries from a JSON-ish string, fail-soft. Returns the
+    input unchanged when it carries none of them (byte-identical for normal content).
+
+    STRUCTURAL first: when the whole string parses as JSON (the retained createCharacter tool RESULT and
+    tool-call ARGUMENTS are both JSON), delete the producer keys at any depth and re-serialize — airtight
+    regardless of the values, so a `]`/`"` inside an interview note cannot defeat it. A string-aware regex
+    is the fallback only for a fragment that won't parse."""
+    if not isinstance(text, str) or not text:
+        return text
+    if not any(k in text for k in _CASTING_PRODUCER_KEYS):
+        return text
+    stripped = text.strip()
+    if stripped[:1] in ("{", "["):
+        try:
+            obj = json.loads(stripped)
+        except (ValueError, TypeError):
+            obj = None
+        if obj is not None:
+            return json.dumps(obj, ensure_ascii=False) if _deep_drop_producer_keys(obj) else text
+    scrubbed = _CASTING_PRODUCER_FIELD_RE.sub("", text)
+    # A removed leading entry can leave `{,"a":…}` / `[,…]` or a trailing `,}` — tidy so the JSON the
+    # model reads stays well-formed (the goal is a clean context, not just an absent token).
+    scrubbed = _CASTING_DANGLING_COMMA_RE.sub(r"\1", scrubbed)
+    scrubbed = scrubbed.replace("{,", "{").replace("[,", "[")
+    return scrubbed
+
 # 2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes the
 # player's own finalize line, which can leave the continuation context with NO user message
 # at all — [system, assistant(tool_calls), tool] — a conversation shape some GLM providers
@@ -1970,12 +2036,15 @@ _PREGAME_PURGE_USER_BRIDGE = "I'm ready — send me into the house."
 def _strip_pregame_context(messages: List[Dict]) -> int:
     """Purge the pre-game casting interview from the in-game narration context, in place.
 
-    Drops every message stamped ``metadata.phase == "casting"`` (the interview turns) and scrubs the
+    Drops every message stamped ``metadata.phase == "casting"`` (the interview turns), scrubs the
     engine's ``CASTING STATUS — already on file: …`` disclosure line (which embeds the player's
-    private strategy) out of any system frame. Returns the number of messages dropped. Idempotent and
-    fail-soft: a second call is a no-op, and any malformed entry is left untouched rather than raised.
-    Called at the finalize→premiere transition (#1312) so the premiere is structurally unable to
-    carry a casting disclosure."""
+    private strategy) out of any system frame, and scrubs the producer-only casting fields
+    (``story``/``motivation``/``backstory``/``privateStrategy``/``interviewNotes``) out of every RETAINED
+    message's content AND tool-call arguments — the createCharacter tool RESULT and the model's own
+    createCharacter ARGS both survive the phase purge otherwise (ADR 0019 / mandate #2). Returns the
+    number of messages dropped. Idempotent and fail-soft: a second call is a no-op, and any malformed
+    entry is left untouched rather than raised. Called at the finalize→premiere transition (#1312) so the
+    premiere is structurally unable to carry a casting disclosure."""
     if not messages:
         return 0
     dropped = 0
@@ -1987,10 +2056,21 @@ def _strip_pregame_context(messages: List[Dict]) -> int:
                 if isinstance(md, dict) and md.get("phase") == "casting":
                     dropped += 1
                     continue
-                if m.get("role") == "system":
-                    c = m.get("content")
-                    if isinstance(c, str) and "CASTING STATUS" in c:
-                        m["content"] = _CASTING_STATUS_DISCLOSURE_RE.sub("", c)
+                c = m.get("content")
+                if m.get("role") == "system" and isinstance(c, str) and "CASTING STATUS" in c:
+                    c = _CASTING_STATUS_DISCLOSURE_RE.sub("", c)
+                # ADR 0019 — scrub the producer-only casting fields from any retained message content
+                # (the createCharacter/getGameState tool RESULT that persists into the premiere context).
+                if isinstance(c, str):
+                    m["content"] = _scrub_producer_fields(c)
+                # …and from the model's own createCharacter tool-call ARGUMENTS (that assistant turn is
+                # not casting-stamped, so it survives the phase purge with the raw backstory/motivation).
+                tcs = m.get("tool_calls")
+                if isinstance(tcs, list):
+                    for tc in tcs:
+                        fn = tc.get("function") if isinstance(tc, dict) else None
+                        if isinstance(fn, dict) and isinstance(fn.get("arguments"), str):
+                            fn["arguments"] = _scrub_producer_fields(fn["arguments"])
         except Exception:
             pass
         kept.append(m)

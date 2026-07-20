@@ -18,6 +18,7 @@ is unambiguous.
 
 import asyncio
 import importlib
+import json
 import os
 import tempfile
 import types
@@ -345,6 +346,36 @@ def test_strip_pregame_context_scrubs_the_engine_casting_status_disclosure():
     assert "You are the show's producer." in blob
 
 
+def test_scrub_producer_fields_is_structural_not_string_scanning():
+    """A player-entered interview note containing a literal `]` must NOT defeat the scrub. The old
+    string-scan stopped at the first `]` (even inside a quoted note), leaving the producer-only tail
+    in the retained createCharacter args → premiere leak. The scrub now parses the JSON structurally
+    (Greptile P1, #1707), so a `]`/`"` inside a value can't terminate the array early."""
+    from src.agent_loop import _scrub_producer_fields
+
+    # `]` inside a quoted note, with a producer-only sentinel AFTER the bracket.
+    args = json.dumps({
+        "name": "Player",
+        "backstory": f"ran a summer camp {CASTING_SENTINEL}",
+        "interviewNotes": [f"private ] {CASTING_SENTINEL}", "target is the veteran"],
+        "vocation": "teacher",
+    })
+    out = _scrub_producer_fields(args)
+    assert CASTING_SENTINEL not in out, "producer-only tail survived the `]`-in-note scrub"
+    assert "interviewNotes" not in out and "backstory" not in out
+    # Public facets the model legitimately needs are untouched.
+    assert "teacher" in out and "Player" in out
+
+    # A JSON fragment embedded in prose (falls to the string-aware regex) — still no leak.
+    frag = f'note {{"interviewNotes":["a ] {CASTING_SENTINEL}","b"],"vocation":"nurse"}} end'
+    out2 = _scrub_producer_fields(frag)
+    assert CASTING_SENTINEL not in out2 and "nurse" in out2
+
+    # No producer keys ⇒ byte-identical (never mangles normal content).
+    clean = '{"vocation":"chef","biography":"likes food"}'
+    assert _scrub_producer_fields(clean) == clean
+
+
 def test_purge_that_removes_every_user_turn_inserts_the_readiness_bridge():
     """2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes
     the player's own finalize line, leaving [system, assistant(tool_calls), tool] — a shape
@@ -393,21 +424,34 @@ def test_purge_keeps_a_surviving_live_user_turn_and_adds_no_bridge():
 def test_strip_pregame_context_is_idempotent_and_keeps_live_turns():
     from src.agent_loop import _strip_pregame_context
 
+    # ADR 0019: the retained createCharacter tool RESULT now carries the player's producer material
+    # (castingCard.story) in the finalize round — the purge KEEPS the result but SCRUBS those fields
+    # (it used to keep it verbatim, the #1312 leak this PR closes). The result's non-producer content
+    # (the started/house payload) still stands, and the live turn is untouched.
+    kept_result = (
+        '### createCharacter\n```\n'
+        '{"started": true, "player": {"name": "The Player", "archetype": "strategist",'
+        f' "castingCard": {{"characterType": "strategist", "story": "{CASTING_SENTINEL}",'
+        ' "strengths": {"physical": "solid"}}}}}\n```'
+    )
     messages = [
         {"role": "system", "content": "GM frame"},
         {"role": "user", "content": f"interview: {CASTING_SENTINEL}", "metadata": {"phase": "casting"}},
         {"role": "assistant", "content": "producer reply", "metadata": {"phase": "casting"}},
-        {"role": "assistant", "content": "createCharacter → house cast"},           # tool result — KEPT
-        {"role": "user", "content": INGAME_TOKEN, "metadata": {"phase": "game"}},    # live turn — KEPT
+        {"role": "assistant", "content": kept_result},                               # tool result — KEPT but SCRUBBED
+        {"role": "user", "content": INGAME_TOKEN, "metadata": {"phase": "game"}},     # live turn — KEPT
     ]
     first = _strip_pregame_context(messages)
     assert first == 2  # both casting turns dropped
     second = _strip_pregame_context(messages)
     assert second == 0  # idempotent — nothing left to drop
     blob = " ".join(m["content"] for m in messages)
+    # The producer material is gone from EVERY retained message (interview turns dropped, result scrubbed).
     assert CASTING_SENTINEL not in blob
+    # The live turn survives, and the createCharacter result is KEPT (only its producer fields scrubbed).
     assert INGAME_TOKEN in blob
-    assert "house cast" in blob
+    assert '"started": true' in blob
+    assert '"characterType": "strategist"' in blob
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -448,3 +492,140 @@ def test_mark_message_phase_persists_to_the_db():
             s.close()
     finally:
         set_session_manager(prior)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. ADR 0019 — "context is not knowledge" (mandate #2, enforcement instance #1).
+#    The player's PRODUCER-ONLY casting material (backstory/motivation) rides on the
+#    engine's Vault-free game VIEW (`player.castingCard.story`/`motivation`), which the
+#    engine returns from EVERY view tool (getGameState, createCharacter, advanceGame, …).
+#    A live playtest showed a houseguest echo it. The MODEL-facing enforcement point is
+#    `tool_execution.format_tool_result` — the ONE seam every tool result crosses into the
+#    narrator's context — so the producer fields are redacted there for all tools at once.
+#    The PLAYER still gets the reveal (narrated in the finalize round + rendered from the
+#    FE's own stored view); the MODEL never receives the raw backstory.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A view that carries the player's producer-only casting material, as EVERY view-returning engine
+# tool serializes it. The CASTING_SENTINEL is planted as the backstory so it lands in castingCard.story.
+def _view_with_producer_material() -> dict:
+    return {
+        "started": True,
+        "week": 1,
+        "phase": "premiere",
+        "player": {
+            "id": "player",
+            "name": "The Player",
+            "archetype": "quiet strategist",          # public — KEPT
+            "strategyStyle": "under the radar",         # public — KEPT
+            "status": "active",
+            "castingCard": {
+                "characterType": "quiet strategist",    # public — KEPT
+                "strategyStyle": "under the radar",      # public — KEPT
+                "strengths": {"physical": "solid", "mental": "standout", "social": "scrappy"},  # public — KEPT
+                "story": CASTING_SENTINEL,               # PRODUCER-ONLY — must be redacted
+                "motivation": "ZZ-MOTIVATION-win-for-my-family-ZZ",  # PRODUCER-ONLY — must be redacted
+            },
+        },
+        "house": [
+            {"id": "npc:1", "name": "A Houseguest", "archetype": "social butterfly",
+             "background": "runs a bakery"},  # an NPC PUBLIC facet keyed `background` — must NOT be touched
+        ],
+    }
+
+
+def test_redact_player_producer_fields_strips_only_producer_material():
+    from src.tool_execution import redact_player_producer_fields
+
+    view = _view_with_producer_material()
+    redacted = redact_player_producer_fields(view)
+
+    card = redacted["player"]["castingCard"]
+    # THE WALL: the producer-only fields are gone from the model-facing view.
+    assert "story" not in card
+    assert "motivation" not in card
+    # The public card + persona survive — the reveal still has its qualitative payoff.
+    assert card["characterType"] == "quiet strategist"
+    assert card["strengths"]["mental"] == "standout"
+    assert redacted["player"]["archetype"] == "quiet strategist"
+    # NPC public facets are untouched (the redactor is player-producer-scoped, not a blanket scrub).
+    assert redacted["house"][0]["background"] == "runs a bakery"
+    # The input is NEVER mutated — the FE's own stored copy stays whole for the player's card render.
+    assert view["player"]["castingCard"]["story"] == CASTING_SENTINEL
+
+
+def test_format_tool_result_redacts_producer_material_from_every_view_tool():
+    """The model-facing chokepoint. EVERY engine tool that returns the game view (createCharacter,
+    getGameState, advanceGame, submitDecision, runCompetition, …) serializes it into `output`, and
+    format_tool_result is the single seam that becomes the narrator's tool-result context — so the
+    producer material must never survive it, for ANY of them."""
+    from src.tool_execution import format_tool_result
+
+    view_json = json.dumps(_view_with_producer_material(), indent=2)
+    for tool in ("createCharacter", "getGameState", "advanceGame", "submitDecision", "runCompetition"):
+        formatted = format_tool_result(tool, {"output": view_json, "exit_code": 0})
+        assert CASTING_SENTINEL not in formatted, f"{tool} tool result leaked the producer backstory to the model"
+        assert "ZZ-MOTIVATION-win-for-my-family-ZZ" not in formatted, f"{tool} leaked the producer motivation"
+        # The public state the model DOES need still crosses (the redaction is surgical, not a blackout).
+        assert "quiet strategist" in formatted
+        assert "premiere" in formatted
+
+
+def test_format_tool_result_leaves_non_view_output_byte_identical():
+    """Fail-open: a normal tool's output (no castingCard) is passed through unchanged — the wall never
+    corrupts an ordinary result."""
+    from src.tool_execution import format_tool_result
+
+    plain = format_tool_result("bash", {"output": "story motivation backstory — just prose, no view", "exit_code": 0})
+    assert "just prose, no view" in plain
+
+
+def test_finalize_premiere_message_set_carries_no_producer_material_anywhere():
+    """The finalize→premiere transition, end to end. The message set that produces the premiere narration
+    is: the casting interview turns (phase-stamped), the model's createCharacter tool-call (its ARGS carry
+    the raw backstory), and the createCharacter tool RESULT (formatted through the model-facing seam). After
+    the season goes live the agent loop purges the pre-game context — the resulting premiere context must
+    carry the producer material in NEITHER the transcript NOR the retained createCharacter result/args."""
+    from src.agent_loop import _strip_pregame_context
+    from src.tool_execution import format_tool_result
+
+    # The createCharacter RESULT as it actually reaches the model — through format_tool_result (redacted).
+    result_content = format_tool_result(
+        "createCharacter", {"output": json.dumps(_view_with_producer_material(), indent=2), "exit_code": 0})
+
+    messages = [
+        {"role": "system", "content": "You are the show's producer. Narrate the premiere."},
+        # The casting interview — the player's private answers (phase-stamped; dropped by the purge).
+        {"role": "user", "content": f"my backstory: {CASTING_SENTINEL}", "metadata": {"phase": "casting"}},
+        {"role": "assistant", "content": "producer: love it", "metadata": {"phase": "casting"}},
+        # The model's createCharacter tool CALL — its arguments carry the raw producer material, and this
+        # assistant turn is NOT casting-stamped, so it survives the phase purge (scrubbed by ADR 0019).
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "c1", "type": "function", "function": {
+             "name": "createCharacter",
+             "arguments": json.dumps({"playerName": "The Player", "backstory": CASTING_SENTINEL,
+                                      "motivation": "win it all", "privateStrategy": "flip the house"})}}]},
+        # The createCharacter RESULT (redacted at the model seam; the purge scrubs it again, belt-and-suspenders).
+        {"role": "tool", "tool_call_id": "c1", "content": result_content},
+    ]
+
+    # Sanity: pre-purge, the interview turn + the tool-call args still hold the producer material.
+    assert any(CASTING_SENTINEL in (m.get("content") or "") for m in messages)
+
+    dropped = _strip_pregame_context(messages)
+    assert dropped == 2  # both casting interview turns purged
+
+    # THE GATE: nothing that produces the premiere narration carries the producer material — not the
+    # transcript, not the retained tool result, not the retained tool-call arguments.
+    def _text_of(m):
+        parts = [m.get("content") or ""]
+        for tc in (m.get("tool_calls") or []):
+            fn = tc.get("function") or {}
+            parts.append(fn.get("arguments") or "")
+        return " ".join(parts)
+
+    blob = " ".join(_text_of(m) for m in messages)
+    assert CASTING_SENTINEL not in blob, "the finalize→premiere context leaked the player's casting backstory"
+    assert "flip the house" not in blob, "the finalize→premiere context leaked the player's private strategy"
+    # The season is still cast — the premiere has the public state it needs to narrate the move-in.
+    assert "quiet strategist" in blob

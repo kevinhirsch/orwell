@@ -131,6 +131,14 @@ XFAIL = {
     # Liquid-Glass legibility batch — REMOVE it when the shared glass/token contrast fix lands and the
     # whole surface ratchets clean.
     "#1418-finale-contrast": "contrast:orwell-finale:",
+    # #738 Liquid-Glass batch: the live status panel's season-WINNER name (#orwell-status .os-done
+    # .os-winner) is hard-coded DARK #16191f on the FROSTED theme (orwellStatusPanel.js:240) and reads
+    # ~3.44:1 on the mid-tone glass — the SAME systemic dark-on-frosted-glass finding as the retro
+    # (#1375-h) and finale (#1418-finale-contrast). Pre-existing (the rule is unchanged); it only
+    # surfaces now that the matrix plays to endgame and the `os-done` winner chip renders. Targeted to
+    # the winner span (the panel's other status text is textured/INDET, not gated). REMOVE when the
+    # shared frosted glass/token contrast fix lands and the surface ratchets clean.
+    "#738-status-winner": "contrast:orwell-status:span.os-winner",
     # #1418 / S4-2: the finale body (#orwell-finale > .ow-body) is a scrollable region without keyboard
     # access (axe scrollable-region-focusable) — a KIT-level gap (the shared OrwellWindow `.ow-body`
     # scroll container is not tabbable) that only surfaces now that the finale renders on a finished

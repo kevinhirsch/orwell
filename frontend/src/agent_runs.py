@@ -223,7 +223,8 @@ async def _drain(session_id: str, agen: AsyncGenerator[str, None],
         _schedule_evict(session_id)
 
 
-def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = False) -> _Run:
+def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = False,
+          lead_event: Optional[str] = None) -> _Run:
     """Start a detached run draining `agen` for a session.
 
     Default (plain chat): if a run is already in flight for this session (a rapid double-send), it is
@@ -235,7 +236,16 @@ def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = Fal
     flight; turns serialize, and there is never more than one reasoning chain at a time. The new run
     streams to its own subscribers only once the prior one ends. (Plain chats keep cancel-on-double-
     send — only the game path opts into queuing.)
-    """
+
+    `lead_event` (F1 — concurrent-session consistency, the causal-inversion fix): an SSE event string
+    SEEDED as the FIRST buffered event (`seq 0`) BEFORE any assistant delta. The live channel carries
+    only the assistant reply; the prompting USER turn is not broadcast on it, so an observer/mirror
+    window could render the reply before its cause. Leading the run buffer with the persisted user
+    message (`{type:"user_message", id, seq, content, clientMsgId}`) makes replay-then-tail deliver
+    cause-before-effect ATOMICALLY to every subscriber (WS `chat` channel and SSE resume alike). It is
+    Vault-free — the player's own words. Seeded here synchronously, before the drain task is created,
+    so it is guaranteed to occupy buffer index 0 (the drain cannot run until the next await). None ⇒
+    byte-identical to the prior behavior (an empty buffer at start)."""
     prev = _RUNS.get(session_id)
     prev_task: Optional[asyncio.Task] = None
     if prev:
@@ -246,6 +256,10 @@ def start(session_id: str, agen: AsyncGenerator[str, None], *, queue: bool = Fal
         _safe_cancel(prev.evict_task)
     run = _Run()
     _RUNS[session_id] = run
+    # F1: seed the leading user-message event at buffer index 0 (cause before effect) BEFORE the drain
+    # task exists, so no assistant delta can ever precede it in the replay buffer.
+    if lead_event:
+        _publish(run, lead_event)
     run.task = asyncio.create_task(_drain(session_id, agen, prev_task))
     return run
 

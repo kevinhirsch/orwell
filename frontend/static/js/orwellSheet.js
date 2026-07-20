@@ -117,6 +117,14 @@
       "@keyframes ow-sheet-out { from { transform: translate(-50%, 0); } to { transform: translate(-50%, 100%); } }" +
       ".ow-sheet.ow-sheet-anim-in { animation: ow-sheet-in .34s cubic-bezier(.32,.72,0,1) both; }" +
       ".ow-sheet.ow-sheet-anim-out { animation: ow-sheet-out .26s cubic-bezier(.4,0,1,1) both; }" +
+      // BL-046 (frosted sheet content-ready gate): mirror the orwellWindow sheet-mode fix — on
+      // the frosted GLASS theme hold the body invisible until the open path clears the
+      // `ow-sheet-content-pending` flag (removed on a painted frame + a hard timeout fallback,
+      // so it can NEVER stay hidden), then fade it in, so the sheet never flashes an empty
+      // translucent body while the backdrop-filter composites. Frosted-scoped; flat untouched.
+      "body.theme-frosted .ow-sheet.ow-sheet-content-pending .ow-sheet-body { opacity: 0; }" +
+      "body.theme-frosted .ow-sheet .ow-sheet-body { transition: opacity .18s ease; }" +
+      "@media (prefers-reduced-motion: reduce) { .ow-sheet .ow-sheet-body { transition: none !important; } }" +
       // ── OPAQUE-UP: translucent glass at medium → solid at large ─────────────────
       // Under the glass theme the sheet is the ONE LIGHT GLASS, and a second layer (the solid
       // panel) cross-fades IN as --ow-sheet-prog climbs toward 1 (the large/full detent), exactly
@@ -482,6 +490,26 @@
   };
 
   // ── open / dismiss ──────────────────────────────────────────────────────────
+  // BL-046: hold the frosted sheet body invisible until a frame has painted, so it never
+  // flashes an empty translucent void while the backdrop-filter composites. FAIL-OPEN — the
+  // pending class is always cleared by the rAF, backed by a hard timeout; a missed frame can
+  // never leave a permanently-blank body. The visual effect is CSS-scoped to the frosted theme.
+  OrwellSheet.prototype._gateContentReady = function (el) {
+    el.classList.add("ow-sheet-content-pending");
+    var revealed = false;
+    var reveal = function () {
+      if (revealed) return;
+      revealed = true;
+      el.classList.remove("ow-sheet-content-pending");
+    };
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () { requestAnimationFrame(reveal); });
+    } else {
+      reveal();
+    }
+    setTimeout(reveal, 400);
+  };
+
   OrwellSheet.prototype.open = function (opener) {
     if (this.el && this.el.isConnected) return this;
     if (this._ac && this._ac.signal.aborted) this._ac = new AbortController();
@@ -495,6 +523,7 @@
       // kits use.
       var host = this._anchorHost();
       host.appendChild(el);
+      this._gateContentReady(el);
       if (!REDUCED_MOTION()) {
         el.classList.add("ow-sheet-anim-in");
         el.addEventListener("animationend", function h() {
@@ -511,6 +540,7 @@
 
     document.body.appendChild(el);
     _byId[this.o.id] = this;
+    this._gateContentReady(el);
     // Open AT the chosen detent (set the height first so the slide-up lands at it).
     var openDetent = this.o.detent || this._detents()[0];
     this.snap(openDetent);
