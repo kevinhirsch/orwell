@@ -7158,8 +7158,14 @@ async def _stream_agent_loop_impl(
                                                     "you narrate, and voice only what it states.")
                                                 try:
                                                     from routes import chat_helpers as _ov_chd
-                                                    if owner not in getattr(_ov_chd, "_DESYNC_REGROUND", {}):
-                                                        _ov_chd._DESYNC_REGROUND[owner] = _reground_txt
+                                                    # BL-004: route through the canonical key + the bounded FIFO
+                                                    # queue (dedup + drain telemetry), NOT a raw single-slot store
+                                                    # under `owner` — else a None-owner-with-canonical-session
+                                                    # correction lands under a key that apply_game_framing (which
+                                                    # drains pop(_desync_key(user))) never reads, leaving the
+                                                    # re-ground unvoiced + untelemetered. _reground_enqueue is
+                                                    # fail-soft and dedups, so the old "not in" guard is subsumed.
+                                                    _ov_chd._reground_enqueue(_ov_chd._desync_key(owner), _reground_txt)
                                                 except Exception:
                                                     pass
                                                 if _emitted_visible:
