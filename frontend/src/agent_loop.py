@@ -3093,10 +3093,15 @@ def _faith_queue_reground(owner, directive) -> bool:
         key = _ch._desync_key(owner)
         if key is None:
             return False  # no owner AND no resolvable game session — nothing to key on
+        # A faith reframe is REDUNDANT with an in-flight board re-ground (both say "re-ground to the
+        # board"), so deferring to one already queued is intentional dedup — NOT the BL-004 drop. The
+        # harmful capacity loss was DISTINCT corrections clobbering each other at the chat_helpers store
+        # sites, now a bounded append queue.
         if key in store:
             return False  # a re-ground is already queued (board correction in flight) — leave it
-        store[key] = directive
-        return True
+        # BL-004: route the store through the shared bounded FIFO queue rather than a raw single-slot
+        # assignment, so this seam shares the cap + telemetry with every other correction site.
+        return bool(_ch._reground_enqueue(key, directive))
     except Exception:
         return False
 
@@ -7013,7 +7018,11 @@ async def _stream_agent_loop_impl(
                                     try:
                                         from routes import chat_helpers as _ov_cha
                                         _ov_after_a = _ov_cha.last_beat_seq(owner)
-                                        _ov_desync_a = owner in getattr(_ov_cha, "_DESYNC_REGROUND", {})
+                                        # BL-004: the store keys under `_desync_key(owner)` (a truthy
+                                        # owner is itself; owner=None resolves to the canonical `gs:<id>`),
+                                        # so the reader MUST use the same key — a raw `owner in …` misses
+                                        # every single-tenant/auth-off queued correction (owner=None).
+                                        _ov_desync_a = _ov_cha._desync_key(owner) in getattr(_ov_cha, "_DESYNC_REGROUND", {})
                                     except Exception:
                                         pass
                                     _ov_sig_a = _OvSignals(
@@ -7153,8 +7162,14 @@ async def _stream_agent_loop_impl(
                                                     "you narrate, and voice only what it states.")
                                                 try:
                                                     from routes import chat_helpers as _ov_chd
-                                                    if owner not in getattr(_ov_chd, "_DESYNC_REGROUND", {}):
-                                                        _ov_chd._DESYNC_REGROUND[owner] = _reground_txt
+                                                    # BL-004: route through the canonical key + the bounded FIFO
+                                                    # queue (dedup + drain telemetry), NOT a raw single-slot store
+                                                    # under `owner` — else a None-owner-with-canonical-session
+                                                    # correction lands under a key that apply_game_framing (which
+                                                    # drains pop(_desync_key(user))) never reads, leaving the
+                                                    # re-ground unvoiced + untelemetered. _reground_enqueue is
+                                                    # fail-soft and dedups, so the old "not in" guard is subsumed.
+                                                    _ov_chd._reground_enqueue(_ov_chd._desync_key(owner), _reground_txt)
                                                 except Exception:
                                                     pass
                                                 if _emitted_visible:
@@ -8479,7 +8494,9 @@ async def _stream_agent_loop_impl(
                 try:
                     from routes import chat_helpers as _ov_ch
                     _ov_beat_after = _ov_ch.last_beat_seq(owner)
-                    _ov_desync = owner in getattr(_ov_ch, "_DESYNC_REGROUND", set())
+                    # BL-004: match the store's `_desync_key(owner)` keying (owner=None ⇒ canonical
+                    # `gs:<id>`); a raw `owner in …` read misses single-tenant/auth-off corrections.
+                    _ov_desync = _ov_ch._desync_key(owner) in getattr(_ov_ch, "_DESYNC_REGROUND", set())
                 except Exception:
                     pass
                 _ov_sig = Signals(
