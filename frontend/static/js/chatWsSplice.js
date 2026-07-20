@@ -68,12 +68,18 @@ let _senderLabel = (modelLabel) => (modelLabel || '');
 // the spinner module + label; injected so a bare test import stays inert. Returns a handle with
 // `.destroy()` (or null). Default is a no-op → the incremental render is unaffected if it's absent.
 let _mountThinkingSpinner = () => null;
+// F1 (concurrent-session consistency): render the observer's USER bubble from the run buffer's leading
+// `user_message` frame, so window B shows the prompting message before its reply. The renderer lives in
+// chat.js (it composes chatRenderer + the reconcile seq/skip helpers); inject it, defaulting to a no-op
+// so a bare test import stays inert.
+let _renderUserMessage = () => null;
 export function _setWsSpliceDeps(deps) {
   if (!deps) return;
   if (deps.renderLiveStream) _renderLiveStream = deps.renderLiveStream;
   if (deps.softReloadHistory) _softReloadHistory = deps.softReloadHistory;
   if (deps.senderLabel) _senderLabel = deps.senderLabel;
   if (deps.mountThinkingSpinner) _mountThinkingSpinner = deps.mountThinkingSpinner;
+  if (deps.renderUserMessage) _renderUserMessage = deps.renderUserMessage;
 }
 
 // ── WebSocket Phase-1 chat splice (ADR 0017 / websocket-phase1-protocol.md §3) ──
@@ -234,6 +240,15 @@ export function _onWsRunBoundary() {
 // The persistent inbound consumer — registered ONCE, drives every `chat` event frame.
 export function _onWsChatFrame(frame) {
   const d = (frame && frame.d) || {};
+  // F1 (concurrent-session consistency): the run buffer leads with the prompting USER turn (seq 0),
+  // so it arrives BEFORE any assistant delta. Render the observer's user bubble AHEAD of the reply
+  // holder (`_wsRound.holder` if a run-boundary already pre-mounted it, else it lands in seq order and
+  // the reply holder mounts after). The SENDER's own bubble already exists → the renderer dedups by
+  // clientMsgId and only stamps {id, seq} (never a duplicate). Cause-before-effect on the WS leg too.
+  if (d.type === 'user_message') {
+    try { _renderUserMessage(d, { beforeEl: (_wsRound && _wsRound.holder) || null }); } catch (_) {}
+    return;
+  }
   // A tool/agent-round marker ⇒ this run is RICH (multi-round). The WS splice renders the whole
   // run into one holder (it has no per-round bubble machinery), so flag it — the `done` branch
   // discards the merged holder and lets softReloadHistory rebuild the N-bubble reconstruction.

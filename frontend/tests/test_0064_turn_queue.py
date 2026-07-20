@@ -78,5 +78,6 @@ def test_chat_route_queues_framed_turns():
     with open(os.path.join(root, "routes", "chat_routes.py"), encoding="utf-8") as f:
         src = f.read()
     assert 'run_key = (getattr(ctx, "canonical_session", None) or session) if _framed else session' in src
-    assert "agent_runs.start(run_key, _safe_stream(), queue=_framed)" in src
+    # F1 added the `lead_event` buffer-seed (cause-before-effect); the queue flag pin is unchanged.
+    assert "agent_runs.start(run_key, _safe_stream(), queue=_framed, lead_event=_lead_event)" in src
     assert '_framed = bool(getattr(ctx, "framed", False))' in src
