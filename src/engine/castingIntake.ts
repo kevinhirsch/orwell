@@ -1,4 +1,5 @@
 import type { UpdateCastingReq, CastingStatusView } from "../ports/GameSession";
+import { nameGenderOf } from "./data/nameGender";
 
 /**
  * The casting interview's incremental intake (feature 0050).
@@ -304,6 +305,8 @@ export function castingFinalizable(intake: CastingIntake): boolean {
 export interface DossierForCoherence {
   /** The PINNED identity spine — authoritative; every other field must agree with it. */
   genderPresentation?: "man" | "woman" | "nonbinary";
+  /** The houseguest's display name — its GIVEN token is checked against the pin (a SOFT flag; F5). */
+  name?: string;
   /** Self-referential subject-descriptive prose (pronouns here describe THE SUBJECT). */
   appearance?: string;
   demeanor?: string;
@@ -462,6 +465,20 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
     }
   }
 
+  // (iv) F5 — NAME vs pinned gender. A SOFT flag only (never fails `ok`): the engine ALLOWS a name to
+  // diverge from the gender (a deliberate diversity choice), and the #1140 re-pick already makes names
+  // cohere by construction upstream — so a mismatch HERE means that re-pick degraded, worth surfacing to
+  // the health rollup, not worth rejecting the dossier. Fires ONLY when the given name reads UNAMBIGUOUSLY
+  // as the OPPOSITE BINARY gender ("James" pinned 'woman'); a unisex name and a `nonbinary` pin never
+  // trip it, so nonbinary is never flattened and the assertion can't force a re-author.
+  if ((gender === "man" || gender === "woman") && typeof d.name === "string" && d.name.trim()) {
+    const given = d.name.trim().split(" ")[0]!;
+    const opposite = gender === "man" ? "woman" : "man";
+    if (nameGenderOf(given) === opposite) {
+      contradictions.push({ field: "name", rule: `given name reads as '${opposite}' but genderPresentation is '${gender}'`, severity: "soft" });
+    }
+  }
+
   const hard = contradictions.filter((c) => c.severity === "hard");
   return {
     ok: hard.length === 0,
@@ -470,19 +487,74 @@ export function validateDossierCoherence(d: DossierForCoherence): DossierCoheren
   };
 }
 
+/** Every gendered self-referential pronoun, so one pass can rewrite them to the pinned gender (F5). */
+const SELF_PRONOUN_RE = /\b(he|him|his|himself|she|her|hers|herself)\b/gi;
+
+/** The pronoun a stray token maps to, per pinned gender. A pin only rewrites the OPPOSITE gender's
+ * pronouns (a `man` pin leaves masculine pronouns alone); a `nonbinary` pin neutralizes BOTH to
+ * singular they/them. Possessive-dominant where a token is ambiguous ("her" → "his"/"their"), which is
+ * the overwhelmingly common case in appearance/mark prose ("her hazel eyes", "his left eyebrow"). */
+const PRONOUN_TARGET: Readonly<Record<"man" | "woman" | "nonbinary", Readonly<Record<string, string>>>> = {
+  man: { she: "he", her: "his", hers: "his", herself: "himself" },
+  woman: { he: "she", him: "her", his: "her", himself: "herself" },
+  nonbinary: {
+    he: "they", him: "them", his: "their", himself: "themself",
+    she: "they", her: "their", hers: "theirs", herself: "themself",
+  },
+};
+
 /**
- * Apply the coherence repair (§S4b): return a COPY of the dossier with only the hard-contradiction
- * fields cleared (`undefined`), so the caller re-authors exactly those — never the whole cast. The pinned
- * `genderPresentation` spine is NEVER cleared (it is authoritative; the prose is what must agree with it).
- * Pure. A dossier with no hard contradiction is returned structurally unchanged.
+ * F5 — rewrite a self-referential field's stray pronouns to the pinned gender, PRESERVING the surrounding
+ * descriptive detail (so "his left eyebrow" on a woman-pinned houseguest becomes "her left eyebrow", not a
+ * blanked field). Case of the first letter is preserved. A token already consistent with the pin is left
+ * untouched. Pure; no allocation beyond the rewritten string.
+ */
+export function scrubSelfReferentialPronouns(text: string, gender: "man" | "woman" | "nonbinary"): string {
+  const map = PRONOUN_TARGET[gender];
+  return text.replace(SELF_PRONOUN_RE, (m) => {
+    const repl = map[m.toLowerCase()];
+    if (!repl) return m; // already consistent with the pin — leave it
+    return m[0] === m[0]!.toUpperCase() ? repl[0]!.toUpperCase() + repl.slice(1) : repl;
+  });
+}
+
+/**
+ * Apply the coherence repair (§S4b): return a COPY of the dossier repaired against the pinned gender.
+ * The portrait-facing DESCRIPTIVE prose (`appearance` and the distinguishing mark) is SCRUBBED — its stray
+ * opposite-gender self-pronouns rewritten to the pin (F5) — so the descriptive detail survives coherent
+ * into the portrait prompt instead of being blanked; every OTHER contradicting field is CLEARED
+ * (`undefined`) for the caller to re-author. The pinned `genderPresentation` spine is NEVER touched (it is
+ * authoritative; the prose is what must agree with it). Pure. A dossier with no hard contradiction is
+ * returned structurally unchanged.
  */
 export function repairDossierCoherence<T extends DossierForCoherence>(d: T): { repaired: T; repairedFields: string[] } {
   const { repairFields } = validateDossierCoherence(d);
   if (repairFields.length === 0) return { repaired: { ...d }, repairedFields: [] };
   const out: Record<string, unknown> = { ...(d as Record<string, unknown>) };
+  const gender = d.genderPresentation;
   for (const field of repairFields) {
     // genderPresentation is the spine — never repaired. Nested facet fields (`a.b`) clear the leaf.
     if (field === "genderPresentation") continue;
+    // F5 — SCRUB the portrait-facing prose to the pin instead of clearing it (requires a pin to scrub
+    // toward; without one, fall through to the clear). `appearance` lives top-level; the mark is labelled
+    // "distinguishingMark" by the validator but the value may sit top-level OR inside physicalCharacteristics.
+    if (gender && field === "appearance" && typeof out.appearance === "string") {
+      out.appearance = scrubSelfReferentialPronouns(out.appearance, gender);
+      continue;
+    }
+    if (gender && field === "distinguishingMark") {
+      if (typeof out.distinguishingMark === "string") {
+        out.distinguishingMark = scrubSelfReferentialPronouns(out.distinguishingMark, gender);
+      }
+      const pc = out.physicalCharacteristics;
+      if (pc && typeof pc === "object" && typeof (pc as Record<string, unknown>).distinguishingMark === "string") {
+        out.physicalCharacteristics = {
+          ...(pc as Record<string, unknown>),
+          distinguishingMark: scrubSelfReferentialPronouns((pc as Record<string, unknown>).distinguishingMark as string, gender),
+        };
+      }
+      continue;
+    }
     if (field.includes(".")) {
       const [root, leaf] = field.split(".") as [string, string];
       const nested = out[root];
