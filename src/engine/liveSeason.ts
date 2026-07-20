@@ -132,8 +132,13 @@ export type Beat =
  * `stagedTrajectoryNeutral`). The crown keeps its comp beat key (so its consequence still folds) and
  * is NOT inert. Callers that gate substantive side-effects (e.g. the ADR-0006 clock, #537) consult this
  * so an inert reveal can never perturb game state the same way it can never perturb the seeded stream.
+ *
+ * `exit-interview` (0130) joins the set: it is a presentation-only producer sit-down (no rng, no fold —
+ * the NPC stance is a read of the already-fixed manner, the record feeds only the 0048 retrospective), so
+ * it must NOT advance the ADR-0006 clock either — an extra eviction-night tick would shift fatigue/rest
+ * into later competitions when time-of-day is enabled, contradicting the feature's no-seeded-state contract.
  */
-const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "day-break"]);
+const INERT_BEATS: ReadonlySet<Beat> = new Set<Beat>(["comp-elimination", "day-break", "exit-interview"]);
 
 /** Whether a beat is an inert, presentation-only staged reveal (no rng / no fold / no clock advance). */
 export function isInertBeat(beat: Beat): boolean {

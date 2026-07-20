@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import type { AdvanceView, SubmitDecisionReq } from "../../src/ports/GameSession";
-import { npcExitStance, EXIT_STANCES } from "../../src/engine/liveSeason";
+import { npcExitStance, EXIT_STANCES, isInertBeat } from "../../src/engine/liveSeason";
 import type { LiveSeasonState } from "../../src/engine/liveSeason";
 import { PLAYER, npc } from "../../src/domain/ids";
 import type { EntityId } from "../../src/domain/ids";
@@ -63,6 +63,17 @@ describe("0130 — an NPC exit stance is derived from the manner (grounded, not 
     const respected = npcExitStance(npc(1), state({ [npc(2)]: { respected: true } }));
     expect(respected).toBe("gracious");
     expect(blindsided).not.toBe(respected); // the DoD: a blindsided evictee reacts differently
+  });
+});
+
+describe("0130 — the exit interview is an INERT beat (no clock advance)", () => {
+  it("is inert, so the ADR-0006 clock never ticks on it (no eviction-night fatigue/rest shift)", () => {
+    // The presentation-only producer sit-down must not advance the in-game clock when time-of-day is
+    // on — an extra tick would move fatigue/rest into later competitions. It sits beside the staged
+    // reveal beats in INERT_BEATS; the crown/ceremony beats stay substantive.
+    expect(isInertBeat("exit-interview")).toBe(true);
+    expect(isInertBeat("comp-elimination")).toBe(true);
+    expect(isInertBeat("eviction")).toBe(false);
   });
 });
 
