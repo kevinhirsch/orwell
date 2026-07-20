@@ -2708,6 +2708,19 @@ async def screen_streamed_scene_break(user, text: str) -> Optional[str]:
             logger.warning("[orwell] scene circuit-breaker HELD a pre-ceremony board-absence fabrication "
                            "for user=%s — cutting the whole scene (%s)", user, _absent)
             return _dir
+        # BL-002 / BL-006 (the msg63 hole): a phantom PLAYER REMOVAL / EXPULSION is verified DIRECTLY
+        # against `playerStatus` and has NO legitimate phase, so — like the board-absence cut above — it
+        # needs no BEFORE baseline. Run it AHEAD of the baseline early-return so a fabricated expulsion
+        # narrated on a turn with no baseline (a fresh process / framing hiccup) is still cut fail-CLOSED,
+        # not left to the draft-level backstop alone. (`_narration_claims_outcome` branch 7 also catches
+        # it, but only once a baseline exists AND the flow reaches past `if not before`.)
+        _removed = _unbacked_player_removal(text, live)
+        if _removed:
+            _dir = _overclaim_directive(_removed, live)
+            _DESYNC_REGROUND[_dkey] = _dir
+            logger.warning("[orwell] scene circuit-breaker HELD a phantom player removal for user=%s — "
+                           "cutting the whole scene (still active on the board)", user)
+            return _dir
         if not before:
             # No baseline this turn — we cannot tell phantom from real, so do NOT cut (the sentence
             # guard + post-turn re-ground remain the backstop). Conservatism on the open set.
@@ -2797,6 +2810,29 @@ def _unbacked_outcome_absent(text: str, live: dict) -> Optional[str]:
         return "an EVICTION / a vote result (no one has been evicted yet)"
     if _CLAIM_WINNER_RE.search(t) and not live.get("finished"):
         return "the SEASON WINNER being crowned (the season is not finished)"
+    return None
+
+
+def _unbacked_player_removal(text: str, live: dict) -> Optional[str]:
+    """BL-002 / BL-006 (2026-07-16 audit): a phantom PLAYER REMOVAL / EXPULSION, verified DIRECTLY
+    against `playerStatus` — the SAME predicate as `_narration_claims_outcome` branch 7, split out so the
+    fail-CLOSED scene breaker can reach it EVEN with no BEFORE baseline this turn.
+
+    Unlike `_unbacked_outcome_absent` (HOH/nom/veto/eviction/winner — all PHASE-SCOPED to a pre-ceremony
+    phase and to a delta the breaker sees before its `if not before` early-return), a player expulsion has
+    NO legitimate phase: it is a fabrication whenever the engine shows the player STILL ACTIVE and the
+    season not finished, regardless of phase and regardless of any before/after delta. Returns a short
+    outcome LABEL (or None). Closed-set only (ADR 0005 #1): a committed removal CLAIM is required, a
+    conditional/hypothetical stands down, an unknown player identity (`playerStatus` None) stands down,
+    and a real removal (`playerStatus != "active"`) stands down — so creative/social prose is never
+    touched and a genuine player eviction narrates normally."""
+    if not isinstance(live, dict):
+        return None
+    if (_CLAIM_PLAYER_EXPULSION_RE.search(text or "")
+            and not _expulsion_claim_is_conditional(text or "")
+            and live.get("playerStatus") == "active"
+            and not live.get("finished")):
+        return "your own REMOVAL / EXPULSION from the game (the engine shows you are STILL in the game)"
     return None
 
 
