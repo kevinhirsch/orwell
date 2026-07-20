@@ -392,6 +392,13 @@ def resolve_endpoint(
         chat_url = build_chat_url(base)
         headers = build_headers(ep.api_key, base)
 
+        # F9: remember the model the operator actually CONFIGURED for this prefix so any silent
+        # substitution below (hidden-model clear → first-chat-model fallback) is surfaced, never a
+        # silent swap. The reported symptom: `utility_model = qwen/qwen3.6-flash` configured, but
+        # `thinkingmachines/inkling` served — because the configured model isn't enabled on the
+        # OpenRouter endpoint, so the picker fell through to the endpoint's first chat model.
+        _configured_model = model
+
         # Discard a configured model the user has since disabled on the
         # endpoint (e.g. a stale `default_model` left pointing at a now-hidden
         # model). Treat it as unset so the picker below selects a live one
@@ -404,6 +411,10 @@ def resolve_endpoint(
                     "[resolve_endpoint] auto-default declined: the configured model %r is "
                     "hidden on endpoint '%s'", model, getattr(ep, "name", None) or ep.id)
                 return fallback_url, fallback_model, fallback_headers
+            logger.warning(
+                "[resolve_endpoint] '%s' configured model %r is HIDDEN/disabled on endpoint '%s' — "
+                "substituting the endpoint's first enabled chat model (config vs served mismatch)",
+                setting_prefix, model, getattr(ep, "name", None) or ep.id)
             model = ""
         # If no (usable) model specified, pick the first enabled chat model.
         if not model:
@@ -411,7 +422,19 @@ def resolve_endpoint(
         if not model and not fallback_model:
             logger.warning('[resolve_endpoint] no usable model (all models hidden or list empty)')
 
-        return chat_url, model or fallback_model, headers
+        # F9: a SILENT SWAP is when a model was configured for this prefix but a DIFFERENT one is
+        # served. Surface it LOUD (an ops-visible WARN on /admin/status logs) so "the configured
+        # utility model is served, OR the substitution is visible" — never a silent swap. This is
+        # additive telemetry only: it changes no resolution, so the served (url, model) is identical.
+        served = model or fallback_model
+        if _configured_model and served and served != _configured_model:
+            logger.warning(
+                "[resolve_endpoint] '%s' model substitution: configured %r is not being served — "
+                "serving %r instead (the configured model is not enabled on endpoint '%s')",
+                setting_prefix, _configured_model, served,
+                getattr(ep, "name", None) or getattr(ep, "id", "?"))
+
+        return chat_url, served, headers
     except Exception as e:
         logger.debug(f"Could not resolve {setting_prefix} endpoint: {e}")
         return fallback_url, fallback_model, fallback_headers

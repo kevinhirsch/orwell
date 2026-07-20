@@ -129,6 +129,58 @@ def faithfulness_enabled() -> bool:
     return faithfulness_mode() != "off"
 
 
+def judge_health(owner: Optional[str] = None) -> dict:
+    """F10 / BL-019 — a Vault-free health readout for the faithfulness judge, for ``/admin/status``.
+
+    The judge silently no-ops when the mode is ``shadow``/``active`` but no model resolves (the live
+    ``_faith_check`` hook just returns on ``_llm is None``) — so an anti-hallucination guard the
+    operator ASKED for was DARK with nothing signalling it. This surfaces the state so it can FAIL
+    LOUD (a health section + a RED alarm) instead of being an invisible no-op.
+
+    Returns Vault-free config posture only::
+
+      {mode, enabled, dedicatedModel, dedicatedEndpointConfigured, modelResolvable, dark}
+
+    ``modelResolvable`` mirrors the live resolution order (``faithfulness`` → ``utility`` → ``default``
+    via ``resolve_endpoint``; the judge can run if ANY yields a usable non-image chat model) using a
+    cheap DB resolve — no network, no model call. ``dark`` == ``enabled and not modelResolvable`` is
+    THE loud signal. Fail-soft: any error degrades to a safe posture and never raises into the poll."""
+    mode = faithfulness_mode()
+    enabled = mode != "off"
+    out: dict = {"mode": mode, "enabled": enabled}
+
+    ded_model = ded_ep = ""
+    try:
+        from src.settings import get_setting
+        ded_model = (get_setting("faithfulness_model", "") or "").strip()
+        ded_ep = (get_setting("faithfulness_endpoint_id", "") or "").strip()
+    except Exception:
+        pass
+    out["dedicatedModel"] = ded_model or None       # PRESENCE/identity only — a model slug, never a secret
+    out["dedicatedEndpointConfigured"] = bool(ded_ep)
+
+    model_resolvable = False
+    try:
+        from src.endpoint_resolver import resolve_endpoint
+        url, model, _ = resolve_endpoint("faithfulness", owner=owner)
+        if not (url and model):
+            url, model, _ = resolve_endpoint("default", owner=owner)
+        if url and model:
+            try:
+                from src.orwell_portraits import _is_image_model
+                model_resolvable = not _is_image_model(model)
+            except Exception:  # failsoft-ok: expected-empty (can't classify the model ⇒ assume a usable chat model resolved; this is the health READER, the `dark` flag is the loud signal)
+                model_resolvable = True
+    except Exception:  # failsoft-ok: expected-empty (this IS the health reporter — an unresolvable model reads as modelResolvable=False, which makes an enabled judge report dark + fires the RED faithfulness-judge-dark alarm; nothing is swallowed)
+        model_resolvable = False
+    out["modelResolvable"] = model_resolvable
+
+    # DARK: the operator enabled the judge (shadow/active) but no model can run it — the guard is
+    # silently a no-op. This is the fail-loud flag the health surface + alarm key on.
+    out["dark"] = bool(enabled and not model_resolvable)
+    return out
+
+
 # Feature 0081 / owner ruling O1 — the configurable fallback for a CLOSED-set slip with NO plausible
 # in-fiction reframe. ALL THREE keep the engine truth UNBENT; they differ only in what the player sees
 # next turn:

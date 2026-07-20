@@ -662,6 +662,28 @@ def _restricts_temperature(model: str) -> bool:
 # Models that support structured thinking — may output </think> without opening tag
 _THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "minimax", "m2-reap", "gemma")
 
+# BL-017: the live ADR-0016 reasoning families that `_THINKING_MODEL_PATTERNS` does NOT already cover.
+# Used ONLY to decide whether to SEND the reasoning-OFF disable (`reasoning:{"enabled":false}`) for a
+# reasoning model behind a NON-openrouter, generic OpenAI-compatible host — kept SEPARATE from
+# `_THINKING_MODEL_PATTERNS` on purpose so the streaming `<think>`-tag handling (which keys on that
+# list) is untouched. The live openrouter path already sends the disable unconditionally
+# (`provider == "openrouter"`), so this only helps non-openrouter deployments and is golden-neutral.
+_REASONING_OFF_EXTRA_PATTERNS = ("deepseek-v", "glm", "thinkingmachines", "inkling")
+
+
+def _reasoning_disable_reaches_provider(provider: str, model: str) -> bool:
+    """True when a ``reasoning:{"enabled":false}`` disable is a valid/honored field to send for this
+    (provider, model). OpenRouter accepts the unified param for any model (harmless if ignored). For a
+    generic OpenAI-compatible provider we only send it for a known reasoning model — the documented
+    ones (`_supports_thinking`) plus the live ADR-0016 families — so a plain chat model stays
+    byte-identical and never 400s on an unknown field."""
+    if provider == "openrouter":
+        return True
+    if _supports_thinking(model):
+        return True
+    m = (model or "").lower()
+    return any(p in m for p in _REASONING_OFF_EXTRA_PATTERNS)
+
 def _supports_thinking(model: str) -> bool:
     """Check if model supports structured thinking output."""
     if not model:
@@ -728,7 +750,12 @@ def _apply_reasoning_budget(payload: Dict, provider: str, model: str, policy: Op
     if reasoning is None:
         if provider == "openai" and _uses_max_completion_tokens(model):
             return  # o-series reasoning is intrinsic — cannot be turned off; leave the default
-        if provider == "openrouter" or _supports_thinking(model):
+        # BL-017: send the strongest reasoning-OFF signal wherever it is a valid field. On OpenRouter
+        # this is unconditional (the live path); for a generic OpenAI-compatible host it fires for a
+        # known reasoning model incl. the live ADR-0016 families (glm / deepseek-v / thinkingmachines)
+        # that the older `_supports_thinking` list missed — so a reasoning model there no longer bursts
+        # its default (billing output as reasoning) when a call class asked for OFF.
+        if _reasoning_disable_reaches_provider(provider, model):
             payload["reasoning"] = {"enabled": False}
         return
     eff = reasoning.get("effort") if isinstance(reasoning, dict) else None

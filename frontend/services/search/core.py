@@ -29,6 +29,7 @@ from .providers import (
     google_pse_search,
     tavily_search,
     serper_search,
+    searxng_configured,
     _get_search_settings,
     _get_provider_key,
     _get_result_count,
@@ -117,15 +118,35 @@ _FALLBACK_ORDER = ["duckduckgo"]
 
 
 def _build_provider_chain(primary: str) -> List[str]:
-    """Build ordered list: primary first, then configured/default fallbacks."""
-    chain = [primary]
+    """Build ordered list: primary first, then configured/default fallbacks.
+
+    BL-058 / F8: an UNCONFIGURED SearXNG (default `search_url == ""` → the localhost:8080 default that
+    isn't running) is dropped from the chain entirely — anywhere it appears — so we degrade CLEANLY to
+    the no-key fallback instead of hammering a refused connection twice per query and spamming the log
+    with `[Errno 111] Connection refused`. When it IS configured it behaves exactly as before.
+    """
+    searxng_ok = searxng_configured()
+
+    def _usable(p) -> bool:
+        if not p or p == "disabled":
+            return False
+        if p == "searxng" and not searxng_ok:
+            return False
+        return True
+
+    chain: List[str] = []
+    if _usable(primary):
+        chain.append(primary)
+    elif primary == "searxng" and not searxng_ok:
+        logger.debug("SearXNG selected but unconfigured (no search_url) — degrading to fallback providers")
+
     settings = _get_search_settings()
     user_chain = settings.get("search_fallback_chain") or []
     if isinstance(user_chain, str):
         user_chain = [s.strip() for s in user_chain.split(",") if s.strip()]
     fallbacks = user_chain if user_chain else _FALLBACK_ORDER
     for fb in fallbacks:
-        if fb and fb != primary and fb not in chain and fb != "disabled":
+        if _usable(fb) and fb not in chain:
             chain.append(fb)
     return chain
 
