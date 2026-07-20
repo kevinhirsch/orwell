@@ -205,6 +205,12 @@ def _auto_resolve(p):
         return {"kind": kind, "appeal": appeals[0]}
     if kind == "juror-question":
         return {"kind": kind, "statement": "What was your biggest move?"}
+    if kind == "exit-interview":
+        # 0130 — the player-evictee's producer sit-down. The pending carries `stances`
+        # (gracious/defiant/bitter), NOT the generic `options` list; pick the first legal
+        # posture + throwaway words so the finish loop clears the eviction and reaches endgame.
+        stances = p.get("stances") or ["gracious"]
+        return {"kind": kind, "stance": stances[0], "message": "Take care."}
     if kind == "self-evict":
         # Never volunteer the player out of the game during a fast-forward.
         return None
