@@ -1740,7 +1740,7 @@ def _redact_producer_view_output(output: str) -> str:
     if redacted is view:
         return output
     try:
-        return json.dumps(redacted, indent=2)
+        return json.dumps(redacted, indent=2, ensure_ascii=False)
     except (TypeError, ValueError):
         return output
 

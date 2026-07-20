@@ -346,6 +346,36 @@ def test_strip_pregame_context_scrubs_the_engine_casting_status_disclosure():
     assert "You are the show's producer." in blob
 
 
+def test_scrub_producer_fields_is_structural_not_string_scanning():
+    """A player-entered interview note containing a literal `]` must NOT defeat the scrub. The old
+    string-scan stopped at the first `]` (even inside a quoted note), leaving the producer-only tail
+    in the retained createCharacter args → premiere leak. The scrub now parses the JSON structurally
+    (Greptile P1, #1707), so a `]`/`"` inside a value can't terminate the array early."""
+    from src.agent_loop import _scrub_producer_fields
+
+    # `]` inside a quoted note, with a producer-only sentinel AFTER the bracket.
+    args = json.dumps({
+        "name": "Player",
+        "backstory": f"ran a summer camp {CASTING_SENTINEL}",
+        "interviewNotes": [f"private ] {CASTING_SENTINEL}", "target is the veteran"],
+        "vocation": "teacher",
+    })
+    out = _scrub_producer_fields(args)
+    assert CASTING_SENTINEL not in out, "producer-only tail survived the `]`-in-note scrub"
+    assert "interviewNotes" not in out and "backstory" not in out
+    # Public facets the model legitimately needs are untouched.
+    assert "teacher" in out and "Player" in out
+
+    # A JSON fragment embedded in prose (falls to the string-aware regex) — still no leak.
+    frag = f'note {{"interviewNotes":["a ] {CASTING_SENTINEL}","b"],"vocation":"nurse"}} end'
+    out2 = _scrub_producer_fields(frag)
+    assert CASTING_SENTINEL not in out2 and "nurse" in out2
+
+    # No producer keys ⇒ byte-identical (never mangles normal content).
+    clean = '{"vocation":"chef","biography":"likes food"}'
+    assert _scrub_producer_fields(clean) == clean
+
+
 def test_purge_that_removes_every_user_turn_inserts_the_readiness_bridge():
     """2026-07-17 (the finalize-turn 400s): purging every casting-stamped turn also removes
     the player's own finalize line, leaving [system, assistant(tool_calls), tool] — a shape

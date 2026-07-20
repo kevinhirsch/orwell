@@ -1964,20 +1964,56 @@ _CASTING_STATUS_DISCLOSURE_RE = re.compile(r"(?im)^.*CASTING STATUS.*$\n?")
 # JSON-ish strings; strip the string/array-valued producer entries (and any dangling comma) so no
 # producer material reaches the premiere continuation. These keys never name public roster facets (the
 # cast uses `background`/`biography`/`vocation`), so the scrub is safe on any pre-game→premiere content.
+_CASTING_PRODUCER_KEYS = ("story", "motivation", "backstory", "privateStrategy", "interviewNotes")
+# String-AWARE fallback regex — used only when the structural JSON parse below can't load the text (a
+# fragment embedded in prose). The string values already skip escaped quotes; the interviewNotes ARRAY is
+# matched as a sequence of quoted strings, so a `]` INSIDE a quoted note (e.g. "private ] secret") is
+# consumed by the string atom rather than mistaken for the array terminator (Greptile P1, #1707).
 _CASTING_PRODUCER_FIELD_RE = re.compile(
     r',?\s*"(?:story|motivation|backstory|privateStrategy)"\s*:\s*"(?:[^"\\]|\\.)*"'
-    r'|,?\s*"interviewNotes"\s*:\s*\[(?:[^\]\\]|\\.)*\]'
+    r'|,?\s*"interviewNotes"\s*:\s*\[(?:\s*"(?:[^"\\]|\\.)*"\s*,?)*\s*\]'
 )
 _CASTING_DANGLING_COMMA_RE = re.compile(r",(\s*[}\]])")
 
 
+def _deep_drop_producer_keys(obj):
+    """Recursively delete the producer-only keys anywhere in a parsed JSON structure (in place).
+    Returns True if anything was removed."""
+    removed = False
+    if isinstance(obj, dict):
+        for k in list(obj.keys()):
+            if k in _CASTING_PRODUCER_KEYS:
+                del obj[k]
+                removed = True
+            elif _deep_drop_producer_keys(obj[k]):
+                removed = True
+    elif isinstance(obj, list):
+        for item in obj:
+            if _deep_drop_producer_keys(item):
+                removed = True
+    return removed
+
+
 def _scrub_producer_fields(text):
     """Remove the producer-only casting key/value entries from a JSON-ish string, fail-soft. Returns the
-    input unchanged when it carries none of them (byte-identical for normal content)."""
+    input unchanged when it carries none of them (byte-identical for normal content).
+
+    STRUCTURAL first: when the whole string parses as JSON (the retained createCharacter tool RESULT and
+    tool-call ARGUMENTS are both JSON), delete the producer keys at any depth and re-serialize — airtight
+    regardless of the values, so a `]`/`"` inside an interview note cannot defeat it. A string-aware regex
+    is the fallback only for a fragment that won't parse."""
     if not isinstance(text, str) or not text:
         return text
-    if not any(k in text for k in ("story", "motivation", "backstory", "privateStrategy", "interviewNotes")):
+    if not any(k in text for k in _CASTING_PRODUCER_KEYS):
         return text
+    stripped = text.strip()
+    if stripped[:1] in ("{", "["):
+        try:
+            obj = json.loads(stripped)
+        except (ValueError, TypeError):
+            obj = None
+        if obj is not None:
+            return json.dumps(obj, ensure_ascii=False) if _deep_drop_producer_keys(obj) else text
     scrubbed = _CASTING_PRODUCER_FIELD_RE.sub("", text)
     # A removed leading entry can leave `{,"a":…}` / `[,…]` or a trailing `,}` — tidy so the JSON the
     # model reads stays well-formed (the goal is a clean context, not just an absent token).
