@@ -1010,19 +1010,27 @@ def run_once(**kw) -> GoldenDriver:
             d.assert_replay_contract()
     except Exception:
         # Diagnostic (issue #1713): on ANY play failure, dump the engine + FE log tails BEFORE
-        # shutdown, so CI reveals WHICH engine call blocked — e.g. the casting-finalize →
-        # champagne-premiere ~300s ORWELL_ENGINE_TIMEOUT hang, whose blocking call is otherwise
-        # invisible in the job's stdout. Best-effort + read-only; it re-raises, never masks.
-        for lbl, path, keep in (("engine", d.engine_log, 5000), ("fe", d.fe_log, 3000)):
+        # shutdown so CI reveals what the finalize turn actually did. The first dump (#1716) proved
+        # the ENGINE is idle during the ~300s (only "listening"), so this is NOT an engine-side
+        # compute hang — the FE access log floods with `GET /api/history` + state polls (the driver's
+        # post-turn wait), which DROWNED the signal in a raw tail. Filter that poll noise so the
+        # chat_stream / agent-loop / tool-call / error / traceback lines survive. Best-effort +
+        # read-only; it re-raises, never masks.
+        _poll_noise = re.compile(
+            r'(GET|HEAD) /api/(history|orwell/(game-session|state|whereabouts)|admin/health|'
+            r'chat/(events|resume)|default-chat)')
+        for lbl, path, keep_lines in (("engine", d.engine_log, 120), ("fe", d.fe_log, 120)):
             try:
-                # Bounded read: seek near EOF and read only ~keep chars' worth of bytes (≤4 B/char
-                # in UTF-8) so a long-running replay's multi-MB log never spikes memory on the
-                # failure path.
+                # Bounded read (≤~256 KB back so a multi-MB log never spikes memory), then drop the
+                # high-frequency poll lines and keep the last `keep_lines` MEANINGFUL lines.
                 with open(path, "rb") as fh:
                     fh.seek(0, os.SEEK_END)
-                    fh.seek(max(0, fh.tell() - keep * 4))
-                    tail = fh.read().decode("utf-8", errors="replace")[-keep:]
-                print(f"\n──── {lbl}.log tail (run_once failure) ────\n{tail}", flush=True)
+                    fh.seek(max(0, fh.tell() - 262144))
+                    raw = fh.read().decode("utf-8", errors="replace")
+                lines = [ln for ln in raw.splitlines() if not _poll_noise.search(ln)]
+                tail = "\n".join(lines[-keep_lines:])
+                print(f"\n──── {lbl}.log tail (run_once failure; poll-noise filtered) ────\n{tail}",
+                      flush=True)
             except OSError:
                 pass
         raise
