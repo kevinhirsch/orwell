@@ -41,9 +41,9 @@ A remarkable pattern: **at least nine fully-built, tested systems produce no sen
 
 | System | State | Evidence |
 |---|---|---|
-| AI Showrunner (0101/#1401) | Built, dark — absent from deploy opt-in defaults | `GameSessionAdapter.ts:619`; no line in `orwell-env-defaults.sh` |
-| Secret-barter economy (0099 hidden half) | Built, dark | same flag-gap |
-| Gossip drift (#1397) | Built, dark | `gossip.ts:180-358`; no `ORWELL_GOSSIP_DRIFT` in defaults |
+| AI Showrunner (0101/#1401) | **Live in deploy defaults (Q2, #1779)** — Phase-1 observe-only; `SHOWRUNNER_REWEIGHT` stays off | `GameSessionAdapter.ts:619`; `ORWELL_SHOWRUNNER=1` in `orwell-env-defaults.sh` |
+| Secret-barter economy (0099 hidden half) | **Live in deploy defaults (Q2, #1779)** | `secretBarterConstants.ts:14-18`; `ORWELL_SECRET_BARTER=1` in `orwell-env-defaults.sh` |
+| Gossip drift (#1397) | **Live in deploy defaults (Q2, #1779)** | `gossip.ts:180-358`; `ORWELL_GOSSIP_DRIFT=1` in `orwell-env-defaults.sh` |
 | Season notoriety voice (0104) | `notorietySummary()` has **zero consumers** — legend clauses authored "for the narrator to voice" are dead code | `notoriety.ts:55-56`, `GameSessionAdapter.ts:7163` |
 | Jury house (0100) | Whole second society compresses to one hidden scalar; the "bearing" the module doc promises was never built | `juryHouse.ts:11-33` vs. `momentPrompts.ts:955-969` |
 | Vote deduction (0110) | Wrong-blame dramatic irony is engine-terminal — never voiced, hinted, or unsealed | `voteDeduction.ts:6-18` |
@@ -372,7 +372,7 @@ Independent convergences across miners, experts, and lenses:
 | Q | Ruling |
 |---|---|
 | Q1 | **Exit door APPROVED, player-only.** The structurally-filtered eviction-night exit package (speaker = evictee; subjects = the player, prior evictees, facts already in the player's knowledge layer (the same predicate as the mechanism text — one boundary, not two); adversarial-test-gated like producerVault; flag-gated off-by-default) becomes the second sanctioned Vault door. The gossip-diffusion variant ("…Airs") is NOT approved. |
-| Q2 | **All three dark flags go live in deploy defaults:** `ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`, `ORWELL_SHOWRUNNER` Phase-1 (observe-only; REWEIGHT stays off). |
+| Q2 | **All three dark flags go live in deploy defaults:** `ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`, `ORWELL_SHOWRUNNER` Phase-1 (observe-only; REWEIGHT stays off). **IMPLEMENTED** — #1779: the three lines added to `deploy/orwell-env-defaults.sh` (the single shared source), `SHOWRUNNER_REWEIGHT` untouched/off, in-code defaults unchanged. |
 | Q3 | **Full cross-season carry-in** (content, never outcomes): legend precedes you + cold cases + production memory. Flag-gated + seeded each. |
 | Q4 | **Seeded partial reaction pan** — the camera catches a temperature-rolled subset each ceremony, never all 15. |
 | Q5 | **Engagement-biased surfacing is OUT** — no player-derived input influences any engine selection, including presentation routing. (F4 ships without step 2.) |
