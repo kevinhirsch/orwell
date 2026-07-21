@@ -1422,6 +1422,15 @@ async def retry_progression_after_stale(owner, exc, retry_fn, *, action):
 _DEFERRED_FOLDS: dict = {}
 _DEFERRED_FOLDS_MAX = 4
 
+# #1731 (C2) drain serialization — under real two-window concurrency two drains for the SAME owner can
+# interleave (each `_backfill_with_cas` call, from either window, drains at its top). Without a guard both
+# could execute the same deferred entry AND both increment its shared `attempts` counter — double-firing
+# the engine call and exhausting the retry budget early, tripping the dropped-fold alarm for a fold the
+# other drain may have just committed. This per-owner in-flight set (mirroring `_fallback_in_flight`)
+# makes the drain single-flight PER OWNER: a second concurrent drain for the same owner no-ops (skip),
+# so exactly one drain owns each entry's execute → increment → budget-check → drop/alarm lifecycle.
+_draining_folds: set = set()
+
 # #1731 (C2) / audit A-S3 — a deferred fold is retried opportunistically, but NOT forever. Under
 # sustained two-window concurrency the board can keep moving under EVERY drain attempt; re-queuing a
 # fold without bound would silently retry one that will never commit (a scene's only consequence fold
@@ -1477,60 +1486,76 @@ async def _drain_deferred_folds(user) -> None:
     (a RED-eligible `sync:dropped-fold` health event + a ledger note), never silently retried forever
     (#1731 requirement #2 / AC-2). Fail-open: never raises — a genuine NON-stale failure on a retry is
     logged (with the scene's description, for forensic recovery) and the entry is dropped, since that
-    class of failure cannot be resolved by retrying."""
+    class of failure cannot be resolved by retrying.
+
+    #1731 (C2): the drain is SINGLE-FLIGHT PER OWNER — two concurrent drains for the same owner (real
+    under two-window concurrency; each window's `_backfill_with_cas` drains at its top) would otherwise
+    both execute the same deferred entry and double-increment its shared `attempts`, exhausting the
+    budget early and tripping the dropped-fold alarm for a fold the other drain may have just committed.
+    A second concurrent drain for the same owner no-ops (skip), so exactly one drain owns each entry's
+    execute → increment → budget-check → drop/alarm lifecycle. The guard is atomic in the asyncio loop
+    (no await between the membership check and the add)."""
     key = _beat_seq_key(user)
-    pending = _DEFERRED_FOLDS.get(key)
-    if not pending:
+    if key in _draining_folds:
+        return  # another drain for this owner is in flight — skip (never double-execute an entry)
+    if not _DEFERRED_FOLDS.get(key):
         return
-    remaining = []
-    for entry in pending:
-        try:
-            result = await entry["fn"](*entry["args"], expected_beat_seq=last_beat_seq(user), **entry["kwargs"])
-        except Exception as e:
-            if _is_stale_beat_error(e):
-                await _handle_stale_beat(user, e)
-                entry["attempts"] = entry.get("attempts", 0) + 1
-                if entry["attempts"] >= _DEFERRED_FOLD_MAX_DRAINS:
-                    # #1731 (C2) / A-S3: repeated stale-409s on the SAME deferred fold across successive
-                    # drains = sustained two-window concurrency the retry budget cannot outrun. FAIL-CLOSED
-                    # and SURFACE the genuine loss rather than re-queue it forever (which would silently
-                    # swallow a scene's only consequence fold — mandate #4 / I4): count it AND fire the
-                    # RED-eligible `sync:dropped-fold` health event, then DROP it. Bounded latency became a
-                    # bounded, ACCOUNTED loss — never an invisible one. Fail-soft — telemetry never breaks
-                    # the reconcile machinery.
-                    logger.error(
-                        "[orwell] deferred fold (%s) exhausted its retry budget after %d stale drains -- "
-                        "surfacing a GENUINE dropped fold (sustained two-window concurrency) user=%s",
-                        entry.get("desc"), entry["attempts"], user)
-                    try:
-                        from src import orwell_sync_ledger as _sl
-                        _sl.note_stale_rejection(
-                            user, dropped_fold=True,
-                            cause="deferred-fold retry budget exhausted (sustained two-window concurrency)")
-                    except Exception:
-                        pass
-                    continue  # DROP -- do not re-queue a fold that will not commit
-                remaining.append(entry)  # still contested, within budget -- leave queued for next time
-                continue
-            logger.warning("[orwell] deferred fold retry (%s) failed non-stale, dropping: %s user=%s",
-                            entry.get("desc"), _exc_detail(e), user)
-            # RC6 S6b (#1599): a deferred fold that dies on a NON-stale error is dropped for good — the
-            # scene's only hidden-impact record is lost and nothing else will retry it. Count it + fire
-            # the RED-eligible `sync:dropped-fold` so the loss surfaces instead of a bare WARN. Fail-soft.
+    _draining_folds.add(key)
+    try:
+        pending = _DEFERRED_FOLDS.get(key)
+        if not pending:
+            return
+        remaining = []
+        for entry in pending:
             try:
-                from src import orwell_sync_ledger as _sl
-                _sl.note_stale_rejection(
-                    user, dropped_fold=True,
-                    cause="deferred-fold non-stale terminal drop (unretryable)")
-            except Exception:
-                pass
-            continue
-        _refresh_beat_seq(user, result if isinstance(result, dict) else {})
-        logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)
-    if remaining:
-        _DEFERRED_FOLDS[key] = remaining
-    else:
-        _DEFERRED_FOLDS.pop(key, None)
+                result = await entry["fn"](*entry["args"], expected_beat_seq=last_beat_seq(user), **entry["kwargs"])
+            except Exception as e:
+                if _is_stale_beat_error(e):
+                    await _handle_stale_beat(user, e)
+                    entry["attempts"] = entry.get("attempts", 0) + 1
+                    if entry["attempts"] >= _DEFERRED_FOLD_MAX_DRAINS:
+                        # #1731 (C2) / A-S3: repeated stale-409s on the SAME deferred fold across successive
+                        # drains = sustained two-window concurrency the retry budget cannot outrun. FAIL-CLOSED
+                        # and SURFACE the genuine loss rather than re-queue it forever (which would silently
+                        # swallow a scene's only consequence fold — mandate #4 / I4): count it AND fire the
+                        # RED-eligible `sync:dropped-fold` health event, then DROP it. Bounded latency became a
+                        # bounded, ACCOUNTED loss — never an invisible one. Fail-soft — telemetry never breaks
+                        # the reconcile machinery.
+                        logger.error(
+                            "[orwell] deferred fold (%s) exhausted its retry budget after %d stale drains -- "
+                            "surfacing a GENUINE dropped fold (sustained two-window concurrency) user=%s",
+                            entry.get("desc"), entry["attempts"], user)
+                        try:
+                            from src import orwell_sync_ledger as _sl
+                            _sl.note_stale_rejection(
+                                user, dropped_fold=True,
+                                cause="deferred-fold retry budget exhausted (sustained two-window concurrency)")
+                        except Exception:
+                            pass
+                        continue  # DROP -- do not re-queue a fold that will not commit
+                    remaining.append(entry)  # still contested, within budget -- leave queued for next time
+                    continue
+                logger.warning("[orwell] deferred fold retry (%s) failed non-stale, dropping: %s user=%s",
+                                entry.get("desc"), _exc_detail(e), user)
+                # RC6 S6b (#1599): a deferred fold that dies on a NON-stale error is dropped for good — the
+                # scene's only hidden-impact record is lost and nothing else will retry it. Count it + fire
+                # the RED-eligible `sync:dropped-fold` so the loss surfaces instead of a bare WARN. Fail-soft.
+                try:
+                    from src import orwell_sync_ledger as _sl
+                    _sl.note_stale_rejection(
+                        user, dropped_fold=True,
+                        cause="deferred-fold non-stale terminal drop (unretryable)")
+                except Exception:
+                    pass
+                continue
+            _refresh_beat_seq(user, result if isinstance(result, dict) else {})
+            logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)
+        if remaining:
+            _DEFERRED_FOLDS[key] = remaining
+        else:
+            _DEFERRED_FOLDS.pop(key, None)
+    finally:
+        _draining_folds.discard(key)
 
 
 def deferred_fold_count(user) -> int:

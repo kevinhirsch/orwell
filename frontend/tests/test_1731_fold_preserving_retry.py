@@ -53,12 +53,14 @@ def _clean_state():
     chat_helpers._LAST_BEAT_SIG.clear()
     chat_helpers._DESYNC_REGROUND.clear()
     chat_helpers._DEFERRED_FOLDS.clear()
+    chat_helpers._draining_folds.clear()
     chat_helpers.reset_stale_beat_rejections()
     yield
     chat_helpers._LAST_BEAT_SEQ.clear()
     chat_helpers._LAST_BEAT_SIG.clear()
     chat_helpers._DESYNC_REGROUND.clear()
     chat_helpers._DEFERRED_FOLDS.clear()
+    chat_helpers._draining_folds.clear()
     chat_helpers.reset_stale_beat_rejections()
 
 
@@ -208,6 +210,55 @@ def test_deferred_fold_that_lands_on_an_early_drain_never_surfaces_the_alarm(mon
     assert not surfaced, "a deferred-then-landed fold is NOT a dropped fold — the alarm stays silent"
 
 
+# ── 3b. CONCURRENCY (Greptile P1): two concurrent drains for the SAME owner must not double-execute ─ #
+
+def test_two_concurrent_drains_do_not_double_execute_or_premature_alarm(monkeypatch):
+    """Under real two-window concurrency both windows can drain the same owner's queue at once (each
+    `_backfill_with_cas` drains at its top). Without a per-owner single-flight guard both drains would
+    execute the SAME deferred entry AND double-increment its shared `attempts` — double-firing the engine
+    call and tripping the dropped-fold alarm for a fold the other drain may have committed. The guard
+    makes the drain single-flight per owner: exactly one execution, no double-count, no premature alarm."""
+    _patch_reconcile_reads(monkeypatch, now=9)
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 11
+
+    surfaced = []
+    real_note = sync_ledger.note_stale_rejection
+
+    def spy_note(user, n=1, *args, **kwargs):
+        if kwargs.get("dropped_fold"):
+            surfaced.append(kwargs.get("cause"))
+        return real_note(user, n, *args, **kwargs)
+
+    monkeypatch.setattr(sync_ledger, "note_stale_rejection", spy_note)
+
+    scene_key = chat_helpers._mint_idempotency_key()
+    executed = {"n": 0}
+
+    async def slow_record(*a, expected_beat_seq=None, idempotency_key=None, **k):
+        executed["n"] += 1
+        # Yield control so a concurrently-scheduled second drain runs WHILE this entry is in flight —
+        # that second drain must see the in-flight guard and skip, not re-execute this same entry.
+        await asyncio.sleep(0.02)
+        return {"recorded": True, "beatSeq": 12}
+
+    chat_helpers._defer_fold("owner", slow_record, ("a bond",),
+                             {"idempotency_key": scene_key, "user": "owner"}, desc="record_interaction")
+    assert chat_helpers.deferred_fold_count("owner") == 1
+
+    async def _both():
+        await asyncio.gather(
+            chat_helpers._drain_deferred_folds("owner"),
+            chat_helpers._drain_deferred_folds("owner"),
+        )
+
+    _run(_both())
+
+    assert executed["n"] == 1, "the deferred entry executed EXACTLY once despite two concurrent drains"
+    assert chat_helpers.deferred_fold_count("owner") == 0, "the fold landed and the queue drained"
+    assert not surfaced, "no premature dropped-fold alarm — the fold committed, it was never a loss"
+    assert chat_helpers._draining_folds == set(), "the in-flight guard released after the drain"
+
+
 # ── 4. source-pins: the record path forwards + reuses idempotency_key, and the drain is bounded ──── #
 
 def test_record_path_forwards_and_reuses_idempotency_key_source_pin():
@@ -239,3 +290,8 @@ def test_drain_is_bounded_and_surfaces_the_loss_source_pin():
     assert 'entry["attempts"] = entry.get("attempts", 0) + 1' in src
     assert 'if entry["attempts"] >= _DEFERRED_FOLD_MAX_DRAINS:' in src
     assert "dropped_fold=True" in src
+    # the drain is single-flight PER OWNER (Greptile P1): a concurrent drain skips, and the guard is
+    # released in a finally so exactly one drain owns each entry's execute/increment/drop lifecycle.
+    assert "_draining_folds" in src
+    assert "if key in _draining_folds:" in src
+    assert "_draining_folds.discard(key)" in src
