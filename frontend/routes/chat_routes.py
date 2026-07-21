@@ -1894,32 +1894,10 @@ def setup_chat_routes(
                                     except Exception:
                                         pass
 
-                                # 0108: under the golden seam, AWAIT the post-turn record belt
-                                # instead of fire-and-forget — its extraction LLM call takes
-                                # seconds live and lands the fold AFTER the driver's stability
-                                # window (record #11: the fold and the NEXT turn's prompt fetch
-                                # swapped order vs replay, forking premiere state). Awaiting
-                                # pins the fold INSIDE the turn on both sides. Production keeps
-                                # the fire-and-forget path byte-identically.
-                                _golden_on = False
-                                try:
-                                    from src import golden_path as _gp
-                                    _golden_on = _gp.active()
-                                except Exception:
-                                    pass
-                                if _golden_on:
-                                    try:
-                                        if await ensure_turn_recorded(
-                                                ctx.user, message, full_response, _agent_tools_called):
-                                            from src import orwell_game_session
-                                            orwell_game_session.publish_game_updated(ctx.user)
-                                    except Exception:
-                                        pass
-                                else:
-                                    _rec_task = asyncio.create_task(ensure_turn_recorded(
-                                        ctx.user, message, full_response, _agent_tools_called,
-                                    ))
-                                    _rec_task.add_done_callback(_push_after_fallback)
+                                _rec_task = asyncio.create_task(ensure_turn_recorded(
+                                    ctx.user, message, full_response, _agent_tools_called,
+                                ))
+                                _rec_task.add_done_callback(_push_after_fallback)
                             if full_response:
                                 # M2-6: the beat's IN-WORLD moment (from this turn's framing state)
                                 # stamps the transcript timestamp; None pre-game (casting) ⇒ neutral.

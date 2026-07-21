@@ -47,7 +47,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from src import golden_path
 from src.constants import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -55,9 +54,9 @@ logger = logging.getLogger(__name__)
 # ── CI/operator image-spend KILL-SWITCH (belt-and-suspenders) ──────────────────────────────
 # `ORWELL_DISABLE_IMAGE_GEN` is a HARD, environment-level off switch for ALL portrait/image
 # generation. Set it in any context that holds a real, keyed image-capable provider but must
-# PROVABLY never spend on images — the keyed nightly CI workflows (golden-nightly /
-# live-harness-nightly, which drive a full `createCharacter` casting flow), the golden
-# record/replay driver, or an operator smoke run. When set, `image_generation_available` reports
+# PROVABLY never spend on images — the keyed nightly CI workflow (live-harness-nightly, which
+# drives a full `createCharacter` casting flow) or an operator smoke run. When set,
+# `image_generation_available` reports
 # graceful absence (the roster/onboarding correctly expect no portraits — no error surface) AND
 # every generation entry point early-returns a no-op BEFORE any settings read, catalog probe, or
 # provider POST, so even a direct/forced call can't reach the image API (defense in depth).
@@ -2117,14 +2116,6 @@ def kickoff_generation(prompts: list, user: Optional[str]) -> None:
     async request path); if called with no loop it runs synchronously to completion. Either
     way it is best-effort and swallows failures.
     """
-    # 0108: quiesced under golden record/replay — the pipeline's provider-capability probe is
-    # live-network (record's live endpoint passes it, replay's dead-end endpoint fails it, so the
-    # 16 getPortraitPrompt reads + engine write-backs run in ONE mode only, shifting seeded state
-    # for everything downstream — the ledger-diff finding). Fail-soft by design: placeholders
-    # stand, exactly as when no image provider is configured.
-    if golden_path.active():
-        logger.info("[portraits] generation skipped: golden record/replay mode (0108 determinism)")
-        return
     if not prompts:
         return
     try:
@@ -2329,10 +2320,6 @@ def kickoff_authored_reshoot(hid, user: Optional[str]) -> bool:
     A face whose fingerprint MATCHES the current prompt is left alone (generate-once holds — the
     backfill's own idempotency skips it). The player's literal uploaded photo is never touched
     (`discard_portraits` locks `source == "upload"`). Best-effort/fail-soft throughout."""
-    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation/backfill.
-    if golden_path.active():
-        logger.info("[portraits] authored re-shoot skipped: golden record/replay mode (0108)")
-        return False
     if not hid:
         return False
 
@@ -2456,11 +2443,6 @@ def kickoff_backfill(missing_ids: list, user: Optional[str], force: bool = False
     manual lever ("Generate cast portraits"): a deliberate click means "run now", so it
     bypasses the debounce window — but still STAMPS it, so an auto-poll seconds later can't
     pile on. Never blocks the caller: scheduled on the running loop like `kickoff_generation`."""
-    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation (the
-    # provider probe is mode-asymmetric and the write-backs shift seeded state mid-walk).
-    if golden_path.active():
-        logger.info("[portraits] backfill skipped: golden record/replay mode (0108 determinism)")
-        return False
     if not missing_ids:
         return False
     if not force and not backfill_allowed(user):
@@ -2878,15 +2860,6 @@ def ensure_reconciler_started() -> bool:
     a second start never double-runs (the single-task guard). A task whose loop died
     (test harnesses / reloads) is replaced rather than wedging the guard forever."""
     global _RECONCILER_TASK
-    # 0108: quiesced under golden record/replay — same rationale as kickoff_generation/
-    # kickoff_backfill, but this is the WALL-CLOCK path: the 5-min sweep fired mid-record
-    # (a record outlives the interval; a replay doesn't), generated real portraits through
-    # `backfill_missing` → `generate_and_store`, and recorded image-shown beats the replay
-    # can never reproduce (dead-end provider) — every later event id/beatSeq shifted one
-    # and the r3 replay missed (`evt:image:6`, the record-only npc portrait beat).
-    if golden_path.active():
-        logger.info("[portraits] reconciler skipped: golden record/replay mode (0108 determinism)")
-        return False
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

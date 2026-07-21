@@ -252,19 +252,6 @@ async def extract_and_store(
     if not endpoint_url or not model:
         logger.debug("[memory-extract] No model or URL provided, skipping")
         return
-    # 0108: quiesce under the golden record/replay seam — this fires on a cadence with a
-    # sliding context window, so record and replay sample DIFFERENT windows and the request
-    # key can never match (the eighth GLM record's replay missed on exactly this call).
-    # Same class as the zeitgeist/offscreen/portrait quiesce; a skipped extraction is the
-    # documented no-op path (the game build barely uses assistant memory anyway).
-    try:
-        from src import golden_path as _gp
-        if _gp.active():
-            logger.debug("[memory-extract] golden record/replay active — skipping")
-            return
-    except Exception:
-        pass
-
     # N9 half 2 / BB F16 (2026-07-16 live-playthrough forensics): a redteam scene inside the
     # Orwell GAME (in-character Big Brother roleplay) was harvested by this extractor as durable
     # USER facts — "User is highly competitive.", "User is confrontational." — sourced from
@@ -276,9 +263,8 @@ async def extract_and_store(
     # a safe bar to hold (the prompt has no game-phase awareness), so the minimal-correct fix is
     # to skip extraction ENTIRELY for the bound game session — covering both the live game and
     # the pre-game casting interview (an OOC producer channel, but still game material, never
-    # player biography; both live on the SAME canonical session before "started"). This mirrors
-    # the golden-path quiesce just above: "a skipped extraction is the documented no-op path —
-    # the game build barely uses assistant memory anyway."
+    # player biography; both live on the SAME canonical session before "started"). A skipped
+    # extraction is the documented no-op path — the game build barely uses assistant memory anyway.
     try:
         from src import orwell_game_session as _ogs
         _sess_id = getattr(session, "id", None)

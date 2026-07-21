@@ -20,8 +20,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable, Optional
 
-from src import golden_path
-
 logger = logging.getLogger(__name__)
 
 # ~7-day one-time lag (§11 #1): the cast moves in slightly behind, so the snapshot is settled and fully
@@ -288,13 +286,6 @@ def kickoff_capture(owner: Optional[str]) -> None:
     """Fire-and-forget the move-in zeitgeist capture in the background, ONCE per season start. Never
     blocks game start; never raises into the caller. A per-user in-flight guard stops a rapid second
     createCharacter from double-capturing the same season."""
-    # 0108: quiesced under golden record/replay — this task embeds LIVE web-search text in its
-    # prompt (inherently non-reproducible) and its engine write bumps beatSeq on a background
-    # schedule, both of which break the deterministic-replay contract. Fail-soft by design: the
-    # engine's deterministic floor simply stands, exactly as when no provider is configured.
-    if golden_path.active():
-        logger.info("[zeitgeist] skipped: golden record/replay mode (0108 determinism)")
-        return
     k = _key(owner)
     if k in _IN_FLIGHT:
         return

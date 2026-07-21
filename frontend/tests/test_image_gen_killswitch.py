@@ -1,13 +1,13 @@
 """Money-safety: the ORWELL_DISABLE_IMAGE_GEN kill-switch (image-spend hard off).
 
-The keyed nightly CI workflows (golden-nightly / live-harness-nightly) and the golden
-record/replay driver all drive a full `createCharacter` casting flow, which fire-and-forget
-kicks portrait generation. DEFAULT_SETTINGS ships image gen ON with a real model, so without a
-hard off switch those keyed runs could POST ~15 real portraits per night — real image-API spend.
+The keyed nightly CI workflow (live-harness-nightly) drives a full `createCharacter` casting flow,
+which fire-and-forget kicks portrait generation. DEFAULT_SETTINGS ships image gen ON with a real
+model, so without a hard off switch that keyed run could POST ~15 real portraits per night — real
+image-API spend.
 
 This gate proves the kill-switch is belt-and-suspenders: BOTH the availability gate AND every
 generation entry point honor it, and a kill-switched run makes NO image call at all. Plus a
-control (unset ⇒ behavior unchanged) and a source-pin that both workflows + the golden driver set it.
+control (unset ⇒ behavior unchanged) and a source-pin that the workflow sets it.
 
 Name-agnostic (roles only). Generation is monkeypatched — no image API, no engine.
 """
@@ -161,14 +161,13 @@ def test_unset_preserves_generation(tmp_portraits, monkeypatch):
         assert (tmp_portraits / "alice" / f"{hid}.png").exists()
 
 
-# --- source-pin: the keyed workflows set the kill-switch -------------------------------------
+# --- source-pin: the keyed workflow sets the kill-switch -------------------------------------
 
 @pytest.mark.parametrize("rel", [
-    ".github/workflows/golden-nightly.yml",
     ".github/workflows/live-harness-nightly.yml",
 ])
 def test_keyed_workflows_set_killswitch(rel):
-    """Both keyed CI workflows must set ORWELL_DISABLE_IMAGE_GEN (workflow-level env) so no keyed
+    """The keyed CI workflow must set ORWELL_DISABLE_IMAGE_GEN (workflow-level env) so no keyed
     step can leak image spend. Source-pin (text) + a light structural YAML check when pyyaml is
     available."""
     path = _REPO_ROOT / rel

@@ -218,20 +218,7 @@ def test_run_authoring_with_a_stub_model_writes_the_vault_free_overlay(monkeypat
 
 # ── the kickoff never raises + the engine wrapper exists ─────────────────────────
 
-def test_kickoff_is_quiesced_under_golden_mode(monkeypatch):
-    monkeypatch.setattr(P.golden_path, "active", lambda: True)
-    called = {"ran": False}
-
-    async def _run_authoring(owner):  # pragma: no cover - must never be called under golden
-        called["ran"] = True
-        return {}
-    monkeypatch.setattr(P, "run_authoring", _run_authoring)
-    P.kickoff_producer_authoring("user-golden")  # returns immediately, never raises
-    assert called["ran"] is False
-
-
 def test_kickoff_runs_the_driver_and_never_raises(monkeypatch):
-    monkeypatch.setattr(P.golden_path, "active", lambda: False)
     ran = {}
 
     async def _run_authoring(owner):
