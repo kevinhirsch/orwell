@@ -10,6 +10,8 @@
 > **Guiding principle:** "Fan out cognition (many cheap, scoped, data-only calls); funnel
 > narration (one voice)." Preserves ADR 0003 (one fluent narrator), ADR 0005 (closed/open split),
 > ADR 0019 (per-NPC knowledge scoping), and ADR 0021 (one-voice decision).
+> **Umbrella:** ADR **0022** (authored cognition and narration voice) is the unified design record
+> uniting #1736/#1738/#1739; this feature is arm B's implementer spec (S1/S2/S3).
 
 ## 1. Summary
 

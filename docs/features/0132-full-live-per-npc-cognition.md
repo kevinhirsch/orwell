@@ -8,6 +8,8 @@
 > (salience-gated fallback mode). **Source:** Sonder design discussion + R3 cost-benefit analysis;
 > owner request. **Hard constraints inherited (ADRs 0003/0005/0019/0021):** cognition-only,
 > never outcome; fan out cognition, funnel narration; knowledge-scoped per call; soul-anchored.
+> **Umbrella:** ADR **0022** (authored cognition and narration voice) is the unified design record
+> uniting #1736/#1738/#1739; this feature is arm C's implementer spec (the full-fidelity mode).
 
 ## 1. Summary
 
