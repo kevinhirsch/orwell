@@ -36,6 +36,24 @@ its un-forced chance every time. Locations are current as of this doc.
 | **Ceremony-narration steer** (F8 #1015, `_ceremony_narration_steer`) | Advance/pre-resolve returned a nomination/veto-ceremony beat with content | *Voicing* the ceremony | Noms appear only in the HUD; an NPC asks "when did the ceremony happen?" |
 | **`_pre_resolve_npc_ceremony`** (`frontend/routes/chat_helpers.py`, C-02/C-03) | Pre-turn framing finds the game sitting at an NPC-owned ceremony/comp beat with no player pending (social-runway gated) | The `advanceGame` that resolves an NPC-owned beat | NPC-owned beats never resolve, or the alternative — the model fast-forwards them unnarrated |
 | **#1154 forced `tool_choice`** (proactive, `_forced_tool_choice_for_beat`) | Framed phase ∈ comp/ceremony force set, no advance yet this turn, **no open player pending**, model honors `tool_choice`, kill-switch on | `advanceGame` (forced ON THE WIRE, before the model can skip it) | Falls back to the reactive belts above |
+| **L-F3 interactive-beat loop break** (#1742, `_loop_break_streak_update` → `_ADVANCE_LOOP_BREAK_NUDGE` / `_PENDING_LOOP_BREAK_NUDGE`) | The SAME framed gate (`_LAST_FRAMED_BEAT_KEY`, which folds in an open pending's `kind`) re-presented `_LOOP_BREAK_THRESHOLD` (3) turns running to an **ENGAGED** player (a real, non-empty reply every turn) with no progress — **independent of `_is_lull`/`_stale`**, never during a social-runway hold | An interactive beat's exact expected phrasing/action (a comp buzz-in, a premiere intro cue) that never matched the player's genuine replies | The gate re-presents forever: the F3 repro looped an identical HOH-comp trivia question 15 straight turns because "Let's keep the week moving — what's next?" was never read as an answer — the lull gate stayed blind since the reply, while clearly meant to move on, didn't hit `_LULL_READY_RE` |
+
+The L-F3 belt fires from the SAME `_want_advance` OR-chain the plain stall-nudge / L39b ladder
+already use (it just adds one more alternative predicate), so once armed it climbs the same
+escalation — a text rung, then the L39b forced `advanceGame` — with one mandate-compliant fork:
+when the re-presented gate is backed by an **open player pending** (the comp-buzz-in case, AC #3),
+the escalation text is `_PENDING_LOOP_BREAK_NUDGE`, not a bare "call advanceGame" — forcing
+`advanceGame` against an open pending is a documented **no-op** (the engine returns the pending
+unchanged) and the belt must never invent the player's binding pick (the mandate). Instead it tells
+the model to stop inventing sub-questions and reduce the ask to the engine's own literal legal
+options. With no pending open (a premiere intro, a plain advance-phase beat), `_ADVANCE_LOOP_BREAK_NUDGE`
+simply pushes the model to call `advanceGame` and treats "keep moving/what's next/skip it"-style
+replies as advance intent even when they miss `_LULL_READY_RE`'s exact phrasing (AC #2). A companion
+fix in `_commit_advance_silently` closes the gap that let the original repro run 15 turns: a
+successful-but-no-op `advanceGame` call against an unresolved pending used to be read as real
+progress and silently reset every stall/staleness counter, so the escalation ladder could never
+actually climb; it now compares the pending `kind` before/after the call and reports `False` (no
+progress) when the SAME pending is still open.
 
 ### 2.2 The consequence loop (social play must fold)
 
@@ -176,7 +194,8 @@ Stable belt names (the registry — keep these tokens stable across refactors):
 `auto-confide`, `auto-expose-secret`, `auto-trade-secret`, `auto-move-player`, `auto-move-npc`,
 `premiere-meet-belt`, `casting-record-belt`, `casting-nudge`, `casting-finalize-force`,
 `eviction-reveal-steer`, `ceremony-narration-steer`, `pre-resolve-npc-ceremony`,
-`headshot-on-file-framing`, `house-entry-gate-hold`.
+`headshot-on-file-framing`, `house-entry-gate-hold`, `loop-break-advance` (#1742, no pending open),
+`loop-break-pending` (#1742, an open pending's ask was escalated instead of advanced past).
 
 Notes: pre-turn belts (framing, pre-resolve) and pre-game belts land on the next recorded turn's
 entry (the buffer holds them); under `AUTH_ENABLED=false` the ledger keys everything under the same
