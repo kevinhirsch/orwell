@@ -4622,7 +4622,8 @@ async def _presence_wall_guard(text: str, owner) -> str:
         return text
 
 
-def _mirror_wall_drop(round_response: str, before: str, after: str) -> str:
+def _mirror_wall_drop(round_response: str, before: str, after: str,
+                      split_pattern: str = r"(?<=[.!?\n])") -> str:
     """Greptile P1 (#1746) — durability fix. `_knowledge_wall_guard`/`_presence_wall_guard` only
     filter what streams to the CLIENT (`full_response`); `round_response` — the raw per-round
     accumulator — was left untouched, and `cleaned_round`/`round_texts` (the persisted/reload text,
@@ -4641,11 +4642,22 @@ def _mirror_wall_drop(round_response: str, before: str, after: str) -> str:
     most-recently-appended tail — an earlier, unrelated repeat of identical prose elsewhere in the
     round is never touched. A sentence that can't be found at all (e.g. the guards saw a
     leak-scrubbed form that differs from the still-raw `round_response`) is safely skipped — this
-    never corrupts `round_response`, it only fails to mirror that one edge case."""
+    never corrupts `round_response`, it only fails to mirror that one edge case.
+
+    Greptile P1 (#1774, follow-up): `split_pattern` MUST match the boundary the caller's OWN
+    filter split on, or the two-pointer walk misreads a partial (clause-level) drop as a
+    whole-unit drop and over-deletes a SURVIVING clause too. The default `[.!?\\n]` is the
+    knowledge/presence wall guards' own boundary — unchanged, so those call sites stay
+    byte-identical. `_scrub_game_leak`/`_scrub_inline_planning_leak` additionally split on `;`
+    (the #1109(b) semicolon-clause fix — "You can shade, spin, or play a character; the engine
+    will take it from there." drops only the second clause), so their mirror calls MUST pass
+    `split_pattern=r"(?<=[.!?\\n;])"` — the identical pattern those scrubs use — or a
+    semicolon-clause drop would coarsen to a [.!?\\n]-only "sentence" here and delete the
+    surviving first clause right along with the dropped second one."""
     if after == before or not before:
         return round_response  # nothing dropped — the hot path
-    b_parts = re.split(r"(?<=[.!?\n])", before)
-    a_parts = re.split(r"(?<=[.!?\n])", after)
+    b_parts = re.split(split_pattern, before)
+    a_parts = re.split(split_pattern, after)
     ai = 0
     for bp in b_parts:
         if ai < len(a_parts) and a_parts[ai] == bp:
@@ -6732,7 +6744,13 @@ async def _stream_agent_loop_impl(
                                 # scrubbed reasoning/jargon leak — or an operator-aside `_scrub_game_leak`
                                 # already dropped — REAPPEARED verbatim after reload even though the
                                 # player never saw it live (the ADR-0015 live-vs-reload drift class).
-                                round_response = _mirror_wall_drop(round_response, _complete, _clean)
+                                # Greptile P1 (#1774, follow-up): `_scrub_game_leak`/
+                                # `_scrub_inline_planning_leak` also split on `;` (the #1109(b)
+                                # semicolon-clause fix), so the mirror MUST use the SAME boundary — the
+                                # default `[.!?\n]`-only split would coarsen a clause-level drop to a
+                                # whole-"sentence" drop and delete a surviving clause too.
+                                round_response = _mirror_wall_drop(
+                                    round_response, _complete, _clean, split_pattern=r"(?<=[.!?\n;])")
                                 if _clean:
                                     # A2: run the whole-scene circuit-breaker + 0065 Part C per-sentence
                                     # pre-emission outcome guard (see `_emit_guarded_scene`'s docstring for
@@ -6888,8 +6906,10 @@ async def _stream_agent_loop_impl(
                 at_bubble_start=not _round_visible_emitted)
             # Greptile P1 (#1774): same mirror fix as the mid-loop emit above — the trailing
             # (possibly unterminated) flush must ALSO propagate its scrub drop into round_response
-            # before `cleaned_round` derives from it a few lines down.
-            round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)
+            # before `cleaned_round` derives from it a few lines down. Same semicolon-aware
+            # split_pattern as the mid-loop call — `_scrub_game_leak` clause-drops on `;` too.
+            round_response = _mirror_wall_drop(
+                round_response, _pre_scrub_tail, _clean, split_pattern=r"(?<=[.!?\n;])")
             _game_buf = ""
             if _clean:
                 # 0065 Part C + A2 — the SAME scene circuit-breaker + per-sentence guard as the mid-loop

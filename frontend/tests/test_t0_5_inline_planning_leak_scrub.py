@@ -193,16 +193,73 @@ def test_wholly_scrubbed_round_leaves_round_response_empty_after_mirror():
 
 def test_mirror_call_wired_at_both_scrub_call_sites_before_cleaned_round_derives():
     src = _read("src", "agent_loop.py")
-    # both streaming call sites must mirror the scrub's drop back into round_response...
-    assert src.count("round_response = _mirror_wall_drop(round_response, _complete, _clean)") == 1
+    # both streaming call sites must mirror the scrub's drop back into round_response, using the
+    # SAME semicolon-aware split_pattern the scrubs themselves split on (#1774 follow-up — see the
+    # semicolon-clause tests below for why the default [.!?\n]-only pattern is wrong here)...
     assert src.count(
-        "round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)") == 1
+        "round_response = _mirror_wall_drop(\n"
+        "                                    round_response, _complete, _clean, "
+        'split_pattern=r"(?<=[.!?\\n;])")') == 1
+    assert src.count(
+        "round_response = _mirror_wall_drop(\n"
+        '                round_response, _pre_scrub_tail, _clean, split_pattern=r"(?<=[.!?\\n;])")'
+    ) == 1
     # ...and both mirror calls must appear BEFORE `cleaned_round` is derived from round_response,
     # so the persisted/reload text reflects the mirrored drop.
     cleaned_round_at = src.index("cleaned_round = strip_tool_blocks(round_response).strip()")
     mid_loop_mirror_at = src.index(
-        "round_response = _mirror_wall_drop(round_response, _complete, _clean)")
+        "round_response = _mirror_wall_drop(\n                                    round_response, _complete, _clean")
     flush_mirror_at = src.index(
-        "round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)")
+        "round_response = _mirror_wall_drop(\n                round_response, _pre_scrub_tail, _clean")
     assert mid_loop_mirror_at < cleaned_round_at
     assert flush_mirror_at < cleaned_round_at
+
+
+def test_wall_guard_mirror_calls_are_unchanged_default_split_pattern():
+    # #1774 follow-up ask: verify the knowledge/presence wall guards' OWN mirror calls are
+    # untouched — they must keep the original 3-arg form (default split_pattern=[.!?\n], matching
+    # `screen_knowledge_wall`/`screen_presence_wall`'s own boundary), never the semicolon-aware one.
+    src = _read("src", "agent_loop.py")
+    assert src.count(
+        "round_response = _mirror_wall_drop(round_response, _guarded.text, _guarded_text)") == 2
+
+
+# ── Greptile P1 (#1774 follow-up) — the mirror's split boundary must match the SCRUB's boundary ──
+# `_scrub_game_leak`/`_scrub_inline_planning_leak` additionally split on `;` (the #1109(b)
+# semicolon-clause fix: "You can shade, spin, or play a character; the engine will take it from
+# there." drops only the machinery clause, keeping the leading one). The mirror fix above used
+# `_mirror_wall_drop`'s DEFAULT split (`[.!?\n]` only, the wall guards' boundary) — for a
+# semicolon-joined sentence with no `.`/`!`/`?`/`\n` before the final period, that coarsens the
+# whole multi-clause sentence into ONE part, so the walker misreads a partial (clause-level) drop
+# as a whole-sentence drop and over-deletes the SURVIVING clause from `round_response` too — the
+# inverse of the original bug (live keeps the good clauses; reload loses ALL of them).
+
+def test_semicolon_clause_drop_preserves_survivors_and_matches_live():
+    complete = "The room settles; holder is null; Griffin stays."
+    clean = _scrub_game_leak(complete)
+    clean = _scrub_inline_planning_leak(clean, reasoning_empty=True, at_bubble_start=False)
+    # only the jargon-bearing CLAUSE is dropped — both real clauses survive live.
+    assert clean == "The room settles; Griffin stays."
+
+    # The FIXED mirror (semicolon-aware split_pattern — what the streaming call sites now pass).
+    round_response = _mirror_wall_drop(complete, complete, clean, split_pattern=r"(?<=[.!?\n;])")
+    reload_text = strip_tool_blocks(round_response).strip()
+
+    assert reload_text == clean, "live == reload for a scrubbed semicolon-clause turn"
+    assert "The room settles;" in reload_text, "the leading surviving clause must NOT be deleted"
+    assert "Griffin stays." in reload_text, "the trailing surviving clause must NOT be deleted"
+    assert "holder is null" not in reload_text
+
+
+def test_mirror_without_semicolon_aware_pattern_would_over_delete_survivors():
+    # Documents the bug this follow-up fixes: the wall guards' DEFAULT [.!?\n]-only split, applied
+    # to a semicolon-joined sentence, coarsens the clause-level drop into a whole-sentence drop and
+    # wipes the surviving clauses too — round_response ends up EMPTY even though `clean` (what
+    # streamed live) still has real narration in it.
+    complete = "The room settles; holder is null; Griffin stays."
+    clean = "The room settles; Griffin stays."
+    broken = _mirror_wall_drop(complete, complete, clean)  # default split_pattern — no `;`
+    assert broken.strip() == "", (
+        "pins the pre-fix behavior: without the semicolon-aware split_pattern the whole sentence "
+        "is wiped from round_response, not just the dropped clause"
+    )
