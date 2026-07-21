@@ -1207,7 +1207,10 @@ export class GameSessionAdapter implements GameSession {
     this.onPersist?.();
   }
 
-  private inOneCommit<T>(fn: () => T): T {
+  // Greptile P2 (issue #1725 follow-up) — constrained to `{ beatSeq: number }` (every real caller
+  // already returns an `AdvanceView`, which requires it) so the compiler enforces the invariant the
+  // post-commit patch below relies on, instead of a runtime duck-type check.
+  private inOneCommit<T extends { beatSeq: number }>(fn: () => T): T {
     this.persistDepth++;
     let out: T;
     try {
@@ -1227,14 +1230,10 @@ export class GameSessionAdapter implements GameSession {
       // compare-and-swap token — a response reporting the PRE-commit counter makes the FE's own very
       // next mutation self-409 as stale, even with zero concurrency (audit finding: 5 closed-set
       // reconciliations / a false-positive desync-burst alarm in a single-window session). Patch it to
-      // the counter's CURRENT (fully-committed, post-tick) value now that the whole commit has landed.
-      // Only touches an object shape that already carries `beatSeq` (every `inOneCommit` caller returns
-      // an `AdvanceView`), so this is a VALUE correction, never a new field — and it only runs after a
-      // successful commit (a refused/failed `onPersist` throws on the line above, before this runs, so
-      // `out` is never returned in that case regardless).
-      if (out && typeof out === "object" && "beatSeq" in out && typeof (out as { beatSeq: unknown }).beatSeq === "number") {
-        (out as { beatSeq: number }).beatSeq = this.beatSeq;
-      }
+      // the counter's CURRENT (fully-committed, post-tick) value now that the whole commit has landed —
+      // a VALUE correction, never a new field — and it only runs after a successful commit (a refused/
+      // failed `onPersist` throws on the line above, before this runs, so `out` is never returned then).
+      out.beatSeq = this.beatSeq;
     }
     return out;
   }
