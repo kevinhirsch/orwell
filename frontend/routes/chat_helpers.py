@@ -1121,16 +1121,24 @@ def last_framed_producer_name(user):
 # consumed (popped) once by `build_chat_context` below, which appends it as the caller's OWN LAST message
 # — AFTER the transcript, nearest generation — instead of folding it into the leading system-prompt stack
 # `gm_prompt` rides (the measured "lost in the middle" region on a long turn). Keyed the SAME "default"-
-# fallback way as `_LAST_FRAMED_PRODUCER_NAME`.
+# fallback way as `_LAST_FRAMED_PRODUCER_NAME`, BUT keyed by SESSION, not user (see below).
+#
+# #1752 (race fix) — keyed by `session_id`, NOT `user`. The stash (in `apply_game_framing`) and the pop
+# (in `build_chat_context`) share one `session_id` in the same call scope, but there are awaits between
+# them. Two overlapping turns for the SAME user necessarily run on DISTINCT sessions (ADR 0008/0012:
+# same-session sends are serialized by the FE single-flight outbox; genuine concurrency is cross-session
+# — a second tab/device). Keyed by `user`, the later turn's framing would overwrite the slot and the
+# earlier turn would pop the wrong block (or None). Keyed by `session_id`, each turn pops its OWN block.
 _LAST_FRAMED_HARD_CONSTRAINTS: dict = {}
 
 
-def _stash_hard_constraints(user, mp) -> None:
-    """Stash this turn's Vault-free terminal HARD-CONSTRAINTS block (#1735). Fail-open: a non-mapping
-    prompt, a missing field, or a blank string CLEARS any previously stashed value for this user — unlike
-    the producer name (stable per season), a stale hard-constraints block from an earlier turn must never
-    silently ride forward onto a turn whose own fetch produced nothing."""
-    _key = user or "default"
+def _stash_hard_constraints(session_id, mp) -> None:
+    """Stash this turn's Vault-free terminal HARD-CONSTRAINTS block (#1735), keyed by `session_id`
+    (#1752 race fix). Fail-open: a non-mapping prompt, a missing field, or a blank string CLEARS any
+    previously stashed value for THIS session — unlike the producer name (stable per season), a stale
+    hard-constraints block from an earlier turn must never silently ride forward onto a turn whose own
+    fetch produced nothing."""
+    _key = session_id or "default"
     _hc = mp.get("hardConstraints") if isinstance(mp, dict) else None
     if isinstance(_hc, str) and _hc.strip():
         _LAST_FRAMED_HARD_CONSTRAINTS[_key] = _hc
@@ -1138,10 +1146,11 @@ def _stash_hard_constraints(user, mp) -> None:
         _LAST_FRAMED_HARD_CONSTRAINTS.pop(_key, None)
 
 
-def pop_framed_hard_constraints(user) -> Optional[str]:
-    """Consume this turn's stashed terminal HARD-CONSTRAINTS block (#1735) — ONE-SHOT (pop, not get), so
-    a hiccup on the NEXT turn's framing read can never silently replay a stale pin from an earlier turn."""
-    return _LAST_FRAMED_HARD_CONSTRAINTS.pop(user or "default", None)
+def pop_framed_hard_constraints(session_id) -> Optional[str]:
+    """Consume this session's stashed terminal HARD-CONSTRAINTS block (#1735) — ONE-SHOT (pop, not get),
+    keyed by `session_id` (#1752 race fix), so a concurrent same-user turn on another session can never
+    steal this turn's block, and a hiccup on the NEXT turn can never replay a stale pin."""
+    return _LAST_FRAMED_HARD_CONSTRAINTS.pop(session_id or "default", None)
 
 # #1411 — the engine-SIGNALED required lever for the framed beat (`GameStateView.requiredLever`),
 # captured from the SAME framing state read that builds `_LAST_FRAMED_BEAT_KEY` (zero extra engine
@@ -4209,13 +4218,13 @@ async def apply_game_framing(
             mp = await orwell_engine.get_moment_prompt(moment, user=user)
             gm_prompt = (mp or {}).get("systemPrompt") or FALLBACK_GM_PROMPT
             _stash_producer_name(user, mp)  # #1626: the season's producer byline for the client
-            _stash_hard_constraints(user, mp)  # #1735 (A4): this turn's terminal HARD-CONSTRAINTS block
+            _stash_hard_constraints(session_id, mp)  # #1735 (A4) / #1752: this turn's terminal HARD-CONSTRAINTS block, keyed by session
         except Exception as e:
             # The season IS live (state proved it) — a moment-prompt hiccup must not become a
             # feeds-down message. Stay in character with a generic, non-fabricating frame.
             logger.warning("[orwell] moment-prompt fetch failed (game live) for user=%s: %s", _gkey, e)
             gm_prompt = FALLBACK_GM_PROMPT
-            _LAST_FRAMED_HARD_CONSTRAINTS.pop(user or "default", None)  # #1735: never replay a stale pin
+            _LAST_FRAMED_HARD_CONSTRAINTS.pop(session_id or "default", None)  # #1735/#1752: never replay a stale pin
         if session_id is not None:
             _SESSION_GAME_FRAMED.add(session_id)
             _bind_canonical_game_session(user, session_id)  # 0064: converge every device here
@@ -5341,7 +5350,7 @@ async def build_chat_context(
     # reasoning-off mid-tier model reliably obeys (the measured live A/B). Deliberately separate from
     # `preface`/`gm_prompt`, which stay the leading system-prompt stack. One-shot consume (pop): absent
     # ⇒ no message appended, byte-identical to before this fix (pre-game, or a framing hiccup this turn).
-    _hard_constraints = pop_framed_hard_constraints(user)
+    _hard_constraints = pop_framed_hard_constraints(session_id)
     if _hard_constraints:
         messages = messages + [{"role": "system", "content": _hard_constraints}]
 
