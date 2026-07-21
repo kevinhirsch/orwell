@@ -171,7 +171,28 @@ that decision.
 | TUN-9 | ADR 0016 Seedream-portrait follow-on (separate, not-yet-built lever). |
 | TUN-10 | Enrichment-flag deploy-parity for dev/playtest rigs — set the deploy's flag envs (`ORWELL_CAMPAIGNS`, `ORWELL_TRAJECTORIES`, `ORWELL_STRATEGIC_CADENCE`, `ORWELL_SCHEME_TARGETS`, `ORWELL_CONFESSIONAL_DEPTH`, `ORWELL_NPC_DEAL_OFFERS`; `ORWELL_DEAL_DEPTH` stays off pending its live-loop reconciliation) in the dev runner/playtest driver so playtests exercise the un-impoverished society. **Never flip code defaults** (calibration neutrality). |
 
-### T7 — Owner decisions pending (nothing else unblocks these)
+### T7 — Owner decisions — **RULED 2026-07-21 (evening session)**
+
+| ID | Ruling |
+|---|---|
+| D1 | **APPROVED** — engine chyrons for official outcomes; AI demoted to color on those beats (scoped ADR 0003 amendment). |
+| D2 | **APPROVED** — non-blocking nightly probe canary. |
+| D3 | **APPROVED, pinning + a direct z.ai endpoint.** Probe/pin whatever the configured narrator default resolves to — `settings.py` ships GLM-4.7 OOB today, while the ADR-0016 README row also records a glm-5.2 retarget the ADR text calls removed; T0-4's implementer reconciles that doc drift while probing the real endpoints. |
+| D4 | **Footage Pool: APPROVED**, gated on the casting ledger (T0-6) landing first. |
+| D5 | **Blindside autopsy: PARKED** — revisit after the Footage Pool + an adversarial redaction suite. |
+| D6 | **CONFIRMED** — deploy-parity flags on dev/playtest rigs, env-level only. |
+| D7 | **OVERRULED dual-transport permanence: GO FULL WEBSOCKET.** Consolidate to WS as the one transport (ADR 0017/0018 revision; the parked one-channel proposal un-parks in WS form as a Wave-2+ item). The ADR 0017/0018 + decisions-README text revision is OWED and rides the Wave-2 implementation PR — until the consolidation lands, the SSE leg stays live and CI-blocking, so current-state docs remain accurate. |
+| D8 | **GRANTED** — allowlist entries for the two by-design fail-soft lanes, RED-with-auto-corrected stays mandatory. |
+| D9 | **DONE** — owner reports all exposed keys rotated; obligation closed. |
+| D10 | **CONFIRMED re-scope + NEW MANDATE:** casting must be deep AND fast — **<10s finalize-to-house**, per-NPC parallel fan-out (15-wide, no content bundling), **all 15 deep profiles complete BEFORE the house door opens** (achieved via early kickoff during the casting interview), and the #1713 premiere-path block bounded. **This work LEADS Wave 1** (it INCLUDES T0-6, so D4's T0-6 dependency is satisfied by step 0); the rest follows after it merges. |
+
+Further rulings same session: **TUN-1** leave (goats-reach-F2 = realism) · **TUN-2** all three Phase-2
+time/sleep extensions parked · **0097/0098/0103** stay parked with built cores, now flagged
+**PO-GATED** (0098 additionally held on the outcomes-untouchable principle, explicitly re-upheld —
+the standing principle stands: no player input modulates a seeded outcome distribution, not even
+variance). Round-2 moonshot (divergent ideation on mined intelligence) commissioned same session.
+
+#### (Original decision cards, for the record)
 
 | ID | Decision | Blocks |
 |---|---|---|
@@ -261,9 +282,10 @@ verify bot claims against code personally.
 
 ## Sequencing summary (the short version)
 
-1. **Now (no owner decision needed):** T0-1 comparator fix · T0-2 beats-terminate-themselves
+0. **FIRST (owner order 2026-07-21): the casting mandate** — FacetLedger + 15-wide genesis + early kickoff + strict entry gate + the #1713 premiere-block fix, targeting <10s finalize-to-house with full depth pre-authored. In flight; the rest of Wave 1 dispatches after it merges.
+1. **Then (no owner decision needed):** T0-1 comparator fix · T0-2 beats-terminate-themselves
    (server-side, no UI change — needs no ADR 0003 ruling) · T0-5 reasoning scrub · T0-4 probe
-   (telemetry arm) · #1729-B1 recorder gate · T0-6 casting ledger (+#1734) · TUN-10 rig parity.
+   (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity. (T0-6 + #1734 are inside step 0, not here.)
 2. **On D1 (Q1):** T0-3 chyrons — the remaining heart of Wave 1 — then the T0-7 exit playtest.
 3. **Wave 2+:** T1-1 (belt demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log) → T1-5 (on
    D4) → T1-6 → T1-7 → T1-8 (on D5).
