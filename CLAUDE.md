@@ -100,9 +100,9 @@ leak-prone build is a **failure state**, not a partial success.
    guarantee stays literally true; `tests/unit/producerVault.test.ts` is the gate. Do **not** "fix" it
    as a leak — it is intentional; do **not** widen it (never the player channel, never an advertised
    tool, never always-on). (2) **The eviction-night exit package (owner-ruled 2026-07-21, Q1 —
-   player-only):** a structurally-filtered unseal at the player's OWN eviction — speaker = the
-   evictee; subjects limited to the player, prior evictees, and facts already in the player's
-   knowledge layer; never living players' secrets; adversarial-test-gated like `producerVault`;
+   player-only AUDIENCE):** a structurally-filtered unseal at EACH eviction night — speaker = the
+   departing evictee, airing to the player alone; subjects limited to the player, prior evictees,
+   and facts already in the player's knowledge layer; never living players' secrets; adversarial-test-gated like `producerVault`;
    flag-gated off-by-default. Spec: `docs/design/2026-07-21-moonshot-round2-divergent-slate.md`
    §5 Q1. Never extend Vault exposure beyond these two doors.
 3. **Anti-sycophancy.** The deterministic core + seeded randomness decide outcomes; the LLM
