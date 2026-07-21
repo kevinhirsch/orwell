@@ -45,10 +45,14 @@ describe("L27b — full-fidelity recall N turns later (across records + a real r
     const before = new GameSessionRegistry(new FileSaveStore(dir));
     const sb = before.sandboxFor(USER);
     sb.session.createCharacter({ playerName: "The Player", seed: 71 });
+    sb.session.advanceGame(); // close the premiere circle so movePlayer works (0111) — co-locate for BL-014
     const ally = sb.session.livingIds().find((id) => id !== PLAYER)!;
     const others = sb.session.livingIds().filter((id) => id !== PLAYER && id !== ally);
 
-    // Turn N: record the rich detail with the ally.
+    // Turn N: record the rich detail with the ally. BL-014: a scene is recorded from the PLAYER's room,
+    // and the engine now drops a named witness its own occupancy places elsewhere — co-locate so the
+    // ally is genuinely co-present for the scene the player and ally shared.
+    sb.session.movePlayer(sb.session.occupancy()!.get(ally)!);
     sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, ally], kind: "bonding", content: RICH_DETAIL });
 
     // …then MANY intervening turns of other social play (the "N turns later" pressure). The rich
@@ -88,12 +92,16 @@ describe("L27b — full-fidelity recall N turns later (across records + a real r
     const before = new GameSessionRegistry(new FileSaveStore(dir));
     const sb = before.sandboxFor(USER);
     sb.session.createCharacter({ playerName: "The Player", seed: 72 });
+    sb.session.advanceGame(); // close the premiere circle so movePlayer works (0111) — co-locate for BL-014
     const ally = sb.session.livingIds().find((id) => id !== PLAYER)!;
 
     // The hidden NPC→player edge BEFORE the weight-bearing scene.
     const beforeEdge = { ...sb.engine.relationships.edge(ally, PLAYER) };
 
     // A betrayal is weight-bearing: its `kind` folds the hidden impact (the 0023 consequence fold).
+    // BL-014: co-locate so the ally is a genuine co-present participant (the engine drops a named
+    // witness placed elsewhere, which would otherwise skip the directed fold under test).
+    sb.session.movePlayer(sb.session.occupancy()!.get(ally)!);
     sb.commands.recordInteraction({
       initiator: PLAYER, witnessSet: [PLAYER, ally], kind: "betrayal",
       content: "You went back on your word to the ally in front of the whole house, naming them as a target.",

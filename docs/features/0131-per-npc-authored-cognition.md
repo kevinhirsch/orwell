@@ -10,6 +10,8 @@
 > **Guiding principle:** "Fan out cognition (many cheap, scoped, data-only calls); funnel
 > narration (one voice)." Preserves ADR 0003 (one fluent narrator), ADR 0005 (closed/open split),
 > ADR 0019 (per-NPC knowledge scoping), and ADR 0021 (one-voice decision).
+> **Umbrella:** ADR **0022** (authored cognition and narration voice) is the unified design record
+> uniting #1736/#1738/#1739; this feature is arm B's implementer spec (S1/S2/S3).
 
 ## 1. Summary
 
@@ -68,9 +70,23 @@ deliver this:
   - Cost control: **1–2 NPCs per turn** (salience-gated); cached as soul state so repeated calls to
     the same NPC within a lull (e.g., multiple scenes with the same NPC) don't re-fire.
   - Integrity gates:
-    - *(a) Bounded input:* authored intent is a structured descriptor (kind, target, emphasis),
-      never raw text; the engine magnitude is fixed (seeded, bounded). `recordInteraction`'s
-      `consequence` descriptor (#355) is the reused pattern.
+    - *(a) Bounded input (two contracts — do NOT conflate):* the model authors intent as a NEW
+      structured **cognition-authoring** type this feature defines — provisionally
+      `AuthoredCognition` (a.k.a. `NpcIntent`): `{ want, attempt, read }`, the open-set cognitive
+      primitives — **never raw text and never `ConsequenceDescriptor`**. This is the INPUT the scoped
+      call returns. The engine adjudicates it and MAY emit a `ConsequenceDescriptor`
+      (`src/ports/EngineCommands.ts`: `{ edges?: [{ toward, direction, emphasis? }], aboutEdges?,
+      rationale? }`, `direction` closed-set, `emphasis` relative-only; `kind` the separate
+      request-level floor on `RecordInteractionReq`) as the bounded, seeded **OUTPUT** fold — and
+      only when a relationship edge actually moves. The engine magnitude stays fixed (seeded,
+      bounded). **Cognition with no edge implication still reaches the resolver as intent** (it is
+      NOT forced into the edge-only descriptor, so valid `want/attempt/read` is never silently
+      discarded as a generic `kind` fold or a no-op). `recordInteraction`'s `consequence` descriptor
+      (#355) is reused ONLY as that output-fold shape, never as the authoring shape. Making this split
+      concrete in the port layer — introducing the `AuthoredCognition` input type and making
+      `ConsequenceDescriptor` **engine-output-only** on `EngineCommands.ts`
+      (`src/ports/EngineCommands.ts` / `EngineCommandsAdapter.ts`) — is part of **building** feature
+      0131, not this design record.
     - *(b) Knowledge-scoped:* each per-NPC call is gated on **engine** presence (`A2` / #1726),
       not narrated — only what the engine says they know reaches the call.
     - *(c) Soul-anchored:* the call *continues* the persisted character (no re-roll; stable
@@ -90,12 +106,15 @@ deliver this:
 - **S3: Paraphrase-residual scoped call (bounded, rare).**
   - ADR 0019's *accepted residual* — vague paraphrase (e.g., "counselor vibe") is hard to gate
     structurally because it's plausible-yet-vague.
-  - When an NPC's knowledge state sharply diverges (they know a secret the player doesn't), voice
-    them via a **per-NPC scoped completion** only when that divergence triggers and the NPC is
-    present in the scene.
+  - When an NPC's knowledge state sharply diverges (they know a secret the player doesn't), a
+    **per-NPC scoped call returns structured residual/intent DATA** (the divergent point + intent) —
+    **not prose** — only when that divergence triggers and the NPC is present in the scene; the
+    **sole narrator** then writes any NPC-specific line from that data (funnel narration; ADR
+    0021/0022). No per-NPC prose completion anywhere.
   - Cost control: **lull-timed + bounded to NPCs whose knowledge diverges**; fire only when the
     divergence is high enough to justify a scoped call.
-  - Integrity gates: same as S1 — bounded input, knowledge-scoped, soul-anchored.
+  - Integrity gates: same as S1 — bounded input (cognition/residual data, not `ConsequenceDescriptor`),
+    knowledge-scoped, soul-anchored, funnel-narration.
 
 ### Out:
 
@@ -115,8 +134,15 @@ deliver this:
     beat.
   - Input: the NPC's character + soul + relationships + the `stateDelta` since their last sim
     (feature 0065; tight context, no full history).
-  - Output: structured `{kind, target, emphasis}` (reuse `ConsequenceDescriptor` from #355).
-  - Fold into the resolver's input: the authored intent weights the outcome, but never **is** it.
+  - Call output (INPUT to the engine): a structured `AuthoredCognition` / `NpcIntent`
+    `{ want, attempt, read }` — the cognition-authoring type, **not** `ConsequenceDescriptor`.
+  - Engine step: adjudicate the intent against the closed set; the engine MAY then emit a
+    `ConsequenceDescriptor` fold (`{ edges?: [{ toward, direction, emphasis? }], aboutEdges?,
+    rationale? }`, `direction` closed-set, `emphasis` relative-only; `kind` the separate
+    request-level floor on `RecordInteractionReq`) **when a relationship edge moves** — the bounded,
+    seeded OUTPUT, never the authoring shape.
+  - Fold into the resolver's input: the authored intent weights the outcome, but never **is** it;
+    intent with no edge implication still reaches the resolver (and persists to soul), never dropped.
   - Cache the result: repeated scenes with the same NPC within the same lull use the cached intent,
     no re-call.
 
@@ -136,9 +162,11 @@ deliver this:
   - If yes, fire a scoped call for just that NPC, for just that beat (e.g., they know a secret
     about an ally the player doesn't; they believe a rumor nobody else holds).
   - Cost gate: only for the NPC(s) where divergence > threshold; only when they're active/present.
-  - Output: a paraphrase-residual descriptor (like ADR 0019's "counselor vibe"), bounded to that
-    NPC's voice/knowledge.
-  - Use by narrator: shape how that NPC voices the scene, grounded in what they (divergently) know.
+  - Output: **structured residual/intent DATA** — the knowledge-divergent point + the NPC's intent
+    for the beat (like ADR 0019's "counselor vibe" case), bounded to that NPC's knowledge — **not
+    prose, and not a `ConsequenceDescriptor`**.
+  - Use by narrator: the **sole narrator** writes any NPC-specific line from that data, grounding how
+    that NPC voices the scene in what they (divergently) know (funnel narration; ADR 0021/0022).
 
 ## 5. Contracts (stack-agnostic)
 
@@ -146,10 +174,12 @@ deliver this:
 0131 Per-NPC cognition (S1/S2/S3):
   S1 (intent, salience-gated):
     off-screen tick → compute salience per NPC (situation changed? mentioned? nominated?)
-    → fire scoped call for top 1–2 by salience → author {kind, target, emphasis}
-    → fold into resolver (input to outcome, not the outcome itself)
+    → fire scoped call for top 1–2 by salience → author AuthoredCognition/NpcIntent {want, attempt, read}   # INPUT (cognition), NOT ConsequenceDescriptor
+    → engine adjudicates intent vs. closed set (input to outcome, not the outcome itself)
+      → engine MAY emit ConsequenceDescriptor {edges:[{toward,direction,emphasis?}], rationale?} as the seeded OUTPUT fold, ONLY when an edge moves
+      → intent with no edge implication still reaches resolver + persists to soul (never dropped/no-op'd)
     → cache per lull (repeated scenes = cached intent, no re-call)
-    integrity: bounded input (seeded magnitude), knowledge-scoped (engine presence gated), soul-anchored
+    integrity: bounded input (author=intent type; engine keeps seeded magnitude), knowledge-scoped (engine presence gated), soul-anchored
 
   S2 (divergent memory, soul-persisted):
     end-of-scene / lull → for each NPC witness, fire extraction call
@@ -160,8 +190,8 @@ deliver this:
   S3 (paraphrase-residual call, rare, knowledge-divergence-gated):
     pre-narration: check NPC knowledge divergence vs. shared transcript
     → if divergence > threshold and NPC present, fire scoped call for that beat
-    → author paraphrase-residual descriptor
-    → narrator uses to shape per-NPC voice in that scene
+    → return STRUCTURED residual/intent DATA (the knowledge-divergent point + intent) — never prose
+    → the SOLE narrator writes any NPC-specific line from that data (funnel narration; ADR 0021/0022)
     integrity: same as S1 (bounded, knowledge-scoped, soul-anchored)
 
   all sub-designs:
@@ -182,7 +212,8 @@ deliver this:
       asymmetry emerges (A remembers betrayal, B doesn't); narrator grounds voice in persisted
       belief.
 - [ ] **S3 (paraphrase-residual):** knowledge-divergence trigger fires correctly; scoped call
-      authored for that beat; narrator uses descriptor to shape voice.
+      returns structured residual/intent data for that beat; the sole narrator writes any NPC-specific
+      line from it (no per-NPC prose).
 - [ ] **Integrity gates green:** `expressiveNonCollapse` test confirms closed set unchanged; Vault
       canary extended to S1/S2/S3 beats; knowledge-scoped gate (ADR 0019) passes; soul-anchor
       holds (no re-rolled character).
@@ -219,9 +250,13 @@ deliver this:
   nominated?); fire scoped calls for S1 (intent), S2 (divergent memory) at lull/beat boundaries.
 - `src/engine/consequence.ts` or `emotionalArc.ts` — fold S1 authored intent into the resolver
   (input to outcome; ADR 0005).
-- `src/ports/GameSession.ts` — a per-NPC **scoped call output shape** for intent / memory /
-  paraphrase-residual (reuse `ConsequenceDescriptor` from #355 where possible); persist S2
-  divergent memory in `SoulState` fields.
+- `src/ports/GameSession.ts` — define a **NEW cognition-authoring type** for the per-NPC scoped call
+  output (provisionally `AuthoredCognition` / `NpcIntent`: `{ want, attempt, read }` for S1, plus the
+  S2 divergent-memory + S3 residual/intent shapes). This is the model's INPUT and is **distinct from
+  `ConsequenceDescriptor`** — do NOT reuse the #355 descriptor as the authoring shape (it only
+  represents a resulting relationship-edge fold, so it cannot carry `want/attempt/read`; the engine
+  emits it as an OUTPUT after adjudicating the intent, only when an edge moves). Persist S2 divergent
+  memory in `SoulState` fields.
 - `src/services/SoulProvider.ts` — extend to store/retrieve `divergentMemories[sceneId]` per NPC
   (S2).
 - `src/engine/momentPrompts.ts` — when narrating a scene, check for S2 divergent memories and S3

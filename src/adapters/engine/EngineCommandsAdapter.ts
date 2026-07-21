@@ -272,16 +272,41 @@ export class EngineCommandsAdapter implements EngineCommands {
     // A witness set excluding the player would mint an off-screen "ground truth" indistinguishable
     // from the engine's own hidden scenes; off-screen life is the ENGINE's to mint (0038), never a
     // caller's. Refused outright — the Vault's hidden layer cannot be written from this channel.
-    const witnessSet = [...req.witnessSet];
+    // Presence grounds the scene (0049): everyone in the initiator's ROOM is a witness — being in the
+    // room means you saw it (co-presence ⇒ witness; ADR 0003 §8). Read the live occupancy UP FRONT: it
+    // grounds BOTH the BL-014 reconciliation of caller-named witnesses (immediately below) AND the
+    // co-presence expansion (further down). Placeless (no provider / initiator unplaced) keeps prior behavior.
+    const occupancy = this.presenceProvider?.() ?? null;
+    const room = occupancy?.get(req.initiator);
+    // BL-014 — CO-PRESENCE RECONCILIATION. The model / FE belts (`_auto_record_scene`, the E22 fallback)
+    // can name a `withIds` participant whom the engine's OWN occupancy (presenceProvider → session
+    // occupancy → the live presence map) places in a DIFFERENT room — a PHANTOM co-presence. If recorded,
+    // engine truth turns internally inconsistent (the EventStore says they witnessed a scene presence says
+    // they weren't in), and that contradiction is re-injected on every recall + relationship fold — a
+    // non-degradation breach (mandate #4): don't PERSIST corruption. So when the scene is GROUNDED
+    // (occupancy known AND the initiator HAS a room) drop any caller-named NON-PLAYER witness the occupancy
+    // POSITIVELY places elsewhere, BEFORE the witness set / the directed relationship fold / the premiere
+    // hot-read read it. NEVER the PLAYER (their knowledge is the game) nor the INITIATOR (they own the
+    // scene). Fails OPEN — no provider / placeless scene / unplaced initiator, or a witness the occupancy
+    // doesn't place at all ⇒ keep them, so a presence hiccup can never zero the 0055 consequence-recording
+    // safety net. Same room = co-present at ANY zone: zone still governs bystander EARSHOT (the co-presence
+    // pass + `rollOverhears` below), never a NAMED participant's legality. This runs ENGINE-SIDE on the
+    // engine's OWN committed occupancy in one atomic snapshot, so it is beatSeq-ordered by construction and
+    // cannot race the FE's one-turn seating-freeze (a render-lag projection, not engine truth) — the exact
+    // reason the earlier FE-side attempt fought the spine and was dropped from #1721.
+    const grounded = occupancy !== null && room !== undefined;
+    const namedWitnesses = grounded
+      ? req.witnessSet.filter((id) => {
+          if (id === PLAYER || id === req.initiator) return true; // never drop the player or the initiator
+          const where = occupancy!.get(id);
+          return where === undefined || where === room; // keep unless POSITIVELY placed in another room
+        })
+      : req.witnessSet;
+    const witnessSet = [...namedWitnesses];
     if (req.initiator === PLAYER && !witnessSet.includes(PLAYER)) witnessSet.push(PLAYER);
     if (!witnessSet.includes(PLAYER)) {
       throw new Error("recordInteraction is player-witnessed only: the witness set must include the player (off-screen scenes are the engine's to mint)");
     }
-    // Presence grounds the scene (0049): everyone in the initiator's ROOM is a witness — being in
-    // the room means you saw it (co-presence ⇒ witness; ADR 0003 §8). Caller-named witnesses are
-    // kept (presence only ADDS, never drops). Placeless (no provider / no room) keeps prior behavior.
-    const occupancy = this.presenceProvider?.() ?? null;
-    const room = occupancy?.get(req.initiator);
     // 0077 (PO ruling #791): the scene's earshot zone is the initiator's. A same-room bystander becomes
     // a FULL CO-WITNESS only when they share the SAME zone — an ADJACENT zone is NOT full earshot (it is
     // overhear-eligible only; handled below by `rollOverhears`), and a FAR zone (workout corner vs.
@@ -305,13 +330,15 @@ export class EngineCommandsAdapter implements EngineCommands {
       initiator: req.initiator, witnessSet,
       hidden: !witnessSet.includes(PLAYER), content: req.content,
     });
-    // #1318 — a recorded player↔NPC scene is a GENUINE premiere hot read. Feed the CALLER-declared
-    // partners (req.witnessSet + initiator, minus the player) — NOT the presence-expanded set — so a
-    // mere same-room bystander added by co-presence above is not miscounted as a read; the player must
-    // actually be in a scene WITH the houseguest. The session no-ops this outside the premiere, so it is
-    // free every other turn. This is the reliable engagement signal that lets first power become reachable.
+    // #1318 — a recorded player↔NPC scene is a GENUINE premiere hot read. Feed the reconciled
+    // caller-named partners (`namedWitnesses` + initiator, minus the player) — NOT the presence-expanded
+    // set — so a mere same-room bystander added by co-presence above is not miscounted as a read; the
+    // player must actually be in a scene WITH the houseguest. BL-014: `namedWitnesses` has already dropped
+    // any phantom (different-room) witness, so a hot read can never form off a name the engine's own
+    // occupancy places elsewhere. The session no-ops this outside the premiere, so it is free every other
+    // turn. This is the reliable engagement signal that lets first power become reachable.
     if (this.playerReadSink) {
-      const partners = new Set<EntityId>(req.witnessSet);
+      const partners = new Set<EntityId>(namedWitnesses);
       partners.add(req.initiator);
       partners.delete(PLAYER);
       const reads = [...partners].filter(isLiving);
@@ -388,7 +415,11 @@ export class EngineCommandsAdapter implements EngineCommands {
         // 2026-06-18): bystanders only OBSERVE, reacting by their own beliefs (foldHiddenImpact).
         // BE-102: same living-only guard for the flat `toward` field — it named a target directly,
         // bypassing the witnessSet/presence liveness that grounds every other targeting mechanism.
-        const partnerNames = (req.toward ? req.toward.filter(isLiving) : req.witnessSet.filter((w) => w !== req.initiator));
+        // BL-014: when the partners come from the witness set (no explicit `toward`), use the RECONCILED
+        // `namedWitnesses` — a phantom different-room witness must not take a directed relationship fold
+        // (that is the very contradiction we refuse to persist). `toward` is a deliberate explicit
+        // override with its own liveness guard and never enters the recorded witness set, so it is left as-is.
+        const partnerNames = (req.toward ? req.toward.filter(isLiving) : namedWitnesses.filter((w) => w !== req.initiator));
         const namedSet = new Set(partnerNames);
         const partners = partnerNames.filter((o) => o !== req.initiator && this.spendFoldBudget(o, req.initiator));
         const bystanders = witnessSet.filter(

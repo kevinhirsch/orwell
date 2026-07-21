@@ -221,9 +221,16 @@ import { onNarrowChange } from './platform.js';
         #orwell-status .os-stale { color: #e0a500; margin-left: .35rem; font-size: .7em; vertical-align: middle; }
         /* Memory wall (C21): the roster a real houseguest can see. Public facts only. */
         #orwell-status .os-you { margin: .35rem 0 .1rem; font-weight: 600; }
+        /* S10 legibility floor: the self-role badge (HOH / ON THE BLOCK / VETO / JURY / EVICTED)
+           must clear the ~11px crowding floor at EVERY viewport. The bare .72em rode the panel's em
+           base down to ~8.9-10.2px across the matrix tiers (below the floor - the fe-responsive
+           JURY-badge regression). A LITERAL 11px floor (not var(--fs-2xs): 0.6875rem itself dips
+           below once the fluid/compact root shrinks) - exactly the sibling .os-roster-h pattern
+           (max(.8em, 11px)) - so it never renders sub-floor while .72em still scales up on zoom.
+           NOTE (KIT-F-04): byte-mirrored between orwellStatusPanel.js and orwellElements.js. */
         #orwell-status .os-you .os-badge {
           display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
-          font-size: .72em; font-weight: 700; letter-spacing: .02em;
+          font-size: max(.72em, 11px); font-weight: 700; letter-spacing: .02em;
           background: var(--accent, var(--red, #e06c75)); color: var(--on-accent, #fff);
         }
         /* #955: the house TALLY only — "The House · N/N". The per-person name list was removed

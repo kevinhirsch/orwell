@@ -8,6 +8,8 @@
 > (salience-gated fallback mode). **Source:** Sonder design discussion + R3 cost-benefit analysis;
 > owner request. **Hard constraints inherited (ADRs 0003/0005/0019/0021):** cognition-only,
 > never outcome; fan out cognition, funnel narration; knowledge-scoped per call; soul-anchored.
+> **Umbrella:** ADR **0022** (authored cognition and narration voice) is the unified design record
+> uniting #1736/#1738/#1739; this feature is arm C's implementer spec (the full-fidelity mode).
 
 ## 1. Summary
 
@@ -44,14 +46,31 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
 - **Full-fidelity mode: every active houseguest's cognition re-simulated live, each turn.**
   - **Awake-set bound:** "every NPC" in practice = the awake set (0066 sleep economy shrinks the
     active cast late-night). No re-simulating NPCs who are off-screen asleep.
-  - **Parallel cheap-tier calls:** all N per-NPC calls fire in parallel (e.g., utility model,
-    Qwen-flash class), fail-soft over the deterministic floor (timeout or garbage ⇒ that NPC runs
-    the floor this turn; turn never blocks).
+  - **Bounded-parallel cheap-tier calls:** the N per-NPC calls fire concurrently **under an explicit
+    in-flight concurrency cap** (a semaphore / admission bound over the awake set, never an unbounded
+    fan-out), with each call's **per-turn token/latency budget reserved before dispatch**; utility
+    model (Qwen-flash class), fail-soft over the deterministic floor (timeout or garbage ⇒ that NPC
+    runs the floor this turn; turn never blocks). Any NPC that cannot be admitted within the
+    cap/budget routes to the deterministic floor / salience-gated degradation (0131-S1) without
+    blocking the turn. The bound is a DEADLINE, not just a cap: an **overall per-turn deadline** plus
+    a **finite admission-wait** so a queued call can never await indefinitely — any NPC not
+    admitted-and-dispatched before the admission deadline runs the deterministic floor this turn and
+    its reserved budget is released back to the ledger. The turn's completion is never contingent on a
+    queued cognition call.
   - **Delta-driven prompts:** each NPC call fed only a `stateDelta` (feature 0065: "what changed for
     you since your last sim"), not the full context. Keeps per-call tokens tiny (O(1) to O(N) instead
     of O(N²)).
-  - **Output:** same as 0131-S1 — structured intent {kind, target, emphasis}, persisted as soul
-    state, folded into the resolver.
+  - **Output:** same as 0131-S1 — a structured `AuthoredCognition` / `NpcIntent`
+    `{ want, attempt, read }` (the NEW cognition-authoring type, **not** `ConsequenceDescriptor`),
+    persisted as soul state, then adjudicated by the engine — which MAY emit a `ConsequenceDescriptor`
+    fold (`{ edges?: [{ toward, direction, emphasis? }], aboutEdges?, rationale? }`, `direction`
+    closed-set, `emphasis` relative-only; `kind` the separate request-level floor on
+    `RecordInteractionReq`) as the bounded, seeded **OUTPUT** only when an edge moves. Intent with no
+    edge implication still reaches the resolver + soul, never dropped. **Contract-boundary note:** on
+    the CURRENT port, `RecordInteractionReq.consequence` is caller-supplied INPUT (the model proposes
+    the shape, the engine keeps the seeded magnitude); the engine-emitted-`ConsequenceDescriptor`-as-
+    OUTPUT framing here describes the FUTURE 0131 port split (build-time work), not today's authority
+    model.
   - **Budget guard:** per-turn ceiling on tokens + latency. When pressure exceeds budget:
     **graceful degrade to 0131-S1 (salience-gated mode)** — fire only for the top K by salience,
     rest use deterministic floor. Make this a **flag** so full vs. gated can be A/B'd.
@@ -106,8 +125,12 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
     - Validate output (JSON schema; fail if malformed).
     - Fold into resolved outcome as a weighted input (same as 0131-S1).
     - Persist result in soul state (cache for repeated scenes within the lull, like 0131-S1).
-  - Fire all N calls **in parallel** (e.g., via `Promise.all`); timeout after T ms; any timeout
-    becomes deterministic floor for that NPC.
+  - Fire the admitted calls **concurrently under a bounded in-flight cap** (a semaphore / admission
+    bound over the awake set with each call's budget reserved before dispatch — **not** an unbounded
+    `Promise.all` over all N); **an overall per-turn deadline + finite admission-wait** bound the
+    whole step (not just a post-dispatch timeout); any timeout, or any NPC not admitted+dispatched
+    before the admission deadline, becomes the deterministic floor for that NPC and releases its
+    reserved budget (turn never blocks).
 
 - **Budget guard + graceful degradation.**
   - Maintain a per-session cost ledger: running total of tokens + latency.
@@ -135,21 +158,28 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
   per-turn:
     compute awake set (0066 sleep economy) → estimate cost
     if cost > budget: degrade to salience-gated (0131-S1, top K by salience)
-    else: fire all N awake-set per-NPC intent calls in parallel
-    
+    else: fire awake-set per-NPC intent calls under a bounded in-flight concurrency cap
+          (semaphore over the awake set; each call's budget reserved before dispatch;
+           overall per-turn deadline + finite admission-wait; a call not admitted+dispatched
+           before the admission deadline → deterministic floor + reserved budget released;
+           turn never blocks)
+
   per-NPC call (parallel, cheap-tier, delta-fed):
     input: character + soul + relationships + divergent memories + stateDelta (0065)
-    output: structured intent {kind, target, emphasis}
+    output: structured AuthoredCognition/NpcIntent {want, attempt, read}   # cognition INPUT, NOT ConsequenceDescriptor
     validate JSON; fail-soft (timeout / malformed → deterministic floor for that NPC)
-    fold into resolver (input to outcome, not the outcome itself; ADR 0005)
+    engine adjudicates intent (input to outcome, not the outcome itself; ADR 0005)
+      → engine MAY emit ConsequenceDescriptor {edges?:[{toward,direction,emphasis?}], aboutEdges?, rationale?} as seeded OUTPUT, ONLY when an edge moves
+        (aboutEdges = third-party relationship folds; on today's port `consequence` is caller-INPUT — see the contract-boundary note in §4)
+      → intent with no edge implication still reaches resolver + soul (never dropped)
     persist in soul state (cache for repeated scenes within lull)
-    
+
   budget guard:
     tokens_budget_max = BUDGET_MAX_TOKENS (e.g., 2000 per turn)
     latency_budget_max = BUDGET_MAX_LATENCY (e.g., 500ms)
     graceful_degrade: when pressure > budget, switch to salience-gated (K NPCs by salience)
     ledger: per-turn {cognitionMode, npcCount, tokensUsed, latency, gracefulDegrades, beltsFired}
-    
+
   integrity gates (inherited from 0131 + new cost-control):
     cognition-only (engine owns resolve/state)
     funnel narration (one voice, not N per-NPC; ADR 0021)
@@ -214,8 +244,12 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
   set.
 - `src/engine/liveSeason.ts` — integrate per-NPC intent calls: fetch soul + stateDelta, call
   cheap-tier model in parallel, validate, fold into resolver.
-- **Parallel call infrastructure:** wire a concurrency pool (e.g., `Promise.all` with timeout
-  guard); fail-soft on timeout/malformed JSON.
+- **Bounded-parallel call infrastructure:** wire a concurrency pool with an **explicit in-flight cap
+  (semaphore / admission bound over the awake set)** and **per-call budget reserved before dispatch**
+  — not an unbounded `Promise.all` over all N — with an **overall per-turn deadline + finite
+  admission-wait** (not just a post-dispatch timeout); any NPC not admitted+dispatched before the
+  admission deadline, or that times out / returns malformed JSON, fail-softs to the deterministic
+  floor and releases its reserved budget. The turn never awaits a queued cognition call.
 - **Cost ledger:** maintain per-session running totals of tokens, latency, graceful-degrade events,
   belt-fire successes. Write to game state or telemetry log per beat.
 - **Graceful degrade logic:** when `(tokens_this_turn + projected_N_calls) > BUDGET_MAX`, set

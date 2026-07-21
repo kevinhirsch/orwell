@@ -30,6 +30,9 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor(user);
     sb.session.createCharacter({ playerName: "The Player", seed });
+    // Close the premiere champagne circle so the player is in normal free-roam presence — `movePlayer`
+    // is pinned until then (0111), and BL-014 co-presence reconciliation needs a real, movable room.
+    sb.session.advanceGame();
     return sb;
   }
 
@@ -50,6 +53,9 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
   it("(2a) CONSEQUENCED — a warranted scene folds a NONZERO hidden delta on the right edge", () => {
     const sb = freshSandbox("adr0005-conseq", 502);
     const partner = sb.session.livingIds().find((id) => id !== PLAYER)!;
+    // BL-014: a scene is recorded from the PLAYER's room; the engine drops a named witness its own
+    // occupancy places elsewhere. Co-locate so the partner is a genuine co-present participant.
+    sb.session.movePlayer(sb.session.occupancy()!.get(partner)!);
     const before = { ...sb.engine.relationships.edge(partner, PLAYER) };
 
     // Warranted: a genuine bonding overture should move how the partner feels about the player.
@@ -84,6 +90,9 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
   it("(3) RECALLED IN FULL — the prose is retrievable later via semantic recall, not just its tag", () => {
     const sb = freshSandbox("adr0005-recall", 504);
     const partner = sb.session.livingIds().find((id) => id !== PLAYER)!;
+    // BL-014: co-locate so the partner genuinely co-witnesses the scene (else the engine drops the
+    // named-but-elsewhere partner and it is never indexed into their recall).
+    sb.session.movePlayer(sb.session.occupancy()!.get(partner)!);
 
     sb.commands.recordInteraction({
       initiator: PLAYER, witnessSet: [PLAYER, partner], kind: "strategy", content: WEIRD_UTTERANCE,
@@ -101,6 +110,9 @@ describe("ADR 0005 — expressive non-collapse (the open set is recorded, conseq
   it("(4) DISTINGUISHABLE DOWNSTREAM — two DIFFERENT scenes with the SAME `kind` stay distinguishable later (the tag is not the only thing that survives)", () => {
     const sb = freshSandbox("adr0005-distinct", 505);
     const partner = sb.session.livingIds().find((id) => id !== PLAYER)!;
+    // BL-014: co-locate so the partner genuinely co-witnesses both scenes (a named-but-elsewhere
+    // partner would be dropped and neither scene indexed into their recall).
+    sb.session.movePlayer(sb.session.occupancy()!.get(partner)!);
 
     const sceneA =
       "You confessed, by the storage room, that you've been throwing every comp on purpose to look harmless.";

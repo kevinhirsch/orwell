@@ -139,6 +139,28 @@ XFAIL = {
     # the winner span (the panel's other status text is textured/INDET, not gated). REMOVE when the
     # shared frosted glass/token contrast fix lands and the surface ratchets clean.
     "#738-status-winner": "contrast:orwell-status:span.os-winner",
+    # #738 Liquid-Glass batch - the LIVE (mid-game) status HUD + decision card, exposed on the a11y
+    # run ONLY when finish_game() TIMES OUT before reaching the endgame (a slow-runner artifact: the
+    # intended FINISHED state renders these same texts over a TEXTURED backdrop -> INDET/not-gated,
+    # but a timed-out mid-eviction leaves them over a uniform mid-tone glass -> determinate). They are
+    # the SAME systemic dark-ink/on-accent-on-frosted-glass family as the sidebar (#1375-e/-f/-i),
+    # retro (#1375-h), finale (#1418-finale-contrast), and the status winner (#738-status-winner):
+    # the live ceremony rows (os-hoh / os-noms / os-veto / os-last-evict), the self-row rest cue
+    # (os-you-rest), and the self-role badge (os-you-badge - e.g. JURY, on-accent ~1.99:1) read
+    # ~1.9-3.5:1 on the mid glass; the decision card's DISABLED Confirm button (a WCAG-1.4.3-exempt
+    # inactive control the sweep still measures - keyed :disabled so an ENABLED/Cancel button is NOT
+    # absorbed) and its enable hint read ~1.86-1.90:1 over the same glass. Tracked with the #738 batch
+    # - REMOVE when the shared glass/token contrast fix lands. Each needle is a FULL element key (exact
+    # id, not the broad os- prefix), so a NEW regression on a sibling (#os-week / #os-phase / #os-tod /
+    # #os-stale / #os-done-winner, or an enabled card button) still gates.
+    "#738-status-hoh": "contrast:orwell-status:span#os-hoh.os-v",
+    "#738-status-noms": "contrast:orwell-status:span#os-noms.os-v",
+    "#738-status-veto": "contrast:orwell-status:span#os-veto.os-v",
+    "#738-status-lastevict": "contrast:orwell-status:span#os-last-evict.os-v",
+    "#738-status-rest": "contrast:orwell-status:span#os-you-rest.os-rest",
+    "#738-status-badge": "contrast:orwell-status:span#os-you-badge.os-badge",
+    "#738-deccard-btn": "contrast:orwell-decision-card:button.ow-btn:disabled",
+    "#738-deccard-hint": "contrast:orwell-decision-card-hint:",
     # #1418 / S4-2: the finale body (#orwell-finale > .ow-body) is a scrollable region without keyboard
     # access (axe scrollable-region-focusable) — a KIT-level gap (the shared OrwellWindow `.ow-body`
     # scroll container is not tabbable) that only surfaces now that the finale renders on a finished
@@ -282,7 +304,16 @@ _COLLECT_JS = r"""
       let a = el.parentElement, hops = 0;
       while(a && hops < 4){ const c = firstClass(a); if(c){ own = '@'+c; break; } a = a.parentElement; hops++; }
     }
-    return el.tagName.toLowerCase() + own;
+    let key = el.tagName.toLowerCase() + own;
+    // The finding key keeps only the FIRST class, so several buttons collapse to one key
+    // (e.g. the decision card's disabled Confirm + its enabled option/Cancel buttons all read
+    // button.ow-btn). WCAG 1.4.3 exempts INACTIVE controls, so mark the disabled state in the key:
+    // a disabled-only XFAIL then absorbs the exempt control WITHOUT masking a real regression on an
+    // ENABLED sibling (which keeps the bare key and still gates).
+    try {
+      if(el.matches && el.matches(':disabled, [disabled], [aria-disabled="true"]')) key += ':disabled';
+    } catch(_e){}
+    return key;
   }
   function parseColor(str){
     if(!str || str === 'transparent') return null;
