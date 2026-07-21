@@ -3732,6 +3732,14 @@ async def _auto_record_casting(last_user, narration, endpoint_url, model, header
         from src import orwell_engine as _oe
         if not (last_user or "").strip():
             return False
+        # A hidden PRODUCTION CUE (the post-photo "continue the casting interview" auto-cue, etc.) is
+        # engine/FE-authored text, NOT the player speaking — extracting casting fields from it invents
+        # answers the player never gave. This was the concrete leak: on the post-photo cue the extractor
+        # echoed the prompt's own example name back as `playerName`, poisoning the intake with a phantom
+        # name (the director then addressed the player by a name they never chose). The player isn't
+        # talking on a cue, so there is nothing to record — skip, exactly as _auto_record_scene does.
+        if _is_production_cue(last_user):
+            return False
         msgs = [
             {"role": "system", "content":
                 _EXTRACTION_UNTRUSTED_FENCE +
@@ -3747,8 +3755,10 @@ async def _auto_record_casting(last_user, narration, endpoint_url, model, header
                 '"privateStrategy":"<their game plan / how they intend to play, if given>",'
                 '"interviewNotes":"<one concise note for anything else recordable they said>"'
                 "}}\n"
-                'A bare name ("Devon Hale") still fills playerName. If they gave nothing recordable '
-                '(a question, chit-chat, a refusal), reply {"fields":{}}.'},
+                "A bare name the player states (just their name, nothing else) still fills playerName "
+                "— but ONLY a name THEY actually typed; never a placeholder, an example, or a name from "
+                'these instructions. If they gave nothing recordable (a question, chit-chat, a refusal, '
+                'or an engine/production note), reply {"fields":{}}.'},
             {"role": "user", "content":
                 f"THE PRODUCER JUST SAID:\n{(narration or '')[:700]}\n\n"
                 f"THE PLAYER REPLIED:\n{(last_user or '')[:900]}\n\nJSON:"},
