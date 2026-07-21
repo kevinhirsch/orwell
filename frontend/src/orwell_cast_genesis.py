@@ -769,6 +769,46 @@ def _clean_str(v, max_len: int = 500) -> Optional[str]:
     return s[:max_len]
 
 
+# ── E1 (#1733): author-time garble / gendered-role lint for the genesis SELF-REFERENTIAL fields ─────
+#
+# `demeanor` and `appearance` are authored HERE, at genesis, BEFORE the 0063 identity call decides
+# `genderPresentation` — so unlike the LATER `orwell_cast_authoring.coherence_conflicts` lint (which
+# checks authored prose against an ALREADY-PINNED gender), these two fields can never be safely
+# cross-checked against a pin that doesn't exist yet. The bundle's F7 defect ("patient and fatherly"
+# demeanor on a houseguest later pinned "woman") is fixed at the SOURCE instead: a gendered relational-
+# role term is simply never appropriate in a neutral "how they carry themselves" / "look" phrase (the
+# genesis prompt's own framing, e.g. "warm but guarded") REGARDLESS of which gender ends up pinned, so
+# it is rejected outright rather than pin-checked. Mixed-script garble is rejected for the same
+# gender-agnostic reason. A rejected value is DROPPED (never persisted) — the field then falls to the
+# engine's deterministic floor (`generateDemeanors` / the seeded appearance pool), matching the
+# existing fail-soft "no model ⇒ floor stands" pattern.
+#
+# The script-garble + gendered-descriptor vocabulary is CANONICAL in `orwell_cast_authoring` (the F2
+# lint owns it); imported here rather than re-declared, mirroring the sibling dynamic-import pattern
+# (`orwell_cast_identity._resolve_llm_fn` importing `orwell_cast_authoring._resolve_llm_fn`) — no
+# module-level import cycle (cast_authoring only imports cast_genesis lazily inside one function body).
+# The self-referential prose fields this lint scans — genesis's OWN framing for both is a NEUTRAL
+# carriage/look phrase ("warm but guarded"), so a gendered relational-role term never belongs in either.
+_GENESIS_GARBLE_FIELDS = ("demeanor", "appearance")
+
+
+def _is_garbled_or_gendered(text: str) -> bool:
+    """True iff `text` carries non-Latin-script garble OR a gendered relational-role term ("fatherly",
+    "maternal") — content that is never appropriate in a neutral genesis carriage/appearance phrase,
+    and unsafe to pin-check here since `genderPresentation` isn't decided until the LATER 0063 identity
+    call. Vault-free. Defers to `orwell_cast_authoring`'s canonical detectors; a defensive import
+    failure fails OPEN (never blocks genesis parsing over a lint-plumbing fault)."""
+    if not text:
+        return False
+    try:
+        from src.orwell_cast_authoring import _FEM_DESCRIPTOR_RE, _MASC_DESCRIPTOR_RE, _has_script_garble
+    except Exception:  # pragma: no cover - defensive: a dedup import must never break genesis parsing
+        return False
+    if _has_script_garble(text):
+        return True
+    return bool(_MASC_DESCRIPTOR_RE.search(text)) or bool(_FEM_DESCRIPTOR_RE.search(text))
+
+
 def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
     """Parse the model reply into a ``recordCastGenesis`` request ``{npcs: [...], ties: [...]}``, keeping
     ONLY recognized shapes for KNOWN houseguest ids. A light FE pre-filter mirroring the engine's
@@ -808,6 +848,14 @@ def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
                            ("demeanor", 120), ("background", 200), ("biography", 500),
                            ("presentation", 200), ("appearance", 300)):
                 cleaned = _clean_str(raw.get(k), cap)
+                # E1 (#1733): reject garbled / gendered-relational-role demeanor+appearance BEFORE they
+                # ever reach the write-back — never persist junk; the field falls to the deterministic
+                # floor instead (matching the fail-soft "no model ⇒ floor stands" contract).
+                if cleaned and k in _GENESIS_GARBLE_FIELDS and _is_garbled_or_gendered(cleaned):
+                    logger.warning(
+                        f"[cast-genesis] garbled/gendered {k} for {hid or '(unbound slot)'} — "
+                        "dropping so the deterministic floor stands")
+                    continue
                 if cleaned:
                     one[k] = cleaned
             arche = raw.get("archetype")
