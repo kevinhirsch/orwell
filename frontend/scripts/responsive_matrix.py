@@ -101,6 +101,15 @@ XFAIL = {
     # forced top banner on the narrow tier (its narrow-sheet slot position goes stale when the banner
     # appears); fixed by the same coordinated post-finish layout above.
     "#1418-finale-banner": "banner-inset: .ow-window top",
+    # ── #1822 — 'Rearrange gadgets' fractional sub-44 on tiny-320 sub-passes ────────────────────
+    # Intermittent: the rail-head rearrange button composes .ow-btn-icon, whose any-pointer:coarse
+    # snap guarantees min 44×44 at REST — but at tiny-320 the rail presents as a bottom SHEET
+    # (#893) and the sweep sometimes reads getBoundingClientRect mid-settle-transform, measuring
+    # ~43.6px (printed rounded as "44x44"). Seen on two unrelated PRs the same night while passing
+    # minutes earlier. Real fix (tracked in #1822): measure at animation quiescence (disable
+    # transitions for the sweep or await getAnimations() drain), then REMOVE this entry so the
+    # touch family ratchets back to a hard assertion.
+    "#1822-rail-rearrange-settle": "touch: 'Rearrange gadgets'",
 }
 
 passes, failures, xfails, xpasses = [], [], [], []
