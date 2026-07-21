@@ -84,19 +84,25 @@ def _endpoint_enabled_models(ep) -> list:
 
 def _model_available(ep, m) -> bool:
     """Is model ``m`` actually SERVED on endpoint ``ep``? A model is unavailable when it is
-    explicitly hidden/disabled, OR when the endpoint's cached model list is known (non-empty)
+    explicitly hidden/disabled, OR when the endpoint's CACHED served list is known (non-empty)
     and ``m`` is absent from it (a configured model the provider does not serve → 400s).
 
-    Conservative on missing data: an endpoint whose models were never cached (empty list)
-    can't be verified, so a configured model is assumed available — never substituted on a
-    hunch. This is the predicate the narrator↔utility mutual fallback tests each candidate with.
+    Membership is tested against the full CACHED set (what the provider actually serves), NOT the
+    enabled SUBSET: if every cached model is hidden, ``_endpoint_enabled_models`` is empty — which
+    must NOT read as "nothing is cached, so everything is available" (that would let a sibling absent
+    from a known cache be selected and sent to the provider, re-triggering the exact unsupported-model
+    error this fallback exists to avoid). Hidden/disabled is a SEPARATE gate above.
+
+    Conservative on missing data: an endpoint whose models were never cached (empty cache) can't be
+    verified, so a configured model is assumed available — never substituted on a hunch. This is the
+    predicate the narrator↔utility mutual fallback tests each candidate with.
     """
     if not m:
         return False
     if m in _endpoint_hidden_models(ep):
         return False
-    enabled = _endpoint_enabled_models(ep)
-    if enabled and m not in enabled:
+    cached = _endpoint_cached_models(ep)
+    if cached and m not in cached:
         return False
     return True
 
@@ -335,7 +341,7 @@ def resolve_endpoint(
 
     # Unset Utility ENDPOINT means "ride the Default Chat endpoint" — but the configured
     # utility MODEL stays authoritative when set (2026-07-13, the arbitrary-default audit):
-    # ADR 0016's two-tier pair ships `utility_model` (qwen/qwen3.6-flash) with
+    # ADR 0016's two-tier pair ships `utility_model` (qwen/qwen3.6-27b) with
     # `utility_endpoint_id` deliberately "" so it binds to the same OpenRouter endpoint as
     # the narrator. The old line overwrote the MODEL with `default_model` too, so the
     # shipped utility tier silently never resolved out of the box (every utility lane ran
@@ -348,7 +354,7 @@ def resolve_endpoint(
     # Fall back through the Utility tier for a non-utility prefix (task/research/faithfulness/
     # auto-naming) whose own endpoint isn't configured. The configured UTILITY MODEL stays
     # authoritative (2026-07-13, the arbitrary-default audit — Greptile P1 repro): ADR 0016 ships
-    # `utility_model=qwen/qwen3.6-flash` with `utility_endpoint_id` deliberately "" so the utility
+    # `utility_model=qwen/qwen3.6-27b` with `utility_endpoint_id` deliberately "" so the utility
     # tier RIDES the Default Chat ENDPOINT. The old inner line overwrote the MODEL with
     # `default_model` too whenever `utility_endpoint_id` was empty, so every utility-tier fallback
     # (extraction belts, faithfulness judge, task/research naming) silently ran the expensive
@@ -433,11 +439,12 @@ def resolve_endpoint(
         _utility_model = _stg("utility_model")
         if model and not _model_available(ep, model):
             if auto_bound:
-                # An auto-bound endpoint whose configured default the operator HID: staying
-                # unresolved (loud) beats silently swapping in an arbitrary first-listed model.
+                # An auto-bound endpoint whose configured default is not served (hidden/disabled OR
+                # absent from the endpoint's served list): staying unresolved (loud) beats silently
+                # swapping in an arbitrary first-listed model.
                 logger.warning(
                     "[resolve_endpoint] auto-default declined: the configured model %r is "
-                    "hidden on endpoint '%s'", model, getattr(ep, "name", None) or ep.id)
+                    "not served on endpoint '%s'", model, getattr(ep, "name", None) or ep.id)
                 return fallback_url, fallback_model, fallback_headers
             # Prefer the SIBLING configured model: if we were about to serve the utility model, fall
             # back to the narrator/default model first (and vice-versa). Dedup + skip the model we

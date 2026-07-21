@@ -1,12 +1,19 @@
-# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 Flash utility, Seedream portraits
+# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 (27B) utility, Seedream portraits
 
 > **Status:** **Accepted** (PO direction, 2026-06-29 — the model-selection research thread).
 > **Re-amended (2026-07-13 / 2026-07-14 — reverted the narrator to `z-ai/glm-4.7`):** the owner
 > reverted the SHIPPED narrator default back to **`z-ai/glm-4.7`** (2026-07-13, live prod
 > debug-bundle audit) and the **golden fixture** back to **`z-ai/glm-4.7`** too (2026-07-14 — the
 > gate must test what prod runs; the interim glm-5.2 golden decoupling was papered-over debt, now
-> removed). **Utility stays `qwen/qwen3.6-flash`.** The historical retarget note below is preserved
-> for context but is superseded on the narrator model by this revert.
+> removed). **Utility corrected to `qwen/qwen3.6-27b` (2026-07-21).** The historical retarget note below
+> is preserved for context but is superseded on the narrator model by this revert.
+> **Utility slug corrected (2026-07-21 — live prod debug bundle):** the previously-shipped utility slug
+> **`qwen/qwen3.6-flash` is NOT served on OpenRouter**, so every OOB utility/faithfulness call fell
+> through `resolve_endpoint` to an arbitrary first-enabled model — which, being slow/broken, hung the
+> casting-finalize burst ("the front-end does not respond during casting"). The OOB utility default is
+> corrected to the SERVED **`qwen/qwen3.6-27b`**. Same PR hardens `resolve_endpoint` with a
+> narrator↔utility MUTUAL fallback so an unavailable configured model can never again silently resolve
+> to an arbitrary one. (This shifts the golden-fixture utility default — advisory; a re-record is owed.)
 > **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget, SUPERSEDED on narrator by the revert above):** the owner retargeted the pair to
 > **narration = `z-ai/glm-5.2`** and **utility = `qwen/qwen3.6-flash`** (Qwen 3.6 Flash on OpenRouter;
 > locally served in prod, `deepseek/deepseek-v4-flash` as the cloud alternate) — the M0-1 golden-path

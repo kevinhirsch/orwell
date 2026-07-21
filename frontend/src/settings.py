@@ -357,7 +357,7 @@ DEFAULT_SETTINGS = {
     # OOB default chat/narration model. OpenRouter is the default provider (added at first-run
     # setup); z-ai/glm-4.7 is the out-of-box selected model (chat box + narrator + onboarding all
     # read this resolved default) — OWNER RULING 2026-07-13 (live prod debug-bundle audit): back to
-    # the ADR 0016 NARRATOR default z-ai/glm-4.7 (utility is qwen/qwen3.6-flash — see utility_model
+    # the ADR 0016 NARRATOR default z-ai/glm-4.7 (utility is qwen/qwen3.6-27b — see utility_model
     # below); the 2026-07-07 glm-5.2 two-tier retarget is
     # reverted; persisted stores keep whatever they carry — the owner flips his box in the UI). The
     # committed golden fixture is ALSO recorded on glm-4.7 (owner ruling 2026-07-14: the golden gate
@@ -372,10 +372,13 @@ DEFAULT_SETTINGS = {
     # dispatch retries the next entry in order.
     "default_model_fallbacks": [],
     "utility_endpoint_id": "",
-    # OOB utility model (ADR 0016 as amended 2026-07-07/09 — the two-tier pair): Qwen 3.6 Flash on
-    # OpenRouter — the cheap, fast flash tier for background JSON work (cast authoring/prewarm/
+    # OOB utility model (ADR 0016 as amended 2026-07-07/09/21 — the two-tier pair): Qwen 3.6 (27B) on
+    # OpenRouter — the cheap, fast tier for background JSON work (cast authoring/prewarm/
     # zeitgeist, summarization, naming); verified tool-calling clean on the M0-1 golden record runs
-    # (locally served in prod; deepseek/deepseek-v4-flash is the cloud alternate). NOTE it reasons by
+    # (deepseek/deepseek-v4-flash is the cloud alternate). OWNER RULING 2026-07-21 (live prod debug
+    # bundle): the previously-shipped `qwen/qwen3.6-flash` slug is NOT served on OpenRouter, so every
+    # OOB utility/faithfulness call fell through to an arbitrary first-enabled model and hung the
+    # casting-finalize burst — corrected to the served `qwen/qwen3.6-27b`. NOTE it reasons by
     # default (~266 reasoning tokens on a trivial call) — the per-class reasoning budgets below
     # ("off" for the JSON classes) are the cost lever. It is its OWN key (utility_model), so it does
     # NOT inherit the narrator swap. `utility_endpoint_id` stays "" so it rides the Default Chat
@@ -383,7 +386,7 @@ DEFAULT_SETTINGS = {
     # (endpoint_resolver): only the ENDPOINT is inherited when unset; this configured utility
     # MODEL stays authoritative (it used to be silently overwritten by `default_model`, so the
     # shipped qwen tier never actually resolved out of the box).
-    "utility_model": "qwen/qwen3.6-flash",
+    "utility_model": "qwen/qwen3.6-27b",
     # Ordered fallback chain for the Utility model (summarization, naming,
     # tidy actions, etc.).
     "utility_model_fallbacks": [],

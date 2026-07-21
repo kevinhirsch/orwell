@@ -126,6 +126,37 @@ def test_both_configured_unavailable_reaches_last_resort(_two_tier_settings, cap
     assert "last resort" in logs or "neither configured" in logs
 
 
+# ── Greptile P1: all cached models hidden ⇒ enabled empty must NOT read as "unknown/available" ────
+
+def test_all_cached_hidden_absent_sibling_not_selected(_two_tier_settings):
+    """The endpoint SERVES only the narrator + utility models (both cached), and BOTH are hidden.
+    The cached list is known/non-empty → an absent sibling must NOT be treated as available: with
+    both configured models hidden and nothing else served, resolution reaches the last resort
+    (first *enabled* chat model, which is empty here) rather than dispatching an unsupported model.
+
+    Regression for the 'Known Empty Set Looks Unknown' bug: basing availability on the ENABLED
+    subset (empty when all cached are hidden) would have wrongly reported an unconfigured/absent
+    model as available and sent it to the provider (the exact unsupported-model error this exists
+    to avoid). Availability is keyed on the CACHED served set instead."""
+    # Only the two configured models are served; both hidden. inkling is NOT in the cache.
+    _seed_endpoint(cached_models=[_NARRATOR, _UTILITY],
+                   hidden_models=[_NARRATOR, _UTILITY])
+    _url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
+    # The absent sibling must never be chosen; with everything hidden, no enabled model remains.
+    assert model != _ARBITRARY
+    assert model in ("", None)
+
+
+def test_absent_sibling_skipped_served_sibling_chosen(_two_tier_settings):
+    """The served-set membership check must not over-reject: when the sibling IS in the cache and
+    enabled, it is correctly chosen (the mutual fallback still works)."""
+    # utility hidden; narrator is cached AND enabled; inkling absent from cache entirely.
+    _seed_endpoint(cached_models=[_NARRATOR, _UTILITY],
+                   hidden_models=[_UTILITY])
+    _url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
+    assert model == _NARRATOR
+
+
 # ── no regression: a served configured model is untouched (no substitution) ──────────────────────
 
 def test_served_utility_model_is_untouched(_two_tier_settings, caplog):
