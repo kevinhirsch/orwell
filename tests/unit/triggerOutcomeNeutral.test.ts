@@ -29,11 +29,23 @@ import { SeededRandom } from "../../src/adapters/random/SeededRandom";
  * HARD rule: roles only — no names; all fixtures generated.
  */
 
-// Seed re-selected 2026-07-13 (0130): the exit-interview beat adds one step per eviction, shifting this
-// harness's 1-beat:1-tick interleave so the dedicated trigger rng reaches the reactive-twist window in a
-// different state — seed 7 no longer erupts within the bounded run (an opt-in-twist harness-timing artifact,
-// NOT a calibration change: triggers are OFF in every seeded gate). Seed 42 erupts under the new interleave.
-const SEED = 42;
+// Seed re-selected 2026-07-21 (T0-2, "beats terminate themselves"): resolving a CLOSED-SET ceremony
+// pending (nominations/veto-decision/replacement/eviction-vote/tie-break/…) now auto-advances the live
+// loop one more deterministic step in the SAME `submitDecision` call (`AUTO_ADVANCE_PENDING_KINDS` in
+// `GameSessionAdapter.ts`) — this harness's `stepLoop` drives exactly ONE `advanceGame`+decision per
+// outer iteration, so the SAME 120-iteration budget now covers MORE of the season per iteration,
+// shifting (again) which beat/tick the reactive-twist eruption window falls in for a given seed — the
+// SAME class of harness-timing artifact 0130 hit on 2026-07-13 (see the seed history below). Seed 42 no
+// longer erupts within the bounded run under the new interleave; seed 8 does. This is a harness-timing
+// retune only — NOT a calibration change (triggers are OFF in every seeded UAT/juryReach/gradient gate)
+// — and the CORE invariants this file protects (dedicated-vs-shared rng separation, flag-OFF byte-
+// identical fixed point) are untouched by T0-2 and stay green regardless of which seed is picked here;
+// only the "flag ON is non-vacuous" check needs a seed that actually erupts inside the fixed budget.
+//
+// Prior history (2026-07-13, 0130): the exit-interview beat added one step per eviction, shifting the
+// 1-beat:1-tick interleave then in effect — seed 7 stopped erupting within the bounded run and seed 42
+// was picked as its replacement.
+const SEED = 8;
 
 /** Drive a bounded, fully-deterministic sequence of orchestrator off-screen ticks + live-loop steps; capture
  *  the SHARED-rng-driven content (every recorded event) and the layer's own additive eruptions, separately. */

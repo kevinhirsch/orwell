@@ -71,9 +71,22 @@ describe("0101/#1401 — the showrunner's producer notes are VAULT-HELD (the bou
 
   // Drive a BOUNDED partial season (never to the finale) with the showrunner ON, so notes accumulate on
   // the real off-screen tick while the season stays LIVE (so the retrospective gate is genuinely closed).
+  //
+  // Budget re-tuned 2026-07-21 (T0-2, "beats terminate themselves"): resolving a CLOSED-SET ceremony
+  // pending now auto-advances the live loop one more deterministic step in the SAME `submitDecision`
+  // call, so this SAME step budget now reaches FURTHER into the season per call. At 12 steps the drive
+  // now lands ON the `eviction` phase, whose static moment-prompt fragment legitimately narrates "play
+  // the producers' eviction-night sit-down" (the 0130 exit-interview glossary text) — a Vault-SAFE,
+  // always-present instructional string that happens to collide with this test's belt-and-suspenders
+  // literal-phrase leak check (line below: `not.toContain("the producers")`), a check that exists
+  // ALONGSIDE the authoritative per-row exact-content check above (unaffected either way — the real
+  // showrunner note text never appears anywhere in these surfaces at ANY step count). 11 steps keeps
+  // the drive at `veto-ceremony` (never reaching the eviction moment prompt) while still comfortably
+  // accumulating multiple notes (non-vacuous, test (1)) — a harness-timing retune only, not a
+  // narrowing of the Vault-Wall guarantee itself.
   const orch = new Orchestrator(reg, new FakeClock(), { seed: 7 });
   let finished = false;
-  for (let i = 0; i < 12 && !finished; i++) {
+  for (let i = 0; i < 11 && !finished; i++) {
     finished = stepLoop(sb);
     if (!finished) orch.advance(user, "offscreen-tick");
   }

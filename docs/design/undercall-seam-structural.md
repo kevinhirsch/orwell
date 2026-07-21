@@ -94,6 +94,31 @@ The pending-decision barrier, the pre-emission outcome guard, and the 0065 desyn
 adjacent *closed-set sync* layer (feature 0065) — same family, already ledgered (`desyncDetected`,
 `staleRejections`).
 
+### 2.4 T0-2 — "beats terminate themselves" (moonshot P1 stage 1 / #27a, 2026-07-21)
+
+The first STRUCTURAL cut into the class §2.1's belts patch reactively: for the CLOSED-SET ceremony/
+comp pending kinds (`AUTO_ADVANCE_PENDING_KINDS` in `src/adapters/engine/GameSessionAdapter.ts` —
+nominations, veto-decision, comp-intent/comp-round, houseguests-choice, replacement, eviction-vote,
+tie-break, final-eviction), `submitDecision` now auto-advances the live loop ONE more deterministic
+step in the SAME committed transaction as the decision's own resolution (one `inOneCommit`, one
+`beatSeq` bump — 0065 Part A). The pending's OWN resolution "IS the exit": there is no longer a
+window where a ceremony beat resolved but nothing moved, waiting on a voluntary `advanceGame` call
+that the model might never place. Deliberately EXCLUDED (current semantics unchanged, no
+auto-advance): `goodbye-message`, `exit-interview` (the player's own expressive content, E34/0130),
+the interactive finale (`finale-statement`/`finale-answer`/`juror-question`/`juror-vote`, paced
+one reveal at a time by design, 0037), `self-evict` (OOC), `secret-veto` (a real strategic choice),
+and `deal-offer` (an NPC-initiated social approach, 0123) — see the doc-comment above
+`AUTO_ADVANCE_PENDING_KINDS` for the full rationale. Tests: `tests/unit/beatsTerminateThemselves.test.ts`.
+
+**Per the T9 resiliency ruling (owner, 2026-07-21): NO belt above is removed by this.** T0-2 narrows
+the SPECIFIC risk window it targets (a resolved pending masquerading as full progress and pacifying
+the L-F3/stall counters while the beat itself never moved); the **L39b forced `advanceGame`** ladder,
+the **`#1154` forced `tool_choice`** seam, and the rest of §2.1's progression belts stay declared,
+armed, and firing for every OTHER progression gap (plain no-pending advances, the excluded pending
+kinds above, and anything T0-2 doesn't reach) — they are demoted to a watchdog role for the class
+T0-2 now closes structurally, not deleted. `beltsFired`/`get_belt_totals` telemetry keeps recording
+permanently so a live playtest can measure how often the watchdog still needs to fire.
+
 ## 3. The structural options, weighed
 
 Hard constraints, all three cited throughout:
