@@ -1494,7 +1494,13 @@ async def _drain_deferred_folds(user) -> None:
     budget early and tripping the dropped-fold alarm for a fold the other drain may have just committed.
     A second concurrent drain for the same owner no-ops (skip), so exactly one drain owns each entry's
     execute → increment → budget-check → drop/alarm lifecycle. The guard is atomic in the asyncio loop
-    (no await between the membership check and the add)."""
+    (no await between the membership check and the add).
+
+    #1731 (C2, CodeRabbit Major): the queue is DETACHED atomically at drain start (`pop`) so a concurrent
+    `_defer_fold` during this drain's awaits appends to a FRESH live list under `key`, never the snapshot
+    we iterate — then MERGED back (never `= remaining` wholesale, which dropped a mid-drain enqueue). The
+    snapshot's still-contested `remaining` go FIRST (older folds retry first — FIFO fairness, no
+    starvation), then whatever arrived mid-drain."""
     key = _beat_seq_key(user)
     if key in _draining_folds:
         return  # another drain for this owner is in flight — skip (never double-execute an entry)
@@ -1502,7 +1508,11 @@ async def _drain_deferred_folds(user) -> None:
         return
     _draining_folds.add(key)
     try:
-        pending = _DEFERRED_FOLDS.get(key)
+        # DETACH atomically: pop the queue so `_defer_fold` calls DURING this drain's awaits land in a
+        # brand-new list under `key` (never the `pending` snapshot we iterate, and never a list whose
+        # front `_defer_fold`'s overflow-pop could shift out from under the iterator). No await between
+        # the pop and here, so the detach is a single atomic step in the asyncio loop.
+        pending = _DEFERRED_FOLDS.pop(key, [])
         if not pending:
             return
         remaining = []
@@ -1550,8 +1560,31 @@ async def _drain_deferred_folds(user) -> None:
                 continue
             _refresh_beat_seq(user, result if isinstance(result, dict) else {})
             logger.info("[orwell] deferred fold (%s) landed on retry user=%s", entry.get("desc"), user)
-        if remaining:
-            _DEFERRED_FOLDS[key] = remaining
+        # MERGE back, never overwrite (CodeRabbit Major): entries `_defer_fold` enqueued DURING this
+        # drain live in a fresh list under `key`; `= remaining` wholesale would clobber them (fold loss).
+        # `remaining` (older, still-contested) go FIRST for FIFO fairness, then the mid-drain arrivals. No
+        # await between the get and the assignment, so this splice is atomic vs. other coroutines.
+        fresh = _DEFERRED_FOLDS.get(key, [])
+        merged = remaining + fresh
+        if len(merged) > _DEFERRED_FOLDS_MAX:
+            # Re-apply the same drop-oldest bound `_defer_fold` enforces, but never SILENTLY: surface each
+            # overflow drop (the oldest = front) as a genuine loss, mirroring `_defer_fold`'s overflow path.
+            overflow = len(merged) - _DEFERRED_FOLDS_MAX
+            for dropped in merged[:overflow]:
+                logger.error(
+                    "[orwell] deferred-fold queue overflow on drain-merge for user=%s -- dropped the "
+                    "OLDEST queued fold (%s); sustained contention is outrunning retry capacity",
+                    user, dropped.get("desc"))
+                try:
+                    from src import orwell_sync_ledger as _sl
+                    _sl.note_stale_rejection(
+                        user, dropped_fold=True,
+                        cause="deferred-fold queue overflow on drain-merge (retry capacity outrun)")
+                except Exception:
+                    pass
+            merged = merged[overflow:]
+        if merged:
+            _DEFERRED_FOLDS[key] = merged
         else:
             _DEFERRED_FOLDS.pop(key, None)
     finally:

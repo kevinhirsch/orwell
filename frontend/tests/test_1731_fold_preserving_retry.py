@@ -47,21 +47,20 @@ def _stale_409(now: int) -> "orwell_engine.EngineToolError":
         status=409)
 
 
+def _reset():
+    chat_helpers._LAST_BEAT_SEQ.clear()
+    chat_helpers._LAST_BEAT_SIG.clear()
+    chat_helpers._DESYNC_REGROUND.clear()
+    chat_helpers._DEFERRED_FOLDS.clear()
+    chat_helpers._draining_folds.clear()
+    chat_helpers.reset_stale_beat_rejections()
+
+
 @pytest.fixture(autouse=True)
 def _clean_state():
-    chat_helpers._LAST_BEAT_SEQ.clear()
-    chat_helpers._LAST_BEAT_SIG.clear()
-    chat_helpers._DESYNC_REGROUND.clear()
-    chat_helpers._DEFERRED_FOLDS.clear()
-    chat_helpers._draining_folds.clear()
-    chat_helpers.reset_stale_beat_rejections()
+    _reset()
     yield
-    chat_helpers._LAST_BEAT_SEQ.clear()
-    chat_helpers._LAST_BEAT_SIG.clear()
-    chat_helpers._DESYNC_REGROUND.clear()
-    chat_helpers._DEFERRED_FOLDS.clear()
-    chat_helpers._draining_folds.clear()
-    chat_helpers.reset_stale_beat_rejections()
+    _reset()
 
 
 def _patch_reconcile_reads(monkeypatch, now: int):
@@ -259,6 +258,51 @@ def test_two_concurrent_drains_do_not_double_execute_or_premature_alarm(monkeypa
     assert chat_helpers._draining_folds == set(), "the in-flight guard released after the drain"
 
 
+# ── 3c. DETACH+MERGE (CodeRabbit Major): a fold enqueued DURING a drain's await is NOT dropped ───── #
+
+def test_a_fold_enqueued_during_a_drain_await_is_not_dropped(monkeypatch):
+    """The queue must be DETACHED (popped) at drain start, so a `_defer_fold` that lands WHILE the drain
+    is awaiting an entry appends to a fresh live list — and the drain-end MERGE (not `= remaining`
+    wholesale) preserves it. Behavioral proof of the fold-loss fix: entry B, deferred mid-drain, is NOT
+    executed by THIS drain (it wasn't in the detached snapshot) and is STILL queued afterward (not
+    clobbered by the merge). On the old aliasing code B would have been picked up by the live-list
+    iterator (executed) or dropped by the wholesale overwrite — so this fails on the pre-fix behavior."""
+    _patch_reconcile_reads(monkeypatch, now=9)
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 11
+    key_a = chat_helpers._mint_idempotency_key()
+    key_b = chat_helpers._mint_idempotency_key()
+    executed = []
+
+    async def fn_b(*a, expected_beat_seq=None, idempotency_key=None, **k):
+        executed.append("b")
+        return {"recorded": True, "beatSeq": 13}
+
+    async def fn_a(*a, expected_beat_seq=None, idempotency_key=None, **k):
+        executed.append("a")
+        # A NEW fold-bearing back-fill is deferred WHILE this drain is mid-flight (the snapshot is already
+        # detached/iterating). It must land in the FRESH live list and survive the drain-end merge.
+        chat_helpers._defer_fold("owner", fn_b, ("scene b",),
+                                 {"idempotency_key": key_b, "user": "owner"}, desc="record_interaction")
+        await asyncio.sleep(0)
+        return {"recorded": True, "beatSeq": 12}
+
+    chat_helpers._defer_fold("owner", fn_a, ("scene a",),
+                             {"idempotency_key": key_a, "user": "owner"}, desc="record_interaction")
+    assert chat_helpers.deferred_fold_count("owner") == 1
+
+    _run(chat_helpers._drain_deferred_folds("owner"))
+
+    assert executed == ["a"], "only A ran this drain; B was enqueued after the snapshot detached"
+    assert chat_helpers.deferred_fold_count("owner") == 1, "the mid-drain enqueue B survived (not dropped)"
+    queued = chat_helpers._DEFERRED_FOLDS[chat_helpers._beat_seq_key("owner")]
+    assert queued[0]["kwargs"].get("idempotency_key") == key_b, "B is the surviving queued entry"
+
+    # And a subsequent drain lands B exactly once — the fold was merely late, never lost.
+    _run(chat_helpers._drain_deferred_folds("owner"))
+    assert executed == ["a", "b"], "B lands on the next drain — bounded latency, no data loss"
+    assert chat_helpers.deferred_fold_count("owner") == 0
+
+
 # ── 4. source-pins: the record path forwards + reuses idempotency_key, and the drain is bounded ──── #
 
 def test_record_path_forwards_and_reuses_idempotency_key_source_pin():
@@ -295,3 +339,7 @@ def test_drain_is_bounded_and_surfaces_the_loss_source_pin():
     assert "_draining_folds" in src
     assert "if key in _draining_folds:" in src
     assert "_draining_folds.discard(key)" in src
+    # the queue is DETACHED (popped) and MERGED back, never `= remaining` wholesale (CodeRabbit Major):
+    # a fold enqueued mid-drain lands in the fresh list and survives the merge.
+    assert "_DEFERRED_FOLDS.pop(key, [])" in src
+    assert "merged = remaining + fresh" in src
