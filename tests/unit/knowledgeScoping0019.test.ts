@@ -201,3 +201,99 @@ describe("ADR 0019 Layer 3 — knowledgeScopeManifest is the full per-fact known
     expect(out.some((s) => s.content.includes("boundary_bounded_token"))).toBe(true);
   });
 });
+
+/**
+ * ADR 0019 guardian caveat C1 — the producer-only casting backstop. The player's producer-only casting
+ * material (motivation / private strategy / backstory / interview notes) lives on the player object and
+ * is NEVER seeded into the knowledge layer, so BEFORE this fix neither `sealedFromHouse` (Diary-Room
+ * `NO_NPC_PATHWAY` only) nor `knowledgeScopeManifest` (knowledge-layer facts only) carried it. Layer 1
+ * removes it from the narrator context, but a STAGED houseguest reciting a casting answer had NO
+ * downstream guard to drop it (Layer 1 was its sole, un-backstopped defense — the "camp counselor"
+ * leak class that birthed the ADR). The fix: `sealedFromHouse` now also emits the producer-only casting
+ * class as GLOBALLY-sealed facts (`knownTo` empty ⇒ NO houseguest may ever voice it), giving the Layer
+ * 3 FE guard the defense-in-depth backstop it lacked. Roles only — no fixture names.
+ */
+describe("ADR 0019 C1 — producer-only casting content is a globally-sealed backstop in sealedFromHouse", () => {
+  function castGame(user: string, casting: { motivation?: string; privateStrategy?: string; backstory?: string; interviewNotes?: string[] }, seed = 11) {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor(user);
+    sb.session.createCharacter({ playerName: "The Player", seed, ...casting });
+    sb.session.advanceGame();
+    return { reg, sb };
+  }
+
+  it("seals the player's casting MOTIVATION, PRIVATE STRATEGY, and BACKSTORY — each with an EMPTY knownTo", () => {
+    const MOTIVE = "SENTINEL_0019_C1_i_came_to_avenge_my_sister_token";
+    const STRAT = "SENTINEL_0019_C1_my_real_plan_is_a_hidden_spy_network_token";
+    const STORY = "SENTINEL_0019_C1_i_was_secretly_a_summer_camp_counselor_token";
+    const { sb } = castGame("adr0019-c1", { motivation: MOTIVE, privateStrategy: STRAT, backstory: STORY });
+    const sealed: SealedFact[] = sb.session.sealedFromHouse();
+    for (const token of [MOTIVE, STRAT, STORY]) {
+      const entry = sealed.find((s) => s.content.includes(token));
+      expect(entry, `casting content is sealed: ${token}`).toBeDefined();
+      // Globally sealed — NO houseguest holds a pathway, so any staged speaker voicing it is dropped.
+      expect(entry!.knownTo).toEqual([]);
+    }
+  });
+
+  it("seals the casting INTERVIEW NOTES (folded into the player's own casting soul-memory)", () => {
+    const NOTE = "SENTINEL_0019_C1_interview_note_i_hate_confrontation_token";
+    const { sb } = castGame("adr0019-c1-notes", { motivation: "to win", interviewNotes: [NOTE] });
+    const sealed = sb.session.sealedFromHouse();
+    const entry = sealed.find((s) => s.content.includes(NOTE));
+    expect(entry, "an interview note is sealed globally").toBeDefined();
+    expect(entry!.knownTo).toEqual([]);
+  });
+
+  it("is Vault-free — a hidden confessional/soul number never rides along in the sealed casting class", () => {
+    const MOTIVE = "SENTINEL_0019_C1_vaultfree_motivation_token";
+    const VAULTED = "SENTINEL_0019_C1_vault_confessional_leak";
+    const { sb } = castGame("adr0019-c1-vaultfree", { motivation: MOTIVE });
+    sb.engine.vault.writeHidden({ id: "0019:c1v", kind: "confessional", content: VAULTED });
+    const blob = JSON.stringify(sb.session.sealedFromHouse());
+    expect(blob).toContain("vaultfree_motivation_token");
+    expect(blob).not.toContain(VAULTED);
+    // No hidden numbers (trust/threat/affinity/emotional modifier) ever cross into the sealed class.
+    expect(blob).not.toMatch(/trust|threat|affinity|emotional modifier/i);
+  });
+
+  it("cross-user isolation — user A's sealed casting content never appears in user B's manifest", () => {
+    const A_MOTIVE = "SENTINEL_0019_C1_userA_private_casting_answer_token";
+    const reg = new GameSessionRegistry();
+    const a = reg.sandboxFor("adr0019-c1-userA");
+    a.session.createCharacter({ playerName: "The Player", seed: 3, motivation: A_MOTIVE });
+    a.session.advanceGame();
+    const b = reg.sandboxFor("adr0019-c1-userB");
+    b.session.createCharacter({ playerName: "The Player", seed: 4, motivation: "something else entirely" });
+    b.session.advanceGame();
+    expect(JSON.stringify(a.session.sealedFromHouse())).toContain("userA_private_casting_answer_token");
+    expect(JSON.stringify(b.session.sealedFromHouse())).not.toContain("userA_private_casting_answer_token");
+  });
+
+  it("adds NOTHING when the player authored no producer-only casting prose (byte-identical to the DR-only class)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("adr0019-c1-empty");
+    // A minimal finalize (name + a canonical archetype so it starts) with NO motivation/strategy/notes.
+    sb.session.createCharacter({ playerName: "The Player", seed: 5, backstory: "" });
+    sb.session.advanceGame();
+    const sealed = sb.session.sealedFromHouse();
+    // No casting prose ⇒ no globally-sealed casting entry beyond whatever the DR class holds (none here).
+    expect(sealed.every((s) => !s.content.includes("SENTINEL_0019_C1"))).toBe(true);
+  });
+
+  it("dispatches through McpServer.callTool without being rejected (the FE-wiring gate)", async () => {
+    const MOTIVE = "SENTINEL_0019_C1_boundary_motivation_token";
+    const { sb } = castGame("adr0019-c1-boundary", { motivation: MOTIVE }, 9);
+    const out = (await sb.mcp.player.callTool("sealedFromHouse", {})) as SealedFact[];
+    expect(Array.isArray(out)).toBe(true);
+    const entry = out.find((s) => s.content.includes("boundary_motivation_token"));
+    expect(entry).toBeDefined();
+    expect(entry!.knownTo).toEqual([]);
+  });
+
+  it("returns [] before a game is started (no casting content, no crash)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("adr0019-c1-pregame");
+    expect(sb.session.sealedFromHouse()).toEqual([]);
+  });
+});

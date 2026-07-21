@@ -2013,12 +2013,24 @@ export class GameSessionAdapter implements GameSession {
    * A0 — the knowledge-wall manifest: the player's private disclosures that are sealed from the house,
    * for the front-end narration guard to enforce (no houseguest may voice what no pathway ever gave
    * them). Vault-free by construction — it reads the PLAYER's OWN knowledge (never a Vault read, never
-   * an NPC's hidden layer). It surfaces ONLY the Diary-Room-tagged facts: the class provably sealed
-   * from the WHOLE house (`NO_NPC_PATHWAY` — an OOC channel with no in-game pathway to ANY npc, ever),
-   * so `knownTo` is empty and the guard's rule is absolute with zero false positives. Non-diary player
-   * knowledge is deliberately NOT surfaced here: a player-witnessed secret can legitimately diffuse
-   * NPC-to-NPC as gossip, so a blunt content scrub would fight the very pathway model that makes it
-   * legal — that class is enforced through the per-NPC `npcVoice.knows` manifest instead.
+   * an NPC's hidden layer). It surfaces the classes provably sealed from the WHOLE house (`knownTo`
+   * empty ⇒ the guard's rule is absolute with zero false positives):
+   *   • the Diary-Room-tagged player knowledge (`NO_NPC_PATHWAY` — an OOC channel with no in-game
+   *     pathway to ANY npc, ever); and
+   *   • ADR 0019 guardian caveat C1 — the PRODUCER-ONLY casting material (`producerOnlyCastingSeals`):
+   *     the player's motivation / private strategy / backstory / interview notes, told to production at
+   *     the casting interview with NO in-game pathway to any houseguest. This is the exact class that
+   *     birthed ADR 0019 (an NPC "recalled" the player's casting answer — the "camp counselor" leak).
+   *     ADR 0019 Layer 1 REMOVES this material from the narrator context; surfacing it here gives Layer
+   *     3 (the FE post-hoc guard) the defense-in-depth BACKSTOP it previously LACKED — this content
+   *     lives on the player object, never in the knowledge layer, so neither the `NO_NPC_PATHWAY`
+   *     player-knowledge facts above nor `knowledgeScopeManifest` covered it. Before this, a staged
+   *     houseguest reciting a casting answer had NOTHING downstream to drop it (Layer 1 was its sole,
+   *     un-backstopped defense).
+   * Non-diary player knowledge is deliberately NOT surfaced here: a player-witnessed secret can
+   * legitimately diffuse NPC-to-NPC as gossip, so a blunt content scrub would fight the very pathway
+   * model that makes it legal — that class is enforced through the per-NPC `npcVoice.knows` manifest
+   * (Layer 2) and `knowledgeScopeManifest` (Layer 3) instead.
    */
   sealedFromHouse(): SealedFact[] {
     if (!this.house) return [];
@@ -2028,6 +2040,42 @@ export class GameSessionAdapter implements GameSession {
       if (f.pathway !== NO_NPC_PATHWAY) continue;
       const content = this.humanize(f.content).trim();
       if (content) out.push({ content, knownTo: [] });
+    }
+    // ADR 0019 C1 — append the producer-only casting class as globally-sealed facts (knownTo empty).
+    for (const content of this.producerOnlyCastingSeals()) out.push({ content, knownTo: [] });
+    return out;
+  }
+
+  /**
+   * ADR 0019 guardian caveat C1 — the producer-only casting material the player told production at the
+   * casting interview, which has NO in-game pathway to ANY houseguest. It lives on the player object
+   * (never seeded into the knowledge layer), so the ADR 0019 Layer 2/3 knowledge manifests never saw
+   * it; this collects it as prose so `sealedFromHouse` can seal it globally. Vault-free by construction:
+   * the player's OWN authored casting words (motivation / private strategy / backstory / interview
+   * notes) — never a stat, a soul number, or any hidden layer. Absent ⇒ []. Distinctive-prose only: a
+   * short/generic label would risk a false positive in the FE shingle guard, and the short public
+   * persona labels are already dropped from the context by #1727, so they are NOT sealed here.
+   */
+  private producerOnlyCastingSeals(): string[] {
+    if (!this.house) return [];
+    const p = this.house.player;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const push = (raw: string | undefined) => {
+      const content = this.humanize((raw ?? "").trim()).trim();
+      // Dedup: motivation lands both directly and as a "why I came" Soul-memory entry.
+      if (content && !seen.has(content)) { seen.add(content); out.push(content); }
+    };
+    push(p.motivation);
+    push(p.privateStrategy);
+    push(p.character.background);
+    // The casting-interview notes were folded into Soul memory as "casting interview — <note>" entries
+    // (mirrors `carryOverFields`); each is producer-only intake with no NPC pathway.
+    const PREFIX = "casting interview — ";
+    for (const m of p.soul?.memory ?? []) {
+      if (typeof m === "string" && m.startsWith(PREFIX)) {
+        push(m.slice(PREFIX.length).replace(/^why I came: /, ""));
+      }
     }
     return out;
   }

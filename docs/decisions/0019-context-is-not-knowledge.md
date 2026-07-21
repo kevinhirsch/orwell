@@ -136,3 +136,44 @@ knowledge is event-derived). The leak is two **front-end** carriers on the final
 result, make finalize a terminal round so no premiere prose is generated with the transcript still
 present, and scrub the retained tool result — with the engine + FE sentinels above locking it. This
 work stales the golden fixture and re-records it in the same PR.
+
+## Follow-on hardening — the guardian caveats C1 & C2
+
+After Layers 1–3 shipped, a guardian pass over the *built* enforcement named the two residual
+caveats — one **closeable**, one an **accepted residual** — and both are now addressed. They are
+distinct on purpose: closing what can be closed, and *strengthening the monitor* on what cannot.
+
+- **C1 — the producer-only casting class had no Layer-3 backstop (STRUCTURAL — now CLOSED).** Layer 1
+  *removes* the producer-only casting material (motivation / private strategy / backstory / interview
+  notes) from the narrator context, but that material lives on the **player object** and is **never
+  seeded into the knowledge layer** — so neither `sealedFromHouse` (which surfaced only the Diary-Room
+  `NO_NPC_PATHWAY` class) nor `knowledgeScopeManifest` (knowledge-layer facts only) carried it. The
+  Layer-3 FE guard therefore had **no signature to match**: a staged houseguest reciting a casting
+  answer had *nothing downstream to drop it* — Layer 1 was its sole, un-backstopped defense (the exact
+  "camp counselor" leak class that birthed this ADR). **Fix:** `GameSessionAdapter.sealedFromHouse`
+  now also emits the producer-only casting class as **globally-sealed** facts (`knownTo` empty ⇒ NO
+  houseguest may ever voice it), so the SAME Layer-3 guard that drops a Diary-Room recital now drops a
+  casting recital — defense-in-depth **behind** Layer 1, not a replacement for it. Vault-free
+  (the player's own authored casting words; distinctive prose only — the short public persona labels
+  stay out, already dropped from the context by #1727 and false-positive-prone in the shingle guard).
+  Gates: `tests/unit/knowledgeScoping0019.test.ts` (the C1 describe block — seals motivation / strategy
+  / backstory / notes each with an empty `knownTo`, Vault-free, cross-user-isolated, MCP-boundary,
+  pre-game `[]`) and `frontend/tests/test_knowledge_wall.py` (a staged houseguest reciting the casting
+  answer is dropped end-to-end; the player's own recall is kept).
+
+- **C2 — the one-model-many-NPCs vague-paraphrase leak (ACCEPTED RESIDUAL — monitor STRENGTHENED, not
+  closed).** This **is** the ADR's stated accepted residual: one LLM voices every NPC from one shared
+  completion, and the transcript is legitimately the **player's** knowledge union (they were present
+  for all of it), so a **vague paraphrase** ("you've got a counselor vibe") is not a verbatim shingle
+  and **cannot** be shingle-matched or deleted without also dropping legitimate creative prose (ADR
+  0005 #1: a false hold on the open set is worse than a missed phantom). It is therefore **not closed
+  structurally — by design.** The hardening is on the **detection/red-team** side, never a blocking
+  gate: a SOFT, log-only `_paraphrase_suspect` detector (`frontend/routes/chat_helpers.py`) flags a
+  staged **non-holder** line that shares a sealed fact's distinctive vocabulary *without* reciting it
+  (deferring to the verbatim guard for the recital class), and the nightly live probe
+  `frontend/scripts/_verify_dr_wall_live.py` now emits it as a `SOFT-c2-paraphrase-suspect` verdict —
+  surfacing the residual for human review instead of silently passing. Gates:
+  `frontend/tests/test_knowledge_wall.py` (the C2 block — the paraphrase is a SOFT suspect but **not**
+  a hard leak; a verbatim recital is still HARD-dropped; ordinary prose and a holder alluding to their
+  own fact are neither). **This remains a named, monitored residual — do not attempt to close it with a
+  blocking scrub.**

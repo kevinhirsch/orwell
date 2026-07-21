@@ -291,3 +291,122 @@ def test_agent_loop_wrapper_strips_the_leak():
 def test_agent_loop_wrapper_is_fail_open_on_empty():
     assert _run(agent_loop._knowledge_wall_guard("", _USER)) == ""
 
+
+# ── ADR 0019 guardian caveat C1 — the producer-only casting backstop ─────────────────────── #
+#
+# The player's producer-only casting material (motivation / private strategy / backstory / interview
+# notes) has NO in-game pathway to ANY houseguest — the exact "camp counselor" leak class that birthed
+# ADR 0019. The engine now emits it from `sealedFromHouse` as a GLOBALLY-sealed fact (`knownTo` empty),
+# so the SAME Layer 3 guard that drops a Diary-Room recital also drops a houseguest reciting a casting
+# answer — the defense-in-depth backstop behind Layer 1's context removal. Roles only.
+
+# A distinctive producer-only casting answer (the player told production this; no houseguest was there).
+_CASTING = "I told the producers my real motivation is to avenge my sister's blindside"
+
+
+def test_producer_casting_content_voiced_by_a_houseguest_is_a_leak():
+    # A globally-sealed casting fact (knownTo empty) recited by a STAGED houseguest — dropped, exactly
+    # like a Diary-Room recital: no houseguest ever had a pathway to the casting interview.
+    facts = [{"content": _CASTING, "knownTo": [],
+              "signatures": chat_helpers._sealed_signatures(_CASTING)}]
+    leak = ('the Nominee smirked and said, '
+            '"I know your real motivation is to avenge your sister\'s blindside."')
+    assert chat_helpers._sentence_leaks_sealed(leak, facts, ["HOH", "Nominee"]) is True
+
+
+def test_player_recalling_their_own_casting_answer_is_not_a_leak():
+    # No houseguest is STAGED — the player's own narration of their casting motivation is legitimate.
+    facts = [{"content": _CASTING, "knownTo": [],
+              "signatures": chat_helpers._sealed_signatures(_CASTING)}]
+    own = "You remember telling the producers your real motivation is to avenge your sister's blindside."
+    assert chat_helpers._sentence_leaks_sealed(own, facts, ["HOH", "Nominee"]) is False
+
+
+def test_scan_strips_a_houseguest_reciting_the_casting_answer_end_to_end():
+    _seed(_USER, sealed=[{"content": _CASTING, "knownTo": []}], active_names=["HOH", "Nominee"])
+    transcript = (
+        "The backyard was quiet at dusk. "
+        'the HOH leaned in and said, "I know your real motivation is to avenge your sister\'s blindside." '
+        "You forced a laugh and deflected."
+    )
+    out = _run(chat_helpers.screen_knowledge_wall(_USER, transcript))
+    assert "avenge your sister" not in out          # the casting recital is dropped (C1 backstop)
+    assert "The backyard was quiet" in out           # ordinary prose survives
+    assert "forced a laugh" in out
+
+
+def test_fetch_surfaces_the_casting_class_from_sealed_from_house(monkeypatch):
+    """The producer-only casting class rides in on `sealedFromHouse` (knownTo empty), UNIONed with the
+    Layer 3 scope manifest exactly as the DR class is — so the guard consumes it with zero new wiring."""
+    chat_helpers._KW_SEALED_CACHE.pop(chat_helpers._kw_key(_USER), None)
+
+    async def _sealed(user=None):
+        # sealedFromHouse now returns the DR class AND the producer-only casting class, both knownTo=[].
+        return [{"content": _DIARY, "knownTo": []}, {"content": _CASTING, "knownTo": []}]
+
+    async def _scope(user=None):
+        return []
+
+    monkeypatch.setattr(orwell_engine, "sealed_from_house", _sealed)
+    monkeypatch.setattr(orwell_engine, "knowledge_scope_manifest", _scope)
+
+    facts = _run(chat_helpers.fetch_sealed_from_house(_USER))
+    contents = [f["content"] for f in facts]
+    assert any("avenge my sister" in c for c in contents)  # the casting fact is in the guard manifest
+    casting = next(f for f in facts if "avenge my sister" in f["content"])
+    assert casting["knownTo"] == []  # globally sealed ⇒ ANY staged houseguest voicing it is dropped
+
+
+# ── ADR 0019 guardian caveat C2 — the ACCEPTED-RESIDUAL paraphrase MONITOR (SOFT, never a drop) ── #
+#
+# C2 is ADR 0019's deliberately-accepted residual: one LLM voices every NPC from ONE shared completion,
+# and the transcript is legitimately the player's own knowledge union, so a VAGUE PARAPHRASE ("you've
+# got a counselor vibe") cannot be shingle-matched or deleted without dropping legitimate creative prose
+# (ADR 0005 #1). It is NOT closed structurally — by design. `_paraphrase_suspect` is a SOFT, LOG-ONLY
+# red-team signal for the nightly probe; these tests pin that (a) it flags the residual the verbatim
+# guard cannot, (b) the verbatim guard still HARD-drops a recital, and (c) it does not fire on ordinary
+# prose or on the holder alluding to their own fact. Roles only.
+
+# The sealed casting backstory (the ADR's canonical example — the player told production this at casting).
+_CAMP = "I was secretly a summer camp counselor for troubled teens before the show"
+
+
+def _facts_camp():
+    return [{"content": _CAMP, "knownTo": [], "signatures": chat_helpers._sealed_signatures(_CAMP)}]
+
+
+def test_paraphrase_of_a_sealed_fact_is_a_soft_suspect_not_a_hard_leak():
+    # The "counselor vibe" case: a houseguest ALLUDES to the sealed casting fact without reciting it.
+    para = 'the Nominee leaned in and said, "you\'ve totally got a camp-counselor vibe, no offense."'
+    # HARD guard does NOT (and must not) drop it — it is not a verbatim shingle of the sealed content.
+    assert chat_helpers._sentence_leaks_sealed(para, _facts_camp(), ["HOH", "Nominee"]) is False
+    # SOFT monitor DOES flag it for red-team review (the accepted residual is observed, not silently lost).
+    assert chat_helpers._paraphrase_suspect(para, _facts_camp(), ["HOH", "Nominee"]) is True
+
+
+def test_verbatim_recital_is_still_hard_dropped_not_merely_soft_flagged():
+    recital = 'the Nominee grinned, "you were secretly a summer camp counselor for troubled teens, huh?"'
+    # The verbatim class stays HARD (Layer 3 drops it); the SOFT monitor defers to it (no double-count).
+    assert chat_helpers._sentence_leaks_sealed(recital, _facts_camp(), ["HOH", "Nominee"]) is True
+    assert chat_helpers._paraphrase_suspect(recital, _facts_camp(), ["HOH", "Nominee"]) is False
+
+
+def test_ordinary_prose_is_not_a_paraphrase_suspect():
+    prose = 'the Nominee laughed and said, "the backyard hammock is the best seat in the house."'
+    assert chat_helpers._paraphrase_suspect(prose, _facts_camp(), ["HOH", "Nominee"]) is False
+
+
+def test_the_player_alluding_to_their_own_casting_answer_is_not_a_suspect():
+    # No houseguest is STAGED — the player reflecting on their own casting past is legitimate.
+    own = "You think back to your summer camp counselor days and smile to yourself."
+    assert chat_helpers._paraphrase_suspect(own, _facts_camp(), ["HOH", "Nominee"]) is False
+
+
+def test_a_pathway_holder_alluding_to_a_fact_they_hold_is_not_a_suspect():
+    # A bounded fact the HOH legitimately holds — the HOH paraphrasing it is fine, only a NON-holder flags.
+    secret = "the HOH and I are quietly running a secret final two"
+    facts = [{"content": secret, "knownTo": ["hoh"],
+              "signatures": chat_helpers._sealed_signatures(secret)}]
+    holder_line = 'the HOH murmured, "our quiet little final-two arrangement is holding, right?"'
+    assert chat_helpers._paraphrase_suspect(holder_line, facts, ["HOH", "Nominee"]) is False
+
