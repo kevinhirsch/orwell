@@ -2260,19 +2260,24 @@ def _stages_in_scene(narration: str, name: str) -> bool:
 
 
 def _presence_facts(state: dict) -> Optional[dict]:
-    """From a getGameState dict build {room, in_view, evicted, active_offscene} — or None when there
-    is no live scene to check (pre-game / player out of the house). `in_view` = the player's room +
-    every adjacent room's occupants (anyone legitimately seen or overheard); `active_offscene` =
-    living houseguests who are NEITHER in view; `evicted` = houseguests no longer in the house."""
+    """From a getGameState dict build {room, in_view, room_present, evicted, active_offscene} — or
+    None when there is no live scene to check (pre-game / player out of the house). `in_view` = the
+    player's room + every adjacent room's occupants (anyone legitimately seen or overheard);
+    `room_present` = ONLY the player's OWN room's occupants (the engine's `whereabouts.present` —
+    used by the A2 (#1726) omission guard, which cares about who is actually IN the scene, not
+    merely glimpsed next door); `active_offscene` = living houseguests who are NEITHER in view;
+    `evicted` = houseguests no longer in the house."""
     if not isinstance(state, dict):
         return None
     wa = state.get("whereabouts")
     if not isinstance(wa, dict) or not wa.get("room"):
         return None  # no live scene → nothing to ground against
     in_view: set = set()
+    room_present: set = set()
     for p in (wa.get("present") or []):
         if isinstance(p, dict) and p.get("name"):
             in_view.add(p["name"])
+            room_present.add(p["name"])
     for nb in (wa.get("nearby") or []):
         if isinstance(nb, dict):
             for p in (nb.get("present") or []):
@@ -2288,8 +2293,32 @@ def _presence_facts(state: dict) -> Optional[dict]:
             evicted.add(name)
         elif name not in in_view:
             active_offscene.add(name)
-    return {"room": wa.get("room"), "in_view": in_view,
+    return {"room": wa.get("room"), "in_view": in_view, "room_present": room_present,
             "evicted": evicted, "active_offscene": active_offscene}
+
+
+def _first_name_counts(names) -> dict:
+    """{lowercased first name -> how many `names` share it}. A first name that maps to exactly ONE
+    full name unambiguously identifies that houseguest even when narration stages them by first name
+    alone (PARITY-4); a shared first name is deliberately left ambiguous everywhere this feeds a
+    staging match, since a false flag on a legitimate scene is worse than a missed one (ADR 0005 #1)."""
+    counts: dict = {}
+    for full in names:
+        parts = str(full).split()
+        if parts:
+            counts[parts[0].lower()] = counts.get(parts[0].lower(), 0) + 1
+    return counts
+
+
+def _name_staged_unique(sentence: str, full_name: str, first_counts: dict) -> bool:
+    """True if `full_name` is STAGED as acting in `sentence` — by their full name, OR by their first
+    name alone when that first name is unique across the whole roster (never ambiguous)."""
+    if _stages_in_scene(sentence, full_name):
+        return True
+    parts = full_name.split()
+    if len(parts) > 1 and first_counts.get(parts[0].lower(), 0) == 1:
+        return _stages_in_scene(sentence, parts[0])
+    return False
 
 
 def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
@@ -2302,20 +2331,10 @@ def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
     # shared first name (ambiguous — the staged one may be the legitimately in-view houseguest) never
     # produces a false flag (ADR 0005 #1: a false hold on creative prose is worse than a missed phantom).
     _roster = set(facts["in_view"]) | set(facts["active_offscene"]) | set(facts["evicted"])
-    _first_counts: dict = {}
-    for _full in _roster:
-        _fp = _full.split()
-        if _fp:
-            _first_counts[_fp[0].lower()] = _first_counts.get(_fp[0].lower(), 0) + 1
+    _first_counts = _first_name_counts(_roster)
 
     def _staged(full: str) -> bool:
-        if _stages_in_scene(text, full):
-            return True
-        parts = full.split()
-        # Fall back to the FIRST name only when it unambiguously identifies this houseguest.
-        if len(parts) > 1 and _first_counts.get(parts[0].lower(), 0) == 1:
-            return _stages_in_scene(text, parts[0])
-        return False
+        return _name_staged_unique(text, full, _first_counts)
 
     staged_evicted = sorted(n for n in facts["evicted"] if _staged(n))[:_PRESENCE_MOVE_MAX_NAMES]
     staged_offscene = sorted(n for n in facts["active_offscene"] if _staged(n))[:_PRESENCE_MOVE_MAX_NAMES]
@@ -2339,11 +2358,83 @@ def _presence_desync_directive(narration: str, facts: dict) -> Optional[str]:
     )
 
 
+# ── A2 (#1726) — the STRUCTURAL presence guard: a location analog of `screen_knowledge_wall` ─── #
+#
+# The BB-Nerd audit (2026-07-20) found `_presence_desync_directive` above insufficient on its own: it
+# is a POST-TURN, NEXT-TURN nudge — the phantom placement still reaches the player THIS turn, and a
+# live A/B on the terminal whereabouts pin (the "bind" half, #1726 part 1) only cut the failure rate
+# 5/6→3/6, never to zero. "Location does NOT bind on wording alone" (owner comment, 2026-07-21) — the
+# STRUCTURAL guard below is the actual wall, mirroring `screen_knowledge_wall`'s DROP posture (not the
+# gentler re-ground-only posture 0076 uses) because the same precision bar 0076 already trusts for a
+# next-turn CLAIM (`_stages_in_scene` + unique-first-name matching) is precise enough to trust for a
+# same-turn DROP — exactly the bar `screen_knowledge_wall` holds for a Vault-Wall leak.
+#
+# Two directions, per the issue's Guard spec:
+#   (a) a narrated sentence STAGES a non-present (off-scene/evicted) houseguest → DROP that sentence,
+#       same-turn, before the player ever sees it (`screen_presence_wall`).
+#   (b) the narration's ENTIRE scene never surfaces ANY engine-present houseguest at all — the "room
+#       population never updates" symptom (PARITY-8) — → FLAG via the existing next-turn re-ground
+#       queue (there is no sentence to drop; the fix is bringing the real cast INTO view next beat,
+#       and inventing that prose here would violate ADR 0005 #1's open-set line, so it is a nudge, not
+#       a same-turn edit). Deliberately conservative: it fires only when NONE of the room's occupants
+#       are mentioned anywhere (not merely unstaged) — a scene that focuses on one of three present
+#       houseguests and leaves the other two silent is normal storytelling, not a population swap.
+
+def _sentence_stages_absent_npc(sentence: str, facts: dict, first_counts: dict) -> Optional[str]:
+    """The name of an off-scene/evicted houseguest STAGED as acting in `sentence`, or None. Evicted
+    is checked first (the stronger, unambiguous claim) then off-scene."""
+    for n in facts.get("evicted") or ():
+        if _name_staged_unique(sentence, n, first_counts):
+            return n
+    for n in facts.get("active_offscene") or ():
+        if _name_staged_unique(sentence, n, first_counts):
+            return n
+    return None
+
+
+def _mentioned_anywhere(text: str, full_name: str) -> bool:
+    """True if `full_name` (or its unambiguous whole-token first name) appears ANYWHERE in `text` —
+    no staging-verb binding required. Used only by the OMISSION check (b), where even a bare mention
+    ("you spot Mara across the room") is enough to prove the narration acknowledged this houseguest is
+    here; the deliberately looser bar (vs. `_stages_in_scene`) keeps that check from nagging on a
+    scene that merely doesn't give every present houseguest a line."""
+    if re.search(rf"\b{re.escape(full_name)}\b", text):
+        return True
+    parts = full_name.split()
+    if len(parts) > 1 and re.search(rf"\b{re.escape(parts[0])}\b", text):
+        return True
+    return False
+
+
+def _presence_omission_directive(narration: str, facts: dict) -> Optional[str]:
+    """PARITY-8 — the inverse desync: the engine places one or more houseguests in the player's OWN
+    room, but the scene never mentions ANY of them at all (the narration substituted its own cast).
+    Returns a next-turn re-ground directive naming the omitted occupant(s), or None. Deliberately
+    requires TOTAL silence on the real room population (not a per-name check) — a scene legitimately
+    spotlighting one of several present houseguests is not a defect."""
+    room_present = facts.get("room_present") or set()
+    if not room_present:
+        return None
+    text = narration or ""
+    if any(_mentioned_anywhere(text, n) for n in room_present):
+        return None  # at least one real occupant appeared somewhere — not a wholesale swap
+    room_label = str(facts["room"]).replace("-", " ")
+    names = sorted(room_present)[:_PRESENCE_MOVE_MAX_NAMES]
+    return (
+        "SURFACE WHO IS ACTUALLY HERE — the engine places " + _join_names(names) + f" in the "
+        f"{room_label} right now, but that scene never mentioned any of them. Before your next beat, "
+        "bring the ACTUAL room population into view (a line, a glance, a greeting) — never let the "
+        "room's cast silently drift to houseguests the engine didn't place here."
+    )
+
+
 async def record_post_turn_presence_check(user, narration: str) -> None:
-    """Post-turn presence/identity guard (0076). Stash a gentle next-turn re-ground when the narration
-    staged an off-scene/evicted houseguest as acting in the scene. SKIPS a turn where the player
-    changed rooms (multi-scene/ambiguous). Combines with (never clobbers) a board re-ground already
-    stashed this turn. Fail-open — never raises, never blocks the finishing turn."""
+    """Post-turn presence/identity guard (0076 + A2/#1726's omission half). Stash a gentle next-turn
+    re-ground when (a) the narration staged an off-scene/evicted houseguest as acting in the scene, or
+    (b) the scene never surfaced ANY of the houseguests the engine actually placed in the player's own
+    room (PARITY-8 — `_presence_omission_directive`). SKIPS a turn where the player changed rooms
+    (multi-scene/ambiguous). Combines with (never clobbers) a board re-ground already stashed this
+    turn. Fail-open — never raises, never blocks the finishing turn."""
     try:
         from src import orwell_engine
         _dkey = _desync_key(user)  # #1045: stable key — functions single-tenant (user=None) too.
@@ -2357,12 +2448,66 @@ async def record_post_turn_presence_check(user, narration: str) -> None:
         if isinstance(before, dict) and before.get("room") and before.get("room") != facts["room"]:
             return
         directive = _presence_desync_directive(narration or "", facts)
-        if not directive:
-            return
-        _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
-        logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
+        if directive:
+            _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
+            logger.warning("[orwell] presence desync detected for user=%s — re-grounding next turn", user)
+        omission = _presence_omission_directive(narration or "", facts)
+        if omission:
+            _reground_enqueue(_dkey, omission)  # BL-004: bounded append (combine, never clobber)
+            logger.warning("[orwell] presence OMISSION detected for user=%s — re-grounding next turn", user)
     except Exception as e:
         logger.warning("[orwell] post-turn presence check skipped for user=%s: %s", user, e)
+
+
+async def screen_presence_wall(user, text: str) -> str:
+    """A2 (#1726) — the STRUCTURAL, SAME-TURN presence guard. Returns `text` with any sentence that
+    stages an off-scene or already-evicted houseguest as present/acting in the player's scene DROPPED
+    (delimiters preserved for the rest) — the empirically load-bearing half: the terminal whereabouts
+    pin alone only halved the failure rate (5/6→3/6 in a live A/B), never zeroed it, so the drop is
+    what actually holds the wall. Sibling to `screen_knowledge_wall`, same shape: cheap hot path (no
+    live whereabouts, or nothing off-scene/evicted to guard against) returns `text` verbatim without
+    ever splitting it; a proven phantom placement is DROPPED and never re-admitted by any fallback.
+    Fail-soft: a read/scan hiccup falls through to emit the text unchanged (a false hold on creative
+    prose is worse than a missed phantom — ADR 0005 #1) — except for a sentence already proven to
+    stage a non-present houseguest, which is never restored."""
+    if not text or not text.strip():
+        return text
+    try:
+        from src import orwell_engine
+        state = await orwell_engine.get_game_state(user=user)
+    except Exception as e:
+        logger.warning("[orwell] presence-wall: game-state read skipped for user=%s: %s", user, _exc_detail(e))
+        return text  # engine unreachable this turn — never hold narration on a read hiccup
+    facts = _presence_facts(state if isinstance(state, dict) else {})
+    if not facts or (not facts.get("evicted") and not facts.get("active_offscene")):
+        return text  # nothing off-scene/evicted this turn — the overwhelmingly common path
+    roster = set(facts["in_view"]) | set(facts["active_offscene"]) | set(facts["evicted"])
+    first_counts = _first_name_counts(roster)
+    parts = re.split(r"(?<=[.!?\n])", text)
+    out = []
+    dropped: set = set()
+    for part in parts:
+        try:
+            hit = _sentence_stages_absent_npc(part, facts, first_counts)
+            if hit:
+                dropped.add(hit)
+                continue  # DROP — a non-present houseguest is never staged as present
+        except Exception:
+            pass  # any hiccup falls through to emit (conservatism), except a proven hit above
+        out.append(part)
+    if dropped:
+        try:
+            _dkey = _desync_key(user)
+            directive = _presence_desync_directive(text, facts)  # reuse the tested re-ground wording
+            if directive:
+                _reground_enqueue(_dkey, directive)  # BL-004: bounded append (combine, never clobber)
+            logger.warning(
+                "[orwell] presence-wall: dropped a phantom placement of %s for user=%s",
+                ", ".join(sorted(dropped)), user,
+            )
+        except Exception:
+            pass
+    return "".join(out)
 
 
 # ── NARR-3 (#613) — the INVENTED-HOUSEGUEST roster-validation backstop (post-turn re-ground) ──── #

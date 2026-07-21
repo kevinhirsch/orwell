@@ -4335,6 +4335,23 @@ async def _knowledge_wall_guard(text: str, owner) -> str:
         return text
 
 
+async def _presence_wall_guard(text: str, owner) -> str:
+    """A2 (#1726) — the PRE-EMISSION structural presence guard, a location analog of
+    `_knowledge_wall_guard` above. Drops any sentence that stages a houseguest the engine places
+    off-scene or already-evicted as present/acting in the player's room — the empirically load-bearing
+    half of #1726 (the terminal whereabouts prompt pin alone only halved the failure rate, never
+    zeroed it). Everything else streams verbatim. Delegates to `chat_helpers.screen_presence_wall`,
+    which is fail-open by construction. Fires single-tenant too (`owner` None ⇒ the desync key falls
+    back to the canonical game-session id, NAR-1-safe). Any hiccup returns the text unchanged."""
+    if not text:
+        return text
+    try:
+        from routes import chat_helpers
+        return await chat_helpers.screen_presence_wall(owner, text)
+    except Exception:
+        return text
+
+
 _GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
 
 
@@ -6235,6 +6252,9 @@ async def _stream_agent_loop_impl(
                                     # fallback: a houseguest voicing the player's sealed Diary-Room content
                                     # is a Vault-Wall leak that must never reach the player.
                                     _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                                    # A2 (#1726) presence wall — drops a phantom (off-scene/evicted)
+                                    # houseguest staged as present, same-turn, before the player sees it.
+                                    _guarded_text = await _presence_wall_guard(_guarded_text, owner)
                                     if _guarded_text:
                                         full_response += _guarded_text
                                         if _guarded_text.strip():
@@ -6373,6 +6393,9 @@ async def _stream_agent_loop_impl(
                 _cutaway_emitted = _guarded.cutaway_emitted
                 # A0 knowledge wall runs LAST — a Vault-Wall leak is never re-admitted by a fallback.
                 _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                # A2 (#1726) presence wall — drops a phantom (off-scene/evicted) houseguest staged as
+                # present, same-turn, before the player sees it.
+                _guarded_text = await _presence_wall_guard(_guarded_text, owner)
                 if _guarded_text:
                     full_response += _guarded_text
                     if _guarded_text.strip():
