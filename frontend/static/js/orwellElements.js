@@ -306,7 +306,9 @@
         #orwell-status .os-you { margin: .35rem 0 .1rem; font-weight: 600; }
         #orwell-status .os-you .os-badge {
           display: inline-block; margin-left: .4rem; padding: 0 .4em; border-radius: .5em;
-          font-size: .72em; font-weight: 700; letter-spacing: .02em;
+          /* Kept in lock-step with the live panel copy (orwellStatusPanel.js): the self-role badge
+             clamps to a literal 11px legibility floor so it never renders sub-floor. */
+          font-size: max(.72em, 11px); font-weight: 700; letter-spacing: .02em;
           background: var(--accent, var(--red, #e06c75)); color: var(--on-accent, #fff);
         }
         #orwell-status .os-roster-h { opacity: .55; font-size: max(.8em, 11px); margin: .4rem 0 .15rem; }`;

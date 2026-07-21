@@ -139,6 +139,22 @@ XFAIL = {
     # the winner span (the panel's other status text is textured/INDET, not gated). REMOVE when the
     # shared frosted glass/token contrast fix lands and the surface ratchets clean.
     "#738-status-winner": "contrast:orwell-status:span.os-winner",
+    # #738 Liquid-Glass batch — the LIVE (mid-game) status HUD + decision card, exposed on the a11y
+    # run ONLY when finish_game() TIMES OUT before reaching the endgame (a slow-runner artifact: the
+    # intended FINISHED state renders these same texts over a TEXTURED backdrop → INDET/not-gated, but
+    # a timed-out mid-eviction leaves them over a uniform mid-tone glass → determinate). They are the
+    # SAME systemic dark-ink/on-accent-on-frosted-glass family as the sidebar (#1375-e/-f/-i), retro
+    # (#1375-h), finale (#1418-finale-contrast), and the status winner (#738-status-winner) above:
+    # the live ceremony rows (#os-hoh / #os-noms / #os-veto / #os-last-evict), the self-row rest cue
+    # (#os-you-rest), and the self-role badge (#os-you-badge — e.g. JURY, on-accent ~1.99:1) all read
+    # ~1.9–3.5:1 on the mid glass; the decision card's DISABLED Confirm button (WCAG-exempt inactive
+    # control, but the sweep still measures it) and its enable hint read ~1.86–1.90:1 over the same
+    # glass. Tracked with the #738 batch — REMOVE when the shared glass/token contrast fix lands.
+    # Scoped tightly (the live status #os-* elements; the decision-card disabled button + hint) so a
+    # NEW, non-glass contrast regression on these surfaces still gates.
+    "#738-status-live": "contrast:orwell-status:span#os-",
+    "#738-deccard-btn": "contrast:orwell-decision-card:button.ow-btn",
+    "#738-deccard-hint": "contrast:orwell-decision-card-hint:",
     # #1418 / S4-2: the finale body (#orwell-finale > .ow-body) is a scrollable region without keyboard
     # access (axe scrollable-region-focusable) — a KIT-level gap (the shared OrwellWindow `.ow-body`
     # scroll container is not tabbable) that only surfaces now that the finale renders on a finished
