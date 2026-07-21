@@ -14,7 +14,7 @@
 
 ## 1. State snapshot — 2026-07-21 (evening reconcile)
 
-**`main` @ `68d2264d`** (`docs: moonshot refactor synthesis`, #1770). All CI required lanes green;
+**`main` @ `68d2264d`** (`docs: moonshot refactor synthesis`, #1770). All CI-required lanes green;
 the three recurring FE flakes are **fixed at root** (#1766 in the table below).
 
 **The working open-items list is now
@@ -59,10 +59,10 @@ session task ledger, each with a disposition. Read it before starting any new wo
 
 ## 3. Owed / obligations
 
-1. **🔑 ROTATE KEYS (owner action, standing):** the OpenRouter key pasted 2026-07-21 (stored only at
-   the session scratchpad `openrouter.key`, 600-perm, never committed), plus the earlier
-   OpenRouter/NanoGPT and prompt-audit keys **and the GitHub PAT (`ghp_…`) from prior sessions**
-   (`SOUL.md` "still owed" carry-forward). Rotate at campaign close; scrub the scratchpad file.
+1. **🔑 ROTATE KEYS (owner action — as soon as practical, not at a milestone):** the provider keys
+   and the GitHub PAT used across this campaign passed through chat and should be rotated/revoked
+   now. The inventory lives in `SOUL.md`'s carry-forward notes (values never committed anywhere;
+   the live key sits only in the session scratchpad, 600-perm). Scrub the scratchpad copy after.
 2. **Owner decisions D1–D10** — backlog §T7. D1 (engine chyrons / scoped ADR 0003 amendment) gates
    the heart of Wave 1.
 3. **Post-#1768 acceptance:** the next *freshly generated* cast is the acceptance check for the

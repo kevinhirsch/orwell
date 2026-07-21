@@ -74,8 +74,10 @@ overseer session's task ledger.
 
 ## Part B — The exhaustive backlog
 
-**How to read.** Tiers T0–T8; every item carries: source/evidence · effort (S/M/L) · dependencies ·
-disposition. "Absorbed into X" means the item ships as part of X and must not be double-built.
+**How to read.** Tiers T0–T8. Fields appear where they carry signal, not uniformly: T0/T1 (build
+items) carry source · effort (S/M/L) · gating dependency; T2/T3/T5 (mappings) carry severity and a
+**disposition**; T4/T6 are compact ledgers; T7 is decisions; T8 is rules. "Absorbed into X" means
+the item ships as part of X and must not be double-built.
 Owner-decision items are collected in T7 — nothing in T0–T6 that lists a Q-dependency starts before
 that decision.
 
@@ -181,7 +183,7 @@ that decision.
 | D6 (Q6, reframed) | Confirm TUN-10's deploy-parity approach for dev/playtest rigs (env-level, not code defaults). | TUN-10 |
 | D7 (Q8) | ADR 0017: willing to reopen post-Wave-2 for single-log consolidation, or is dual-transport permanence absolute? | the parked one-log proposal |
 | D8 | #1599 allowlist grants: the moonshot P4/P8 fail-soft sites will need explicit owner-permitted entries (site + reason) under the governing ruling. | T1-4/T1-5 DoD |
-| D9 | **🔑 ROTATE KEYS (standing):** the 2026-07-21 OpenRouter key (session scratchpad only, 600-perm), the earlier OpenRouter/NanoGPT + prompt-audit keys, and the GitHub PAT (`ghp_…`) from prior sessions. Scrub the scratchpad file after rotation. | campaign close |
+| D9 | **🔑 ROTATE KEYS (standing, do NOT defer):** rotate/revoke the provider keys and the GitHub PAT used across this campaign **as soon as practical** — they passed through chat and belong rotated now, not at a milestone. The specific inventory lives in the session's secure notes (`SOUL.md` carry-forward), not in this committed doc; scrub the session scratchpad copy after rotation. | immediate |
 | D10 | #1713 behavioral fix scope: the premiere-path 300s block needs an owner/engine decision (it is an owner-driven feature); confirm the re-scope in T2. | #1713 Step-2 |
 
 *(Q7 — the golden-path treadmill — is moot: the apparatus was decommissioned by #1765 before the
@@ -198,9 +200,10 @@ verify bot claims against code personally.
 
 ## Sequencing summary (the short version)
 
-1. **Now (no owner decision needed):** T0-1 comparator fix · T0-5 reasoning scrub · T0-4 probe
+1. **Now (no owner decision needed):** T0-1 comparator fix · T0-2 beats-terminate-themselves
+   (server-side, no UI change — needs no ADR 0003 ruling) · T0-5 reasoning scrub · T0-4 probe
    (telemetry arm) · #1729-B1 recorder gate · T0-6 casting ledger (+#1734) · TUN-10 rig parity.
-2. **On D1 (Q1):** T0-2 + T0-3 — the heart of Wave 1 — then the T0-7 exit playtest.
+2. **On D1 (Q1):** T0-3 chyrons — the remaining heart of Wave 1 — then the T0-7 exit playtest.
 3. **Wave 2+:** T1-1 (belt demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log) → T1-5 (on
    D4) → T1-6 → T1-7 → T1-8 (on D5).
 4. **Continuously:** #1644 text standardization · #1599 fail-soft audit (with 0112) · T4/T6
