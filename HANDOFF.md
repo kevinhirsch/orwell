@@ -15,7 +15,8 @@
 ## 1. State snapshot — 2026-07-21
 
 **`main` @ `4fbccd92`** (`feat: Wave-2 — off-screen scheming names a real target`, #1767).
-All CI required lanes green; the three recurring FE flakes are **fixed at root** (see §4).
+All CI required lanes green; the three recurring FE flakes are **fixed at root** (#1766 in the
+table below; what deliberately remains of that story is in §4).
 
 **Landed this cycle (all squash-merged on green required gates):**
 
@@ -54,7 +55,8 @@ All CI required lanes green; the three recurring FE flakes are **fixed at root**
 
 1. **🔑 ROTATE KEYS (owner action, standing):** the OpenRouter key pasted 2026-07-21 (stored only at
    the session scratchpad `openrouter.key`, 600-perm, never committed), plus the earlier
-   OpenRouter/NanoGPT and prompt-audit keys. Rotate at campaign close; scrub the scratchpad file.
+   OpenRouter/NanoGPT and prompt-audit keys **and the GitHub PAT (`ghp_…`) from prior sessions**
+   (`SOUL.md` "still owed" carry-forward). Rotate at campaign close; scrub the scratchpad file.
 2. **Triage the live-playtest findings** into a fix wave when the agent reports.
 3. **Post-#1768:** the next *freshly generated* cast is the acceptance check for the tattoo fix
    (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
@@ -105,15 +107,18 @@ All CI required lanes green; the three recurring FE flakes are **fixed at root**
 
 ## 6. Resume-here playbook
 
+Shell steps:
+
 ```bash
 # state of the world
 git fetch origin main && git log --oneline -5 origin/main
-# open PRs / their gate state (one call)
-#   -> mcp__github__list_pull_requests state=open; merge anything 'unstable' whose work you know
 # engine smoke (headless)
 npm run build && ORWELL_ENGINE_PORT=8765 node dist/main.js  # then the playtest driver pattern
 # FE full gate before pushing FE changes
 cd frontend && python3 -m pytest tests/ -n 4
 ```
 
-Open questions for the owner are listed in §3; everything else is autonomous.
+Tool steps (GitHub MCP, not shell): list open PRs with `list_pull_requests state=open` and read each
+`mergeable_state` (§5 semantics); merge anything `unstable` whose work you know.
+
+Owner obligations are listed in §3; everything else is autonomous.
