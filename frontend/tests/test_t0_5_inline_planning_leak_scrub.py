@@ -128,3 +128,81 @@ def test_wired_at_both_scrub_game_leak_call_sites():
     assert "reasoning_empty=not round_reasoning.strip()" in src
     # the bubble-start tracker exists and is set once real narration actually flushes.
     assert "_round_visible_emitted" in src
+
+
+# ── Greptile P1 (#1774) — the scrub's drop must be MIRRORED into round_response, or the ──
+# scrubbed leak REAPPEARS after reload (the ADR-0015 live-vs-reload drift class). Live-stream
+# filtering only touches `full_response`/what the player sees THIS turn; `round_response` is the
+# raw per-round accumulator that `cleaned_round = strip_tool_blocks(round_response)` derives
+# `round_texts` from — the text persisted and re-served on history reload. Without mirroring the
+# drop back (the SAME `_mirror_wall_drop` fix #1746 applies for the knowledge/presence wall
+# guards), a leak invisible live would resurface verbatim the next time the session reloads.
+
+from src.agent_loop import _scrub_game_leak, _mirror_wall_drop
+from src.tool_parsing import strip_tool_blocks
+
+
+def test_scrubbed_leak_is_mirrored_into_round_response_live_equals_reload():
+    complete = ("I need to ground myself in the actual game state before I say anything else. "
+                "The room falls quiet as Delia sets down her mug.")
+    # The SAME pipeline the streaming loop runs: scrub → scrub → mirror the drop back.
+    clean = _scrub_game_leak(complete)
+    clean = _scrub_inline_planning_leak(clean, reasoning_empty=True, at_bubble_start=True)
+    round_response = complete  # the raw per-round accumulator, pre-mirror
+    round_response = _mirror_wall_drop(round_response, complete, clean)
+
+    live_text = clean.strip()
+    reload_text = strip_tool_blocks(round_response).strip()
+
+    assert "I need to ground myself" not in live_text
+    assert "I need to ground myself" not in reload_text, (
+        "the scrubbed planning leak reappeared in the reload/persisted text even though the "
+        "player never saw it live — the exact ADR-0015 live-vs-reload drift class"
+    )
+    # LIVE == RELOAD for a scrubbed turn: what the player saw live is exactly what a later
+    # reload re-serves from history.
+    assert reload_text == live_text
+
+
+def test_scrubbed_engine_jargon_is_mirrored_into_round_response_live_equals_reload():
+    complete = ("The room settles into evening light. Wait, holder is null, players array is "
+                "empty. Griffin leans against the counter.")
+    clean = _scrub_game_leak(complete)
+    clean = _scrub_inline_planning_leak(clean, reasoning_empty=True, at_bubble_start=False)
+    round_response = _mirror_wall_drop(complete, complete, clean)
+
+    live_text = clean.strip()
+    reload_text = strip_tool_blocks(round_response).strip()
+
+    assert "holder is null" not in reload_text
+    assert "players array is empty" not in reload_text
+    assert reload_text == live_text
+
+
+def test_wholly_scrubbed_round_leaves_round_response_empty_after_mirror():
+    # the entire chunk was planning preamble — round_response must end up empty too, not just
+    # `full_response` — otherwise a reload would show the leak even though the live turn showed
+    # nothing at all for this chunk.
+    complete = "I need to ground myself in the actual game state before I say anything else."
+    clean = _scrub_game_leak(complete)
+    clean = _scrub_inline_planning_leak(clean, reasoning_empty=True, at_bubble_start=True)
+    assert clean.strip() == ""
+    round_response = _mirror_wall_drop(complete, complete, clean)
+    assert strip_tool_blocks(round_response).strip() == ""
+
+
+def test_mirror_call_wired_at_both_scrub_call_sites_before_cleaned_round_derives():
+    src = _read("src", "agent_loop.py")
+    # both streaming call sites must mirror the scrub's drop back into round_response...
+    assert src.count("round_response = _mirror_wall_drop(round_response, _complete, _clean)") == 1
+    assert src.count(
+        "round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)") == 1
+    # ...and both mirror calls must appear BEFORE `cleaned_round` is derived from round_response,
+    # so the persisted/reload text reflects the mirrored drop.
+    cleaned_round_at = src.index("cleaned_round = strip_tool_blocks(round_response).strip()")
+    mid_loop_mirror_at = src.index(
+        "round_response = _mirror_wall_drop(round_response, _complete, _clean)")
+    flush_mirror_at = src.index(
+        "round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)")
+    assert mid_loop_mirror_at < cleaned_round_at
+    assert flush_mirror_at < cleaned_round_at

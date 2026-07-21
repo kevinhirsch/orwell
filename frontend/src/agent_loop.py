@@ -4502,7 +4502,14 @@ def _scrub_inline_planning_leak(text: str, *, reasoning_empty: bool,
                 continue
             break
         if start:
-            result = "".join(parts[start:]).lstrip()
+            # Greptile P1 (#1774): do NOT `.lstrip()` the remainder — `_mirror_wall_drop` (the
+            # durability fix that propagates this scrub's removal into `round_response`, see the
+            # call sites below) walks a byte-identical two-pointer match between the pre-scrub
+            # sentence parts and the surviving ones; trimming a survivor's leading whitespace here
+            # would desync that match and make the walk misread a KEPT sentence as dropped,
+            # over-deleting from `round_response` (a leading space is harmless in rendered HTML,
+            # unlike a broken mirror).
+            result = "".join(parts[start:])
     if not result:
         return result
     parts = re.split(r"(?<=[.!?\n;])", result)
@@ -6717,6 +6724,15 @@ async def _stream_agent_loop_impl(
                                 _clean = _scrub_inline_planning_leak(
                                     _clean, reasoning_empty=not round_reasoning.strip(),
                                     at_bubble_start=not _round_visible_emitted)
+                                # Greptile P1 (#1774): mirror the leak-scrub's OWN removal back into
+                                # round_response — the SAME durability fix `_mirror_wall_drop` applies
+                                # to the wall guards below (#1746). Without this, `_complete → _clean`
+                                # only filtered what streamed LIVE (`full_response`); `round_response`
+                                # (raw) still fed `cleaned_round`/`round_texts` a few lines down, so a
+                                # scrubbed reasoning/jargon leak — or an operator-aside `_scrub_game_leak`
+                                # already dropped — REAPPEARED verbatim after reload even though the
+                                # player never saw it live (the ADR-0015 live-vs-reload drift class).
+                                round_response = _mirror_wall_drop(round_response, _complete, _clean)
                                 if _clean:
                                     # A2: run the whole-scene circuit-breaker + 0065 Part C per-sentence
                                     # pre-emission outcome guard (see `_emit_guarded_scene`'s docstring for
@@ -6864,11 +6880,16 @@ async def _stream_agent_loop_impl(
         # Flush the scrub buffer: emit the trailing (possibly unterminated) sentence, cleaned, so
         # nothing the round produced is left unshown or leaks through.
         if _scrub_active and _game_buf:
+            _pre_scrub_tail = _game_buf
             _clean = _scrub_game_leak(_game_buf)
             # T0-5: same inline-planning/debugger-monologue scrub as the mid-loop emit above.
             _clean = _scrub_inline_planning_leak(
                 _clean, reasoning_empty=not round_reasoning.strip(),
                 at_bubble_start=not _round_visible_emitted)
+            # Greptile P1 (#1774): same mirror fix as the mid-loop emit above — the trailing
+            # (possibly unterminated) flush must ALSO propagate its scrub drop into round_response
+            # before `cleaned_round` derives from it a few lines down.
+            round_response = _mirror_wall_drop(round_response, _pre_scrub_tail, _clean)
             _game_buf = ""
             if _clean:
                 # 0065 Part C + A2 — the SAME scene circuit-breaker + per-sentence guard as the mid-loop
