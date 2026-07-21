@@ -137,7 +137,7 @@ def test_look_line_renders_into_the_casting_card():
 
 
 def test_prompt_injects_used_facet_ledgers():
-    # 2026-07-21 (the "San Diego ×2" defect): the hometown/vocation ledgers thread between waves like
+    # 2026-07-21 (the "San Diego x2" defect): the hometown/vocation ledgers thread between waves like
     # the name ledger, so per-NPC calls stop landing on the model's default picks.
     brief = G.generate_season_brief(108108)
     msgs = G.build_genesis_messages(_ROSTER, brief, None, None, None,

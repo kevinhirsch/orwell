@@ -2385,7 +2385,10 @@ export class GameSessionAdapter implements GameSession {
       // per-field fallback the skinTone re-ground uses); every clean authored facet folds freely. A
       // seeded facet that already granted ink anywhere leaves the authored look untouched (sharpening,
       // not inventing).
-      const INK_RE = /tattoo|inked/i;
+      // Word-bounded ink lexicon (CodeRabbit on #1768): `\btattoo` covers tattoo/tattoos/tattooed;
+      // `\bink(ed)?\b` covers the real model phrasings "forearm ink" / "inked" WITHOUT the unbounded
+      // substring false-positives ("blinked", "kinked") that would wrongly hold a clean authored field.
+      const INK_RE = /\btattoo|\bink(?:ed)?\b/i;
       const RENDERED_FACET_FIELDS = [
         "heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style",
       ] as const;

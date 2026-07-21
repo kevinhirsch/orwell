@@ -194,8 +194,26 @@ describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the
 });
 
 describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (the tattoo-uniformity fix)", () => {
+  // The ink lexicon — kept in lockstep with the adapter's INK_RE: word-bounded so "forearm ink" /
+  // "inked" classify as ink while "blinked"-style substrings can never false-positive.
+  const INK_LEXICON = /\btattoo|\bink(?:ed)?\b/i;
   const facetHasInk = (pc: PhysicalCharacteristics): boolean =>
-    Object.values(pc).some((v) => /tattoo|inked/i.test(String(v ?? "")));
+    Object.values(pc).some((v) => INK_LEXICON.test(String(v ?? "")));
+
+  it("the ink lexicon classifies real model phrasings and rejects substring false-positives", () => {
+    const base: PhysicalCharacteristics = {
+      heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+      facialFeatures: "a square jaw", distinguishingMark: "none notable",
+      ageLook: "fresh-faced, late-twenties look", style: "sporty and laid-back",
+    };
+    // "visible forearm ink" is a real model phrasing — it must classify as ink.
+    expect(facetHasInk({ ...base, style: "visible forearm ink" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "an inked half-sleeve" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "a full sleeve of tattoos" })).toBe(true);
+    // Substring false-positives must NOT classify (the false-hold CodeRabbit flagged).
+    expect(facetHasInk({ ...base, facialFeatures: "eyes that look like they just blinked awake" })).toBe(false);
+    expect(facetHasInk(base)).toBe(false);
+  });
 
   it("an authored mark that INTRODUCES ink where the seeded deal granted none is refused; other facets fold", () => {
     const { sb } = liveGame("ink-budget", 5);
@@ -243,17 +261,25 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     expect(after.physicalCharacteristics!.distinguishingMark).toBe("a beauty mark on one cheek");
     // And the portrait prompt — which renders style into "Presentation style:" — carries no ink.
     const pp = sb.session.getPortraitPrompt(card.id)!;
-    expect(/tattoo|inked/i.test(pp.prompt)).toBe(false);
+    expect(INK_LEXICON.test(pp.prompt)).toBe(false);
   });
 
   it("an authored ink mark is KEPT when the seeded deal already granted ink (sharpening, not inventing)", () => {
-    const { sb } = liveGame("ink-keep", 5);
-    const inked = sb.session.getGameState().house
-      .find((h) => h.status === "active" && h.physicalCharacteristics
-        && /tattoo/i.test(h.physicalCharacteristics.distinguishingMark));
-    if (!inked) return; // this seed dealt an all-plain cast — nothing to sharpen (the budget is small)
+    // Deterministic fixture hunt: the mark deal grants ~1-2 tattoo marks per cast on average, so a
+    // small fixed seed sweep is GUARANTEED to surface an inked card — and we ASSERT it does, so this
+    // test can never silently pass while testing nothing (the CodeRabbit vacuity finding).
+    let found: { sb: ReturnType<typeof liveGame>["sb"]; id: string } | undefined;
+    for (const seed of [5, 1, 2, 3, 4, 6, 7, 8, 9, 10]) {
+      const { sb } = liveGame(`ink-keep-${seed}`, seed);
+      const inked = sb.session.getGameState().house
+        .find((h) => h.status === "active" && h.physicalCharacteristics
+          && /\btattoo/i.test(h.physicalCharacteristics.distinguishingMark));
+      if (inked) { found = { sb, id: inked.id }; break; }
+    }
+    expect(found, "the fixed seed sweep must surface an ink-granted card").toBeDefined();
+    const { sb, id } = found!;
     const res = sb.session.recordCastProfile({
-      houseguestId: inked.id,
+      houseguestId: id,
       physicalCharacteristics: {
         heightBuild: "stocky and powerful", skinTone: "warm tan complexion", hair: "a close-cropped fade",
         facialFeatures: "an open friendly face", distinguishingMark: "a forearm tattoo of a compass rose",
@@ -261,7 +287,7 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
       },
     });
     expect(res.accepted).toBe(true);
-    const after = sb.session.getGameState().house.find((h) => h.id === inked.id)!;
+    const after = sb.session.getGameState().house.find((h) => h.id === id)!;
     expect(after.physicalCharacteristics!.distinguishingMark).toBe("a forearm tattoo of a compass rose");
   });
 });

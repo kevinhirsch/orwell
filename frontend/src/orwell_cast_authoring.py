@@ -747,7 +747,7 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     # is still the airtight belt). `genderPresentation` is a PUBLIC, Vault-free HouseguestCard facet.
     # 2026-07-21 prompt audit: thread the SEEDED `physicalCharacteristics` in as the LOOK BRIEF — the
     # engine deals the cast-wide capped look spread (incl. the visible-ink budget), and without it the
-    # model invents the whole look from its prior (the "full sleeve of tattoos ×4" index case). The
+    # model invents the whole look from its prior (the "full sleeve of tattoos x4" index case). The
     # model sharpens the brief; the ink budget is fixed (and the engine's write-back backstop holds it).
     skeleton = {
         k: npc.get(k)

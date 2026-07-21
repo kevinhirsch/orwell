@@ -680,7 +680,7 @@ def build_genesis_messages(roster: list, brief: dict,
             "Names ALREADY taken by earlier houseguests in THIS cast — do NOT reuse any of these first "
             "names OR surnames (every houseguest needs a distinct given name and surname): "
             + ", ".join(taken) + ".")
-    # 2026-07-21 prompt audit (the "San Diego ×2" defect): thread the ALREADY-USED hometowns/vocations
+    # 2026-07-21 prompt audit (the "San Diego x2" defect): thread the ALREADY-USED hometowns/vocations
     # forward between waves exactly like the name ledger, so per-NPC calls stop landing on the model's
     # default picks. The engine's cross-cast dedupe backstop still catches any within-wave collision.
     if isinstance(used_facets, dict):
