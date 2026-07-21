@@ -6823,6 +6823,10 @@ async def _stream_agent_loop_impl(
                 # pending unchanged) and the surface-the-pending belt brings up the card. Cheap: reads the
                 # phase the model was framed on this turn (stashed by apply_game_framing), no extra fetch.
                 _framed_phase = None
+                # #1754 (CodeRabbit Major): default `_fk` BEFORE the try — the L-F3 code below consumes
+                # it unconditionally after this try/except, so a failed import/get must degrade, not raise
+                # NameError for the whole turn (every sibling read in this fn follows init-then-overwrite).
+                _fk = None
                 try:
                     from routes import chat_helpers as _ch_fp
                     # NAR-1: `_belt_key` — was `owner or ""`, which never matched the "default"
