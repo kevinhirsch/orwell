@@ -1373,7 +1373,9 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     best-effort and Vault-free. Structure::
 
       { windowSeconds,
-        llm:    {<callClass>: {total, failed, failureRate, lastFailureAt}},
+        llm:    {<callClass>: {total, failed, failureRate, lastFailureAt,
+                                semanticNoOps, lastSemanticNoOpAt,
+                                emptyCompletions, lastEmptyCompletionAt}},
         tools:  {<engineTool>: {total, failed, failureRate, lastFailureAt}},
         guards: {<softFailClass>: {failed, autoCorrected, lastFailureAt}} }
 
@@ -1393,14 +1395,14 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
     tools: dict = {}
     guards: dict = {}
 
-    def _bump(bucket, key, failed, ts, *, semantic_noop=False, llm=False):
-        # The semantic-no-op fields are LLM-only: seed them in the default shape ONLY for the LLM
-        # rollup so TOOL/guard buckets stay `{total, failed, lastFailureAt}` and don't carry the
-        # LLM-only `semanticNoOps`/`lastSemanticNoOpAt`. LLM buckets keep all five keys always.
+    def _bump(bucket, key, failed, ts, *, semantic_noop=False, llm=False, empty=False):
+        # The semantic-no-op / empty-completion fields are LLM-only: seed them in the default shape
+        # ONLY for the LLM rollup so TOOL/guard buckets stay `{total, failed, lastFailureAt}` and
+        # don't carry the LLM-only fields. LLM buckets keep all seven keys always.
         if llm:
             d = bucket.setdefault(
                 key, {"total": 0, "failed": 0, "semanticNoOps": 0, "lastFailureAt": None,
-                      "lastSemanticNoOpAt": None})
+                      "lastSemanticNoOpAt": None, "emptyCompletions": 0, "lastEmptyCompletionAt": None})
         else:
             d = bucket.setdefault(key, {"total": 0, "failed": 0, "lastFailureAt": None})
         d["total"] += 1
@@ -1412,6 +1414,14 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
         if semantic_noop:
             d["semanticNoOps"] = d.get("semanticNoOps", 0) + 1
             d["lastSemanticNoOpAt"] = ts
+        # F8 (#1741): a `finishReason: None` / empty-completion (llm_trace's `failClass == "empty"`)
+        # is a FIRST-CLASS telemetry class of its own — counted separately from the blunt `failed`
+        # bucket (which also lumps in 4xx/5xx/timeout) so an operator can see "N of these were
+        # specifically vanished/empty generations", the exact signal the 6/103-in-bundle finding
+        # needed and the retry-on-empty guard (llm_core.py) is meant to be driving toward zero.
+        if empty:
+            d["emptyCompletions"] = d.get("emptyCompletions", 0) + 1
+            d["lastEmptyCompletionAt"] = ts
 
     try:
         _, llm_lines = log_rings.LLMIO.since(0, limit=_BUNDLE_RING_LIMIT)
@@ -1423,7 +1433,8 @@ def _compute_health_rollup(window_s: int = _ROLLUP_WINDOW_S, now_ms=None,
         if _norm_user(e.get("user")) != want_user:
             continue  # cross-user isolation: this LLM call counts for THIS user only
         _bump(llm, _llm_class_of(e), _entry_failed(e), e.get("ts"),
-              semantic_noop=_entry_semantic_noop(e), llm=True)
+              semantic_noop=_entry_semantic_noop(e), llm=True,
+              empty=(str(e.get("failClass") or "") == "empty"))
 
     try:
         _, io_lines = log_rings.IO.since(0, limit=_BUNDLE_RING_LIMIT)
@@ -1534,6 +1545,26 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
             "semantic-noop-storm", "Semantic no-op storm", semantic,
             f"{semantic} HTTP-ok LLM call(s) applied nothing (output dropped / length-cut) "
             f"in-window — class(es): {worst or '?'}"))
+
+    # 2c) Empty-completion STORM (F8 / #1741). `finishReason: None` / vanished completions
+    #     (llm_trace's `failClass == "empty"`) are already folded into the blunt `failed` axis
+    #     (so `narration-failure` above still fires at threshold 1 for the player-facing class),
+    #     but that axis can't tell an operator "N of these were SPECIFICALLY empty generations" —
+    #     it reads identically to a 5xx or a timeout. This is the first-class count the #1741 audit
+    #     asked for (6/103 stream records finished `finishReason: None` in the reviewed bundle):
+    #     tracked per-class as `emptyCompletions`, and a burst across ANY class (not just narration
+    #     — a silent empty utility/enrichment call is just as real a dropped turn) fires RED at the
+    #     same storm threshold as the semantic-no-op burst above. `llm_core.py`'s empty-`stop` guard
+    #     already retries a single empty completion like a failed attempt; this alarm is for when
+    #     retries are ALSO failing (a genuine burst), not an occasional blip.
+    empties = sum(int(v.get("emptyCompletions", 0)) for v in llm.values() if isinstance(v, dict))
+    if empties >= _STORM_THRESHOLD:
+        worst = ", ".join(sorted(
+            k for k, v in llm.items() if isinstance(v, dict) and v.get("emptyCompletions")))
+        alarms.append(_alarm(
+            "empty-completion-storm", "Empty-completion storm", empties,
+            f"{empties} vanished/empty LLM completion(s) (finishReason: None / empty 'stop') "
+            f"in-window — class(es): {worst or '?'} — a dropped turn from the player's view"))
 
     # 3) Write-back / enrichment refusal STORM. The provider/runtime classes (search-provider /
     #    narrator-http / reasoning-misroute) have their OWN alarm (4c) and are excluded here so a
@@ -2454,9 +2485,23 @@ function renderRollup(rl) {
             : rate(v.failed || 0, v.total || 0)) + "</td></tr>";
     }).join("");
   };
+  // F8 (#1741): the LLM table gets its own row renderer with an extra "empty" column —
+  // `finishReason: None` / vanished completions, a FIRST-CLASS count distinct from the blunt
+  // failed/total (which also lumps in 4xx/5xx/timeout). Zero renders muted, any count warns.
+  const llmRows = (obj) => {
+    const keys = Object.keys(obj || {}).sort();
+    if (!keys.length) return "<tr><td colspan=3 class='sub'>none in window</td></tr>";
+    return keys.map(k => {
+      const v = obj[k] || {};
+      const empty = v.emptyCompletions || 0;
+      return "<tr><td>" + esc(k) + "</td><td class='num'>" + rate(v.failed || 0, v.total || 0) +
+        "</td><td class='num'>" + (empty ? '<span class="warn">' + esc(empty) + "</span>" : '<span class="sub">0</span>') +
+        "</td></tr>";
+    }).join("");
+  };
   el.innerHTML =
-    "<table style='margin-bottom:10px'><thead><tr><th>LLM call class</th><th style='text-align:right'>failed/total</th></tr></thead><tbody>" +
-    rows(rl.llm, 2) + "</tbody></table>" +
+    "<table style='margin-bottom:10px'><thead><tr><th>LLM call class</th><th style='text-align:right'>failed/total</th><th style='text-align:right'>empty completions</th></tr></thead><tbody>" +
+    llmRows(rl.llm) + "</tbody></table>" +
     "<table style='margin-bottom:10px'><thead><tr><th>Engine tool</th><th style='text-align:right'>failed/total</th></tr></thead><tbody>" +
     rows(rl.tools, 2) + "</tbody></table>" +
     "<table><thead><tr><th>Guard / judge class</th><th style='text-align:right'>failures</th></tr></thead><tbody>" +
