@@ -203,21 +203,24 @@ describe("ADR 0019 Layer 3 — knowledgeScopeManifest is the full per-fact known
 });
 
 /**
- * ADR 0019 guardian caveat C1 — the producer-only casting backstop. The genuinely producer-only casting
- * intake (motivation / private strategy / interview notes) lives on the player object and is NEVER
+ * ADR 0019 guardian caveat C1 — the producer-only casting backstop. The seal set is DELIBERATELY NARROW:
+ * only `privateStrategy` (private BY DEFINITION — the player's true gameplan, "stays with production" —
+ * never voluntarily spoken in-house, the DR-class analog). It lives on the player object and is NEVER
  * seeded into the knowledge layer, so BEFORE this fix neither `sealedFromHouse` (Diary-Room
- * `NO_NPC_PATHWAY` only) nor `knowledgeScopeManifest` (knowledge-layer facts only) carried it. Layer 1
- * removes it from the narrator context, but a STAGED houseguest reciting a casting answer had NO
- * downstream guard to drop it (Layer 1 was its sole, un-backstopped defense — the "camp counselor"
- * leak class that birthed the ADR). The fix: `sealedFromHouse` now also emits the producer-only casting
- * class as GLOBALLY-sealed facts (`knownTo` empty ⇒ NO houseguest may ever voice it), giving the Layer
- * 3 FE guard the defense-in-depth backstop it lacked. TWO guards keep it from false-holding the OPEN set
- * (ADR 0005 #1 / Greptile+CodeRabbit #1763): BACKSTORY is excluded (shareable public bio), and only
- * DISTINCTIVE prose (≥3 words) is sealed (a terse "revenge" would mint a broad single-word signature
- * that hard-drops every sentence carrying that common word all season). Note: casting values below are
- * ≥3-word sentences carrying a searchable token — roles only, no fixture names.
+ * `NO_NPC_PATHWAY` only) nor `knowledgeScopeManifest` (knowledge-layer facts only) carried it — a STAGED
+ * houseguest reciting it had NO downstream guard to drop it (Layer 1 was its sole, un-backstopped
+ * defense). The fix: `sealedFromHouse` now emits it as a GLOBALLY-sealed fact (`knownTo` empty ⇒ NO
+ * houseguest may ever voice it), the Layer-3 defense-in-depth backstop.
+ *
+ * What is DELIBERATELY EXCLUDED — all SHAREABLE, so a global seal would FALSE-HOLD legitimate open-set
+ * narration all season (ADR 0005 #1 / Greptile+CodeRabbit #1763, VERIFIED by repro): `motivation` ("why
+ * I came" — house small-talk), `character.background` (public bio), open-ended `interviewNotes` (mixed);
+ * their casting-turn recital is Layer 1's job, any later reference the pathway model's. A second guard:
+ * only DISTINCTIVE prose (≥3 words) is sealed (a terse "revenge" would mint a broad single-word signature
+ * that hard-drops every sentence carrying that common word all season). Casting values below are ≥3-word
+ * sentences carrying a searchable token — roles only, no fixture names.
  */
-describe("ADR 0019 C1 — producer-only casting content is a globally-sealed backstop in sealedFromHouse", () => {
+describe("ADR 0019 C1 — the player's private strategy is a globally-sealed backstop in sealedFromHouse", () => {
   function castGame(user: string, casting: { motivation?: string; privateStrategy?: string; backstory?: string; interviewNotes?: string[] }, seed = 11) {
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor(user);
@@ -226,56 +229,45 @@ describe("ADR 0019 C1 — producer-only casting content is a globally-sealed bac
     return { reg, sb };
   }
 
-  it("seals the player's casting MOTIVATION and PRIVATE STRATEGY — each with an EMPTY knownTo", () => {
-    const MOTIVE = "my real reason for playing is TOKENC1MOTIVE cold revenge on my ex";
+  it("seals the player's PRIVATE STRATEGY — with an EMPTY knownTo (globally sealed)", () => {
     const STRAT = "my actual gameplan is TOKENC1STRAT to run a hidden spy network quietly";
-    const { sb } = castGame("adr0019-c1", { motivation: MOTIVE, privateStrategy: STRAT });
+    const { sb } = castGame("adr0019-c1", { privateStrategy: STRAT });
     const sealed: SealedFact[] = sb.session.sealedFromHouse();
-    for (const token of ["TOKENC1MOTIVE", "TOKENC1STRAT"]) {
-      const entry = sealed.find((s) => s.content.includes(token));
-      expect(entry, `casting content is sealed: ${token}`).toBeDefined();
-      // Globally sealed — NO houseguest holds a pathway, so any staged speaker voicing it is dropped.
-      expect(entry!.knownTo).toEqual([]);
-    }
-  });
-
-  it("does NOT globally seal the player's BACKSTORY — it is shareable public bio (Greptile #1763 / ADR 0005 #1)", () => {
-    // Backstory is shareable: the player tells houseguests where they're from / what they do, so a
-    // houseguest they told legitimately references it. A global knownTo:[] seal would DROP that
-    // legitimate open-set narration all season — a false hold worse than a missed phantom. Backstory's
-    // casting-turn recital is Layer 1's job; any later reference is the pathway model's, never a seal.
-    const STORY = "before the show I was secretly TOKENC1BACKSTORY a summer camp counselor for teens";
-    const MOTIVE = "my true motivation is TOKENC1BMOTIVE to win it all for my family";
-    const { sb } = castGame("adr0019-c1-backstory", { backstory: STORY, motivation: MOTIVE });
-    const blob = JSON.stringify(sb.session.sealedFromHouse());
-    // The producer-only motivation IS sealed…
-    expect(blob).toContain("TOKENC1BMOTIVE");
-    // …but the shareable backstory is NOT — the guard must never hold a legitimate shared-bio reference.
-    expect(blob).not.toContain("TOKENC1BACKSTORY");
-  });
-
-  it("does NOT seal a TERSE producer field — a one/two-word answer can't mint a broad single-word signature (CodeRabbit #1763)", () => {
-    // "revenge" / "the money" would otherwise become a single-word FE signature that substring-drops
-    // EVERY houseguest sentence carrying that common word for the whole season (ADR 0005 #1 false hold).
-    const { sb } = castGame("adr0019-c1-terse", { motivation: "revenge", privateStrategy: "the money" });
-    const sealed = sb.session.sealedFromHouse();
-    // No DR + only terse casting ⇒ nothing distinctive enough to seal.
-    expect(sealed).toEqual([]);
-  });
-
-  it("seals the casting INTERVIEW NOTES (folded into the player's own casting soul-memory)", () => {
-    const NOTE = "in the interview I admitted TOKENC1NOTE that I truly hate open confrontation";
-    const { sb } = castGame("adr0019-c1-notes", { motivation: "I came here to win the whole thing", interviewNotes: [NOTE] });
-    const sealed = sb.session.sealedFromHouse();
-    const entry = sealed.find((s) => s.content.includes("TOKENC1NOTE"));
-    expect(entry, "an interview note is sealed globally").toBeDefined();
+    const entry = sealed.find((s) => s.content.includes("TOKENC1STRAT"));
+    expect(entry, "private strategy is sealed").toBeDefined();
+    // Globally sealed — NO houseguest holds a pathway, so any staged speaker voicing it is dropped.
     expect(entry!.knownTo).toEqual([]);
   });
 
+  it("does NOT globally seal the SHAREABLE fields — motivation, backstory, interview notes (Greptile #1763 / ADR 0005 #1)", () => {
+    // All three are things a player DOES voluntarily say in the house, so a houseguest they told
+    // legitimately references them. A global knownTo:[] seal would DROP that legitimate open-set
+    // narration all season — a false hold worse than a missed phantom. Only privateStrategy is sealed.
+    const STRAT = "my true secret plan is TOKENC1KEEP to blindside my closest ally at final four";
+    const MOTIVE = "my motivation is TOKENC1MOTIVE to win it all for my late father";
+    const STORY = "before the show I was TOKENC1BACKSTORY a pediatric nurse from Ohio for ten years";
+    const NOTE = "one thing about me is TOKENC1NOTE I played college volleyball on a scholarship";
+    const { sb } = castGame("adr0019-c1-shareable", { privateStrategy: STRAT, motivation: MOTIVE, backstory: STORY, interviewNotes: [NOTE] });
+    const blob = JSON.stringify(sb.session.sealedFromHouse());
+    expect(blob).toContain("TOKENC1KEEP");        // the private strategy IS sealed…
+    expect(blob).not.toContain("TOKENC1MOTIVE");   // …but the shareable fields are NOT.
+    expect(blob).not.toContain("TOKENC1BACKSTORY");
+    expect(blob).not.toContain("TOKENC1NOTE");
+  });
+
+  it("does NOT seal a TERSE private strategy — a one/two-word answer can't mint a broad single-word signature (CodeRabbit #1763)", () => {
+    // "chaos" would otherwise become a single-word FE signature that substring-drops EVERY houseguest
+    // sentence carrying that common word for the whole season (ADR 0005 #1 false hold).
+    const { sb } = castGame("adr0019-c1-terse", { privateStrategy: "chaos" });
+    const sealed = sb.session.sealedFromHouse();
+    // No DR + only a terse private strategy ⇒ nothing distinctive enough to seal.
+    expect(sealed).toEqual([]);
+  });
+
   it("is Vault-free — a hidden confessional/soul number never rides along in the sealed casting class", () => {
-    const MOTIVE = "my private motivation is TOKENC1VF pure petty long-held revenge";
+    const STRAT = "my private plan is TOKENC1VF to float quietly then strike at the very end";
     const VAULTED = "TOKENC1VAULT vault confessional leak";
-    const { sb } = castGame("adr0019-c1-vaultfree", { motivation: MOTIVE });
+    const { sb } = castGame("adr0019-c1-vaultfree", { privateStrategy: STRAT });
     sb.engine.vault.writeHidden({ id: "0019:c1v", kind: "confessional", content: VAULTED });
     const blob = JSON.stringify(sb.session.sealedFromHouse());
     expect(blob).toContain("TOKENC1VF");
@@ -284,32 +276,32 @@ describe("ADR 0019 C1 — producer-only casting content is a globally-sealed bac
     expect(blob).not.toMatch(/trust|threat|affinity|emotional modifier/i);
   });
 
-  it("cross-user isolation — user A's sealed casting content never appears in user B's manifest", () => {
-    const A_MOTIVE = "my secret casting answer is TOKENC1USERA to backstab absolutely everyone";
+  it("cross-user isolation — user A's sealed private strategy never appears in user B's manifest", () => {
+    const A_STRAT = "my real secret plan is TOKENC1USERA to backstab absolutely everyone at the end";
     const reg = new GameSessionRegistry();
     const a = reg.sandboxFor("adr0019-c1-userA");
-    a.session.createCharacter({ playerName: "The Player", seed: 3, motivation: A_MOTIVE });
+    a.session.createCharacter({ playerName: "The Player", seed: 3, privateStrategy: A_STRAT });
     a.session.advanceGame();
     const b = reg.sandboxFor("adr0019-c1-userB");
-    b.session.createCharacter({ playerName: "The Player", seed: 4, motivation: "something completely different for user b entirely" });
+    b.session.createCharacter({ playerName: "The Player", seed: 4, privateStrategy: "something completely different for user b entirely" });
     b.session.advanceGame();
     expect(JSON.stringify(a.session.sealedFromHouse())).toContain("TOKENC1USERA");
     expect(JSON.stringify(b.session.sealedFromHouse())).not.toContain("TOKENC1USERA");
   });
 
-  it("adds NOTHING when the player authored no producer-only casting prose (byte-identical to the DR-only class)", () => {
+  it("adds NOTHING when the player authored no private strategy (byte-identical to the DR-only class)", () => {
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor("adr0019-c1-empty");
-    // A minimal finalize (name + seed carry identity so it starts) with NO motivation/strategy/notes.
+    // A minimal finalize (name + seed carry identity so it starts) with NO private strategy.
     sb.session.createCharacter({ playerName: "The Player", seed: 5, backstory: "" });
     sb.session.advanceGame();
-    // No casting prose + no DR ⇒ the sealed set is empty (byte-identical to the pre-C1 DR-only path).
+    // No private strategy + no DR ⇒ the sealed set is empty (byte-identical to the pre-C1 DR-only path).
     expect(sb.session.sealedFromHouse()).toEqual([]);
   });
 
   it("dispatches through McpServer.callTool without being rejected (the FE-wiring gate)", async () => {
-    const MOTIVE = "my producer-only boundary answer is TOKENC1BOUNDARY to lie about everything";
-    const { sb } = castGame("adr0019-c1-boundary", { motivation: MOTIVE }, 9);
+    const STRAT = "my producer-only boundary plan is TOKENC1BOUNDARY to lie about everything constantly";
+    const { sb } = castGame("adr0019-c1-boundary", { privateStrategy: STRAT }, 9);
     const out = (await sb.mcp.player.callTool("sealedFromHouse", {})) as SealedFact[];
     expect(Array.isArray(out)).toBe(true);
     const entry = out.find((s) => s.content.includes("TOKENC1BOUNDARY"));

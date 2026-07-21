@@ -292,56 +292,58 @@ def test_agent_loop_wrapper_is_fail_open_on_empty():
     assert _run(agent_loop._knowledge_wall_guard("", _USER)) == ""
 
 
-# ── ADR 0019 guardian caveat C1 — the producer-only casting backstop ─────────────────────── #
+# ── ADR 0019 guardian caveat C1 — the producer-only PRIVATE-STRATEGY backstop ────────────── #
 #
-# The player's producer-only casting material (motivation / private strategy / backstory / interview
-# notes) has NO in-game pathway to ANY houseguest — the exact "camp counselor" leak class that birthed
-# ADR 0019. The engine now emits it from `sealedFromHouse` as a GLOBALLY-sealed fact (`knownTo` empty),
-# so the SAME Layer 3 guard that drops a Diary-Room recital also drops a houseguest reciting a casting
-# answer — the defense-in-depth backstop behind Layer 1's context removal. Roles only.
+# The seal set is deliberately NARROW: only the player's `privateStrategy` — the one casting field
+# private BY DEFINITION (their true gameplan, "stays with production"), never voluntarily spoken in the
+# house, the DR-class analog. It has NO in-game pathway to ANY houseguest. The engine now emits it from
+# `sealedFromHouse` as a GLOBALLY-sealed fact (`knownTo` empty), so the SAME Layer 3 guard that drops a
+# Diary-Room recital also drops a houseguest reciting the player's secret plan — the defense-in-depth
+# backstop behind Layer 1's context removal. The SHAREABLE fields (motivation / backstory / interview
+# notes) are NOT sealed (see the shared-reference test below). Roles only.
 
-# A distinctive producer-only casting answer (the player told production this; no houseguest was there).
-_CASTING = "I told the producers my real motivation is to avenge my sister's blindside"
+# A distinctive producer-only PRIVATE STRATEGY (the player confided this to production, never in-house).
+_CASTING = "I told production in confidence my secret plan is to backstab the comp beast at final four"
 
 
-def test_producer_casting_content_voiced_by_a_houseguest_is_a_leak():
-    # A globally-sealed casting fact (knownTo empty) recited by a STAGED houseguest — dropped, exactly
-    # like a Diary-Room recital: no houseguest ever had a pathway to the casting interview.
+def test_producer_private_strategy_voiced_by_a_houseguest_is_a_leak():
+    # A globally-sealed private-strategy fact (knownTo empty) recited by a STAGED houseguest — dropped,
+    # exactly like a Diary-Room recital: no houseguest ever had a pathway to the confided casting plan.
     facts = [{"content": _CASTING, "knownTo": [],
               "signatures": chat_helpers._sealed_signatures(_CASTING)}]
     leak = ('the Nominee smirked and said, '
-            '"I know your real motivation is to avenge your sister\'s blindside."')
+            '"I know your secret plan is to backstab the comp beast at final four."')
     assert chat_helpers._sentence_leaks_sealed(leak, facts, ["HOH", "Nominee"]) is True
 
 
-def test_player_recalling_their_own_casting_answer_is_not_a_leak():
-    # No houseguest is STAGED — the player's own narration of their casting motivation is legitimate.
+def test_player_recalling_their_own_private_strategy_is_not_a_leak():
+    # No houseguest is STAGED — the player's own narration of their confided plan is legitimate.
     facts = [{"content": _CASTING, "knownTo": [],
               "signatures": chat_helpers._sealed_signatures(_CASTING)}]
-    own = "You remember telling the producers your real motivation is to avenge your sister's blindside."
+    own = "You remember confiding to production your secret plan is to backstab the comp beast at final four."
     assert chat_helpers._sentence_leaks_sealed(own, facts, ["HOH", "Nominee"]) is False
 
 
-def test_scan_strips_a_houseguest_reciting_the_casting_answer_end_to_end():
+def test_scan_strips_a_houseguest_reciting_the_private_strategy_end_to_end():
     _seed(_USER, sealed=[{"content": _CASTING, "knownTo": []}], active_names=["HOH", "Nominee"])
     transcript = (
         "The backyard was quiet at dusk. "
-        'the HOH leaned in and said, "I know your real motivation is to avenge your sister\'s blindside." '
+        'the HOH leaned in and said, "I know your secret plan is to backstab the comp beast at final four." '
         "You forced a laugh and deflected."
     )
     out = _run(chat_helpers.screen_knowledge_wall(_USER, transcript))
-    assert "avenge your sister" not in out          # the casting recital is dropped (C1 backstop)
+    assert "backstab the comp beast" not in out     # the private-strategy recital is dropped (C1 backstop)
     assert "The backyard was quiet" in out           # ordinary prose survives
     assert "forced a laugh" in out
 
 
-def test_fetch_surfaces_the_casting_class_from_sealed_from_house(monkeypatch):
-    """The producer-only casting class rides in on `sealedFromHouse` (knownTo empty), UNIONed with the
-    Layer 3 scope manifest exactly as the DR class is — so the guard consumes it with zero new wiring."""
+def test_fetch_surfaces_the_private_strategy_class_from_sealed_from_house(monkeypatch):
+    """The producer-only private-strategy class rides in on `sealedFromHouse` (knownTo empty), UNIONed
+    with the Layer 3 scope manifest exactly as the DR class is — the guard consumes it with zero new wiring."""
     chat_helpers._KW_SEALED_CACHE.pop(chat_helpers._kw_key(_USER), None)
 
     async def _sealed(user=None):
-        # sealedFromHouse now returns the DR class AND the producer-only casting class, both knownTo=[].
+        # sealedFromHouse now returns the DR class AND the producer-only private-strategy class, both knownTo=[].
         return [{"content": _DIARY, "knownTo": []}, {"content": _CASTING, "knownTo": []}]
 
     async def _scope(user=None):
@@ -352,15 +354,16 @@ def test_fetch_surfaces_the_casting_class_from_sealed_from_house(monkeypatch):
 
     facts = _run(chat_helpers.fetch_sealed_from_house(_USER))
     contents = [f["content"] for f in facts]
-    assert any("avenge my sister" in c for c in contents)  # the casting fact is in the guard manifest
-    casting = next(f for f in facts if "avenge my sister" in f["content"])
+    assert any("backstab the comp beast" in c for c in contents)  # the private-strategy fact is in the manifest
+    casting = next(f for f in facts if "backstab the comp beast" in f["content"])
     assert casting["knownTo"] == []  # globally sealed ⇒ ANY staged houseguest voicing it is dropped
 
 
 def test_a_houseguest_referencing_the_players_shared_backstory_is_NOT_dropped():
-    # Greptile #1763 / ADR 0005 #1: backstory is shareable public bio, so it is NOT in the sealed set —
-    # a houseguest the player told legitimately references it, and the guard must never hold that line.
-    # Only the producer-only motivation is sealed here; the backstory reference has no signature to match.
+    # Greptile #1763 / ADR 0005 #1: backstory (and motivation, interview notes) is shareable public bio,
+    # so it is NOT in the sealed set — a houseguest the player told legitimately references it, and the
+    # guard must never hold that line. Only the private strategy is sealed here; the shared-bio reference
+    # has no signature to match, so the whole line passes through untouched.
     _seed(_USER, sealed=[{"content": _CASTING, "knownTo": []}], active_names=["HOH", "Nominee"])
     transcript = (
         'the Nominee smiled and said, "you mentioned you\'re a nurse from Ohio — that must be intense." '

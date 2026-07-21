@@ -143,36 +143,34 @@ After Layers 1–3 shipped, a guardian pass over the *built* enforcement named t
 caveats — one **closeable**, one an **accepted residual** — and both are now addressed. They are
 distinct on purpose: closing what can be closed, and *strengthening the monitor* on what cannot.
 
-- **C1 — the producer-only casting class had no Layer-3 backstop (STRUCTURAL — now CLOSED).** Layer 1
-  *removes* the producer-only casting intake (motivation / private strategy / interview notes) from
-  the narrator context, but that material lives on the **player object** and is **never seeded into
-  the knowledge layer** — so neither `sealedFromHouse` (which surfaced only the Diary-Room
+- **C1 — the producer-only casting class had no Layer-3 backstop (STRUCTURAL — now CLOSED).** The
+  player's `privateStrategy` (their true gameplan, recorded at casting "stays with production" — the
+  DR-class analog, never voluntarily spoken in-house) lives on the **player object** and is **never
+  seeded into the knowledge layer** — so neither `sealedFromHouse` (which surfaced only the Diary-Room
   `NO_NPC_PATHWAY` class) nor `knowledgeScopeManifest` (knowledge-layer facts only) carried it. The
-  Layer-3 FE guard therefore had **no signature to match**: a staged houseguest reciting a casting
-  answer had *nothing downstream to drop it* — Layer 1 was its sole, un-backstopped defense (the exact
-  "camp counselor" leak class that birthed this ADR). **Fix:** `GameSessionAdapter.sealedFromHouse`
-  now also emits the genuinely producer-only casting intake as **globally-sealed** facts (`knownTo`
-  empty ⇒ NO houseguest may ever voice it), so the SAME Layer-3 guard that drops a Diary-Room recital
-  now drops a casting recital — defense-in-depth **behind** Layer 1, not a replacement for it.
-  Vault-free (the player's own authored casting words; distinctive prose only).
-  **Deliberately EXCLUDED — the player's BACKSTORY (`character.background`).** Backstory is *shareable
-  public biography*: in ordinary house play the player tells houseguests where they're from / what
-  they do, so a houseguest the player told **legitimately** references it. A global seal cannot tell
-  "no one has been told yet" from "this houseguest was told," so it would **drop that legitimate
-  open-set narration all season** — a false hold worse than a missed phantom (**ADR 0005 #1**, the
-  same principle the C2 arm cites). Backstory's casting-turn recital is covered by Layer 1, and any
-  later reference belongs to the **pathway model**, never a global seal. (The short public persona
-  labels stay out for the same reason — plus #1727 already drops them from context and they are
-  false-positive-prone in the shingle guard.) A second guard on the same risk: only **distinctive
-  prose (≥3 words)** is sealed — a terse answer ("revenge", "the money") would mint a broad
-  single-word FE signature that substring-drops *every* sentence carrying that common word all season
-  (ADR 0005 #1 again); a too-short answer relies on Layer 1 alone. Gates:
-  `tests/unit/knowledgeScoping0019.test.ts` (the C1 block — seals motivation / private strategy /
-  interview notes each with an empty `knownTo`, Vault-free, cross-user-isolated, MCP-boundary,
-  pre-game `[]`, **and asserts backstory is NOT globally sealed, and a terse field is NOT sealed**) and
-  `frontend/tests/test_knowledge_wall.py` (a staged houseguest reciting the casting answer is dropped
-  end-to-end; the player's own recall is kept; **a legitimate shared-backstory reference is NOT
-  suppressed**).
+  Layer-3 FE guard therefore had **no signature to match**: a staged houseguest reciting the player's
+  secret plan had *nothing downstream to drop it* — Layer 1 was its sole, un-backstopped defense.
+  **Fix:** `GameSessionAdapter.sealedFromHouse` now also emits `privateStrategy` as a **globally-sealed**
+  fact (`knownTo` empty ⇒ NO houseguest may ever voice it), so the SAME Layer-3 guard that drops a
+  Diary-Room recital now drops a private-strategy recital — defense-in-depth **behind** Layer 1, not a
+  replacement. Vault-free (the player's own authored words; distinctive prose only).
+  **The seal set is DELIBERATELY NARROW — only what the player would never voluntarily say in-house.**
+  Excluded because all are *shareable* (a global seal would false-hold legitimate open-set narration all
+  season — **ADR 0005 #1**, the same principle the C2 arm cites; a global seal cannot tell "no one told
+  yet" from "this houseguest was told," which is the **pathway model's** job): `character.background`
+  (public bio), `motivation` ("why I came" — house small-talk; **VERIFIED** by repro that sealing it
+  globally hard-drops a legitimate shared-motivation line, #1763), and the open-ended `interviewNotes`
+  (mixed — some private, some shareable, indistinguishable). Their casting-turn recital is Layer 1's job;
+  any later reference belongs to the pathway model. (The short public persona labels stay out too — #1727
+  already drops them from context.) A second guard on the same risk: only **distinctive prose (≥3 words)**
+  is sealed — a terse `privateStrategy` ("chaos") would mint a broad single-word FE signature that
+  substring-drops *every* sentence carrying that common word all season; a too-short answer relies on
+  Layer 1 alone. Gates: `tests/unit/knowledgeScoping0019.test.ts` (the C1 block — seals `privateStrategy`
+  with an empty `knownTo`, Vault-free, cross-user-isolated, MCP-boundary, pre-game `[]`, **and asserts
+  the shareable fields — motivation / backstory / interview notes — are NOT sealed, and a terse field is
+  NOT sealed**) and `frontend/tests/test_knowledge_wall.py` (a staged houseguest reciting the private
+  strategy is dropped end-to-end; the player's own recall is kept; **a legitimate shared-backstory
+  reference is NOT suppressed**).
 
 - **C2 — the one-model-many-NPCs vague-paraphrase leak (ACCEPTED RESIDUAL — monitor STRENGTHENED, not
   closed).** This **is** the ADR's stated accepted residual: one LLM voices every NPC from one shared
