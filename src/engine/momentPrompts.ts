@@ -1525,10 +1525,15 @@ export function renderHardConstraints(view: GameStateView): string | undefined {
   for (const p of wa.present) {
     const h = houseById.get(p.id);
     if (h?.genderPresentation) {
-      lines.push(
-        `- PRONOUN LOCK: ${p.name} uses ${pronounsFor(h.genderPresentation)}. Use these exactly, every ` +
-          "time — never they/them, never guessed from the name.",
-      );
+      const pron = pronounsFor(h.genderPresentation);
+      // #1752 — the "never they/them" clause de-defaults a GENDERED NPC off the model's habitual
+      // they/them; it must NOT fire for an NPC whose pronouns ARE they/them (nonbinary), or the lock
+      // contradicts the very set it is enforcing. Drop it in that case.
+      const caveat =
+        pron === "they/them"
+          ? "Use these exactly, every time — never guessed from the name."
+          : "Use these exactly, every time — never they/them, never guessed from the name.";
+      lines.push(`- PRONOUN LOCK: ${p.name} uses ${pron}. ${caveat}`);
     }
   }
   const pk = view.presentKnowledge ?? [];
