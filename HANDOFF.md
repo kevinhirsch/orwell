@@ -12,11 +12,16 @@
 
 ---
 
-## 1. State snapshot — 2026-07-21
+## 1. State snapshot — 2026-07-21 (evening reconcile)
 
-**`main` @ `4fbccd92`** (`feat: Wave-2 — off-screen scheming names a real target`, #1767).
-All CI required lanes green; the three recurring FE flakes are **fixed at root** (#1766 in the
-table below; what deliberately remains of that story is in §4).
+**`main` @ `68d2264d`** (`docs: moonshot refactor synthesis`, #1770). All CI-required lanes green;
+the three recurring FE flakes are **fixed at root** (#1766 in the table below).
+
+**The working open-items list is now
+`docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md`** — the exhaustive tiered
+backlog (T0 launch-blocker axis → T8 discipline) consolidating the live-playtest findings F1–F10,
+the moonshot portfolio P1–P8, all 7 open GitHub issues, this file's old §4 residuals, and the
+session task ledger, each with a disposition. Read it before starting any new work.
 
 **Landed this cycle (all squash-merged on green required gates):**
 
@@ -35,50 +40,41 @@ table below; what deliberately remains of that story is in §4).
 | #1765 | **Golden-fixture decommission** (owner directive): fixture + golden-path/visual-regression/theme-consistency jobs + golden-nightly + seam unwiring, −9,984 lines |
 | #1766 | **CI-flake root fixes**: JURY-badge 11px floor · onboarding-scrim re-mount seam · a11y glass ratchet (tight needles) |
 | #1767 | Wave-2: off-screen scheming names a real target (`ORWELL_SCHEME_TARGETS`, seeded side-rng, default OFF, ON in deploy) |
+| #1768 | Full prompt audit — A/B-tested realism rewrites (cast-tattoo index case; ink backstop, seeded look lane) |
+| #1769 | HANDOFF.md v1 |
+| #1770 | Moonshot refactor synthesis (breakage map A–G, portfolio P1–P8, five-wave roadmap, owner questions Q1–Q8) |
 
 ## 2. In flight — check these FIRST on resume
 
-- **#1768 — full prompt audit (A/B-tested realism rewrites; cast-tattoo index case).** Branch
-  `claude/prompt-audit-ab`. Review-driven ink-guard widening landed (`87478fce`: all 7
-  portrait-rendered `physicalCharacteristics` fields scanned, per-field refusal to seeded floor).
-  **Merge on green** — a sweep is armed; if it lapsed, check `mergeable_state` (`unstable` = required
-  green = merge; advisory `a11y-matrix` does not block). Audit doc: `docs/audits/2026-07-21-prompt-audit.md`.
-- **Live GLM-4.7 playtest to finale** — a background agent is playing a full persona-driven season
-  through the real FE (engine :8765 + uvicorn :7000 in its own worktree). Deliverable: ranked
-  findings (realism breaks, machinery leaks, desyncs, knowledge-wall breaches, progression stalls)
-  + a behavioral-fidelity verdict. **Its findings seed the next fix wave.**
-- **Headless playtest baseline (done, for contrast):** 5 seeds × full season to finale over the
-  rules engine — 0 structural/Vault/ceremony/ballot findings; both endgame paths exercised. The
-  engine is solid; open risk is concentrated in the narration layer.
+- **The exhaustive backlog PR** (branch `claude/playtest-protocol-review-u4wxaz`, this doc + the
+  backlog): merge on green; a sweep is armed.
+- **Both playtests are DONE and triaged.** Headless: 5 seeds to finale, 0 structural/Vault/ceremony
+  findings — the engine is launch-ready. Live (GLM-4.7/novita shipped default): findings F1–F10 —
+  every week-1 closed-set outcome narrated falsely first, forced tool_choice ignored (17-turn
+  livelock), reasoning leaked to bubbles. **Narrative fidelity to the board is the broken axis**;
+  the triage/disposition map is §T3 of the exhaustive backlog.
+- **Moonshot synthesis is merged** (`docs/design/2026-07-21-moonshot-refactor-synthesis.md`): the
+  build answer is Wave 1 (T0 tier) — beats terminate themselves, engine chyrons, provider
+  capability contract, casting ledger. **Owner decisions D1–D10 (backlog §T7) gate the big pieces.**
 
 ## 3. Owed / obligations
 
-1. **🔑 ROTATE KEYS (owner action, standing):** the OpenRouter key pasted 2026-07-21 (stored only at
-   the session scratchpad `openrouter.key`, 600-perm, never committed), plus the earlier
-   OpenRouter/NanoGPT and prompt-audit keys **and the GitHub PAT (`ghp_…`) from prior sessions**
-   (`SOUL.md` "still owed" carry-forward). Rotate at campaign close; scrub the scratchpad file.
-2. **Triage the live-playtest findings** into a fix wave when the agent reports.
-3. **Post-#1768:** the next *freshly generated* cast is the acceptance check for the tattoo fix
-   (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
+1. **🔑 ROTATE KEYS (owner action — as soon as practical, not at a milestone):** the provider keys
+   and the GitHub PAT used across this campaign passed through chat and should be rotated/revoked
+   now. The inventory lives in `SOUL.md`'s carry-forward notes (values never committed anywhere;
+   the live key sits only in the session scratchpad, 600-perm). Scrub the scratchpad copy after.
+2. **Owner decisions D1–D10** — backlog §T7. D1 (engine chyrons / scoped ADR 0003 amendment) gates
+   the heart of Wave 1.
+3. **Post-#1768 acceptance:** the next *freshly generated* cast is the acceptance check for the
+   tattoo fix (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
 
-## 4. Residual ledger (known, deliberately deferred — none block)
+## 4. Residual ledger
 
-- **#738 Liquid-Glass contrast, the REAL fix** — #1766 only registered tightly-scoped a11y XFAILs
-  (live status `#os-*` ids, disabled Confirm) to stop CI flapping; lifting the frosted-glass token
-  ink to clear AA on live surfaces is still owed. `a11y-matrix` (advisory) can still go red when
-  `finish_game()` times out on a slow runner and the sweep audits the mid-game HUD.
-- **C2 paraphrase monitor first-name gap** (#1763 review, skipped as non-blocking): the SOFT nightly
-  `_paraphrase_suspect` probe misses a non-holder staged by unique first name ("Mara" for "Mara
-  Quinn"); adopt the presence-detector's unique-first-name logic + ambiguity check if the monitor's
-  recall starts to matter.
-- **`_stages_in_scene` verb coverage** (noted during #1763): recognizes some speech framings
-  ("leaned in and said") but not others ("tilted their head and said").
-- **Test-convention nits skipped by design:** `coPresenceReconcile.test.ts` +
-  `knowledgeScoping0019.test.ts` wire sandboxes manually instead of `tests/support/sandbox.ts`;
-  0131/0132 spec DoD wording nits from #1760's reviews (docs-only, features unbuilt).
-- **Pre-existing backlog issues (untouched by this campaign):** #1728/#1729/#1734
-  recording-integrity B-series · #1713 casting-finalize→premiere engine-timeout hang · #1644/#1599/
-  #1413 owner-mandate umbrellas.
+**Moved.** The full residual ledger now lives in the exhaustive backlog (§T4), deduplicated against
+the moonshot portfolio and the open issues — #738's real fix is subsumed by #1644; the C2
+first-name gap, `_stages_in_scene` verbs, and test-convention nits carry forward unchanged; the 7
+open GitHub issues are mapped with dispositions in §T2 (notably #1713 re-scoped: its CI symptom is
+moot post-#1765 but the ~300s premiere block is potentially production-relevant).
 
 ## 5. Operational discipline — the short version (details in `SOUL.md`)
 
