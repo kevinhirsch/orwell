@@ -72,8 +72,9 @@ session task ledger, each with a disposition. Read it before starting any new wo
    and the GitHub PAT used across this campaign passed through chat and should be rotated/revoked
    now. The inventory lives in `SOUL.md`'s carry-forward notes (values never committed anywhere;
    the live key sits only in the session scratchpad, 600-perm). Scrub the scratchpad copy after.
-2. **Owner decisions D1–D10** — backlog §T7. D1 (engine chyrons / scoped ADR 0003 amendment) gates
-   the heart of Wave 1.
+2. **Owner decisions D1–D10 are ALL RULED** (backlog §T7 rulings table, finalized via #1772) — no
+   operator should wait on them. The only live gates are sequencing ones: the casting mandate leads
+   Wave 1, and T0-6 must land before the Footage Pool (D4's condition).
 3. **Post-#1768 acceptance:** the next *freshly generated* cast is the acceptance check for the
    tattoo fix (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
 

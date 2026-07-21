@@ -178,8 +178,8 @@ that decision.
 | D1 | **APPROVED** — engine chyrons for official outcomes; AI demoted to color on those beats (scoped ADR 0003 amendment). |
 | D2 | **APPROVED** — non-blocking nightly probe canary. |
 | D3 | **APPROVED, pinning + a direct z.ai endpoint.** Probe/pin whatever the configured narrator default resolves to — `settings.py` ships GLM-4.7 OOB today, while the ADR-0016 README row also records a glm-5.2 retarget the ADR text calls removed; T0-4's implementer reconciles that doc drift while probing the real endpoints. |
-| D4 | **APPROVED, gated on the casting ledger (T0-6) landing first.** |
-| D5 | **PARKED** — revisit after the Footage Pool + an adversarial redaction suite. |
+| D4 | **Footage Pool: APPROVED**, gated on the casting ledger (T0-6) landing first. |
+| D5 | **Blindside autopsy: PARKED** — revisit after the Footage Pool + an adversarial redaction suite. |
 | D6 | **CONFIRMED** — deploy-parity flags on dev/playtest rigs, env-level only. |
 | D7 | **OVERRULED dual-transport permanence: GO FULL WEBSOCKET.** Consolidate to WS as the one transport (ADR 0017/0018 revision; the parked one-channel proposal un-parks in WS form as a Wave-2+ item). The ADR 0017/0018 + decisions-README text revision is OWED and rides the Wave-2 implementation PR — until the consolidation lands, the SSE leg stays live and CI-blocking, so current-state docs remain accurate. |
 | D8 | **GRANTED** — allowlist entries for the two by-design fail-soft lanes, RED-with-auto-corrected stays mandatory. |
