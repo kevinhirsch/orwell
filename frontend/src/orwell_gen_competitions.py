@@ -23,8 +23,6 @@ import json
 import logging
 from typing import Awaitable, Callable, Optional
 
-from src import golden_path
-
 logger = logging.getLogger(__name__)
 
 # The bounds the engine also enforces (defense-in-depth; keeps the ask tight — flavor, not an almanac).
@@ -242,12 +240,8 @@ async def _ready(staging: dict) -> dict:
 def kickoff_fiction(owner: Optional[str]) -> None:
     """Fire-and-forget the competition-fiction author in the background, ONCE per staged competition.
     Never blocks the turn; never raises into the caller. A per-(user, week, comp) in-flight guard stops a
-    rapid re-advance from double-authoring the same competition. A no-op under golden record/replay (its
-    live model call is inherently non-reproducible; the engine's floor stands, exactly as with no model).
+    rapid re-advance from double-authoring the same competition.
     One cheap staging read gates everything — no staged comp ⇒ no model is ever spun up."""
-    if golden_path.active():
-        logger.info("[gen-comp] skipped: golden record/replay mode (determinism)")
-        return
 
     async def _runner():
         try:

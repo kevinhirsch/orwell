@@ -534,46 +534,8 @@ async def maybe_compact(
     # partially interleave), and the background pass preserves the recent tail
     # (`session.history[split:]`) — so whichever order they land in, the just-appended turns are
     # retained; nothing is lost.
-    #
-    # Under the golden record/replay seam KEEP the old blocking behavior so the fixture's summary
-    # call stays in its recorded position (byte-identical record and replay).
-    _golden = False
-    try:
-        from src import golden_path as _gp
-        _golden = _gp.active()
-    except Exception:  # noqa: BLE001 — golden probe is best-effort; absence ⇒ not golden
-        _golden = False
-
-    if not _golden:
-        _schedule_background_compaction(session, split_point, len(system_msgs), _summarize)
-        return messages, context_length, False
-
-    # Golden (or explicitly-blocking) path: summarize inline and apply to THIS turn's messages.
-    summary = await _summarize()
-    if summary is None:
-        return messages, context_length, False
-
-    summary_msg = {
-        "role": "system",
-        "content": f"[Conversation summary — earlier messages were compacted]\n{summary}",
-    }
-
-    compacted = system_msgs + [summary_msg] + recent
-
-    # Update session history to match. Pass len(system_msgs) so the
-    # recent_history slice in _update_session_history uses the correct
-    # offset — session.history INCLUDES the system messages, but
-    # split_point is indexed against convo_msgs which does NOT. Without
-    # this, the slice drops the leading system message(s).
-    _update_session_history(session, split_point, summary, system_msg_count=len(system_msgs))
-
-    new_used = estimate_tokens(compacted)
-    logger.info(
-        f"Compacted: {used} -> {new_used} tokens "
-        f"({len(older)} messages summarized, {len(recent)} kept)"
-    )
-
-    return compacted, context_length, True
+    _schedule_background_compaction(session, split_point, len(system_msgs), _summarize)
+    return messages, context_length, False
 
 
 def _update_session_history(session, split_point: int, summary: str,

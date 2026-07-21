@@ -9,7 +9,7 @@ guard, mirroring test_chat_stream_no_silent_drop.py):
   F-PY-5  a status/stage progress frame emitted before the model call.
   F-PY-4  the per-turn framing reads use the tight framing timeout, not the 30s default.
   F-PY-3  the blocking /models + /slots context probes are off-loaded + short-TTL memoized.
-  F-PY-2  context compaction no longer blocks the first token (backgrounded; golden stays blocking).
+  F-PY-2  context compaction no longer blocks the first token (backgrounded).
 """
 import asyncio
 import inspect
@@ -351,7 +351,7 @@ def test_model_context_imports_under_malformed_env():
     assert "IMPORT_OK" in r.stdout
 
 
-# ── F-PY-2: non-blocking compaction (background; golden stays blocking) ─────── #
+# ── F-PY-2: non-blocking compaction (background) ─────── #
 
 
 class _FakeSession:
@@ -380,7 +380,6 @@ def test_maybe_compact_backgrounds_over_threshold(monkeypatch):
     monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
     monkeypatch.setattr(cc, "llm_call_async", fake_llm)
     monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
-    monkeypatch.setattr("src.golden_path.active", lambda: False)
     cc._compaction_in_flight.clear()
     cc._background_tasks.clear()
 
@@ -399,37 +398,11 @@ def test_maybe_compact_backgrounds_over_threshold(monkeypatch):
     assert llm["n"] == 1, "the summary still ran — in the background, off the first-token path"
 
 
-def test_maybe_compact_stays_blocking_under_golden(monkeypatch):
-    async def fake_ctx(url, model):
-        return 100
-
-    async def fake_llm(*a, **k):
-        return "GOLDEN-SUMMARY"
-
-    monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
-    monkeypatch.setattr(cc, "llm_call_async", fake_llm)
-    monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
-    monkeypatch.setattr("src.golden_path.active", lambda: True)
-    cc._compaction_in_flight.clear()
-    cc._background_tasks.clear()
-
-    messages = _msgs(6)
-    out_msgs, ctxlen, was = _run(cc.maybe_compact(_FakeSession(), "url", "model", messages))
-    assert was is True, "golden path stays blocking so the fixture's summary call keeps its position"
-    assert out_msgs is not messages, "golden path applies the summary to THIS turn's messages"
-    assert any(
-        "GOLDEN-SUMMARY" in (m.get("content") or "")
-        for m in out_msgs
-        if m.get("role") == "system"
-    )
-
-
 def test_maybe_compact_under_threshold_is_noop(monkeypatch):
     async def fake_ctx(url, model):
         return 10_000_000  # huge window ⇒ well under threshold
 
     monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
-    monkeypatch.setattr("src.golden_path.active", lambda: False)
     messages = _msgs(6)
     out_msgs, ctxlen, was = _run(cc.maybe_compact(_FakeSession(), "url", "model", messages))
     assert was is False and out_msgs is messages
@@ -447,7 +420,6 @@ def test_background_compaction_abandons_on_concurrent_history_edit(monkeypatch):
 
     monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
     monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
-    monkeypatch.setattr("src.golden_path.active", lambda: False)
     # Force the in-memory apply path (no real session manager DB write) so we can inspect history.
     monkeypatch.setattr(core_models, "_session_manager", None, raising=False)
     cc._compaction_in_flight.clear()
@@ -498,7 +470,6 @@ def test_background_compaction_abandons_on_in_place_content_edit(monkeypatch):
 
     monkeypatch.setattr(cc, "get_context_length_async", fake_ctx)
     monkeypatch.setattr(cc, "resolve_endpoint", lambda *a, **k: (None, None, None))
-    monkeypatch.setattr("src.golden_path.active", lambda: False)
     monkeypatch.setattr(core_models, "_session_manager", None, raising=False)
     cc._compaction_in_flight.clear()
     cc._background_tasks.clear()

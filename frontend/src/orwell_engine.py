@@ -284,21 +284,6 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
     what came back (or the failure) — feeding the /admin/status viewer."""
     import time as _t
     from src import log_rings as _rings
-    # 0108: under the golden seam, DROP the 0065 compare-and-swap token. The golden walk is
-    # single-writer by definition (no concurrent windows), so the protection has nothing to
-    # protect — while the RACE it guards is wall-clock-paced: record #10 hit 4 intra-turn
-    # stale-beat 409s (a belt commit landing between the model's read and its action) that a
-    # fast replay can never reproduce, forking the mutation branch and the presence rng.
-    # No token ⇒ no 409 branch ⇒ identical mutation sequences at any pacing. Production
-    # keeps the token byte-identically.
-    if args and "expectedBeatSeq" in args:
-        try:
-            from src import golden_path as _gp
-            if _gp.active():
-                args = {k: v for k, v in args.items() if k != "expectedBeatSeq"}
-        except Exception:
-            pass
-    _golden_call_ledger(name, args)
     t0 = _t.monotonic()
     try:
         res = await _call_inner(name, args, user=user, timeout=timeout)
@@ -309,28 +294,6 @@ async def _call(name: str, args: dict | None = None, user: str | None = None, ti
                          f"{type(e).__name__}: {e}", user=user)
         raise
 
-
-def _golden_call_ledger(name: str, args: dict | None) -> None:
-    """0108 determinism diagnosis aid: with ORWELL_GOLDEN_CALL_LEDGER=<path>, append one line
-    per FE→engine call (name + volatile-stripped args digest). Diffing a record run's ledger
-    against a replay run's shows exactly which engine call diverges in count or order — the
-    engine consumes seeded RNG per call/scene, so a mode-asymmetric caller shifts every later
-    surfacing draw. Off (the default) this is a single env read; never raises."""
-    import os as _os
-    path = _os.environ.get("ORWELL_GOLDEN_CALL_LEDGER")
-    if not path:
-        return
-    try:
-        import hashlib as _h
-        import json as _j
-        a = dict(args or {})
-        for volatile in ("expectedBeatSeq", "idempotencyKey"):
-            a.pop(volatile, None)
-        digest = _h.sha256(_j.dumps(a, sort_keys=True, default=str).encode()).hexdigest()[:12]
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{name} {digest}\n")
-    except Exception:
-        pass
 
 async def _call_inner(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """Invoke a player-channel tool over the engine's HTTP MCP transport, for `user`'s sandbox.

@@ -13,17 +13,15 @@
 > casting-finalize burst ("the front-end does not respond during casting"). The OOB utility default is
 > corrected to the SERVED **`qwen/qwen3.6-27b`**. Same PR hardens `resolve_endpoint` with a
 > narrator↔utility MUTUAL fallback so an unavailable configured model can never again silently resolve
-> to an arbitrary one. (This shifts the golden-fixture utility default — advisory; a re-record is owed.)
+> to an arbitrary one.
 > **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget, SUPERSEDED on narrator by the revert above
 > AND on the utility SLUG by the 2026-07-21 correction above):** the owner retargeted the pair to
 > **narration = `z-ai/glm-5.2`** and **utility = `qwen/qwen3.6-flash`** (Qwen 3.6 on OpenRouter,
-> `deepseek/deepseek-v4-flash` as the cloud alternate) — the M0-1 golden-path
-> fixture and the `golden-nightly` re-record job run on exactly this pair. On **2026-07-09 the owner
+> `deepseek/deepseek-v4-flash` as the cloud alternate). On **2026-07-09 the owner
 > confirmed the OOB defaults should BE the pair** (not merely this deployment's settings), so
 > `DEFAULT_SETTINGS.default_model`/`utility_model` and the OOBE-reset defaults now carry it (M0-6).
 > **(The utility slug `qwen/qwen3.6-flash` named here is NOT served on OpenRouter and was corrected to
-> the served `qwen/qwen3.6-27b` on 2026-07-21 — see the note above; a golden re-record on the corrected
-> slug is owed.)** Everything else in this ADR stands: the narrator reasoning posture stays **`low`**
+> the served `qwen/qwen3.6-27b` on 2026-07-21 — see the note above.)** Everything else in this ADR stands: the narrator reasoning posture stays **`low`**
 > (GLM-4.7 is the same interleaved-thinking family), the portrait default is **unchanged**
 > (`google/gemini-3.1-flash-image` OOB; the Seedream follow-up remains a separate build), and the
 > per-class reasoning budgets are the cost lever for the utility tier's reason-by-default behavior

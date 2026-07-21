@@ -1,4 +1,4 @@
-"""Prompt-audit Batch B — the golden-neutral FE machinery fixes (P1-2, P2-11, P2-15, P2-16).
+"""Prompt-audit Batch B — the FE machinery fixes (P1-2, P2-11, P2-15, P2-16).
 
 Four repairs, each pinned here:
 
@@ -12,9 +12,7 @@ Four repairs, each pinned here:
 
   • P2-11 — the "Since your last turn:" stateDelta framing was DEAD single-tenant: `_maybe_delta_line`
     bailed on `user is None` (`AUTH_ENABLED=false` — the posture the owner runs) while every sibling
-    belt got the NAR-1/#1045 stable-key fix. Now it renders with no user; it QUIESCES under the
-    golden record/replay seam (the committed fixture was recorded while the line was dead, so
-    rendering it under replay would drift every later request key off the recording).
+    belt got the NAR-1/#1045 stable-key fix. Now it renders with no user.
 
   • P2-15 — the utility-EXTRACTION prompts interpolate RAW player text with no untrusted-data fence,
     letting a player address the extractor directly and steer their own hidden consequence folds (a
@@ -176,7 +174,7 @@ def test_model_called_advance_gets_the_day_break_tool_steer():
 
 
 # ════════════════════════════════════════════════════════════════════════════════════════
-# P2-11 — the delta line works single-tenant (and quiesces under the golden seam)
+# P2-11 — the delta line works single-tenant
 # ════════════════════════════════════════════════════════════════════════════════════════
 
 def _fake_delta(monkeypatch, calls=None):
@@ -191,8 +189,6 @@ def _fake_delta(monkeypatch, calls=None):
 def test_delta_line_renders_single_tenant(monkeypatch):
     """The P2-11 repair: `user=None` (AUTH_ENABLED=false — the owner's own posture) renders the
     'Since your last turn:' line like any sibling belt, instead of bailing dead."""
-    monkeypatch.delenv("ORWELL_GOLDEN_RECORD", raising=False)
-    monkeypatch.delenv("ORWELL_GOLDEN_REPLAY", raising=False)
     calls = []
     _fake_delta(monkeypatch, calls)
     line = _run(chat_helpers._maybe_delta_line(None, 4))
@@ -207,16 +203,6 @@ def test_delta_line_still_requires_a_last_seen_token(monkeypatch):
     assert _run(chat_helpers._maybe_delta_line(None, None)) is None
     assert _run(chat_helpers._maybe_delta_line(None, True)) is None  # bool is not a beatSeq
     assert calls == []
-
-
-def test_delta_line_quiesces_under_the_golden_seam(monkeypatch):
-    """0108: the committed fixture was recorded while this line was dead, so its request keys hold
-    framing WITHOUT a delta line — under record/replay the line must not render (golden-neutral)."""
-    calls = []
-    _fake_delta(monkeypatch, calls)
-    monkeypatch.setenv("ORWELL_GOLDEN_REPLAY", "/tmp/some-fixture.jsonl")
-    assert _run(chat_helpers._maybe_delta_line(_USER, 4)) is None
-    assert calls == [], "no engine fetch under the golden seam"
 
 
 # ════════════════════════════════════════════════════════════════════════════════════════
