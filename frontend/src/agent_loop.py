@@ -4726,7 +4726,12 @@ def _loop_break_streak_update(key: str, framed_key, *, progressed: bool, runway_
         _LOOP_STREAK[key] = _LOOP_STREAK.get(key, 0) + 1
     else:
         _LOOP_STREAK[key] = 1  # first sighting of this (possibly new) gate under live conditions
-    _LOOP_LAST_FRAMED_KEY[key] = framed_key
+    # #1754 (Greptile P1): only overwrite the tracked gate on a KNOWN read. An unknown read
+    # (framed_key None) must NOT erase the gate the pending telemetry note is tracking — else a
+    # later peer-driven move compares the new gate against None, the real resolution is never
+    # observed, and the loop-break note stays stuck (the streak already reset to 0 above).
+    if framed_key is not None:
+        _LOOP_LAST_FRAMED_KEY[key] = framed_key
     return _LOOP_STREAK.get(key, 0) >= _LOOP_BREAK_THRESHOLD
 
 
