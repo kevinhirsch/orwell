@@ -68,10 +68,8 @@ session task ledger, each with a disposition. Read it before starting any new wo
 
 ## 3. Owed / obligations
 
-1. **🔑 ROTATE KEYS (owner action — as soon as practical, not at a milestone):** the provider keys
-   and the GitHub PAT used across this campaign passed through chat and should be rotated/revoked
-   now. The inventory lives in `SOUL.md`'s carry-forward notes (values never committed anywhere;
-   the live key sits only in the session scratchpad, 600-perm). Scrub the scratchpad copy after.
+1. **🔑 Key rotation: CLOSED (D9, 2026-07-21)** — the owner rotated all exposed keys; the session
+   scratchpad copy was destroyed by the container rollback. Nothing outstanding.
 2. **Owner decisions D1–D10 are ALL RULED** (backlog §T7 rulings table, finalized via #1772) — no
    operator should wait on them. The only live gates are sequencing ones: the casting mandate leads
    Wave 1, and T0-6 must land before the Footage Pool (D4's condition).
