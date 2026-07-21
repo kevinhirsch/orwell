@@ -564,7 +564,7 @@ def test_settle_reuses_the_stage_time_idempotency_key(monkeypatch):
     """AC — re-applying the surviving fold is idempotent: settle carries the SAME key minted at
     stage time (0065 Part B), so a retried settle/engine call can never double-apply."""
     ok, _cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}')
-    entry_key = fl._PENDING[("owner", "sess-1")]["idempotency_key"]
+    entry_key = fl._PENDING[("owner", "sess-1")][0]["idempotency_key"]
     _ok2, cap = ok, {}
 
     async def fake_record(content, with_ids=None, kind=None, consequence=None,
@@ -578,9 +578,9 @@ def test_settle_reuses_the_stage_time_idempotency_key(monkeypatch):
     assert cap["idempotency_key"] == entry_key
 
 
-def test_settle_failure_re_stages_the_entry_instead_of_losing_it(monkeypatch):
+def test_settle_failure_re_queues_the_entry_instead_of_losing_it(monkeypatch):
     """mandate #4 (non-degradation) — a validated fold must never silently evaporate on a
-    transient hiccup; it re-stages for the next settle opportunity instead."""
+    transient hiccup; it re-queues (at the front) for the next settle opportunity instead."""
     ok, _cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}')
     assert ok is True
 
@@ -591,7 +591,124 @@ def test_settle_failure_re_stages_the_entry_instead_of_losing_it(monkeypatch):
     monkeypatch.setattr(oe, "record_interaction", boom)
     settled = _run(al._settle_pending_fold("owner", "sess-1"))
     assert settled is False
-    assert fl.has_pending_fold("owner", "sess-1") is True, "a failed settle must re-stage, never drop"
+    assert fl.has_pending_fold("owner", "sess-1") is True, "a failed settle must re-queue, never drop"
+    assert fl.pending_fold_count("owner", "sess-1") == 1
+
+
+# ── PR #1825 (Greptile P1) — the queue redesign: a single overwriting slot let a transient
+# settle-failure re-stage the PRIOR turn's still-unsettled fold, and a NEW turn reaching
+# `_auto_record_scene` right after would silently CLOBBER it (mandate #4 evaporation). Fixed by
+# making the pending store a bounded FIFO queue: stage appends, settle drains oldest-first and
+# stops (never skips) on a failure, and truncate discards only the tail. ─────────────────────────
+
+def test_settle_failure_then_a_new_turn_stage_settles_both_in_order(monkeypatch):
+    """The exact T-Rex repro: turn 1's settle hits a transient error (re-queued), turn 2 also
+    stages its own fold — with the old single-slot design this OVERWRITES and silently drops
+    turn 1's fold. With the queue, BOTH survive and settle in order on the next successful
+    settle, each carrying its OWN idempotency key."""
+    ok1, cap1 = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"turn 1 content"}')
+    assert ok1 is True
+    key1 = fl._PENDING[("owner", "sess-1")][0]["idempotency_key"]
+
+    async def boom(*a, **k):
+        raise RuntimeError("network blip")
+
+    from src import orwell_engine as oe
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    settled = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled is False
+    assert fl.pending_fold_count("owner", "sess-1") == 1, "turn 1's fold must survive the failure"
+
+    # Turn 2 begins (the settle above already ran fail-open at turn 2's own start) and reaches
+    # _auto_record_scene for ITS OWN scene — this must APPEND, never clobber turn 1's re-queued entry.
+    ok2, cap2 = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"turn 2 content"}')
+    assert ok2 is True
+    assert fl.pending_fold_count("owner", "sess-1") == 2, (
+        "staging turn 2's fold must not clobber turn 1's still-unsettled, re-queued fold")
+    key2 = fl._PENDING[("owner", "sess-1")][1]["idempotency_key"]
+    assert key1 != key2
+
+    # A later, successful settle (turn 3's start) must drain BOTH, oldest first, each with its
+    # own preserved idempotency key.
+    applied = []
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        applied.append((content, idempotency_key))
+        return {"recorded": True, "beatSeq": 4 + len(applied)}
+
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    settled_again = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled_again is True
+    assert applied == [("turn 1 content", key1), ("turn 2 content", key2)], (
+        "both folds must land, oldest-first, each with its ORIGINAL idempotency key — "
+        "neither evaporated nor reordered"
+    )
+    assert fl.has_pending_fold("owner", "sess-1") is False
+
+
+def test_truncate_after_a_requeue_discards_only_the_newest_entry(monkeypatch):
+    """A truncate can only ever supersede the session's LATEST turn. If an OLDER fold is sitting
+    re-queued (from a prior transient settle failure) when a NEWER take gets regenerated, the
+    truncate/discard must remove ONLY the newest (tail) entry — the older, already-accepted fold
+    must survive and still settle."""
+    ok1, _cap1 = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"older, already-accepted turn"}')
+    assert ok1 is True
+
+    async def boom(*a, **k):
+        raise RuntimeError("network blip")
+
+    from src import orwell_engine as oe
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    _run(al._settle_pending_fold("owner", "sess-1"))  # fails, re-queues the older entry
+    assert fl.pending_fold_count("owner", "sess-1") == 1
+
+    ok2, _cap2 = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"newer take (being regenerated)"}')
+    assert ok2 is True
+    assert fl.pending_fold_count("owner", "sess-1") == 2
+
+    # "Try again" on the NEWER take — the truncate route discards only its (tail) fold.
+    discarded = fl.discard_pending_fold("owner", "sess-1")
+    assert discarded is True
+    assert fl.pending_fold_count("owner", "sess-1") == 1
+    assert fl._PENDING[("owner", "sess-1")][0]["content"] == "older, already-accepted turn", (
+        "the older, already-accepted fold must survive a truncate targeting a NEWER take"
+    )
+
+    applied = []
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        applied.append(content)
+        return {"recorded": True, "beatSeq": 9}
+
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    settled = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled is True
+    assert applied == ["older, already-accepted turn"]
+
+
+def test_pending_queue_bound_drops_the_oldest_entry_with_a_warning(caplog):
+    """A pathological repeated-settle-failure loop must not grow the queue without limit — past
+    `_MAX_QUEUE_LEN` the OLDEST entry is dropped (a real, bounded loss) with a warning log."""
+    import logging
+    caplog.set_level(logging.WARNING, logger="src.fold_ledger")
+    for i in range(fl._MAX_QUEUE_LEN + 3):
+        fl.stage_pending_fold("owner", "sess-1", content=f"entry-{i}", with_ids=["npc:3"],
+                              kind="bonding", consequence=None, felt_minutes=None,
+                              idempotency_key=f"k{i}")
+    assert fl.pending_fold_count("owner", "sess-1") == fl._MAX_QUEUE_LEN
+    # The oldest 3 entries (0, 1, 2) must have been dropped — the queue keeps the NEWEST N.
+    contents = [e["content"] for e in fl._PENDING[("owner", "sess-1")]]
+    assert contents[0] == "entry-3", "the bound must drop the OLDEST entries, keeping the newest"
+    assert contents[-1] == f"entry-{fl._MAX_QUEUE_LEN + 2}"
+    assert any("dropping the OLDEST staged fold" in r.message for r in caplog.records), (
+        "an overflow drop must be logged — it is a real (if bounded) fold loss"
+    )
 
 
 def test_faithfulness_retro_adopt_path_without_session_id_still_commits_immediately(monkeypatch):
@@ -621,8 +738,9 @@ def test_discard_returns_false_when_nothing_was_staged():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# #1728 (B2) — the truncate route's discard wiring: any truncate on a session unconditionally
-# clears a staged fold, and the settle-at-turn-start call sits at the top of the turn (before ANY
+# #1728 (B2) — the truncate route's discard wiring: any truncate on a session discards the NEWEST
+# staged fold (the tail — see `test_truncate_after_a_requeue_discards_only_the_newest_entry` above
+# for why only the tail), and the settle-at-turn-start call sits at the top of the turn (before ANY
 # narration is generated) — both source-pinned so a future refactor can't silently reorder them.
 # ─────────────────────────────────────────────────────────────────────────────
 

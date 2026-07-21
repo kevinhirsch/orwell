@@ -266,29 +266,41 @@ survived, its content could belong to neither take as narrated (F6 — a fabrica
 
 **Decision — DEFER-FOLD-TO-SETTLE is the primary mechanism (owner ruling, issue #1728).** A
 scene's fold is no longer committed at proposal time. `frontend/src/fold_ledger.py` is a small,
-Vault-free, in-memory, per-`(owner, session)` staging slot (one entry at most, mirroring the
-established `routes/chat_helpers.py` `_DEFERRED_FOLDS`/`_LAST_BEAT_SEQ` pattern for exactly this
-class of short-lived FE bookkeeping):
+Vault-free, in-memory, per-`(owner, session)` **bounded FIFO queue** (mirroring the established
+`routes/chat_helpers.py` `_DEFERRED_FOLDS`/`_LAST_BEAT_SEQ` pattern for exactly this class of
+short-lived FE bookkeeping — max depth 8, oldest-drop-with-a-warning past that):
 
 - `_auto_record_scene` validates the extraction exactly as before (the OOC/machinery gate, the
   engine-whereabouts witness-set intersection, the `withIds` roster normalization — #1729/#1730/
-  #1734, unchanged) and then **stages** the payload instead of calling `recordInteraction`.
+  #1734, unchanged) and then **appends** the payload to the queue instead of calling
+  `recordInteraction`.
 - The fold **settles** (the actual, CAS-guarded `recordInteraction` call) at the **start of the
   next turn** for that same session (`agent_loop._settle_pending_fold`, called before the new
-  turn's round loop begins — never mid-stream) — reaching a new turn is the proof the prior take
-  was accepted, not regenerated.
-- A **regenerate discards the staged fold unconditionally** as part of the truncate it already
-  performs (`routes/history_routes.py::truncate_session` calls `fold_ledger.discard_pending_fold`)
-  — provably correct because a truncate always cuts this session's tail from some point to the
-  end, and a staged fold only ever exists for the session's most-recent turn (settle always drains
-  any earlier one first), so the row that produced a staged fold — if any — is always inside every
-  truncate's discarded range.
-- **Idempotency (AC):** the idempotency key is minted once, at stage time, and carried unchanged
-  to the settle-time engine call (0065 Part B) — the engine dedups a repeated key, so a retried
-  settle can never double-apply. A settle that fails on a transient error (not a stale-beat
+  turn's round loop begins — never mid-stream), which **drains the whole queue oldest-first** —
+  reaching a new turn is the proof the OLDEST staged take(s) were accepted, not regenerated.
+- A **regenerate discards only the TAIL (most-recently-staged) entry** as part of the truncate it
+  already performs (`routes/history_routes.py::truncate_session` calls
+  `fold_ledger.discard_pending_fold`) — provably correct because a truncate can only ever
+  supersede the session's LATEST turn, and any older, still-queued entries belong to already-
+  accepted turns that must survive.
+- **Idempotency (AC):** each entry's idempotency key is minted once, at stage time, and carried
+  unchanged to its settle-time engine call (0065 Part B) — the engine dedups a repeated key, so a
+  retried settle can never double-apply. A settle that fails on a transient error (not a stale-beat
   conflict, which `_backfill_with_cas`'s existing CON-11 deferred-retry queue already absorbs)
-  **re-stages the identical entry** rather than dropping it (mandate #4 — a validated fold must
-  never silently evaporate).
+  **re-queues that entry at the FRONT and stops draining** — a newer entry must never settle ahead
+  of an older one still retrying — rather than dropping anything (mandate #4 — a validated fold
+  must never silently evaporate).
+
+**Queue, not a single overwriting slot (PR #1825 Greptile P1 fix, post-merge).** The first cut of
+this design used a single-slot "stage always overwrites" store. Greptile (confirmed by a T-Rex
+repro) found a real evaporation hole in it: a transient settle failure re-stages the prior turn's
+still-valid fold for retry, and if the NEW turn (which the settle deliberately let proceed —
+fail-open) also reaches `_auto_record_scene`, a plain overwrite silently clobbers the
+still-unsettled prior entry — exactly the mandate-#4 violation the module promised couldn't
+happen. The fix is the FIFO queue described above: stage always appends, settle always drains
+oldest-first and stops (rather than skips) on a failure, and truncate discards only the tail —
+so an older re-queued entry can never be lost to a newer one, and a newer take's fold can never be
+discarded by a truncate that targets an older one it doesn't touch.
 
 **The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
 issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
@@ -311,10 +323,14 @@ applied/guaranteed-to-apply correction, never a bare attempt) both stay green un
 
 **Tests:** `frontend/tests/test_1728_1729_1730_1734_recording_render_integrity.py` — the D1 id-
 keyed-truncate + cancel-discard source pins (already landed with PR #1751) plus the B2 section
-added here: stage-not-commit, settle-commits-once, the regenerate/discard/one-surviving-fold
-repro (the F5/F6 case end to end), idempotency-key reuse, re-stage-on-transient-failure, the
-`session_id=None` (0081 faithfulness retro-adopt) immediate-commit fallback, and two source pins
-(the truncate route's discard call; settle sitting before the round loop starts).
+added here: stage-not-commit, settle-drains-and-commits, the regenerate/discard/one-surviving-fold
+repro (the F5/F6 case end to end), idempotency-key reuse, re-queue-on-transient-failure, the
+`session_id=None` (0081 faithfulness retro-adopt) immediate-commit fallback, cross-session
+isolation, and two source pins (the truncate route's discard call; settle sitting before the round
+loop starts) — plus the PR #1825 queue-redesign cases: a settle failure followed by a new-turn
+stage settles BOTH folds in order on the next successful settle (each with its own idempotency
+key), a truncate after a re-queue discards only the newest entry while the re-queued older fold
+still settles, and the bound drops the oldest entry with a warning log past `_MAX_QUEUE_LEN`.
 
 ## Traceability
 

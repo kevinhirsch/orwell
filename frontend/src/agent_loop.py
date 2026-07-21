@@ -2559,44 +2559,53 @@ async def _backfill_with_cas(owner, fn, *args, defer_fold: bool = False, **kwarg
 
 # ── #1728 (B2) — settle a deferred scene fold ──────────────────────────────────────────────────
 async def _settle_pending_fold(owner, session_id) -> bool:
-    """Commit a fold `_auto_record_scene` STAGED (`fold_ledger.stage_pending_fold`) on a PRIOR
-    turn, now that a NEW turn is beginning for this session — proof the prior take was accepted,
-    not regenerated. A "Try again" truncates that prior row BEFORE this ever runs and the
-    truncate route discards the staged fold as part of that (`routes/history_routes.py
-    ::truncate_session`), so a superseded take can never reach here at all.
+    """Commit every fold `_auto_record_scene` STAGED (`fold_ledger.stage_pending_fold`) on PRIOR
+    turns, now that a NEW turn is beginning for this session — proof those prior takes were
+    accepted, not regenerated. A "Try again" discards the SUPERSEDED take's staged fold as part of
+    its truncate (`routes/history_routes.py::truncate_session`), BEFORE this ever runs, so a
+    superseded take can never reach here at all.
 
     Called once, at the very start of `_stream_agent_loop_impl`, before the new turn generates
-    anything (see the call site's own comment). At-most-once via the idempotency key minted when
-    the fold was staged — reused unchanged, so a retry of this exact settle (or the engine's own
-    CAS retry inside `_backfill_with_cas`) can never double-apply.
+    anything (see the call site's own comment).
+
+    **Drains the whole FIFO queue, oldest-first** (PR #1825 fix — the queue redesign): normally 0
+    or 1 entries, but a settle-failure can leave more than one queued across turns, and EVERY one
+    must eventually land, in order. Each entry carries its OWN idempotency key minted at stage
+    time, reused unchanged at settle — a retry of this exact settle (or the engine's own CAS retry
+    inside `_backfill_with_cas`) can never double-apply.
 
     Fail-open for the NEW turn (a settle hiccup never blocks it from starting) but never silently
-    loses the fold (mandate #4): a transient failure re-stages the identical entry for the next
-    settle opportunity rather than dropping it. Returns True only when the fold was actually
-    applied this call (or there was nothing to settle → False, same as "no-op")."""
+    loses a fold (mandate #4): a transient failure RE-QUEUES the identical entry at the FRONT for
+    the next settle opportunity and STOPS draining — a later (newer) entry must never settle ahead
+    of an older one still stuck retrying, or the ledger's order (and truncate's "only the tail"
+    assumption) would be violated. Returns True iff at least one fold was actually applied this
+    call."""
     from src import fold_ledger as _fl
-    entry = _fl.pop_pending_fold(owner, session_id)
-    if entry is None:
-        return False
     from src import orwell_engine as _oe
-    try:
-        result = await _backfill_with_cas(
-            owner, _oe.record_interaction, entry["content"],
-            with_ids=entry["with_ids"], kind=entry["kind"], consequence=entry["consequence"],
-            felt_minutes=entry["felt_minutes"], user=owner, defer_fold=True,
-            idempotency_key=entry["idempotency_key"])
-    except Exception as _e:
-        logger.warning(f"[orwell] settle deferred fold failed, re-staging for retry: {_e}")
-        _fl.stage_pending_fold(owner, session_id, **entry)
-        return False
-    if result is None:
-        # `_backfill_with_cas` already queued this onto the CON-11 deferred-retry mechanism
-        # (`defer_fold=True`) on a double stale-beat conflict — not lost, just delayed there
-        # instead of here; re-staging it too would just duplicate that queue.
-        return False
-    logger.info(f"[orwell] settled deferred scene fold (kind={entry['kind']}, "
-                f"with={entry['with_ids']}) user={owner}")
-    return True
+    settled_any = False
+    while True:
+        entry = _fl.pop_oldest_pending_fold(owner, session_id)
+        if entry is None:
+            break
+        try:
+            result = await _backfill_with_cas(
+                owner, _oe.record_interaction, entry["content"],
+                with_ids=entry["with_ids"], kind=entry["kind"], consequence=entry["consequence"],
+                felt_minutes=entry["felt_minutes"], user=owner, defer_fold=True,
+                idempotency_key=entry["idempotency_key"])
+        except Exception as _e:
+            logger.warning(f"[orwell] settle deferred fold failed, re-queuing at front for retry: {_e}")
+            _fl.requeue_pending_fold_front(owner, session_id, entry)
+            break  # never settle a newer entry ahead of this one still stuck retrying
+        if result is None:
+            # `_backfill_with_cas` already queued this onto the CON-11 deferred-retry mechanism
+            # (`defer_fold=True`) on a double stale-beat conflict — not lost, just delayed there
+            # instead of here; stop draining here too so order stays preserved.
+            break
+        logger.info(f"[orwell] settled deferred scene fold (kind={entry['kind']}, "
+                    f"with={entry['with_ids']}) user={owner}")
+        settled_any = True
+    return settled_any
 
 
 # ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
