@@ -46,8 +46,15 @@ This ADR records one answer to both, because they are the same principle applied
 **data-only** calls (per-NPC intent, subjective memory, paraphrase-residual); keep *narration*
 **monolithic** — one completion writes every NPC's words. This is the Orwell inversion of Sonder:
 adopt the cognitive decomposition (which enriches play) and reject the prose decomposition (which
-would cost fluency and Vault security). It is also strictly *more* Vault-secure than Sonder — one
-enforcement seam, not N.
+would cost fluency and Vault security). Its two layers get security from **two different**
+mechanisms, and it is important not to conflate them: **narration** is monolithic, so the Vault
+Wall is enforced at exactly **one** player-facing prose seam; **cognition** fans out to N calls, so
+its security is *not* "one seam" — it is that each of the N calls is **individually
+knowledge-scoped** (gated on engine presence, ADR 0019), **emits structured data, never
+player-facing prose**, and is covered by **aggregate leak testing across the N requests** (the
+union of all N cognition calls must leak nothing outside each NPC's legitimate knowledge). Together
+that is still strictly *more* Vault-secure than Sonder, whose N per-character *writing* agents each
+add a fresh player-facing prose seam; Orwell adds no prose seam beyond the one narrator.
 
 ### A. One funnel voice, not N narrators (the #1738 arm)
 
@@ -58,12 +65,15 @@ enforcement seam, not N.
    Committee prose (multiple models, lines produced in isolation that must fit together) reads with
    visible seams, register shifts, and false consistency breaks. ADR 0003 governs: don't trade
    fluent prose for a control panel of per-NPC agents.
-2. **Security — one Vault-enforcement seam.** The Vault Wall (mandate #2) is enforced at *one* seam:
-   the point where facts leave the engine. One narrator = one place to lock down knowledge-scoped
-   voice (ADR 0019). N narrators = N leak surfaces, each needing the ADR 0019 scoping enforced
+2. **Security — one player-facing prose seam.** The Vault Wall on *narration* (mandate #2) is
+   enforced at exactly *one* place: the single completion that writes player-facing text. One
+   narrator = one place to lock down knowledge-scoped voice (ADR 0019). N per-character *writing*
+   agents = N player-facing prose surfaces, each needing the ADR 0019 scoping enforced
    independently — N× harder to audit, and exactly the failure class ADR 0019 names (one shared
    context, one model, many NPCs reaching into it; the casting-interview and "recalled something
-   they weren't privy to" leaks). One seam is defensible; N are not.
+   they weren't privy to" leaks). One prose seam is defensible; N are not. *(This is the narration
+   argument only; cognition also fans out to N calls, but those emit **data, never prose**, and are
+   secured differently — see the Decision preamble and invariants 3 & 5.)*
 3. **Cost and latency.** One completion is cheaper and lower-latency than N parallel prose calls,
    each with its own LLM overhead. Real-time play can't afford N narrators per beat.
 
@@ -87,11 +97,18 @@ an NPC's cognition; the engine keeps the *magnitude* and owns every outcome. Con
 | **state** (relationship magnitudes, board, persistence, the Vault) | **engine only** (closed set) | The model never sees or sets a number. |
 
 The magnitude/shape split of ADR 0005 is **preserved exactly** and reuses the existing seam: the
-`recordInteraction` `consequence` descriptor (PR #355) — the model proposes `{kind, target,
-emphasis}` (which edge moves, which direction, relative emphasis), the engine keeps the bounded,
-seeded magnitude; **no descriptor ⇒ byte-identical fold** to the deterministic floor. "Model
-proposes, engine disposes." Authored intent is a **bounded weighted input** to engine resolution,
-never the resolution.
+`recordInteraction` `consequence` descriptor (PR #355). The **actual** contract (`ConsequenceDescriptor`
+in `src/ports/EngineCommands.ts`, cite it exactly — a wrong shape produces a no-op write) is
+`{ edges?: Array<{ toward, direction, emphasis? }>, aboutEdges?, rationale? }`, where `direction` is a
+member of the **closed** `ConsequenceDirection` set (`warmer`/`cooler`/`more-trust`/`less-trust`/
+`more-threatened`/`less-threatened`/`more-aligned`/`less-aligned`) and `emphasis` is a **relative**
+weight only (`slight`/`notable`/`strong`) — never a magnitude. The `kind` is **not** part of the
+descriptor: it is a **separate request-level field** on `RecordInteractionReq` (`kind?: string`) that
+seeds the engine's base magnitude and is the **floor + default** (no `consequence` descriptor ⇒ the
+fold is byte-identical to the legacy `kind`-only path). So the model proposes *which* edges move, *in
+which* closed direction, with *what relative* emphasis, and *why* (`rationale`, recorded losslessly,
+never scored); the engine keeps the bounded, seeded amount. "Model proposes, engine disposes."
+Authored cognition is a **bounded weighted input** to engine resolution, never the resolution.
 
 The three sub-designs that deliver this are specced in **feature 0131**:
 - **S1 — per-NPC authored intent (salience-gated).** A scoped sub-call authors `want/attempt` for
@@ -103,9 +120,13 @@ The three sub-designs that deliver this are specced in **feature 0131**:
   as soul state (store recalled, not chat remembered) — beyond today's NPC→NPC gossip drift. Cached
   per scene; fail-soft.
 - **S3 — paraphrase-residual scoped call.** ADR 0019's *accepted residual* (vague paraphrase, e.g.
-  "counselor vibe") killed for the one high-risk case: voice a **present** NPC's secret-adjacent
-  line from a per-NPC scoped completion **only** when their knowledge sharply diverges from the
-  shared transcript. Knowledge-divergence-gated; bounded to that NPC, that beat.
+  "counselor vibe") killed for the one high-risk case: when a **present** NPC's knowledge sharply
+  diverges from the shared transcript, a per-NPC scoped call returns **structured residual/intent
+  data** — the specific knowledge-divergent point + the NPC's intent for the beat — and the **one
+  narrator** writes the prose from that data. S3 is **not** a per-NPC prose completion: even when the
+  beat needs an NPC-specific line, it is still the sole narrator writing it from S3's structured
+  data. This keeps "fan out cognition (data), funnel narration (one voice)" with no exception.
+  Knowledge-divergence-gated; bounded to that NPC, that beat.
 
 ### C. Full-fidelity mode — every awake NPC, every turn (the #1739 arm)
 
@@ -160,60 +181,116 @@ Testability.
 
 ### The unifying principle
 
-Arms A–D are one rule at two layers. **Cognition fans out** (many cheap, scoped, data-only calls,
-each authoring open-set shape) so the house feels alive and independent. **Narration funnels**
-(one fluent voice, one Vault seam) so the prose stays coherent and the wall stays enforceable.
-**Neither arm ever moves closed-set authority to the model** — outcomes, state, knowledge, and
-persistence remain engine-owned and seeded, at gated *and* full fidelity.
+Arms A–D are one rule at two layers, each **secured differently**. **Cognition fans out** (many
+cheap, scoped, data-only calls, each authoring open-set shape) so the house feels alive and
+independent — its security is per-call knowledge-scoping (invariant 3) + data-only outputs
+(invariant 5) + aggregate leak testing across the N calls, **not** a single seam. **Narration
+funnels** (one fluent voice) so the prose stays coherent and the Vault Wall on player-facing text
+stays enforceable **at one prose seam**. **Neither arm ever moves closed-set authority to the
+model** — outcomes, state, knowledge, and persistence remain engine-owned and seeded, at gated
+*and* full fidelity.
 
 ## Integrity invariants (expressed as testable gates)
 
 Every mechanism in this ADR MUST hold these. They are the acceptance surface for the feature issues
-that split off, and they reuse the existing proofs — no new authority model, no new wall.
+that split off. **The existing `expressiveNonCollapse` + Vault-Wall sentinels are reused only for
+what they actually cover** — the current social-consequence *descriptor* path (open-set
+non-collapse; no closed-set authority movement through `recordInteraction`). They do **not** exercise
+the NEW per-NPC cognition calls, their access to resolution/state, or the parallel fan-out — so the
+gates marked **(NEW gate — build with the feature)** below must be written alongside the
+implementation. An implementation could route authored cognition into a closed-set resolver and
+still pass the existing sentinels; that is exactly why the new gates are required.
 
-1. **Cognition-only (never outcome).** A cognition call may author `want/attempt/read` only; the
-   deterministic resolver owns `resolve/state`. *Proof:* `expressiveNonCollapse.test.ts` +
-   `frontend/tests/test_expressive_non_collapse.py` stay green — with **no descriptor the fold is
-   byte-identical** to the floor, so authored shape can never change a seeded magnitude.
-2. **Bounded-input-to-resolution.** Authored intent enters resolution only as a structured
-   `{kind, target, emphasis}` descriptor (the #355 pattern) with a bounded, seeded magnitude; no
-   raw number and no free text crosses into the closed set. *Proof:* the descriptor-shape test on
-   the resolver path; a planted intent cannot move an outcome beyond the seeded bound.
-3. **Knowledge-scoped (on ENGINE presence).** Every per-NPC call is scoped to what the engine says
-   that NPC knows, gated on **engine** presence (#1726 / A2), never on what the narrator happens to
-   hold in context (ADR 0019). *Proof:* the ADR 0019 per-NPC sentinel — plant a token into a scene
-   witnessed only by NPC B, assert it is absent from A's scoped call input; plant a producer-only
-   token, assert it is globally absent. N parallel calls do not re-open the leak N times.
+1. **Cognition-only (never outcome). (NEW gate — build with the feature.)** A per-NPC cognition call
+   may author `want/attempt/read` only; the deterministic resolver owns `resolve/state`. *Proof:* a
+   **new dedicated acceptance test** asserting a cognition-call response **cannot write** `resolve`
+   or `state` — the authored cognition is a **bounded INPUT** to the seeded resolver, never the
+   resolution (drive a call whose response tries to set an outcome/magnitude; assert the engine
+   ignores it and the seeded result stands). The existing `expressiveNonCollapse.test.ts` +
+   `frontend/tests/test_expressive_non_collapse.py` remain the proof **only** for the descriptor
+   path they cover (no descriptor ⇒ byte-identical fold), not for the cognition boundary.
+2. **Bounded-input-to-resolution.** Authored cognition enters resolution only through the
+   `ConsequenceDescriptor` shape (`src/ports/EngineCommands.ts`, the #355 pattern) —
+   `{ edges?: [{ toward, direction, emphasis? }], aboutEdges?, rationale? }`, with `direction` from
+   the **closed** `ConsequenceDirection` set and `emphasis` a **relative** weight
+   (`slight`/`notable`/`strong`), never a magnitude; `kind` is the **separate request-level field**
+   on `RecordInteractionReq` that seeds the engine's base. No raw number and no free text crosses
+   into the closed set. *Proof:* the descriptor-shape guard on the resolver path (the `McpServer`
+   arg-guard already refuses malformed `consequence.edges[]`); a planted intent cannot move an
+   outcome beyond the engine's bounded, seeded amount.
+3. **Knowledge-scoped (on ENGINE presence). (NEW gate — build with the feature.)** Every per-NPC
+   call is scoped to what the engine says that NPC knows, gated on **engine** presence (#1726 / A2),
+   never on what the narrator happens to hold in context (ADR 0019). *Proof:* **two new tests**
+   modeled on the ADR 0019 per-NPC sentinel — **(a) a per-call knowledge-scope test:** plant a token
+   into a scene witnessed only by NPC B, assert it is absent from A's scoped call input, and a
+   producer-only token is globally absent from every call's input; **(b) an aggregate-leak test
+   across the parallel fan-out:** the **union** of all N cognition-call inputs on a turn leaks
+   nothing outside each NPC's legitimate knowledge. The existing narrator-seam sentinels do not
+   exercise the cognition-call inputs, so these gates are new. N parallel calls must not re-open the
+   leak N times.
 4. **Soul-anchored.** Each call *continues* the persisted character (stable public persona, "people
    make sense," 0041); it never re-rolls the character. Outcomes fold back via `evolveFromBeat`.
    *Proof:* `CHARACTER` byte-stable across a cognition beat; the authored read persists to soul, not
    chat.
-5. **Funnel-narration (single seam).** Cognition calls emit **data/intent only, never prose**; one
-   completion writes every NPC's words. *Proof:* the Vault-Wall structural sentinels
-   (dependency-cruiser: no outward module imports `VaultStore`; `liveSentinel.property.test.ts`;
-   `test_knowledge_wall.py`) remain the wall — there is exactly one narration seam to guard.
+5. **Funnel-narration (one prose seam). (NEW gate — build with the feature.)** Cognition calls emit
+   **structured data/intent only, never prose**; exactly one completion writes every NPC's words
+   (including S3's NPC-specific lines, produced by the sole narrator from S3's structured data).
+   *Proof:* a **new funnel-only test** asserting no per-NPC prose is emitted by any cognition call
+   (their outputs validate against the structured-data schema, contain no narration) and that the
+   scene's player-facing text comes from a single narration completion. The existing Vault-Wall
+   structural sentinels (dependency-cruiser: no outward module imports `VaultStore`;
+   `liveSentinel.property.test.ts`; `test_knowledge_wall.py`) remain the wall on that **one**
+   narration seam — but they do not by themselves prove the cognition calls stay prose-free, hence
+   the new gate.
 6. **Voice content-neutrality.** A distinctiveness mechanism may shape *how* a line reads, never
    *what* the NPC knows/wants/achieves. *Proof:* if a rewrite changes a line's knowledge, intent, or
    outcome, it fails; the Vault/knowledge sentinels are untouched by voice-sharpening.
-7. **Voice distinctiveness (measurable).** In a multi-NPC scene, unlabeled lines are attributable to
-   the right NPC **above chance** (e.g. a reader study or trained classifier over a sample of lines),
-   **while** scene flow/coherence stays high (no felt register shifts). *Proof:* the attribution
-   test passes *and* a seam check finds no discontinuities — distinctiveness up, seams flat.
+7. **Voice distinctiveness (measurable — reproducible protocol). (NEW gate — build with the
+   feature.)** "Above chance" is only a gate if the protocol is fixed. Define it so repeated runs and
+   the A/B flag modes are comparable:
+   - **Corpus:** a fixed sample of **N = 200 unlabeled lines** drawn from **M = 8 distinct NPCs**
+     over **K = 10 scenes** (seed-fixed so the same corpus regenerates).
+   - **Chance baseline:** random guessing among the M candidates = **1/M = 12.5%** attribution.
+   - **Attributor:** a held-out reader panel *or* a trained classifier scores each unlabeled line →
+     one of the M NPCs.
+   - **Acceptance threshold:** mean attribution accuracy **≥ 40%** (a **≥ 27.5-point** absolute
+     improvement over the 12.5% baseline), significant at **p < 0.05** (binomial vs. chance; report
+     the 95% CI).
+   - **Coherence/seam rubric (fixed, scored 1–5):** register consistency, absence of felt
+     interruptions/topic-jumps, and pronoun/tense stability across a scene; **acceptance = mean ≥ 4.0
+     with no scene below 3.** A distinctiveness gain that drops the coherence score **fails** (that
+     is the "N voices with seams" regression).
+   - **Reproducibility:** the **same** protocol (corpus seed, thresholds, rubric) runs on every
+     evaluation and across **both A/B flag modes** (full-fidelity vs. salience-gated), so the numbers
+     are directly comparable run-to-run.
+   *Proof:* the attribution test clears the ≥ 40% / p < 0.05 bar **and** the coherence rubric clears
+   ≥ 4.0 — distinctiveness up, seams flat, on a fixed reproducible corpus.
 8. **Full-fidelity cost containment (mode C).** The awake-set bound, per-turn budget guard, and
    graceful degradation to gated mode hold under load; belt-fire telemetry counts only applied
    folds. *Proof:* 0132's cost-ledger + graceful-degrade tests; a busy turn degrades to S1 without a
    stall, and the integrity invariants 1–6 hold identically at full fidelity.
 
-**No closed-set authority moves to the model at any fidelity.** `expressiveNonCollapse` and the
-Vault-Wall sentinels remain the standing proof for arms B and C alike.
+**No closed-set authority moves to the model at any fidelity — but this is proved by the NEW gates
+above, not by the existing sentinels alone.** `expressiveNonCollapse` + the Vault-Wall sentinels
+remain the standing proof for **what they cover**: open-set non-collapse and no closed-set authority
+movement on the *existing descriptor path*. They do **not** exercise arms B and C's new paths —
+scoped per-NPC cognition calls, the parallel fan-out, the budget-fallback, and funnel-only outputs —
+so each new arm ships with its **own** acceptance gate: **(a)** a per-call knowledge-scope test (no
+NPC receives out-of-scope Vault knowledge, invariant 3a), **(b)** an aggregate-leak test across the
+parallel fan-out (invariant 3b), **(c)** a cognition-response-cannot-cross-into-closed-set-authority
+test (invariant 1), and **(d)** a funnel-only test (no per-NPC prose emitted; one narrator writes,
+invariant 5). Presenting the existing sentinels as sufficient proof for the new arms would be a gap;
+the new gates close it.
 
 ## Consequences
 
 - The social-deduction floor gets **real** enrichment: NPCs pursue authored wants and hold divergent
   memories, so the house reads as an independent social system, not a mirror of the player — without
   paying Sonder's sycophancy, N-stochastic-call, latency, or committee-prose costs.
-- The Vault Wall stays a **single seam** even as cognition fans out to N calls — the enforcement
-  burden does not multiply, which is the security argument for one narrator made concrete.
+- The Vault Wall on **player-facing prose** stays a **single seam** (one narrator), while **cognition
+  fans out to N calls** secured by per-call knowledge-scoping + data-only outputs + aggregate leak
+  testing — two distinct mechanisms, neither claiming the other's guarantee. Orwell adds **no** prose
+  seam beyond the one narrator, which is the concrete security win over Sonder's N writing agents.
 - Voice distinctiveness becomes a **tunable, content-neutral** property of one completion, measured
   by attribution rather than bought with N narrators.
 - The work is **flag-gated and A/B-able** end to end: gated mode (0131-S1) is the safe fallback, full
