@@ -292,6 +292,30 @@ export interface CompetitionProgress {
    * the outcome is decided.
    */
   dropOrder?: EntityId[];
+  /**
+   * L-F4 (#1743) — the theme's live-varying INPUTS, FROZEN at draw/stage time. The 0125 seeded-theme
+   * skin the adapter lays over the library floor is a pure function of (gameSeed, phase, week, cycle);
+   * `week` is stable across a comp, but the twist `cycle` (0, or 1 while a double-eviction twist is
+   * "running") can flip MID-comp, which would silently re-skin an in-progress competition round to round
+   * (the L-F4 finding's twist-phase variant). Freezing both here pins the resolved name/premise for the
+   * comp's whole duration — the adapter reads these instead of the live `week`/`twist`. Absent on a legacy
+   * save (or when themes are off) ⇒ the adapter falls back to live resolution (back-compat, byte-identical
+   * when the twist never changes). Seed-NEUTRAL projection inputs — no rng, no fold. Vault-free.
+   */
+  themeWeek?: number;
+  themeCycle?: number;
+  /**
+   * L-F4 (#1743) — the presentation SOURCE decision, FROZEN at draw. #1400 model fiction is authored a
+   * turn or more AFTER the roll stages (the model dresses a decided result), so a first-fiction write-back
+   * that lands mid-comp would otherwise flip the name/premise from the seeded theme to the authored one
+   * PART-WAY through the comp — the same flip-flop this feature prevents. This pins the choice at draw:
+   * `true` only if VALIDATED fiction already existed when the comp staged (in practice only after a reload
+   * of a comp whose fiction was authored before the save); `false` ⇒ the comp is committed to the frozen
+   * seeded theme for its whole duration and a LATE fiction is still stored (its per-drop lines ride the
+   * `comp-elimination` beats) but never re-skins the active comp's name/premise. Absent on a legacy save ⇒
+   * live resolution (back-compat). Seed-NEUTRAL. Vault-free.
+   */
+  themeAuthored?: boolean;
 }
 
 /**
@@ -763,8 +787,45 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     recordDraw(s, "hoh", def); // committed for the week — the next hoh draw avoids it (0042)
     s.vetoComp = undefined;
     s.competition = beginStaged("hoh-competition", def.type, field, result);
+    freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
+}
+
+/**
+ * L-F4 (#1743) — freeze the 0125 theme's live-varying inputs (week + twist cycle) at DRAW/STAGE time,
+ * onto the just-created staged-comp state. The adapter's `themedScaffold` reads these frozen inputs for
+ * an in-progress comp instead of the live `week`/`twist`, so the surfaced name/premise stays byte-
+ * identical across every round even if the twist flips to "running" mid-comp (a double-eviction night).
+ * Presentation-only: pure projection inputs — no rng, no fold, byte-identical to before when the twist
+ * never changes (the common case) and off entirely when themes are off.
+ */
+function freezeCompTheme(s: LiveSeasonState): void {
+  if (!s.competition) return;
+  s.competition.themeWeek = s.week;
+  s.competition.themeCycle = s.twist?.phase === "running" ? 1 : 0;
+  // Pin the presentation SOURCE too: whether this comp is dressed by authored #1400 fiction or the frozen
+  // seeded theme is decided NOW. In normal play no fiction exists yet at draw ⇒ false ⇒ the comp is
+  // committed to the seeded theme, and a late first-fiction write-back cannot re-skin it mid-comp.
+  const f = s.competitionFiction;
+  s.competition.themeAuthored = !!(f && f.comp === s.competition.comp && f.week === s.week);
+}
+
+/**
+ * L-F4 (#1743) — LAZY-FREEZE for a LEGACY save. An in-progress staged comp loaded from a pre-#1743 save
+ * carries no frozen theme fields, so every read would fall back to MUTABLE live state (a twist-phase
+ * change or a late fiction write-back could then re-skin its remaining rounds — the flip this feature
+ * closes). Freeze them ONCE, at the FIRST read, from the current live state, and persist onto the comp,
+ * so from that point the presentation is pinned for the comp's remaining rounds. STRICTLY idempotent: a
+ * comp that already carries the fields is NEVER re-frozen (a later live twist/week change must not shift
+ * an already-pinned comp), and a pre-stage / no-comp state is left to live resolution. Presentation-only
+ * (freezeCompTheme consumes no rng, folds nothing) — the frozen values equal what a fresh draw would have
+ * pinned, so nothing calibration-relevant changes. Called at the top of every presentation read.
+ */
+export function ensureCompThemeFrozen(s: LiveSeasonState): void {
+  const c = s.competition;
+  if (!c || c.themeWeek !== undefined) return; // no staged comp, or already frozen ⇒ never re-freeze
+  freezeCompTheme(s);
 }
 
 /**
@@ -784,6 +845,7 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     recordDraw(s, "veto", def); // committed for the week — the next veto draw avoids it (0042)
     // `s.compIntent` (round 1's approach) carries into advanceCompetition as round 1's expression.
     s.competition = beginStaged("veto-competition", def.type, field, result);
+    freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
 }
@@ -1076,6 +1138,82 @@ function competitionDefFor(s: LiveSeasonState, c: CompetitionProgress): Competit
   const recent = s.compHistory?.[phase] ?? [];
   const last = recent[recent.length - 1];
   return last ? competitionById(last) : undefined;
+}
+
+/**
+ * L-F4 (#1743) — THE PINNED COMP PRESENTATION. Once a competition is drawn, its format/premise is FIXED
+ * for the whole event; this is the single engine-side pin the outward ground truth surfaces on EVERY
+ * comp-beat turn (the first reveal AND every staged `comp-elimination` round), so the narrator can never
+ * re-author "what kind of comp this is" turn to turn (the finding: "Piece by Piece" on one beat, "Center-
+ * Ring Trivia" the next — a format flip-flop within one comp). COMP-13 already pins the comp NAME + hard-
+ * rejects a winner rename (`validateCompetitionFiction`); this pins the FORMAT + PREMISE the same way.
+ *
+ * Enforcement mirrors those guards' HARDNESS where a write-back exists and can only be SOFT where one
+ * cannot:
+ *   • FORMAT is HARD-pinned — always the drawn library `def.format`; the #1400 write-back never carries a
+ *     format, so the model literally cannot rename it (the analogue of the winner-rename rejection).
+ *   • The #1400 authored PREMISE is HARD-pinned per comp — stored once, immutable until crown (the
+ *     `already-authored` reject in `validateCompetitionFiction`), so it too is stable across rounds.
+ *   • The free-narration (library-floor) PREMISE is SOFT-pinned — fed on every comp-beat turn's ground
+ *     truth. A hard engine-side REJECT of the narration is architecturally impossible: narration runs in
+ *     the FE and the engine only emits Vault-free ground truth and never receives the prose, so there is
+ *     nothing to reject; feeding the same premise every turn IS the structural pin for that path.
+ *
+ * Pure (NO rng — safe for the observational `whereabouts` read): a lookup of the recorded draw / vetoComp
+ * plus the stored authored fiction. Returns `null` before a def is drawn (the HOH comp before it stages —
+ * its premise genuinely does not exist yet) and off a comp beat. Vault-free (public flavor only — never a
+ * score / lean / number). The `def` is surfaced so the adapter can dress it in the 0125 seeded theme,
+ * matching `runCompetition`'s precedence (model fiction > seeded theme > 0042 library floor).
+ */
+export interface CompetitionPresentation {
+  comp: "hoh-competition" | "veto-competition";
+  /** The drawn 0042 library def — the floor the adapter themes; carries the canonical `format`. */
+  def: CompetitionDef;
+  /** The comp NAME the ground truth shows: the #1400 authored theme, else the library name (pre-theme). */
+  name: string;
+  /** The comp FORMAT — ALWAYS `def.format`; never model-overridable (the HARD format pin). */
+  format: CompetitionFormat;
+  /** The comp PREMISE: the #1400 authored premise, else the library premise (pre-theme). */
+  premise: string;
+  /** Whether #1400 fiction is pinned for THIS comp (the adapter then skips the theme skin, like runCompetition). */
+  authored: boolean;
+}
+
+export function competitionPresentation(s: LiveSeasonState): CompetitionPresentation | null {
+  // L-F4 (#1743): a legacy in-progress comp (no frozen fields) is pinned ONCE here, on first read, so it
+  // can't flip for its remaining rounds. A comp drawn under this change is already frozen ⇒ a no-op.
+  ensureCompThemeFrozen(s);
+  let comp: "hoh-competition" | "veto-competition" | undefined;
+  let def: CompetitionDef | undefined;
+  if (s.competition) {
+    // A staged comp is running — the def is the recorded draw for its phase (a pure lookup).
+    comp = s.competition.comp;
+    def = competitionDefFor(s, s.competition);
+  } else if (s.pending && (s.pending.kind === "comp-intent" || s.pending.kind === "comp-round")) {
+    // A comp has surfaced but not yet staged. The VETO def was drawn at the chip-draw stage (`vetoComp`);
+    // the HOH def is not drawn until the comp resolves, so there is no premise to pin yet (return null).
+    comp = s.pending.comp;
+    if (comp === "veto-competition") def = s.vetoComp ? competitionById(s.vetoComp) : undefined;
+  }
+  if (!comp || !def) return null;
+  const f = s.competitionFiction;
+  const fictionPresent = !!(f && f.comp === comp && f.week === s.week);
+  // L-F4 (#1743) — the presentation SOURCE is FROZEN at draw for a staged comp, so a first-fiction
+  // write-back that lands AFTER staged rounds began cannot retroactively re-skin the in-progress comp
+  // (the authored-fiction variant of the flip-flop). Honor the frozen decision; fall back to the live
+  // read only for a legacy save (no frozen field) or a pre-stage comp (no `s.competition`). A frozen
+  // "authored" still requires the fiction to actually be present (it always is — cleared only at crown).
+  const sourceAuthored = s.competition && s.competition.themeAuthored !== undefined
+    ? s.competition.themeAuthored
+    : fictionPresent;
+  const authored = sourceAuthored && fictionPresent;
+  return {
+    comp, def,
+    name: authored ? f!.theme : def.name,
+    format: def.format, // the HARD pin — the model can never rename the format
+    premise: authored ? f!.premise : def.narrative.premise,
+    authored,
+  };
 }
 
 // --- Feature #1400: generative competition design (the model DRESSES the fixed roll) -----------------

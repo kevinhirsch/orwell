@@ -1,22 +1,32 @@
-# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 Flash utility, Seedream portraits
+# 0016 — LLM model selection: GLM-4.7 narrator (reasoning-low), Qwen 3.6 (27B) utility, Seedream portraits
 
 > **Status:** **Accepted** (PO direction, 2026-06-29 — the model-selection research thread).
 > **Re-amended (2026-07-13 / 2026-07-14 — reverted the narrator to `z-ai/glm-4.7`):** the owner
 > reverted the SHIPPED narrator default back to **`z-ai/glm-4.7`** (2026-07-13, live prod
 > debug-bundle audit) and the **golden fixture** back to **`z-ai/glm-4.7`** too (2026-07-14 — the
 > gate must test what prod runs; the interim glm-5.2 golden decoupling was papered-over debt, now
-> removed). **Utility stays `qwen/qwen3.6-flash`.** The historical retarget note below is preserved
-> for context but is superseded on the narrator model by this revert.
-> **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget, SUPERSEDED on narrator by the revert above):** the owner retargeted the pair to
-> **narration = `z-ai/glm-5.2`** and **utility = `qwen/qwen3.6-flash`** (Qwen 3.6 Flash on OpenRouter;
-> locally served in prod, `deepseek/deepseek-v4-flash` as the cloud alternate) — the M0-1 golden-path
+> removed). **Utility corrected to `qwen/qwen3.6-27b` (2026-07-21).** The historical retarget note below
+> is preserved for context but is superseded on the narrator model by this revert.
+> **Utility slug corrected (2026-07-21 — live prod debug bundle):** the previously-shipped utility slug
+> **`qwen/qwen3.6-flash` is NOT served on OpenRouter**, so every OOB utility/faithfulness call fell
+> through `resolve_endpoint` to an arbitrary first-enabled model — which, being slow/broken, hung the
+> casting-finalize burst ("the front-end does not respond during casting"). The OOB utility default is
+> corrected to the SERVED **`qwen/qwen3.6-27b`**. Same PR hardens `resolve_endpoint` with a
+> narrator↔utility MUTUAL fallback so an unavailable configured model can never again silently resolve
+> to an arbitrary one. (This shifts the golden-fixture utility default — advisory; a re-record is owed.)
+> **Amended (2026-07-07 / 2026-07-09 — the two-tier retarget, SUPERSEDED on narrator by the revert above
+> AND on the utility SLUG by the 2026-07-21 correction above):** the owner retargeted the pair to
+> **narration = `z-ai/glm-5.2`** and **utility = `qwen/qwen3.6-flash`** (Qwen 3.6 on OpenRouter,
+> `deepseek/deepseek-v4-flash` as the cloud alternate) — the M0-1 golden-path
 > fixture and the `golden-nightly` re-record job run on exactly this pair. On **2026-07-09 the owner
 > confirmed the OOB defaults should BE the pair** (not merely this deployment's settings), so
 > `DEFAULT_SETTINGS.default_model`/`utility_model` and the OOBE-reset defaults now carry it (M0-6).
-> Everything else in this ADR stands: the narrator reasoning posture stays **`low`** (GLM-4.7 is the
-> same interleaved-thinking family), the portrait default is **unchanged**
+> **(The utility slug `qwen/qwen3.6-flash` named here is NOT served on OpenRouter and was corrected to
+> the served `qwen/qwen3.6-27b` on 2026-07-21 — see the note above; a golden re-record on the corrected
+> slug is owed.)** Everything else in this ADR stands: the narrator reasoning posture stays **`low`**
+> (GLM-4.7 is the same interleaved-thinking family), the portrait default is **unchanged**
 > (`google/gemini-3.1-flash-image` OOB; the Seedream follow-up remains a separate build), and the
-> per-class reasoning budgets are the cost lever for Qwen 3.6 Flash's reason-by-default behavior
+> per-class reasoning budgets are the cost lever for the utility tier's reason-by-default behavior
 > (~266 reasoning tokens on a trivial call — the JSON classes run "off").
 > **Source:** a six-lane research sweep (mainstream-hosted + open-weight candidates, community/practitioner
 > sentiment, tool-calling & creative-writing benchmarks, current pricing, and self-host feasibility on the
@@ -77,14 +87,24 @@ The narrator's reasoning effort is now editable **in the Default Chat Model sett
 (`set-narratorReasoning`), kept in lockstep with the Token Economy "Narration" select — both write
 `reasoning_budget.narration`.
 
-### B. Utility — `z-ai/glm-4.7-flash`
+### B. Utility — `qwen/qwen3.6-27b`
 
-The background JSON lane (cast authoring / prewarm / zeitgeist / summarization / naming) moves to
-GLM-4.7-Flash: cheap ($0.06 / $0.40 per 1M; **free on Z.ai-direct**), fast (30B-A3B), non-reasoning, honors
-`response_format`. It is its **own** `utility_model` key — it does **not** inherit the narrator swap.
-Background classes already run reasoning `off`. (Self-hosting this same class on the operator's box —
-Qwen3-30B-A3B-Instruct @ Q6 via `llama-server`, `enable_thinking=False` at template-apply — is a documented
-zero-cost option, but the hosted Flash is the OOB default.)
+The background JSON lane (cast authoring / prewarm / zeitgeist / summarization / naming) runs a cheap,
+fast, non-reasoning Qwen 3.6 tier that honors `response_format`. It is its **own** `utility_model` key —
+it does **not** inherit the narrator swap. Background classes already run reasoning `off`.
+
+**Current OOB default = `qwen/qwen3.6-27b`** (corrected 2026-07-21 — live prod debug bundle). The
+previously-shipped slug **`qwen/qwen3.6-flash` is NOT served on OpenRouter**, so every OOB
+utility/faithfulness call fell through `resolve_endpoint` to an arbitrary first-enabled model — which,
+being slow/broken, hung the casting-finalize burst ("the front-end does not respond during casting").
+The same correction PR hardens `resolve_endpoint` with a narrator↔utility MUTUAL fallback so an
+unavailable configured model can never again silently resolve to an arbitrary one.
+
+*(Superseded history: the original 2026-06-29 decision named `z-ai/glm-4.7-flash` — cheap
+($0.06 / $0.40 per 1M; free on Z.ai-direct), 30B-A3B — for this lane; the 2026-07-07/09 two-tier retarget
+then moved it to a hosted Qwen 3.6 Flash. Both are superseded on the exact slug by the 2026-07-21
+correction above. Self-hosting the same class on the operator's box — Qwen3-30B-A3B-Instruct @ Q6 via
+`llama-server`, `enable_thinking=False` at template-apply — remains a documented zero-cost option.)*
 
 ### C. Portrait — Seedream v5 Lite Sequential via fal.ai · *follow-up build*
 
@@ -110,7 +130,7 @@ never sent* (2026-06-21 OpenRouter conformance audit); this build adds it, scope
 
 - **Why not just keep cheaper DeepSeek:** the `tool_choice` defect is identical on V4-Flash and V4-Pro, so
   "cheaper DeepSeek" keeps the bug. GLM-4.7 fixes it for ~2× the *output* price (still ~10× under Claude
-  Sonnet), and GLM-4.7-Flash is near-free.
+  Sonnet), and the cheap utility tier (now `qwen/qwen3.6-27b`; see Decision B) is near-free.
 - **Why `low`, not `off` (the load-bearing call):** GLM ≠ DeepSeek. DeepSeek's thinking *blocked* tools (a
   bug); GLM's thinking *drives* tools (interleaved — a feature). Disabling it recreates the under-call
   problem we're escaping. This reverses the earlier "thinking-off" lean, which had wrongly carried the
@@ -122,8 +142,9 @@ never sent* (2026-06-21 OpenRouter conformance audit); this build adds it, scope
 
 ## Consequences / follow-ups
 
-- **Built with this ADR:** the narrator reasoning posture (`low`), the utility default
-  (`z-ai/glm-4.7-flash`), the narrator-area reasoning control, and the source-pin tests
+- **Built with this ADR:** the narrator reasoning posture (`low`), the utility default (originally
+  `z-ai/glm-4.7-flash`; **now `qwen/qwen3.6-27b`** per Decision B, corrected 2026-07-21), the
+  narrator-area reasoning control, and the source-pin tests
   (`frontend/tests/test_adr0010_settings_ui.py`, `test_default_model_resolution.py`,
   `test_adr0010_admin_token_economy.py`). The narrator default-string swap (`deepseek/deepseek-v4-pro` →
   `z-ai/glm-4.7`) lands alongside (parallel work).

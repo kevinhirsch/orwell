@@ -268,3 +268,81 @@ def test_forced_tool_choice_notes_only_after_the_forced_call_landed():
     assert "_forced_belt_tool = _CASTING_FINALIZE_TOOL" in src                        # casting force
     # And the marker is cleared after one note (a repeat call never double-counts).
     assert "_forced_belt_tool = None" in src[note_at:note_at + 300]
+
+
+# ── L-F3 (#1742) Greptile P2 — the loop-break belt is success-gated too ─────────────────────
+# Selecting `_ADVANCE_LOOP_BREAK_NUDGE`/`_PENDING_LOOP_BREAK_NUDGE` is only an ATTEMPT; the belt
+# must count only once an OBSERVED resolution lands (a progression tool fired, the framed gate
+# changed, or a forced advance committed) — never a bare selection that leaves the SAME gate
+# stalled next turn.
+
+
+def test_loop_break_selection_sites_stash_instead_of_noting_directly():
+    src = _src("src/agent_loop.py")
+    assert '_LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-pending"' in src
+    assert '_LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-advance"' in src
+    # Neither selection site notes the belt directly.
+    assert '_note_belt(owner, "loop-break-pending")' not in src
+    assert '_note_belt(owner, "loop-break-advance")' not in src
+
+
+def test_loop_break_note_never_fires_while_the_same_gate_stays_stalled():
+    # The exact scenario Greptile flagged: a nudge is SELECTED (stashed) but the model ignores it —
+    # the beat is still stalled on the SAME gate next turn. No progression, no gate change ⇒ NO
+    # belt fire, and the stash survives so a later real resolution can still be credited.
+    al = importlib.import_module("src.agent_loop")
+    led = importlib.import_module("src.orwell_sync_ledger")
+    led._PENDING_BELTS.clear()
+    key = "test-belt-telemetry-loop-break-still-stalled"
+    al._LOOP_BREAK_PENDING_NOTE.pop(key, None)
+    gate = (1, "hoh-competition", "comp-round", "comp-round")
+    al._LOOP_LAST_FRAMED_KEY[key] = gate  # the gate the streak was tracking
+
+    al._LOOP_BREAK_PENDING_NOTE[key] = "loop-break-advance"
+    al._note_loop_break_if_resolved(key, "player-lf3-stalled", progressed=False, current_gate=gate)
+    assert led.get_belt_totals("player-lf3-stalled") == {}  # NO fire — ignored nudge, same gate
+    assert al._LOOP_BREAK_PENDING_NOTE.get(key) == "loop-break-advance"  # stash still pending
+
+
+def test_loop_break_note_fires_once_progression_is_observed():
+    al = importlib.import_module("src.agent_loop")
+    led = importlib.import_module("src.orwell_sync_ledger")
+    led._PENDING_BELTS.clear()
+    key = "test-belt-telemetry-loop-break-resolved"
+    al._LOOP_BREAK_PENDING_NOTE.pop(key, None)
+    al._LOOP_LAST_FRAMED_KEY.pop(key, None)
+    gate = (1, "hoh-competition", "comp-round", "comp-round")
+    al._LOOP_LAST_FRAMED_KEY[key] = gate
+    al._LOOP_BREAK_PENDING_NOTE[key] = "loop-break-advance"
+
+    # Still stalled — no belt fire yet.
+    al._note_loop_break_if_resolved(key, "player-lf3", progressed=False, current_gate=gate)
+    assert led.get_belt_totals("player-lf3") == {}
+    assert al._LOOP_BREAK_PENDING_NOTE.get(key) == "loop-break-advance"
+
+    # A progression tool fires (the model complied, or a forced advance committed) — NOW it counts,
+    # and the stash clears so a repeat call never double-notes.
+    al._note_loop_break_if_resolved(key, "player-lf3", progressed=True, current_gate=gate)
+    assert led.get_belt_totals("player-lf3") == {"loop-break-advance": 1}
+    assert key not in al._LOOP_BREAK_PENDING_NOTE
+    al._note_loop_break_if_resolved(key, "player-lf3", progressed=True, current_gate=gate)
+    assert led.get_belt_totals("player-lf3") == {"loop-break-advance": 1}  # unchanged — no double-count
+
+
+def test_loop_break_note_fires_when_the_gate_itself_changed():
+    # A forced advance / a peer turn moved the beat WITHOUT this turn's tool_events showing a
+    # progression tool (`_commit_advance_silently` bypasses the normal tool-call path) — the
+    # gate-changed branch is the OTHER way a resolution is observed.
+    al = importlib.import_module("src.agent_loop")
+    led = importlib.import_module("src.orwell_sync_ledger")
+    led._PENDING_BELTS.clear()
+    key = "test-belt-telemetry-loop-break-gate-changed"
+    al._LOOP_BREAK_PENDING_NOTE.pop(key, None)
+    old_gate = (1, "hoh-competition", "comp-round", "comp-round")
+    new_gate = (1, "hoh-competition", "comp-round-2", "comp-round")
+    al._LOOP_LAST_FRAMED_KEY[key] = old_gate
+    al._LOOP_BREAK_PENDING_NOTE[key] = "loop-break-pending"
+
+    al._note_loop_break_if_resolved(key, "player-lf3-gate", progressed=False, current_gate=new_gate)
+    assert led.get_belt_totals("player-lf3-gate") == {"loop-break-pending": 1}
+    assert key not in al._LOOP_BREAK_PENDING_NOTE

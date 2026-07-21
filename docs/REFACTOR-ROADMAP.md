@@ -17,9 +17,11 @@ and requirement-grounded — *no requirement → not in the list.* The lead owns
 Dependencies/sequencing · Verification.** Severity per the brief: **[LAUNCH-BLOCKING]** (only those that
 *cause* a launch-blocking bug — these route back into the Phase-3 gated remediation) vs **[POST-LAUNCH]**.
 
-> **GitHub issue tracking (added 2026-06-23).** The highest-value post-launch latent, **R1c / A-S3**
-> (a stale-409 dropping a scene's only consequence fold), is tracked as
-> [#591](https://github.com/kevinhirsch/orwell/issues/591). The remaining R-items here stay roadmap-only
+> **GitHub issue tracking (added 2026-06-23; updated 2026-07-21).** The highest-value post-launch latent,
+> **R1c / A-S3** (a stale-409 dropping a scene's only consequence fold), was tracked as
+> [#591](https://github.com/kevinhirsch/orwell/issues/591) and is now **RESOLVED** — closed across #591 /
+> CON-11 / A10-#1305 / #1537 / #1659-R3 / #1725-C1 and **#1731-C2** (bounded deferred-fold retry that
+> fail-closes + surfaces a genuine loss). See R1c below. The remaining R-items here stay roadmap-only
 > until scheduled; file them as `type:enhancement` + `post-launch` issues when picked up. This document
 > remains the mechanism-first design record.
 
@@ -80,13 +82,25 @@ Three independent, low-risk fixes to the FE↔engine sync spine (audit A-S5 / A-
     mutating-tool set from one shared registry (the same source `INFRA_LEVERS`/`PLAYER_TOOLS` use), so a
     new write-back can't silently leave HUDs stale. *Risk:* low. *Effort:* small. *Verify:* extend
     `test_g15` to assert every registry-mutating tool routes through the one dispatcher.
-- **R1c — preserve a scene's consequence fold on a stale-409** (audit **A-S3**).
-  - *Requirement (mandate #4):* no consequence fold silently dropped. *Current:* a stale-409 on
-    `recordInteraction`/`makeDeal`/`moveTo` is reconciled-and-**skipped**; the only recording of a scene
-    can be lost. *Target:* re-attempt the fold against the refreshed `beatSeq` (the fold is
-    re-derivable) rather than drop it. *Risk:* low-medium (must not double-apply — idempotency-keyed).
-    *Effort:* small-medium. *Verify:* a test that forces a stale-409 on the sole recording and asserts
-    the fold still lands once.
+- **R1c — preserve a scene's consequence fold on a stale-409** (audit **A-S3**). **✅ DONE — closed by
+    #591 / CON-11 / A10-#1305 / #1537 / #1659-R3 / #1725-C1, and #1731-C2 (this change).**
+  - *Requirement (mandate #4):* no consequence fold silently dropped. *Was:* a stale-409 on
+    `recordInteraction`/`makeDeal`/the trust levers was reconciled-and-**skipped**; the only recording of
+    a scene could be lost. *Shipped:* every FE-issued fold-bearing back-fill routes through
+    `_backfill_with_cas` (`src/agent_loop.py`), which RE-ATTEMPTS once against the refreshed `beatSeq` on a
+    single stale-409 (#591) and DEFERS on a double-409 into a bounded per-owner queue (CON-11,
+    `chat_helpers._defer_fold`/`_drain_deferred_folds`) rather than dropping it — each attempt threading ONE
+    stable `idempotency_key` so the engine folds AT-MOST-ONCE (A10/#1305; the engine dedup is
+    `tests/unit/recordInteractionIdempotency.test.ts` / `foldLeverIdempotency.test.ts`). C1 (#1725/#1753)
+    made the engine report the fully-committed `beatSeq` so ordinary turns stop 409-ing spuriously.
+    **C2 (#1731, this change)** bounded the opportunistic retry itself: after `_DEFERRED_FOLD_MAX_DRAINS`
+    failed drains a genuinely un-committable fold is FAIL-CLOSED and SURFACED (a RED-eligible
+    `sync:dropped-fold` health event + a ledger note via `note_stale_rejection(dropped_fold=True)`) rather
+    than re-queued forever — so under sustained two-window concurrency a lost fold is ACCOUNTED, never
+    silent, and the dropped-fold alarm stays a true positive. *Verify:* `frontend/tests/test_a10_fold_
+    idempotency.py`, `test_1537_as3_floor_fold_retry.py`, and `test_1731_fold_preserving_retry.py`
+    (exactly-once under a forced double stale-409; a fold that ultimately cannot commit is surfaced; the
+    alarm stays silent when a deferred fold lands late).
 
 ## R2 — Collapse the duplicated live-vs-reload chat render paths **[POST-LAUNCH · Wave 2]**
 - *Requirement / failure mode:* one render path, so live == reload by construction. *Current

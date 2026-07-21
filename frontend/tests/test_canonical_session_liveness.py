@@ -94,6 +94,43 @@ def test_resolve_live_none_when_nothing_bound():
     assert ogs.resolve_live_game_session("u", lambda sid: True) is None
 
 
+def test_canonical_rotation_is_followed_not_dropped():
+    """L-F6 / #1745 at the store seam. The canonical id is first-writer-wins and STABLE during a
+    started game, so a fixed-session client never rotates under continuous play. It rotates only on a
+    season-lifecycle event: a restart/new-season clears the binding, the old chat row is deleted, then
+    the new season's first turn rebinds a FRESH chat. ``resolve_live_game_session`` must always resolve
+    to a LIVE id — hand out the old chat while it lives, UNBIND it the moment it's dead (never pin a
+    dangling id that would 404 the mirror/history forever, the #1085 window-collapse class), then
+    FOLLOW to the new binding. This is the server truth a browser reads via GET
+    /api/orwell/game-session and the fixed-session driver now re-resolves to on a history 404."""
+    live = {"chat-old"}
+    is_live = lambda sid: sid in live  # noqa: E731
+    # Season 1: the bound chat is live -> resolve hands it out (a client keys the run on it).
+    ogs.bind_game_session("u", "chat-old")
+    assert ogs.resolve_live_game_session("u", is_live) == "chat-old"
+    # Restart/new-season: the old chat row is deleted, so resolve UNBINDS the dead id (rather than
+    # pinning a dangling pointer). A resolve now reads clean — no dead-channel subscribe.
+    live.discard("chat-old")
+    assert ogs.resolve_live_game_session("u", is_live) is None
+    assert ogs.get_game_session("u") is None
+    # Season 2's first turn rebinds a fresh live chat -> resolve FOLLOWS to the new id. First-writer-
+    # wins means the NEW season binds cleanly (the old binding was already cleared), so the client
+    # converges on the new chat instead of 404-ing on the old one forever.
+    live.add("chat-new")
+    ogs.bind_game_session("u", "chat-new")
+    assert ogs.resolve_live_game_session("u", is_live) == "chat-new"
+
+
+def test_first_writer_wins_never_silently_rotates_a_live_binding():
+    """The other half of the verdict: while a binding is LIVE, a racing second bind NEVER rotates it
+    (first-writer-wins). This is why a started game's canonical id is stable and a fixed-session client
+    does not spuriously rotate mid-play — the ONLY id changes are the lifecycle clears above."""
+    ogs.bind_game_session("u", "chat-A")
+    # a second device racing a different id adopts the incumbent; the binding does NOT flip
+    assert ogs.bind_game_session("u", "chat-B") == "chat-A"
+    assert ogs.get_game_session("u") == "chat-A"
+
+
 # ── GAP-1: the GET route validates liveness before handing out the id ──────────
 
 def _app():

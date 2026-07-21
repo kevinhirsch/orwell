@@ -55,7 +55,7 @@
     radial-gradient(64vmax 64vmax at 20% 86%, color-mix(in srgb, var(--lbg-c4) calc(90% * var(--lbg-intensity)), transparent), transparent 80%);
   background-size: 150% 150%;
   filter: blur(54px) saturate(1.55) brightness(1.14);
-  will-change: background-position;
+  will-change: transform;
 }
 /* A drifting diagonal "aurora ray" of brighter light streaking across. */
 .login-bg-gradient::after {
@@ -73,10 +73,19 @@
 .login-bg-gradient.is-animated::after {
   animation: login-ray-sweep calc(var(--lbg-speed, 26s) * 1.6) ease-in-out infinite alternate;
 }
+/* PERF — the drift is a COMPOSITOR-ONLY transform (translate → scale → rotate), NOT a
+   background-position animation. background-position is paint-bound: it repaints this
+   54px-blurred full-viewport ::before every frame, and because #__wp sits UNDER the whole
+   backdrop-filter glass stack each repaint forces the glass chrome above to re-composite its
+   backdrop-blur (the jank). A transform on a blurred layer is painted ONCE into its own GPU
+   layer (translate3d promotes it) and then just moved/scaled — no per-frame repaint, no forced
+   backdrop re-blur. The blobs keep their designed `at X% Y%` mesh positions; the whole layer
+   drifts. The layer is inset:-25% + background-size:150% and scales UP (never below 1), so the
+   blurred edges stay off-screen throughout. */
 @keyframes login-mesh-drift {
-  0%   { background-position: 0% 50%,   100% 40%,  80% 100%, 20% 0%;   }
-  50%  { background-position: 70% 10%,  20% 90%,   30% 40%,  90% 70%;  }
-  100% { background-position: 100% 60%, 0% 50%,    60% 0%,   0% 100%;  }
+  0%   { transform: translate3d(-3%, -2%, 0) scale(1.06) rotate(-1.5deg); }
+  50%  { transform: translate3d(3%,  3%,  0) scale(1.12) rotate(1.5deg);  }
+  100% { transform: translate3d(-1%, 2%,  0) scale(1.07) rotate(2deg);    }
 }
 @keyframes login-ray-sweep {
   0%   { transform: translateX(-12%) translateY(6%);  opacity: 0.7; }

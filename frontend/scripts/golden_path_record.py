@@ -32,7 +32,7 @@ def main() -> int:
     ap.add_argument("--fixture", default=gp.DEFAULT_FIXTURE)
     ap.add_argument("--model", default="z-ai/glm-4.7",
                     help="the NARRATION model (default_model)")
-    ap.add_argument("--utility-model", default="qwen/qwen3.6-flash",
+    ap.add_argument("--utility-model", default="qwen/qwen3.6-27b",
                     help="the cheap tier for utility/background call classes "
                          "(utility_model); empty = same as --model")
     ap.add_argument("--base-url", default=os.environ.get(

@@ -1424,6 +1424,16 @@ export interface WhereaboutsView {
     competing?: NamedRef[];
     spectating?: NamedRef[];
     youAreCompeting?: boolean;
+    /**
+     * L-F4 (#1743) — the PINNED presentation of the drawn competition (name + format + premise), so a
+     * comp's format/premise stays CONSISTENT across every one of its beats (the first reveal AND every
+     * staged elimination round). Present only for a competition house-event once its def is drawn (the
+     * HOH comp before it stages carries none — its format isn't decided yet). The `format`/`premise` are
+     * FIXED for the whole event (the library floor, or the pinned #1400 authored premise), so the
+     * narrator can never re-author "what kind of comp this is" turn to turn. Vault-free public flavor —
+     * never a stat, score, or hidden number. Absent for ceremonies / the champagne circle.
+     */
+    comp?: { name: string; format: string; premise: string };
   };
 }
 

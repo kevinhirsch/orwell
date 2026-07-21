@@ -3732,6 +3732,14 @@ async def _auto_record_casting(last_user, narration, endpoint_url, model, header
         from src import orwell_engine as _oe
         if not (last_user or "").strip():
             return False
+        # A hidden PRODUCTION CUE (the post-photo "continue the casting interview" auto-cue, etc.) is
+        # engine/FE-authored text, NOT the player speaking — extracting casting fields from it invents
+        # answers the player never gave. This was the concrete leak: on the post-photo cue the extractor
+        # echoed the prompt's own example name back as `playerName`, poisoning the intake with a phantom
+        # name (the director then addressed the player by a name they never chose). The player isn't
+        # talking on a cue, so there is nothing to record — skip, exactly as _auto_record_scene does.
+        if _is_production_cue(last_user):
+            return False
         msgs = [
             {"role": "system", "content":
                 _EXTRACTION_UNTRUSTED_FENCE +
@@ -3747,8 +3755,10 @@ async def _auto_record_casting(last_user, narration, endpoint_url, model, header
                 '"privateStrategy":"<their game plan / how they intend to play, if given>",'
                 '"interviewNotes":"<one concise note for anything else recordable they said>"'
                 "}}\n"
-                'A bare name ("Devon Hale") still fills playerName. If they gave nothing recordable '
-                '(a question, chit-chat, a refusal), reply {"fields":{}}.'},
+                "A bare name the player states (just their name, nothing else) still fills playerName "
+                "— but ONLY a name THEY actually typed; never a placeholder, an example, or a name from "
+                'these instructions. If they gave nothing recordable (a question, chit-chat, a refusal, '
+                'or an engine/production note), reply {"fields":{}}.'},
             {"role": "user", "content":
                 f"THE PRODUCER JUST SAID:\n{(narration or '')[:700]}\n\n"
                 f"THE PLAYER REPLIED:\n{(last_user or '')[:900]}\n\nJSON:"},
@@ -4840,6 +4850,177 @@ _SILENT_FORCE_ADVANCE_CAP = 2
 # cap). Cleared on the same signals as the streak (a genuine model advance, or a peer advance). Keyed via
 # `_belt_key`.
 _ANTI_STALE_CAP_HOLDS: Dict[str, int] = {}
+
+
+# ── L-F3 (#1742) — INTERACTIVE-BEAT LOOP BREAK. ─────────────────────────────────────────────
+# The lull-gated advance-nudge above (`_is_lull` + `_stale`) and the L39b safety net both assume
+# the player either DISENGAGES (a lull) or the model eventually calls the tool it's waiting on.
+# Neither catches the F3 case a 2026-07-20 live playtest hit: the player is ENGAGED — replying
+# every single turn — but their reply never matches whatever specific answer the model invented
+# (an HOH-comp trivia buzz-in, a premiere intro's expected action…), so `_is_lull` stays False
+# turn after turn and the SAME gate is re-presented indefinitely (observed: 15 straight turns on
+# one true/false trivia question — "Let's keep the week moving — what's next?" was never read as
+# an answer to it).
+#
+# This belt is INDEPENDENT of the lull gate: it fires on REPETITION of the identical framed gate
+# across consecutive turns where the player DID reply (engaged, however they phrased it) and the
+# turn did NOT progress — never on a genuine lull (the belt above already owns that) and never
+# while a legitimate social runway hold is in effect (a deliberately-held ceremony re-presents the
+# SAME "social" moment turn after turn by design — `_runway_holding` excludes it so that never
+# reads as a soft-lock). "The same gate" is `_LAST_FRAMED_BEAT_KEY` — which already folds the open
+# pending's `kind` into a 4th tuple element (#1019) — so a genuine comp-round/nomination/vote
+# pending re-presented verbatim counts, while a beat that has moved on (even to a DIFFERENT
+# pending) resets the streak.
+_LOOP_BREAK_THRESHOLD = 3  # owner spec: "≥2-3" re-presentations before escalating
+_LOOP_LAST_FRAMED_KEY: Dict[str, tuple] = {}
+_LOOP_STREAK: Dict[str, int] = {}
+
+
+def _player_replied_engaged(messages) -> bool:
+    """L-F3: True iff the player's last message THIS turn is a real reply — non-empty and not a
+    hidden production cue. Deliberately NOT gated on `_LULL_READY_RE`/`_player_turn_is_lull`: the
+    F3 soft-lock is exactly the case where the player replies every turn, just never with the
+    literal phrase the lull gate wants. Silence (or a production cue) is the only thing that
+    means "not engaged" here — any real reply, however phrased, counts."""
+    last = (_extract_last_user_message(messages) or "").strip()
+    return bool(last) and not _is_production_cue(last)
+
+
+def _loop_break_streak_update(key: str, framed_key, *, progressed: bool, runway_holding: bool,
+                              pre_resolved: bool, engaged: bool) -> bool:
+    """L-F3: advance the per-game loop-break streak and return whether it has crossed
+    `_LOOP_BREAK_THRESHOLD` — i.e. the SAME framed gate (`framed_key`) has been re-presented,
+    unprogressed, to an ENGAGED player this many consecutive turns. A pure state transition
+    (mutates the two module dicts above, returns the verdict) so it is unit-testable without the
+    full streaming loop.
+
+    The streak RESETS TO ZERO whenever: the beat progressed; a social runway is deliberately
+    holding (the SAME "social" moment repeating by design is never a soft-lock); a pre-resolve
+    already walked a beat this turn; the framed key is unknown; or the player did not actually
+    reply (silence is a lull — the existing gate's job, not this one's). A framed key that
+    CHANGED since the last turn (a genuinely different gate) restarts the streak at 1 — THIS
+    turn is the first sighting of the new gate, not yet a repeat — so `_LOOP_BREAK_THRESHOLD`
+    turns of the identical gate (not N-1 repeats past a silent first sighting) is what arms it."""
+    if framed_key is None or progressed or runway_holding or pre_resolved or not engaged:
+        _LOOP_STREAK[key] = 0
+    elif framed_key == _LOOP_LAST_FRAMED_KEY.get(key):
+        _LOOP_STREAK[key] = _LOOP_STREAK.get(key, 0) + 1
+    else:
+        _LOOP_STREAK[key] = 1  # first sighting of this (possibly new) gate under live conditions
+    # #1754 (Greptile P1): only overwrite the tracked gate on a KNOWN read. An unknown read
+    # (framed_key None) must NOT erase the gate the pending telemetry note is tracking — else a
+    # later peer-driven move compares the new gate against None, the real resolution is never
+    # observed, and the loop-break note stays stuck (the streak already reset to 0 above).
+    if framed_key is not None:
+        _LOOP_LAST_FRAMED_KEY[key] = framed_key
+    return _LOOP_STREAK.get(key, 0) >= _LOOP_BREAK_THRESHOLD
+
+
+def _pending_signature(pending):
+    """L-F3 Greptile P1: a ROUND-AWARE identity for an open player pending — `(kind, stillIn-ids)`
+    — used ONLY as the degraded-mode fallback (below) when `beatSeq` is unavailable. `kind` ALONE
+    is not enough: a STAGED competition advances round → round while keeping the SAME `kind`
+    (e.g. "comp-round" stays "comp-round" as the field narrows), so comparing kind alone would
+    read a genuine round advance as a no-op. Folding in the pending's `stillIn` set (which DOES
+    change every round) fixes that even without beatSeq. Returns None for a non-pending/garbage
+    input (kind absent ⇒ no signature)."""
+    if not isinstance(pending, dict):
+        return None
+    kind = (pending.get("kind") or "").strip() or None
+    if not kind:
+        return None
+    still_in = pending.get("stillIn")
+    ids = tuple(sorted(
+        str((s or {}).get("id") or "") for s in still_in if isinstance(s, dict)
+    )) if isinstance(still_in, list) else ()
+    return (kind, ids)
+
+
+def _advance_was_pending_noop(pending_kind_before, beat_seq_before, pending_sig_before,
+                              adv_response) -> bool:
+    """L-F3 (#1742) + Greptile P1: was this `advanceGame` call a documented NO-OP against an
+    unresolved player pending (the engine returns the pending unchanged), or did it represent
+    REAL progress? A pure decision (no engine I/O), unit-testable in isolation.
+
+    No pending was open at read time ⇒ never a no-op (an ordinary advance). Otherwise prefer the
+    STABLE, authoritative signal — the engine's `beatSeq` (bumps once per committed mutation; a
+    genuine advance — INCLUDING a staged competition's comp-round -> comp-round round advance —
+    strictly increases it, a true no-op against an open pending does not). `kind` alone can't
+    tell those apart (a staged comp keeps the SAME `kind` across rounds — the bug Greptile
+    reproduced: the old kind-only check misread a real round advance as a no-op, skipped the
+    counter cleanup, and could escalate/force-advance the new round prematurely). Only when
+    `beatSeq` is unavailable on either side does this fall back to the round-aware pending
+    signature (`_pending_signature` — kind + stillIn, not kind alone)."""
+    if not pending_kind_before:
+        return False
+    beat_seq_after = (adv_response or {}).get("beatSeq") if isinstance(adv_response, dict) else None
+    beat_seq_after = (beat_seq_after if isinstance(beat_seq_after, int)
+                      and not isinstance(beat_seq_after, bool) else None)
+    if beat_seq_before is not None and beat_seq_after is not None:
+        return beat_seq_after <= beat_seq_before
+    pending_after = (adv_response or {}).get("pending") if isinstance(adv_response, dict) else None
+    return _pending_signature(pending_after) == pending_sig_before
+
+
+# L-F3 (#1742) Greptile P2 — belt-fire telemetry is SUCCESS-GATED (CLAUDE.md §5 / the mandate: "a
+# count means an APPLIED correction ... never a mere selection or a no-op"). Selecting a loop-break
+# nudge is only an ATTEMPT — the model may ignore it and leave the SAME gate stalled. So the belt
+# name is STASHED here (mirroring `_forced_belt_tool`'s deferred-note pattern) at selection time and
+# noted ONLY once an OBSERVED resolution lands: a progression tool actually fires (the model
+# complied — caught on a later round/turn's `_progressed`), or the framed gate itself changes
+# relative to what the streak was tracking (a forced advance committed, or a peer/later turn moved
+# it — caught either synchronously inside `_commit_advance_silently`'s real-progress branch, or on
+# the next round/turn's generic check). An ignored nudge that leaves the identical gate stalled
+# notes nothing.
+_LOOP_BREAK_PENDING_NOTE: Dict[str, str] = {}
+
+
+def _loop_break_resolution_observed(progressed: bool, current_gate, prior_gate) -> bool:
+    """L-F3 Greptile P2: pure verdict — has the loop-break-stalled gate OBSERVABLY resolved? True
+    when a progression tool fired this turn, OR the framed gate changed since the streak last saw
+    it. Neither an unknown PRIOR gate (nothing to compare against yet) NOR an unknown CURRENT gate
+    (#1754 Greptile P1: a failed framed-key read leaves `current_gate=None` — that missing value
+    must NOT read as a gate CHANGE, or an ignored nudge on a still-stalled beat would be falsely
+    counted as an applied belt correction) counts as resolution."""
+    return bool(progressed) or (
+        prior_gate is not None and current_gate is not None and current_gate != prior_gate)
+
+
+def _note_loop_break_if_resolved(key: str, owner, *, progressed: bool, current_gate) -> None:
+    """Fire the STASHED loop-break belt note (from a prior nudge selection) only once its
+    resolution is observed against the gate the streak was tracking BEFORE this call — so call
+    this BEFORE `_loop_break_streak_update` mutates `_LOOP_LAST_FRAMED_KEY` for the same key.
+    Pops the stash on fire so a repeat call never double-counts; a persistent stall notes nothing."""
+    belt = _LOOP_BREAK_PENDING_NOTE.get(key)
+    if belt and _loop_break_resolution_observed(progressed, current_gate, _LOOP_LAST_FRAMED_KEY.get(key)):
+        _note_belt(owner, belt)
+        _LOOP_BREAK_PENDING_NOTE.pop(key, None)
+
+
+# Generic-intent tolerance (AC #2): a stalled beat's escalation text explicitly tells the model to
+# read "keep moving / what's next / skip it" and kin as the player's intent to resolve the gate
+# NOW, rather than waiting on exact phrasing it was fishing for. Two flavors — a beat with NO open
+# player pending is broken by simply advancing (the generic case, AC #1/#4); a beat BACKED BY an
+# open pending (AC #3, the comp buzz-in) can never be force-resolved with an invented choice (the
+# mandate: never infer a binding pick from prose) — its escalation instead forces the model to
+# STOP inventing sub-questions and reduce the ask to the engine's own literal legal options.
+_ADVANCE_LOOP_BREAK_NUDGE = (
+    "(Production note, not for the player.) SOFT-LOCK: this beat has been re-presented to the "
+    "player several turns running with no progress — they keep replying, just never with whatever "
+    "exact action or phrase you were waiting for. Stop waiting for that exact phrasing: read their "
+    "last message as their intent to move the story forward (\"what's next\" / \"keep moving\" / "
+    "\"skip it\" / similar all count, even if they are not the literal words you wanted), call "
+    "advanceGame NOW, and voice ONLY the real result it returns.")
+_PENDING_LOOP_BREAK_NUDGE = (
+    "(Production note, not for the player.) SOFT-LOCK: you have re-presented this SAME decision "
+    "to the player several turns running and none of their replies has been read as an answer to "
+    "it. Do NOT invent another trivia question or sub-prompt and do NOT restate the scene. Your "
+    "very next words must be a SHORT, DIRECT restatement of the actual decision the engine is "
+    "waiting on, spelling out its exact legal options, and asking for exactly one of those literal "
+    "replies. If the player's last message plainly signals \"move on\" (e.g. \"what's next\", "
+    "\"keep moving\", \"skip it\"), read that AS their intent to resolve this now — ask them, in "
+    "the SIMPLEST closed form, to pick one of the legal options so their choice can be submitted "
+    "via submitDecision; never silently re-loop the same open-ended prompt again.")
 
 
 # ── Post-season re-approach (feature 0057, chunk 4) ───────────────────────────────────
@@ -6847,6 +7028,10 @@ async def _stream_agent_loop_impl(
                 # pending unchanged) and the surface-the-pending belt brings up the card. Cheap: reads the
                 # phase the model was framed on this turn (stashed by apply_game_framing), no extra fetch.
                 _framed_phase = None
+                # #1754 (CodeRabbit Major): default `_fk` BEFORE the try — the L-F3 code below consumes
+                # it unconditionally after this try/except, so a failed import/get must degrade, not raise
+                # NameError for the whole turn (every sibling read in this fn follows init-then-overwrite).
+                _fk = None
                 try:
                     from routes import chat_helpers as _ch_fp
                     # NAR-1: `_belt_key` — was `owner or ""`, which never matched the "default"
@@ -6875,11 +7060,33 @@ async def _stream_agent_loop_impl(
                     _milestone_due = bool(_ch_md._LAST_MILESTONE_DUE.get(_belt_key(owner)))
                 except Exception:
                     _milestone_due = False
+                # L-F3 (#1742): has THIS SAME framed gate now been re-presented, unprogressed, to an
+                # ENGAGED player `_LOOP_BREAK_THRESHOLD` turns running? Independent of `_is_lull`/
+                # `_stale` — see the belt's docstring above. `_fk` is the SAME framed-beat-key read
+                # just above for the eviction-drain check (zero extra work); `_runway_holding` /
+                # `_pre_resolved` are already computed for this turn.
+                _loop_engaged = _player_replied_engaged(messages)
+                # L-F3 Greptile P2 (belt telemetry, success-gated): check for an OBSERVED resolution
+                # of a PRIOR loop-break nudge — a progression tool fired this round/turn, or the
+                # framed gate itself moved — BEFORE `_loop_break_streak_update` overwrites
+                # `_LOOP_LAST_FRAMED_KEY` for this key. Covers the "model complied on a later round"
+                # and "a peer/later turn moved the beat" cases; the direct forced-advance-committed
+                # case is noted synchronously inside `_commit_advance_silently`.
+                _note_loop_break_if_resolved(_belt_key(owner), owner,
+                                             progressed=_progressed, current_gate=_fk)
+                _loop_stalled = _loop_break_streak_update(
+                    _belt_key(owner), _fk, progressed=_progressed, runway_holding=_runway_holding,
+                    pre_resolved=_pre_resolved, engaged=_loop_engaged)
+                if _loop_stalled:
+                    logger.info(
+                        f"[orwell] L-F3 loop-break armed (streak={_LOOP_STREAK.get(_belt_key(owner), 0)}, "
+                        f"framed={_fk}) round {round_num} user={owner}")
                 _want_advance = (_turn_advance_nudges < _MAX_ADVANCE_NUDGES_PER_TURN and (
                     _previewed_uncommitted
                     or _decision_undelivered
                     or _want_drain_eviction
                     or (_milestone_due and (not _progressed) and not _runway_holding)
+                    or (_loop_stalled and not _runway_holding)
                     or ((not _progressed) and _is_lull and _stale and not _runway_holding)))
                 # not _progressed: a turn that advanced a comp/ceremony is a beat-resolution, not a
                 # social exchange — its houseguest mentions are comp players, not a scene to bank.
@@ -6991,11 +7198,35 @@ async def _stream_agent_loop_impl(
                 if _want_confide or _want_expose or _want_trade or _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
+                    # L-F3 (#1742): the open player pending's identity AT THIS READ, if any — used
+                    # both to pick the pending-aware loop-break nudge text below AND (via `_gs`,
+                    # captured by the closure) to detect a `_commit_advance_silently` NO-OP against
+                    # an unresolved pending. `_beat_seq_at_read` is the PRIMARY no-op signal
+                    # (Greptile P1 — kind alone can't tell a staged comp's round advance from a true
+                    # no-op, since `kind` stays "comp-round" across rounds); `_pending_sig_at_read`
+                    # (kind + stillIn) is the degraded-mode fallback when beatSeq is unavailable.
+                    _pending_kind_at_read = None
+                    _beat_seq_at_read = None
+                    _pending_sig_at_read = None
+                    # Greptile P1: track whether the pre-advance read actually SUCCEEDED. A failed
+                    # read leaves all three pre-state vars None — indistinguishable, without this
+                    # flag, from a genuine "no pending was open" — so a later no-op advance would be
+                    # misclassified as real progress (see the guard at the `_commit_advance_silently`
+                    # success branch below).
+                    _state_read_ok = False
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
                         _phase = (_gs or {}).get("phase")
                         _moment = (_gs or {}).get("moment")
+                        _pd_ar = (_gs or {}).get("pending")
+                        _pending_kind_at_read = (
+                            (_pd_ar.get("kind") or "").strip() or None
+                            if isinstance(_pd_ar, dict) else None)
+                        _pending_sig_at_read = _pending_signature(_pd_ar)
+                        _bs_ar = (_gs or {}).get("beatSeq")
+                        _beat_seq_at_read = (_bs_ar if isinstance(_bs_ar, int)
+                                             and not isinstance(_bs_ar, bool) else None)
                         # F7: a coarse identity for THIS beat (week + phase + moment). If it differs on a
                         # re-read just before the forced advance, the game moved on under us (another device
                         # or the model's own tool path advanced) and the forced advance would double-advance.
@@ -7012,6 +7243,7 @@ async def _stream_agent_loop_impl(
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
+                        _state_read_ok = True  # every extraction above completed cleanly
                     except Exception as _e:
                         logger.warning(
                             f"[orwell] error-correction state fetch failed: "
@@ -7165,6 +7397,14 @@ async def _stream_agent_loop_impl(
                         # frozen narration. The caller reads it to END the turn (a scene already shown) with
                         # the anti-stale reground queued, instead of racing the engine further ahead.
                         _silent_advance_capped = [False]
+                        # Greptile/CodeRabbit P1 (unknown pre-state): set when the advance COMMITTED (no
+                        # exception) but the pre-advance state read FAILED, so we cannot confirm it was real
+                        # progress vs. a no-op against an open pending. The function returns False (NOT the
+                        # success sentinel — that would drive success-only callers to log a forced advance,
+                        # inject a follow-up nudge, or record an applied overseer action, all phantom on a
+                        # no-op), and the caller reads this flag to END the turn safely without a second
+                        # narration and WITHOUT resetting the stall/escalation counters.
+                        _silent_advance_unconfirmed = [False]
 
                         async def _commit_advance_silently(_why: str) -> bool:
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
@@ -7182,6 +7422,7 @@ async def _stream_agent_loop_impl(
                             does NOT then blindly retry into a stomp."""
                             _silent_advance_reconciled[0] = False  # reset per call (finding 4)
                             _silent_advance_capped[0] = False       # reset per call (F1 anti-stale)
+                            _silent_advance_unconfirmed[0] = False  # reset per call (unknown pre-state)
                             # F1 ANTI-STALE CAP — scoped to the emitted-visible PLAIN-stall silent commit
                             # ("stall L{level}"): the exact path where a scene was already shown and the
                             # turn breaks silently with NO next-turn voicing obligation (the 141× premiere-
@@ -7268,6 +7509,56 @@ async def _stream_agent_loop_impl(
                                         _silent_advance_reconciled[0] = True
                                         return False  # board moved twice — reconciled, S1b picks it up
                                 _ch3._refresh_beat_seq(owner, _adv)  # track the new beatSeq
+                                # L-F3 (#1742): advanceGame against an OPEN PLAYER PENDING is a
+                                # documented NO-OP — "the engine returns the pending unchanged" (see
+                                # this function's docstring). A bare "no exception" success used to be
+                                # treated as real progress here, which FALSELY reset every staleness/
+                                # stall counter below every time this fired — so a soft-locked pending
+                                # (the F3 comp-buzz-in repro) could sit forever with its escalation
+                                # ladder silently restarting at zero each turn instead of climbing.
+                                # Greptile/CodeRabbit P1 (unknown pre-state): if the pre-advance state read
+                                # FAILED (`_state_read_ok` is False), all three pre-state signals are None and
+                                # we CANNOT tell a real advance from a no-op against an open pending. Blessing
+                                # it as progress here would falsely reset the stall/escalation counters and
+                                # record a phantom loop-break correction — the exact soft-lock-perpetuating
+                                # bug this ladder exists to fix. It also must NOT return the success sentinel
+                                # True: True drives success-only callers (the forced path logs a forced
+                                # advance + injects a follow-up nudge; the active-overseer path records an
+                                # applied action), all phantom when the advance was actually a no-op. So set
+                                # the `_silent_advance_unconfirmed` sidecar flag and return False — the
+                                # emitted-visible caller reads the flag and ENDS the turn (no second
+                                # narration) with the counters + belt state left intact so the ladder keeps
+                                # climbing off the next (clean) read. (The forced-advance callers already
+                                # skip this call when the beat re-read is unknown — `_beat_key_at_read is
+                                # None` — so they never reach here on a failed read.)
+                                if not _state_read_ok:
+                                    _silent_advance_unconfirmed[0] = True
+                                    logger.info(
+                                        "[orwell] silent advanceGame committed but the pre-advance state "
+                                        f"read was unavailable — NOT counting as confirmed progress ({_why}, "
+                                        f"phase={_phase}) round {round_num} user={owner}")
+                                    return False
+                                # Detect the no-op via `_advance_was_pending_noop` — PRIMARILY the
+                                # engine `beatSeq` (Greptile P1: a bare pending-`kind` comparison
+                                # misreads a STAGED competition's genuine comp-round -> comp-round
+                                # round advance as a no-op, since `kind` stays identical across
+                                # rounds — this now strictly increases `beatSeq`, so it is correctly
+                                # read as PROGRESS), falling back to the round-aware pending
+                                # signature (kind + stillIn) only if beatSeq is unavailable.
+                                if _advance_was_pending_noop(_pending_kind_at_read, _beat_seq_at_read,
+                                                             _pending_sig_at_read, _adv):
+                                    logger.info(
+                                        f"[orwell] silent advanceGame NO-OP — pending "
+                                        f"`{_pending_kind_at_read}` still open ({_why}, phase={_phase}, "
+                                        f"beatSeq {_beat_seq_at_read}->{(_adv or {}).get('beatSeq')}) "
+                                        f"round {round_num} user={owner}")
+                                    return False
+                                # Real progress (INCLUDING a same-`kind` staged-comp round advance).
+                                # L-F3 Greptile P2: if a loop-break nudge is awaiting confirmation for
+                                # this owner, THIS is the observed resolution — note the belt now
+                                # (success-gated: a stalled gate that never resolves notes nothing).
+                                _note_loop_break_if_resolved(_belt_key(owner), owner,
+                                                             progressed=True, current_gate=_fk)
                                 # The beat moved — reset the staleness clock AND clear the
                                 # persisted escalation so the next stall (if any) starts gentle,
                                 # mirroring the model-driven progression cleanup below. NAR-1:
@@ -7320,6 +7611,15 @@ async def _stream_agent_loop_impl(
                                 # SECOND narration): end the turn; the next real beat surfaces next turn.
                                 logger.info("[orwell] visible-scene turn ended after a reconciled double-"
                                             f"stale advance (no second narration) round {round_num} user={owner}")
+                                break
+                            if _silent_advance_unconfirmed[0]:
+                                # Unknown pre-state (the pre-advance read failed): the advance committed but
+                                # we cannot confirm it was progress vs. a no-op. A scene already streamed this
+                                # turn, so END the turn (no second narration) rather than falling through to
+                                # the text nudge — the counters/belt state are intact, so the ladder re-climbs
+                                # off the next clean read next turn.
+                                logger.info("[orwell] visible-scene turn ended after an unconfirmed silent "
+                                            f"advance (pre-state read failed) round {round_num} user={owner}")
                                 break
                             if _silent_advance_capped[0]:
                                 # F1 anti-stale CAP: the engine is already _SILENT_FORCE_ADVANCE_CAP beats
@@ -7724,6 +8024,22 @@ async def _stream_agent_loop_impl(
                             _nudge, _why = _PREVIEW_COMMIT_NUDGE, "preview-commit"
                         elif _decision_undelivered:
                             _nudge, _why = _DECISION_DELIVER_NUDGE, "decision-deliver"
+                        elif _loop_stalled and _pending_kind_at_read:
+                            # L-F3 (#1742): the SAME open pending is being re-presented — never a bare
+                            # "call advanceGame" (the mandate: never infer the player's binding pick,
+                            # and calling advanceGame against an open pending is a documented no-op
+                            # anyway). Escalate the ASK ITSELF instead — stop inventing sub-questions,
+                            # reduce to the engine's literal legal options. Greptile P2: SELECTING this
+                            # nudge is only an ATTEMPT — stash the belt name; `_note_loop_break_if_resolved`
+                            # notes it only once an OBSERVED resolution lands (never a bare selection).
+                            _nudge, _why = _PENDING_LOOP_BREAK_NUDGE, "loop-break-pending"
+                            _LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-pending"
+                        elif _loop_stalled:
+                            # No pending is blocking — the generic case (a premiere intro, an
+                            # un-gated advance-phase beat): break the loop by simply advancing.
+                            # Greptile P2: same deferred-note contract as the pending branch above.
+                            _nudge, _why = _ADVANCE_LOOP_BREAK_NUDGE, "loop-break"
+                            _LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-advance"
                         else:
                             _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
                         logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")

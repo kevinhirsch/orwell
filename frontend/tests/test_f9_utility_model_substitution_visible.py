@@ -61,18 +61,23 @@ def _utility_settings(monkeypatch):
     return merged
 
 
-def test_hidden_configured_utility_model_logs_substitution(_utility_settings, caplog):
-    # qwen is configured but HIDDEN on the endpoint; inkling is the enabled chat model.
-    _seed_endpoint(cached_models=["qwen/qwen3.6-flash", "thinkingmachines/inkling"],
+def test_hidden_configured_utility_model_falls_back_to_narrator_not_arbitrary(_utility_settings, caplog):
+    # qwen (utility) is configured but HIDDEN on the endpoint; inkling is an arbitrary enabled chat
+    # model; glm-4.7 (the narrator/default) IS served. Owner ruling 2026-07-21 (narrator↔utility
+    # mutual fallback): a utility-class call whose model is unavailable must fall back to the
+    # configured NARRATOR/default model (known-served), NOT the arbitrary first-enabled model that
+    # could be slow/broken and hang the casting-finalize burst (the reported thinkingmachines/inkling).
+    _seed_endpoint(cached_models=["z-ai/glm-4.7", "qwen/qwen3.6-flash", "thinkingmachines/inkling"],
                    hidden_models=["qwen/qwen3.6-flash"])
     with caplog.at_level("WARNING"):
         _url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="u")
-    # served model is the endpoint's first enabled chat model (unchanged resolution)…
-    assert model == "thinkingmachines/inkling"
-    # …but the swap is now LOUD, not silent.
+    # Deterministic mutual fallback to the served narrator model — never the arbitrary inkling.
+    assert model == "z-ai/glm-4.7"
+    assert model != "thinkingmachines/inkling"
+    # …and the substitution is LOUD, not silent.
     logs = " ".join(r.message for r in caplog.records)
-    assert "substitution" in logs.lower() or "not being served" in logs.lower()
-    assert "qwen/qwen3.6-flash" in logs and "thinkingmachines/inkling" in logs
+    assert "mutual fallback" in logs.lower() or "not served" in logs.lower()
+    assert "qwen/qwen3.6-flash" in logs and "z-ai/glm-4.7" in logs
 
 
 def test_configured_utility_model_served_logs_no_substitution(_utility_settings, caplog):
