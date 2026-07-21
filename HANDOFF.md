@@ -44,10 +44,19 @@ session task ledger, each with a disposition. Read it before starting any new wo
 | #1769 | HANDOFF.md v1 |
 | #1770 | Moonshot refactor synthesis (breakage map A–G, portfolio P1–P8, five-wave roadmap, owner questions Q1–Q8) |
 
-## 2. In flight — check these FIRST on resume
+## 2. In flight — check these FIRST on resume (updated 2026-07-21 evening, ~90% session)
 
-- **The exhaustive backlog PR** (branch `claude/playtest-protocol-review-u4wxaz`, this doc + the
-  backlog): merge on green; a sweep is armed.
+- **#1772** (rulings doc, this branch): merge on green — sweep armed.
+- **Casting-speed build (LEADS Wave 1, owner order):** two worktree agents dispatched —
+  `claude/1713-premiere-block-fix` (bound the createCharacter→premiere ~300s block) and
+  `claude/casting-ledger-fast` (FacetLedger + 15-wide genesis + early kickoff during the interview +
+  strict all-profiles-before-entry gate; target <10s finalize-to-house). They push branches only;
+  the overseer opens PRs one at a time.
+- **Round-2 moonshot** (divergent ideation, full rated slate, nothing dropped): workflow run
+  `wf_f64dc993-284` — on completion extract the synthesize agent's `result` string from
+  `<transcriptDir>/journal.jsonl` (`type=result` lines), commit to `docs/design/`, deliver to owner.
+  Container rollbacks happen: fetch origin first; only pushed things are durable.
+- Rulings D1–D10 + casting mandate + full-WebSocket + PO-gates: recorded in the backlog §T7 (this PR).
 - **Both playtests are DONE and triaged.** Headless: 5 seeds to finale, 0 structural/Vault/ceremony
   findings — the engine is launch-ready. Live (GLM-4.7/novita shipped default): findings F1–F10 —
   every week-1 closed-set outcome narrated falsely first, forced tool_choice ignored (17-turn
