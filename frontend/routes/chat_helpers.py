@@ -2392,16 +2392,23 @@ def _sentence_stages_absent_npc(sentence: str, facts: dict, first_counts: dict) 
     return None
 
 
-def _mentioned_anywhere(text: str, full_name: str) -> bool:
-    """True if `full_name` (or its unambiguous whole-token first name) appears ANYWHERE in `text` —
-    no staging-verb binding required. Used only by the OMISSION check (b), where even a bare mention
-    ("you spot Mara across the room") is enough to prove the narration acknowledged this houseguest is
-    here; the deliberately looser bar (vs. `_stages_in_scene`) keeps that check from nagging on a
-    scene that merely doesn't give every present houseguest a line."""
+def _mentioned_anywhere(text: str, full_name: str, first_counts: dict) -> bool:
+    """True if `full_name` (or its UNIQUE-across-the-roster whole-token first name) appears ANYWHERE
+    in `text` — no staging-verb binding required. Used only by the OMISSION check (b), where even a
+    bare mention ("you spot Mara across the room") is enough to prove the narration acknowledged this
+    houseguest is here; the deliberately looser bar (vs. `_stages_in_scene`) keeps that check from
+    nagging on a scene that merely doesn't give every present houseguest a line.
+
+    Greptile P1 (#1746): the first-name fallback MUST share the same uniqueness guard
+    `_name_staged_unique` uses — an ambiguous first name (two roster members share it) can belong to
+    EITHER houseguest, so a bare "Alex" mention must NOT be credited to a specific present occupant
+    named Alex when an off-scene/evicted Alex could equally be the one meant. Crediting the wrong
+    houseguest would silently suppress the omission re-ground for the real room population."""
     if re.search(rf"\b{re.escape(full_name)}\b", text):
         return True
     parts = full_name.split()
-    if len(parts) > 1 and re.search(rf"\b{re.escape(parts[0])}\b", text):
+    if len(parts) > 1 and first_counts.get(parts[0].lower(), 0) == 1 and re.search(
+            rf"\b{re.escape(parts[0])}\b", text):
         return True
     return False
 
@@ -2416,7 +2423,13 @@ def _presence_omission_directive(narration: str, facts: dict) -> Optional[str]:
     if not room_present:
         return None
     text = narration or ""
-    if any(_mentioned_anywhere(text, n) for n in room_present):
+    # The uniqueness check needs the WHOLE roster (in view + off-scene + evicted), not just the
+    # room — an off-scene/evicted houseguest sharing a first name with a present one must still make
+    # that first name ambiguous (Greptile #1746).
+    _roster = set(facts.get("in_view") or ()) | set(facts.get("active_offscene") or ()) | \
+        set(facts.get("evicted") or ())
+    _first_counts = _first_name_counts(_roster | room_present)
+    if any(_mentioned_anywhere(text, n, _first_counts) for n in room_present):
         return None  # at least one real occupant appeared somewhere — not a wholesale swap
     room_label = str(facts["room"]).replace("-", " ")
     names = sorted(room_present)[:_PRESENCE_MOVE_MAX_NAMES]

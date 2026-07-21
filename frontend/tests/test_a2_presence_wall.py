@@ -226,6 +226,30 @@ def test_omission_bare_mention_counts_as_surfaced_not_only_staging():
     assert directive is None
 
 
+def test_omission_still_fires_when_only_an_ambiguous_first_name_is_mentioned():
+    # Greptile P1 (#1746): two roster members share the first name "Alex" — one PRESENT (Alex Kim),
+    # one off-scene (Alex Diaz). Narration mentions only the bare, ambiguous first name "Alex". That
+    # must NOT be credited to the present occupant (it could equally mean the off-scene one), so the
+    # omission guard must still fire for the real room population — mirroring the same uniqueness bar
+    # `_name_staged_unique` / `_presence_desync_directive` already apply on the drop side.
+    facts = {"room": "kitchen", "in_view": {"Alex Kim"},
+             "room_present": {"Alex Kim"}, "active_offscene": {"Alex Diaz"}, "evicted": set()}
+    directive = chat_helpers._presence_omission_directive(
+        "You wonder where Alex went as you wash a mug alone in the quiet kitchen.", facts)
+    assert directive is not None
+    assert "Alex Kim" in directive
+
+
+def test_omission_does_not_fire_when_the_unique_full_name_is_mentioned():
+    # The FULL name is never ambiguous — mentioning "Alex Kim" by full name still surfaces them even
+    # though "Alex" alone is shared with the off-scene "Alex Diaz".
+    facts = {"room": "kitchen", "in_view": {"Alex Kim"},
+             "room_present": {"Alex Kim"}, "active_offscene": {"Alex Diaz"}, "evicted": set()}
+    directive = chat_helpers._presence_omission_directive(
+        "You spot Alex Kim by the sink and give a small wave.", facts)
+    assert directive is None
+
+
 def test_post_turn_check_stashes_the_omission_reground(monkeypatch):
     from src import orwell_engine
     state = _state("kitchen", present=["An Ally", "A Neighbor"],
