@@ -234,6 +234,43 @@ CASTING_HEADSHOT_ON_FILE_NOTE = (
     "not keep interviewing once everything required is on file and the player is ready to go."
 )
 
+# #1744 (F7 — casting question-sail): with the live model the interviewer kept PROBING for a "why Big
+# Brother / real game read" for ~8 turns and RE-ASKED questions the player had already answered, sailing
+# past finalize. The engine's casting moment prompt (0050) already carries the live status of what is on
+# file, but the model still looped. This note rides EVERY pre-game (casting) turn to forbid re-asking an
+# ANSWERED question and to finalize once the required fields are on file — it kills the RE-ASK, not the
+# (inherently seed-varying) finalize turn-count. Framing only — facts to voice, never a script; the
+# engine casting status remains the source of truth for what is on file.
+CASTING_NO_REASK_NOTE = (
+    "PRODUCTION NOTE (not for the player): do NOT re-ask a question the player has ALREADY answered. "
+    "The casting status in your context shows what is on file — read it and BUILD on it. Once the player "
+    "has given something (their name, where they're from, why they're here, how they plan to play), "
+    "acknowledge it and move ON; never loop back to re-extract it, and never re-ask the same question in "
+    "new words. The moment the required fields are on file and the player signals they're ready, FINALIZE "
+    "with createCharacter — do not keep interviewing for more."
+)
+
+# #1744 (F2 — premiere roll-call relapse): the player ALREADY introduced themselves in the casting
+# interview — their NAME, where they're from, and what they do are on file, and (A1/#1727) the player's
+# identity line rides EVERY moment prompt, so the model always HAS it. Yet the premiere champagne-circle
+# beat's own design invites the player to "introduce THEMSELVES," and the live model re-DEMANDED the same
+# four facts the player just gave ("what's your name, where you're from, what you do, one real thing"),
+# turning a warm welcome into an interrogation. This note rides ONLY the premiere (a started game AND the
+# engine reporting a `premiere` view) to state the identity is established, so production/NPCs GREET the
+# player by name rather than re-interrogate. The houseguests still introduce THEMSELVES (they are
+# strangers to the player and each other) — only the PLAYER's basics are already known and must not be
+# re-extracted. Framing only — facts to voice, never a script; the player may still volunteer more.
+PREMIERE_IDENTITY_ON_FILE_NOTE = (
+    "PRODUCTION NOTE (not for the player): the player ALREADY introduced themselves in the casting "
+    "interview — their NAME, where they're from, and what they do are ON FILE (their identity is in your "
+    "GAME CONTEXT). This premiere is a WELCOME, not a fresh intake. Do NOT have production or any "
+    "houseguest interrogate the player for their name, hometown, or job again, and do NOT ask them to "
+    "\"introduce themselves\" from scratch as if you don't know who they are — GREET them by name. The "
+    "houseguests still introduce THEMSELVES around the champagne circle (they are strangers to the player "
+    "and to each other); only the player's own basics are already known to production. The player may of "
+    "course volunteer more about themselves, but never re-demand the basics they gave in casting."
+)
+
 # #1034 — casting narration register/framing (live-verify, deepseek). The casting interview reliably
 # slips on register with the live model: a deliberate fourth-wall break ("Let me drop the producer
 # persona for a second"), an informal / borderline-meta aside ("I can't pull up a cast lol"), and
@@ -4435,6 +4472,16 @@ async def apply_game_framing(
                 gm_prompt = gm_prompt + "\n\n" + _prem
         except Exception as e:
             logger.warning("[orwell] premiere progress framing skipped for user=%s: %s", _gkey, e)
+        # #1744 (F2 — premiere roll-call relapse): during the premiere ONLY, remind the model the player's
+        # identity is already on file from casting so the champagne circle is a GREETING, not a fresh
+        # identity demand. Gated on the engine reporting a `premiere` view (absent outside the premiere,
+        # exactly like `_premiere_progress_directive`). Vault-free (public identity the player authored),
+        # additive, best-effort / fail-open.
+        try:
+            if isinstance(game_state.get("premiere"), dict):
+                gm_prompt = gm_prompt + "\n\n" + PREMIERE_IDENTITY_ON_FILE_NOTE
+        except Exception as e:
+            logger.warning("[orwell] premiere identity note framing skipped for user=%s: %s", _gkey, e)
         # 0013 §5 / PG-14 / PS-4 — the producer's Diary-Room INVITATION. The engine marks a dramatic
         # beat via `diaryRoomInvite`; invite the player in ONCE per (game, beat) — a dramatic beat spans
         # many turns, so we dedup on (week, moment) so it's an invitation, not a per-turn nag. Vault-free
@@ -4561,6 +4608,10 @@ async def apply_game_framing(
             # informal/meta register, and keep a minimum substance per turn (no degenerate "Name."
             # collapse). Rides every pre-game turn (the engine moment prompt OR the static fallback).
             pre_prompt = pre_prompt + "\n\n" + CASTING_REGISTER_NOTE
+            # #1744 (F7): forbid re-asking an answered question and finalize once the required fields are
+            # on file — kills the casting question-sail without engine-authoring or bounding the (seed-
+            # varying) finalize turn-count. Rides every pre-game turn like the register note above.
+            pre_prompt = pre_prompt + "\n\n" + CASTING_NO_REASK_NOTE
             # A/C fix (2026-06-20): once the cast headshot is on file, tell the model the photo is
             # handled so it stops re-asking for it and can finalize. Fail-open — never block a turn.
             try:
