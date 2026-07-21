@@ -2403,12 +2403,19 @@ def _mentioned_anywhere(text: str, full_name: str, first_counts: dict) -> bool:
     `_name_staged_unique` uses — an ambiguous first name (two roster members share it) can belong to
     EITHER houseguest, so a bare "Alex" mention must NOT be credited to a specific present occupant
     named Alex when an off-scene/evicted Alex could equally be the one meant. Crediting the wrong
-    houseguest would silently suppress the omission re-ground for the real room population."""
-    if re.search(rf"\b{re.escape(full_name)}\b", text):
+    houseguest would silently suppress the omission re-ground for the real room population.
+
+    CodeRabbit (#1746): matched case-INSENSITIVE, mirroring `_stages_in_scene`/`_name_staged_unique` —
+    narration doesn't always render a roster name in its stored casing, and a casing mismatch here
+    would make this OMISSION check wrongly conclude "never mentioned" and fire an unnecessary
+    re-ground, the opposite of this guard's conservative bias (a false flag is worse than a missed
+    one). `full_name`/`parts[0]` are engine roster data run through `re.escape()`, so this is not a
+    ReDoS-shaped pattern."""
+    if re.search(rf"\b{re.escape(full_name)}\b", text, re.IGNORECASE):
         return True
     parts = full_name.split()
     if len(parts) > 1 and first_counts.get(parts[0].lower(), 0) == 1 and re.search(
-            rf"\b{re.escape(parts[0])}\b", text):
+            rf"\b{re.escape(parts[0])}\b", text, re.IGNORECASE):
         return True
     return False
 

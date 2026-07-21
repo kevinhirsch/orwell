@@ -22,6 +22,7 @@ sibling 0076 / knowledge-wall guard tests do; no name carries test intent.
 
 import asyncio
 import importlib
+import re
 
 import pytest
 
@@ -193,10 +194,13 @@ def test_scan_fires_single_tenant_with_owner_none(monkeypatch):
 # ── part (b): the inverse — an engine-present houseguest the narration omitted entirely ─────── #
 
 def test_omission_flags_when_no_present_houseguest_is_mentioned_at_all():
+    # NOTE: the transcript deliberately avoids a bare "a"/"an" token — with the guard's
+    # case-insensitive first-name match (CodeRabbit #1746), a stray indefinite article would
+    # otherwise collide with the placeholder role "A Neighbor"'s single-letter first name.
     facts = {"room": "kitchen", "in_view": {"An Ally", "A Neighbor"},
              "room_present": {"An Ally", "A Neighbor"}, "active_offscene": set(), "evicted": set()}
     directive = chat_helpers._presence_omission_directive(
-        "You wander into the empty-feeling kitchen and pour a glass of water alone.", facts)
+        "You wander into the empty-feeling kitchen and pour water alone, saying nothing.", facts)
     assert directive is not None
     assert "An Ally" in directive and "A Neighbor" in directive
     assert "never mentioned" in directive
@@ -250,6 +254,18 @@ def test_omission_does_not_fire_when_the_unique_full_name_is_mentioned():
     assert directive is None
 
 
+def test_omission_mention_matches_case_insensitively():
+    # CodeRabbit (#1746): `_mentioned_anywhere` must match case-insensitively, mirroring
+    # `_stages_in_scene`/`_name_staged_unique` — narration doesn't always render a roster name in its
+    # stored casing. A casing mismatch here would wrongly conclude "never mentioned" and fire an
+    # unnecessary re-ground (a false omission flag).
+    facts = {"room": "kitchen", "in_view": {"An Ally"},
+             "room_present": {"An Ally"}, "active_offscene": set(), "evicted": set()}
+    directive = chat_helpers._presence_omission_directive(
+        "you spot an ally leaning on the counter and nod hello.", facts)  # all-lowercase mention
+    assert directive is None  # the differently-cased mention still counts as surfaced
+
+
 def test_post_turn_check_stashes_the_omission_reground(monkeypatch):
     from src import orwell_engine
     state = _state("kitchen", present=["An Ally", "A Neighbor"],
@@ -284,3 +300,85 @@ def test_agent_loop_wrapper_drops_the_phantom_placement(monkeypatch):
 def test_agent_loop_wrapper_is_fail_open_on_empty():
     agent_loop = importlib.import_module("src.agent_loop")
     assert _run(agent_loop._presence_wall_guard("", _USER)) == ""
+
+
+# ── Greptile P1 (#1746): the drop must be durable — mirrored into round_response so it never ──── #
+# ── survives into the persisted/reload round text (`cleaned_round` / `round_texts`).           ──── #
+
+def test_mirror_wall_drop_removes_the_dropped_sentence_from_round_response():
+    agent_loop = importlib.import_module("src.agent_loop")
+    # round_response is the RAW per-round accumulator (may hold text this chunk didn't originate,
+    # simulating earlier narration already appended this round).
+    round_response = (
+        "The backyard was quiet under the string lights. "
+        'A Schemer leans against the fence and mutters, "nobody suspects us yet." '
+        "You kept your face still and changed the subject."
+    )
+    before = 'A Schemer leans against the fence and mutters, "nobody suspects us yet." '
+    after = ""  # the presence wall dropped the whole (single-sentence) chunk
+    mirrored = agent_loop._mirror_wall_drop(round_response, before, after)
+    assert "A Schemer" not in mirrored
+    assert "nobody suspects us yet" not in mirrored
+    assert "The backyard was quiet under the string lights." in mirrored
+    assert "You kept your face still and changed the subject." in mirrored
+
+
+def test_mirror_wall_drop_survives_into_the_persisted_reload_text():
+    # Reproduces the exact regression: after the mirror, deriving `cleaned_round` the same way the
+    # round-completion path does (`strip_tool_blocks(round_response).strip()`) must NOT resurrect
+    # the phantom sentence on a history reload.
+    agent_loop = importlib.import_module("src.agent_loop")
+    from src.agent_tools import strip_tool_blocks
+    round_response = (
+        "The backyard was quiet under the string lights. "
+        'A Schemer leans against the fence and mutters, "nobody suspects us yet." '
+        "You kept your face still and changed the subject."
+    )
+    before = 'A Schemer leans against the fence and mutters, "nobody suspects us yet." '
+    after = ""
+    round_response = agent_loop._mirror_wall_drop(round_response, before, after)
+    cleaned_round = strip_tool_blocks(round_response).strip()
+    assert "A Schemer" not in cleaned_round
+    assert "nobody suspects us yet" not in cleaned_round
+    assert "The backyard was quiet" in cleaned_round
+    assert "changed the subject" in cleaned_round
+
+
+def test_mirror_wall_drop_only_removes_the_rightmost_occurrence():
+    # An earlier, unrelated repeat of identical prose elsewhere in the round must survive — only the
+    # dropped chunk's OWN occurrence (the round's most-recently-appended tail) is erased.
+    agent_loop = importlib.import_module("src.agent_loop")
+    dupe = 'A Schemer grins. '
+    round_response = dupe + "Some other narration in between. " + dupe
+    mirrored = agent_loop._mirror_wall_drop(round_response, dupe, "")
+    assert mirrored.count("A Schemer grins.") == 1
+    assert mirrored.startswith("A Schemer grins.")  # the LEADING occurrence survives
+    assert "Some other narration in between." in mirrored
+
+
+def test_mirror_wall_drop_is_a_noop_when_nothing_was_dropped():
+    agent_loop = importlib.import_module("src.agent_loop")
+    round_response = "An Ally grins and says hello. You wave back."
+    same = 'An Ally grins and says hello. You wave back.'
+    mirrored = agent_loop._mirror_wall_drop(round_response, same, same)
+    assert mirrored == round_response
+
+
+def test_mirror_wall_drop_partial_sentence_removal_keeps_the_rest():
+    # Only ONE of two sentences in the chunk is dropped — the survivor stays, in order. `after` is
+    # built the SAME way `screen_knowledge_wall`/`screen_presence_wall` build it — split on the
+    # identical sentence boundary and rejoin the kept parts verbatim (including whatever leading
+    # whitespace that split left attached) — never a hand-trimmed string, which would misrepresent
+    # what the real guards actually emit and desync the two-pointer diff.
+    agent_loop = importlib.import_module("src.agent_loop")
+    lead = "An Ally settles into the lounge chair. "
+    dropped_sentence = 'A Schemer struts in and says, "I run this house." '
+    kept_sentence = "The sprinklers click on in the distance."
+    round_response = lead + dropped_sentence + kept_sentence
+    before = dropped_sentence + kept_sentence
+    parts = re.split(r"(?<=[.!?\n])", before)
+    after = "".join(p for p in parts if "Schemer" not in p)
+    mirrored = agent_loop._mirror_wall_drop(round_response, before, after)
+    assert "I run this house" not in mirrored
+    assert "An Ally settles into the lounge chair." in mirrored
+    assert "The sprinklers click on in the distance." in mirrored
