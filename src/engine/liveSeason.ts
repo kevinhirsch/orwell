@@ -1078,6 +1078,70 @@ function competitionDefFor(s: LiveSeasonState, c: CompetitionProgress): Competit
   return last ? competitionById(last) : undefined;
 }
 
+/**
+ * L-F4 (#1743) — THE PINNED COMP PRESENTATION. Once a competition is drawn, its format/premise is FIXED
+ * for the whole event; this is the single engine-side pin the outward ground truth surfaces on EVERY
+ * comp-beat turn (the first reveal AND every staged `comp-elimination` round), so the narrator can never
+ * re-author "what kind of comp this is" turn to turn (the finding: "Piece by Piece" on one beat, "Center-
+ * Ring Trivia" the next — a format flip-flop within one comp). COMP-13 already pins the comp NAME + hard-
+ * rejects a winner rename (`validateCompetitionFiction`); this pins the FORMAT + PREMISE the same way.
+ *
+ * Enforcement mirrors those guards' HARDNESS where a write-back exists and can only be SOFT where one
+ * cannot:
+ *   • FORMAT is HARD-pinned — always the drawn library `def.format`; the #1400 write-back never carries a
+ *     format, so the model literally cannot rename it (the analogue of the winner-rename rejection).
+ *   • The #1400 authored PREMISE is HARD-pinned per comp — stored once, immutable until crown (the
+ *     `already-authored` reject in `validateCompetitionFiction`), so it too is stable across rounds.
+ *   • The free-narration (library-floor) PREMISE is SOFT-pinned — fed on every comp-beat turn's ground
+ *     truth. A hard engine-side REJECT of the narration is architecturally impossible: narration runs in
+ *     the FE and the engine only emits Vault-free ground truth and never receives the prose, so there is
+ *     nothing to reject; feeding the same premise every turn IS the structural pin for that path.
+ *
+ * Pure (NO rng — safe for the observational `whereabouts` read): a lookup of the recorded draw / vetoComp
+ * plus the stored authored fiction. Returns `null` before a def is drawn (the HOH comp before it stages —
+ * its premise genuinely does not exist yet) and off a comp beat. Vault-free (public flavor only — never a
+ * score / lean / number). The `def` is surfaced so the adapter can dress it in the 0125 seeded theme,
+ * matching `runCompetition`'s precedence (model fiction > seeded theme > 0042 library floor).
+ */
+export interface CompetitionPresentation {
+  comp: "hoh-competition" | "veto-competition";
+  /** The drawn 0042 library def — the floor the adapter themes; carries the canonical `format`. */
+  def: CompetitionDef;
+  /** The comp NAME the ground truth shows: the #1400 authored theme, else the library name (pre-theme). */
+  name: string;
+  /** The comp FORMAT — ALWAYS `def.format`; never model-overridable (the HARD format pin). */
+  format: CompetitionFormat;
+  /** The comp PREMISE: the #1400 authored premise, else the library premise (pre-theme). */
+  premise: string;
+  /** Whether #1400 fiction is pinned for THIS comp (the adapter then skips the theme skin, like runCompetition). */
+  authored: boolean;
+}
+
+export function competitionPresentation(s: LiveSeasonState): CompetitionPresentation | null {
+  let comp: "hoh-competition" | "veto-competition" | undefined;
+  let def: CompetitionDef | undefined;
+  if (s.competition) {
+    // A staged comp is running — the def is the recorded draw for its phase (a pure lookup).
+    comp = s.competition.comp;
+    def = competitionDefFor(s, s.competition);
+  } else if (s.pending && (s.pending.kind === "comp-intent" || s.pending.kind === "comp-round")) {
+    // A comp has surfaced but not yet staged. The VETO def was drawn at the chip-draw stage (`vetoComp`);
+    // the HOH def is not drawn until the comp resolves, so there is no premise to pin yet (return null).
+    comp = s.pending.comp;
+    if (comp === "veto-competition") def = s.vetoComp ? competitionById(s.vetoComp) : undefined;
+  }
+  if (!comp || !def) return null;
+  const f = s.competitionFiction;
+  const authored = !!(f && f.comp === comp && f.week === s.week);
+  return {
+    comp, def,
+    name: authored ? f!.theme : def.name,
+    format: def.format, // the HARD pin — the model can never rename the format
+    premise: authored ? f!.premise : def.narrative.premise,
+    authored,
+  };
+}
+
 // --- Feature #1400: generative competition design (the model DRESSES the fixed roll) -----------------
 
 /**

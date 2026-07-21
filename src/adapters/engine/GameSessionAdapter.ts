@@ -215,7 +215,7 @@ import {
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, advanceClockPerScene, resetSceneClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
-  competitionStagingData, validateCompetitionFiction,
+  competitionStagingData, validateCompetitionFiction, competitionPresentation,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone, type ExitStance,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
@@ -4166,6 +4166,11 @@ export class GameSessionAdapter implements GameSession {
             };
           })()
         : {};
+      // L-F4 (#1743): pin the drawn comp's presentation (name + format + premise) onto the house event so
+      // EVERY comp-beat turn's ground truth carries ONE consistent format across the comp's rounds. Only
+      // for a competition, and only once its def is drawn (the HOH comp before it stages carries none).
+      const compPin = (ev.kind === "hoh-competition" || ev.kind === "veto-competition")
+        ? this.pinnedCompView() : undefined;
       return {
         room,
         present: others.map(named),       // the whole house is gathered for the event
@@ -4173,7 +4178,7 @@ export class GameSessionAdapter implements GameSession {
         turnsHere: this.presenceTenure?.get(me) ?? 0,
         companions: others.map((id) => ({ ...named(id), turnsHere: 0 })),
         tracked: [],
-        houseEvent: { kind: ev.kind, ...compSplit },
+        houseEvent: { kind: ev.kind, ...compSplit, ...(compPin ? { comp: compPin } : {}) },
       };
     }
     // ADR 0006: as the night thins, houseguests who have turned in are no longer "around" — the house
@@ -6856,6 +6861,28 @@ export class GameSessionAdapter implements GameSession {
     const cycle = this.live?.twist?.phase === "running" ? 1 : 0;
     const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, this.week, cycle));
     return { name: t.name, theme: t.theme, narrative: t.narrative };
+  }
+
+  /**
+   * L-F4 (#1743) — the PINNED comp presentation surfaced on EVERY comp-beat turn's whereabouts (name +
+   * format + premise), resolved with the SAME precedence `runCompetition` uses (model-authored #1400
+   * fiction > 0125 seeded theme > 0042 library floor), so a comp's format/premise stays CONSISTENT across
+   * its first reveal and every staged elimination round — the narrator can never re-author "what kind of
+   * comp this is" turn to turn. The FORMAT is ALWAYS the drawn `def.format` (the HARD pin — never model-
+   * overridable). `undefined` before a def is drawn (the HOH comp before it stages) and off a comp beat.
+   * PURE — `competitionPresentation` + `themedScaffold` consume no rng, so `whereabouts` stays a purely
+   * observational, calibration-identical read. Vault-free (public flavor only — never a score/lean/number).
+   */
+  private pinnedCompView(): { name: string; format: string; premise: string } | undefined {
+    if (!this.live) return undefined;
+    const pin = competitionPresentation(this.live);
+    if (!pin) return undefined;
+    // #1400 fiction, once pinned, wins outright (a fresh restart re-grounds the narrator in the authored
+    // staging) — exactly `runCompetition`'s precedence; otherwise dress the library floor in this week's
+    // seeded theme. The FORMAT never comes from either skin — it is always the drawn library `def.format`.
+    if (pin.authored) return { name: pin.name, format: pin.format, premise: pin.premise };
+    const skin = this.themedScaffold(pin.def);
+    return { name: skin.name, format: pin.format, premise: skin.narrative.premise };
   }
 
   /**
