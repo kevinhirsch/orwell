@@ -125,3 +125,52 @@ def test_a_broken_probe_kickoff_never_fails_endpoint_registration(monkeypatch):
     # The registration itself still succeeds — the probe kickoff is fail-soft.
     assert res.status_code == 200, res.text
     assert "id" in res.json()
+
+
+# ── T0-4 CodeRabbit minor (PR #1821): deleting an endpoint clears its CapabilityProfile too ─────
+# A stale profile left behind after deletion can otherwise keep lighting the capability-red alarm
+# on /admin/status for an endpoint that no longer exists — un-actionable RED noise.
+
+
+def test_deleting_an_endpoint_clears_its_capability_profile(monkeypatch, tmp_path):
+    # Isolate capability_probe's OWN settings-store reads/writes (it goes through the real
+    # src.settings module, independent of the route-level in-memory `store` the `_client`
+    # harness patches for the endpoint-registration path). Verified against the RAW file rather
+    # than cap.get_capability_profile() — the `_client` harness patches `settings_mod.get_setting`
+    # to read the route's fake in-memory `store` (needed for the registration path's own settings
+    # reads), which would shadow the real file `get_capability_profile()` reads through; the
+    # DELETE-side fix under test writes through `save_settings` directly, unaffected by that patch.
+    import json as _json
+    monkeypatch.setattr(settings_mod, "SETTINGS_FILE", str(tmp_path / "settings.json"))
+    settings_mod._invalidate_caches()
+
+    monkeypatch.setattr(cap, "probe_endpoint_background", lambda *a, **k: None)  # skip the real kickoff
+    client = _client(monkeypatch, {}, {"v": _CATALOG})
+    res = client.post("/api/model-endpoints", data={
+        "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-live-test",
+        "name": "OpenRouter", "require_models": "true"})
+    assert res.status_code == 200, res.text
+    ep_id = res.json()["id"]
+
+    cap.save_capability_profile(ep_id, {"overallTier": "red", "model": _NARRATOR})
+    saved_before = _json.loads((tmp_path / "settings.json").read_text())
+    assert ep_id in saved_before.get("capability_profiles", {})
+
+    del_res = client.delete(f"/api/model-endpoints/{ep_id}")
+    assert del_res.status_code == 200, del_res.text
+    saved_after = _json.loads((tmp_path / "settings.json").read_text())
+    assert ep_id not in saved_after.get("capability_profiles", {})
+
+
+def test_deleting_an_endpoint_with_no_profile_never_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings_mod, "SETTINGS_FILE", str(tmp_path / "settings.json"))
+    settings_mod._invalidate_caches()
+    monkeypatch.setattr(cap, "probe_endpoint_background", lambda *a, **k: None)
+    client = _client(monkeypatch, {}, {"v": _CATALOG})
+    res = client.post("/api/model-endpoints", data={
+        "base_url": "https://openrouter.ai/api/v1", "api_key": "sk-live-test",
+        "name": "OpenRouter", "require_models": "true"})
+    ep_id = res.json()["id"]
+    # No profile was ever saved for this endpoint — deletion must still succeed cleanly.
+    del_res = client.delete(f"/api/model-endpoints/{ep_id}")
+    assert del_res.status_code == 200, del_res.text

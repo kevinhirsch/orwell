@@ -6764,6 +6764,22 @@ async def _stream_agent_loop_impl(
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
 
+        # CodeRabbit MAJOR (PR #1821): resolve a forced-tool_choice attempt's outcome HERE,
+        # immediately after the round's tool_blocks are parsed — the exact F2 case this
+        # telemetry exists to catch (the model calls ZERO tools) never reached the post-loop
+        # reconciliation further below, because every branch inside the giant `if not
+        # tool_blocks:` block (force-answer synthesis, the intent-without-action nudge, the
+        # live-game lull/record nudges, …) ends in a `continue`/`break` back to the top of the
+        # round loop before that code ever runs. Check now: if a forced tool_choice was
+        # selected this round but is absent from tool_blocks — covers BOTH "zero tool calls"
+        # and "a different tool was called instead" — the attempt was IGNORED; resolve and
+        # clear the marker immediately, before any early continue/break can skip it. The later
+        # per-block honored check + the post-loop reconciliation stay in place as an idempotent
+        # safety net (the marker is already cleared here, so neither can double-count).
+        if _forced_belt_tool and not any(b.tool_type == _forced_belt_tool for b in tool_blocks):
+            _note_forced_choice(owner, _forced_belt_tool, honored=False)
+            _forced_belt_tool = None
+
         # Force-answer round: we told the model to STOP calling tools and
         # answer. If it ignored that and emitted a (possibly DSML) tool
         # call anyway, discard it — don't execute, don't re-loop. Keep

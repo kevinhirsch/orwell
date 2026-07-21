@@ -69,11 +69,16 @@ def test_tool_choice_call_ignored_when_a_different_tool_is_called(monkeypatch):
     assert cap._tool_choice_call("http://x", None, "m", "prompt", 5) is False
 
 
-def test_tool_choice_call_returns_none_on_http_failure(monkeypatch):
-    def fake_post(*a, **k):
-        return _FakeResponse(status_code=500)
-    monkeypatch.setattr(cap.httpx, "post", fake_post)
-    assert cap._tool_choice_call("http://x", None, "m", "prompt", 5) is None
+def test_tool_choice_call_rejected_with_a_4xx_or_5xx_scores_false_not_none(monkeypatch):
+    # CodeRabbit P1 (PR #1821): an API REJECTION (the provider 400/500s the forced tool_choice
+    # request) is FAILED conformance — a real miss in the denominator — never None (None would
+    # let a provider that NEVER honors tool_choice score 'unknown' and slip past the
+    # capability-red gate entirely). Sweep a representative 4xx AND 5xx.
+    for code in (400, 500):
+        def fake_post(*a, _code=code, **k):
+            return _FakeResponse(status_code=_code)
+        monkeypatch.setattr(cap.httpx, "post", fake_post)
+        assert cap._tool_choice_call("http://x", None, "m", "prompt", 5) is False, code
 
 
 def test_tool_choice_call_returns_none_on_transport_exception(monkeypatch):
@@ -118,11 +123,14 @@ def test_json_call_non_conformant_wrong_shape(monkeypatch):
     assert cap._json_call("http://x", None, "m", "prompt", 5) is False
 
 
-def test_json_call_returns_none_on_http_failure(monkeypatch):
-    def fake_post(*a, **k):
-        return _FakeResponse(status_code=429)
-    monkeypatch.setattr(cap.httpx, "post", fake_post)
-    assert cap._json_call("http://x", None, "m", "prompt", 5) is None
+def test_json_call_rejected_with_a_4xx_or_5xx_scores_false_not_none(monkeypatch):
+    # CodeRabbit P1 (PR #1821): same fix as _tool_choice_call — an API rejection is FAILED
+    # conformance, not no-signal.
+    for code in (400, 429, 500):
+        def fake_post(*a, _code=code, **k):
+            return _FakeResponse(status_code=_code)
+        monkeypatch.setattr(cap.httpx, "post", fake_post)
+        assert cap._json_call("http://x", None, "m", "prompt", 5) is False, code
 
 
 # ── _reasoning_call ──────────────────────────────────────────────────────────────────────────
@@ -206,6 +214,41 @@ def test_run_capability_probe_a_totally_failed_endpoint_is_unknown_not_a_crash(m
     assert profile["toolChoice"]["honoredRate"] is None
 
 
+def test_rejected_tool_choice_with_green_json_is_red_overall_and_alarms(monkeypatch):
+    """CodeRabbit P1 regression (PR #1821), the exact scenario named in review: a provider that
+    REJECTS every forced tool_choice request (400) but conforms fine on the json-format probe.
+    BEFORE the fix, a non-2xx scored None (no signal) — `toolChoice.tier` came back 'unknown',
+    `dimension_tiers` ignored it entirely, and `overallTier` fell through to 'green' even though
+    the provider can NEVER honor a forced call. Drives the REAL per-call HTTP path (not the
+    monkeypatched-orchestration shortcut the other run_capability_probe tests use), so this
+    exercises the actual fix in `_tool_choice_call`/`_json_call`, then confirms the alarm layer
+    actually lights RED for the resulting profile."""
+    def fake_post(url, headers=None, json=None, timeout=None):
+        if json and json.get("tool_choice") is not None:
+            return _FakeResponse(status_code=400)  # the provider rejects forced tool_choice
+        # every other call (the json-conformance probe) succeeds and conforms cleanly
+        return _FakeResponse(json_data={"choices": [{"message": {"content": '{"result": "ok"}'}}]})
+    monkeypatch.setattr(cap.httpx, "post", fake_post)
+    # Keep reasoning out of this scenario (it doesn't feed overallTier) — hold it green/clean.
+    monkeypatch.setattr(cap, "_reasoning_call", lambda *a, **k: "separated")
+
+    profile = cap.run_capability_probe("http://x", "key", "model-a")
+    assert profile["toolChoice"]["honoredRate"] == 0.0, profile["toolChoice"]
+    assert profile["toolChoice"]["tier"] == "red"
+    assert profile["json"]["conformanceRate"] == 1.0
+    assert profile["json"]["tier"] == "green"
+    assert profile["overallTier"] != "green"
+    assert profile["overallTier"] == "red"
+    # The API rejections counted as REAL misses, not vanished as no-signal.
+    assert profile["callsFailed"] == 0
+    assert profile["toolChoice"]["calls"] == len(cap._TOOL_CHOICE_PROMPTS)
+
+    # And the alarm-surfacing layer actually lights RED for this exact profile shape.
+    ahr = importlib.import_module("routes.admin_health_routes")
+    alarms = ahr._compute_alarms({}, capability={"ep-1": profile})
+    assert any(a["code"] == "capability-red" for a in alarms), alarms
+
+
 # ── persistence (the FE settings store) ─────────────────────────────────────────────────────
 
 
@@ -227,6 +270,40 @@ def test_save_capability_profile_persists_to_disk(tmp_path):
     cap.save_capability_profile("ep-1", {"overallTier": "yellow"})
     saved = _json.loads((tmp_path / "settings.json").read_text())
     assert saved["capability_profiles"]["ep-1"]["overallTier"] == "yellow"
+
+
+# ── clear_capability_profile (CodeRabbit minor, PR #1821: deletion must drop the profile too) ──
+
+
+def test_clear_capability_profile_removes_only_the_named_entry():
+    cap.save_capability_profile("ep-1", {"overallTier": "red"})
+    cap.save_capability_profile("ep-2", {"overallTier": "green"})
+    cap.clear_capability_profile("ep-1")
+    assert cap.get_capability_profile("ep-1") is None
+    assert cap.get_capability_profile("ep-2") == {"overallTier": "green"}
+    assert cap.get_all_capability_profiles() == {"ep-2": {"overallTier": "green"}}
+
+
+def test_clear_capability_profile_of_a_never_probed_endpoint_is_a_noop():
+    cap.save_capability_profile("ep-2", {"overallTier": "green"})
+    cap.clear_capability_profile("ep-does-not-exist")  # must not raise, must not touch ep-2
+    assert cap.get_all_capability_profiles() == {"ep-2": {"overallTier": "green"}}
+
+
+def test_clear_capability_profile_persists_the_removal_to_disk(tmp_path):
+    cap.save_capability_profile("ep-1", {"overallTier": "red"})
+    cap.clear_capability_profile("ep-1")
+    saved = _json.loads((tmp_path / "settings.json").read_text())
+    assert "ep-1" not in (saved.get("capability_profiles") or {})
+
+
+def test_clear_capability_profile_never_raises_when_settings_is_unwritable(monkeypatch):
+    cap.save_capability_profile("ep-1", {"overallTier": "red"})
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(settings, "save_settings", boom)
+    cap.clear_capability_profile("ep-1")  # must not raise
 
 
 def test_capability_profile_functions_never_raise_when_settings_is_unwritable(monkeypatch):

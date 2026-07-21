@@ -292,8 +292,18 @@ def test_agent_loop_note_forced_choice_counts_into_the_ledger():
 # clear sits within 120 chars of that note — so the honored `_note_forced_choice` call sits AFTER
 # the clear (using `block.tool_type`, which still holds the just-matched tool name) rather than
 # between the note and the clear. `_note_forced_choice` must resolve BOTH outcomes so no attempt
-# is dropped: once at that honored site, and once more where an unmatched selection reconciles as
-# ignored before the next round's top-of-loop reset overwrites the marker.
+# is dropped.
+#
+# CodeRabbit MAJOR (PR #1821): the ORIGINAL ignored-resolution site (right after the per-round
+# tool-call loop) is UNREACHABLE for the exact F2 case this telemetry exists to catch — the model
+# calls ZERO tools — because every branch inside the giant `if not tool_blocks:` block ends in a
+# `continue`/`break` back to the top of the round loop before that post-loop code ever runs. The
+# fix adds a SECOND, EARLIER resolution site immediately after `tool_blocks` is parsed (before
+# `if not tool_blocks:` and everything downstream of it), so an unmatched/absent forced tool is
+# caught before any early continue/break can skip it. Two call sites now exist for the SAME
+# `honored=False` shape: the early one (reachable on every path, incl. zero tool calls) and the
+# original post-loop one (kept as an idempotent safety net — a no-op once the marker is cleared
+# early).
 
 
 def test_forced_choice_attempt_is_resolved_honored_at_the_belt_note_site():
@@ -307,18 +317,37 @@ def test_forced_choice_attempt_is_resolved_honored_at_the_belt_note_site():
     assert clear_idx < 120
 
 
-def test_forced_choice_attempt_is_resolved_ignored_when_never_matched():
+def test_forced_choice_attempt_is_resolved_ignored_at_two_sites_early_and_safety_net():
     src = _src("src/agent_loop.py")
-    # Exactly one reconciliation site, sitting AFTER the per-round tool-call loop that hosts the
-    # honored note above (never inside it, or every unmatched tool call in a multi-call round
-    # would double-count the same unresolved attempt as ignored).
-    assert src.count('_note_forced_choice(owner, _forced_belt_tool, honored=False)') == 1
+    # TWO reconciliation sites for the SAME ignored shape: the early one (right after
+    # `_resolve_tool_blocks`, reachable even on a zero-tool-call round) and the post-loop
+    # safety net (kept for defense in depth — a no-op once the early site has already cleared
+    # the marker).
+    assert src.count('_note_forced_choice(owner, _forced_belt_tool, honored=False)') == 2
+    resolve_at = src.index('tool_blocks, used_native = _resolve_tool_blocks(')
     honored_note_at = src.index('_note_forced_choice(owner, block.tool_type, honored=True)')
-    ignored_note_at = src.index('_note_forced_choice(owner, _forced_belt_tool, honored=False)')
-    assert ignored_note_at > honored_note_at
-    tail = src[ignored_note_at - 40:ignored_note_at + 120]
-    assert 'if _forced_belt_tool:' in tail
-    assert '_forced_belt_tool = None' in tail
+    early_ignored_at = src.index('_note_forced_choice(owner, _forced_belt_tool, honored=False)')
+    late_ignored_at = src.index('_note_forced_choice(owner, _forced_belt_tool, honored=False)',
+                                early_ignored_at + 1)
+    # Ordering: tool_blocks resolved → EARLY ignored-check → (much later) the honored check
+    # inside the per-block loop → the LATE post-loop safety net.
+    assert resolve_at < early_ignored_at < honored_note_at < late_ignored_at
+
+    # The early site sits BEFORE the giant `if not tool_blocks:` branch (and everything nested
+    # inside it) — i.e. before the force-answer synthesis / intent-nudge / live-game lull-nudge
+    # logic that would `continue`/`break` past a later check on the exact zero-tool-call round.
+    not_tool_blocks_at = src.index('if not tool_blocks:', early_ignored_at)
+    assert early_ignored_at < not_tool_blocks_at
+
+    # The early site's own guard + clear, close by (a tight, self-contained check).
+    early_tail = src[early_ignored_at - 120:early_ignored_at + 150]
+    assert 'if _forced_belt_tool and not any(' in early_tail
+    assert '_forced_belt_tool = None' in early_tail
+
+    # The late (post-loop) site's guard + clear, unchanged shape.
+    late_tail = src[late_ignored_at - 40:late_ignored_at + 120]
+    assert 'if _forced_belt_tool:' in late_tail
+    assert '_forced_belt_tool = None' in late_tail
 
 
 # ── source pins: every named belt call site notes its fire ──────────────────────────────────
@@ -505,3 +534,79 @@ def test_loop_break_note_fires_when_the_gate_itself_changed():
     al._note_loop_break_if_resolved(key, "player-lf3-gate", progressed=False, current_gate=new_gate)
     assert led.get_belt_totals("player-lf3-gate") == {"loop-break-pending": 1}
     assert key not in al._LOOP_BREAK_PENDING_NOTE
+
+
+# ── T0-4 BEHAVIORAL: the zero-tool-call forced round (CodeRabbit MAJOR, PR #1821) ───────────────
+# Drives the real `stream_agent_loop` end to end (mirrors test_tool_choice_force.py's
+# `_drive_loop_capture_tool_choice` harness) against a stubbed transport that returns PLAIN TEXT
+# with NO tool call at all — the exact F2 case this telemetry exists to catch: the model was
+# forced to call a tool and simply didn't call ANY. Before the fix this round never reached a
+# resolution site (every branch inside `if not tool_blocks:` continues/breaks first), so
+# `get_forced_choice_totals` stayed empty even though a real forced attempt was ignored.
+
+import asyncio
+
+OR_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def _drive_zero_tool_call_forced_round(monkeypatch, *, owner="t04-zero-tool-owner"):
+    """Frame a force-candidate beat (hoh-competition → advanceGame), stub the wire so the model
+    answers with plain narration and ZERO tool calls, and drive one round of the real loop."""
+    al = importlib.import_module("src.agent_loop")
+    ch = importlib.import_module("routes.chat_helpers")
+    oe = importlib.import_module("src.orwell_engine")
+    ti = importlib.import_module("src.tool_index")
+
+    monkeypatch.delenv("ORWELL_GAME_BUILD", raising=False)
+
+    _real_get_setting = al.get_setting
+
+    def fake_get_setting(key, default=None):
+        if key == "force_tool_choice_at_beats":
+            return True
+        return _real_get_setting(key, default)
+
+    monkeypatch.setattr(al, "get_setting", fake_get_setting)
+    monkeypatch.setattr(ti, "get_tool_index", lambda: None)
+
+    # A force-candidate beat: hoh-competition → the engine names advanceGame.
+    framed_key = ("w1", "hoh-competition", "hoh-competition")
+    ch._LAST_FRAMED_BEAT_KEY[owner] = framed_key
+    ch._LAST_FRAMED_REQUIRED_LEVER[owner] = "advanceGame"
+
+    async def fake_status(user=None):
+        return {"pending": None}
+    monkeypatch.setattr(oe, "game_status", fake_status)
+
+    # The stubbed wire: a normal narration reply, deliberately carrying NO tool_call_delta / no
+    # native tool call at all — the model ignored the forced tool_choice entirely.
+    async def fake_stream(candidates, messages, **kwargs):
+        yield 'data: {"delta": "The house is quiet tonight."}\n\n'
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(al, "stream_llm_with_fallback", fake_stream)
+
+    async def drive():
+        async for _ in al.stream_agent_loop(
+            OR_URL, "z-ai/glm-4.7",
+            [{"role": "system", "content": "narrator"}, {"role": "user", "content": "what happens"}],
+            max_rounds=1, game_mode="game", owner=owner,
+        ):
+            pass
+
+    try:
+        asyncio.get_event_loop().run_until_complete(drive())
+    finally:
+        ch._LAST_FRAMED_BEAT_KEY.pop(owner, None)
+        ch._LAST_FRAMED_REQUIRED_LEVER.pop(owner, None)
+
+
+def test_zero_tool_call_forced_round_records_exactly_one_ignored_attempt(monkeypatch):
+    ledger.clear("t04-zero-tool-owner")
+    _drive_zero_tool_call_forced_round(monkeypatch)
+    totals = ledger.get_forced_choice_totals("t04-zero-tool-owner")
+    assert totals == {"advanceGame": {"honored": 0, "ignored": 1, "attempted": 1}}, totals
+    # And the SUCCESS-GATED belt contract is untouched by this ignored attempt — an ignored
+    # forced call is NEVER an applied correction, so beltsFired must stay empty (the
+    # success-gated `note_belt_fire` semantics this fix must not redefine).
+    assert ledger.get_belt_totals("t04-zero-tool-owner") == {}

@@ -67,8 +67,14 @@ npm run build                       # bundles dist/main.js (+ dist/embedWorker.j
 # can never silently drift from what ships. ORWELL_DEAL_DEPTH is deliberately EXCLUDED even though the
 # deploy currently ships it: its live-loop reconciliation is still pending (owner ruling), so it stays off
 # here regardless of the deploy's current value.
+#
+# CodeRabbit MAJOR-SECURITY (PR #1821): an `eval "$(... )"` here would re-parse whatever the
+# generator prints as shell SYNTAX, not just KEY=VALUE data — an injectable pattern even though
+# today's source (deploy/orwell-env-defaults.sh) is trusted. `export "$assignment"` treats each
+# line as an opaque string value instead, so nothing it contains can execute as a command.
 . deploy/orwell-env-defaults.sh
-eval "$(orwell_optin_env_defaults "$PWD/.audit-telemetry/engine-data" | sed 's/^/export /')"
+while IFS= read -r assignment; do export "$assignment"; done \
+  < <(orwell_optin_env_defaults "$PWD/.audit-telemetry/engine-data")
 unset ORWELL_EMBEDDINGS ORWELL_EMBED_CACHE   # keep the deterministic-fake embeddings path (below)
 unset ORWELL_DEAL_DEPTH                      # TUN-10: pending its live-loop reconciliation
 ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$PWD/.audit-telemetry/engine-data" node dist/main.js

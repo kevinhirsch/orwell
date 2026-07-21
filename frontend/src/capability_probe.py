@@ -104,9 +104,16 @@ def _post(base_url: str, api_key: str | None, model: str, payload: dict, timeout
 
 def _tool_choice_call(base_url: str, api_key: str | None, model: str, prompt: str,
                       timeout: float) -> bool | None:
-    """One forced-tool_choice attempt. True = honored, False = ignored (answered without
-    calling the tool), None = the call itself failed (network/HTTP error — not counted either
-    way, so a flaky network never reads as 'the provider ignores tool_choice')."""
+    """One forced-tool_choice attempt. True = honored, False = ignored — EITHER the provider
+    answered without calling the tool, OR it outright REJECTED the request (a 4xx/5xx HTTP
+    status on a forced tool_choice call, e.g. 'tool_choice is not supported'). CodeRabbit P1
+    (PR #1821): an API rejection is a genuine, meaningful capability signal — a provider that
+    can't honor forced tools at all — and must count as a MISS in the denominator, not vanish as
+    None (a provider that 400s on every forced call would otherwise show `toolChoice.tier ==
+    'unknown'`, which is excluded from the overall-tier gate, so a provider that can NEVER honor
+    tool_choice would score green/never trip `capability-red`). None is reserved strictly for a
+    TRANSPORT failure (timeout, connection refused, an unparseable response) — genuine no-signal,
+    not a provider answer."""
     payload = {
         "messages": [
             {"role": "system", "content": "You are being capability-tested. Follow instructions exactly."},
@@ -120,7 +127,9 @@ def _tool_choice_call(base_url: str, api_key: str | None, model: str, prompt: st
     try:
         resp = _post(base_url, api_key, model, payload, timeout)
         if not resp.is_success:
-            return None
+            # An API REJECTION (the provider refused the forced-tool_choice request outright) is
+            # FAILED conformance for this dimension — a miss, not no-signal (P1 fix above).
+            return False
         data = resp.json()
         msg = ((data.get("choices") or [{}])[0] or {}).get("message") or {}
         for call in (msg.get("tool_calls") or []):
@@ -142,7 +151,10 @@ def _tool_choice_call(base_url: str, api_key: str | None, model: str, prompt: st
 def _json_call(base_url: str, api_key: str | None, model: str, prompt: str,
               timeout: float) -> bool | None:
     """One JSON-conformance attempt. True = parsed as a JSON object with a 'result' key,
-    False = the reply didn't parse / didn't conform, None = the call itself failed."""
+    False = the reply didn't parse/conform OR the provider REJECTED the request outright (a
+    4xx/5xx on a `response_format`-json call — CodeRabbit P1, PR #1821: an API rejection is
+    FAILED conformance, a real miss, not no-signal — see `_tool_choice_call`'s identical fix).
+    None is reserved strictly for a TRANSPORT failure (timeout, connection refused)."""
     import json as _json
     payload = {
         "messages": [
@@ -156,7 +168,7 @@ def _json_call(base_url: str, api_key: str | None, model: str, prompt: str,
     try:
         resp = _post(base_url, api_key, model, payload, timeout)
         if not resp.is_success:
-            return None
+            return False  # an API rejection is FAILED conformance, not no-signal
         data = resp.json()
         content = (((data.get("choices") or [{}])[0] or {}).get("message") or {}).get("content") or ""
         try:
@@ -347,7 +359,33 @@ def get_all_capability_profiles() -> dict:
         return {}
 
 
+def clear_capability_profile(endpoint_id: Any) -> None:
+    """Drop one endpoint's CapabilityProfile (CodeRabbit minor, PR #1821) — call this when the
+    endpoint itself is deleted. A stale profile left behind after deletion can still light the
+    `capability-red` alarm on /admin/status for an endpoint that no longer exists, which is
+    exactly the kind of un-actionable RED noise #1599 warns against. Best-effort: a missing
+    entry or a broken settings read/write is a no-op, never raised (deletion must never fail on
+    this)."""
+    try:
+        from src.settings import load_settings, save_settings
+        settings = load_settings()
+        profiles = dict(settings.get("capability_profiles") or {})
+        if str(endpoint_id) in profiles:
+            profiles.pop(str(endpoint_id), None)
+            settings["capability_profiles"] = profiles
+            save_settings(settings)
+    except Exception as e:
+        logger.warning("[capability-probe] failed to clear profile for endpoint %s: %s",
+                       endpoint_id, e)
+
+
 # ── the best-effort background probe run (kicked from endpoint registration) ────────────────
+#
+# KNOWN GAP (CodeRabbit nitpick, PR #1821, accepted as-is for now): the probe only fires on the
+# FRESH-endpoint registration path (POST /api/model-endpoints) — an already-registered endpoint
+# is never retro-probed, so its CapabilityProfile can go stale (or stay absent) until it is
+# edited/re-added. No scheduled/periodic re-probe exists yet; a future T1-2-style nightly canary
+# would close this (see docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md §T1-2).
 
 
 def probe_endpoint_background(endpoint_id: Any, base_url: str, api_key: str | None, model: str,

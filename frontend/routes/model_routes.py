@@ -2322,6 +2322,16 @@ def setup_model_routes(model_discovery):
             db.commit()
             _invalidate_models_cache()
             _local_probe_cache["data"] = None
+            # T0-4 (CodeRabbit minor, PR #1821): drop the deleted endpoint's CapabilityProfile too —
+            # a stale profile left behind can otherwise keep lighting the capability-red alarm on
+            # /admin/status for an endpoint that no longer exists. Fail-soft (clear_capability_profile
+            # never raises); deletion must never fail on this.
+            try:
+                from src.capability_probe import clear_capability_profile
+                clear_capability_profile(ep_id)
+            except Exception as _cap_clear_err:
+                logger.warning("[model-endpoints] capability-profile clear skipped (fail-soft): %s",
+                               _cap_clear_err)
             return {
                 "deleted": True,
                 "cleared_settings": cleared,
