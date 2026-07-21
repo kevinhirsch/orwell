@@ -1207,7 +1207,10 @@ export class GameSessionAdapter implements GameSession {
     this.onPersist?.();
   }
 
-  private inOneCommit<T>(fn: () => T): T {
+  // Greptile P2 (issue #1725 follow-up) — constrained to `{ beatSeq: number }` (every real caller
+  // already returns an `AdvanceView`, which requires it) so the compiler enforces the invariant the
+  // post-commit patch below relies on, instead of a runtime duck-type check.
+  private inOneCommit<T extends { beatSeq: number }>(fn: () => T): T {
     this.persistDepth++;
     let out: T;
     try {
@@ -1218,6 +1221,19 @@ export class GameSessionAdapter implements GameSession {
     if (this.persistDepth === 0 && this.persistDeferred) {
       this.persistDeferred = false;
       this.onPersist?.(); // may throw (a refused/failed commit) — AFTER all state mutation (E3)
+      // Issue #1725 (C1) — `fn()` built `out` (and read `this.beatSeq` into it via `advanceView`)
+      // BEFORE the deferred `onPersist` above ran, so `out.beatSeq` was captured PRE-commit-funnel:
+      // stale by the ONE bump this very mutation just earned, and it would stay stale by any FURTHER
+      // bump a supplementary off-screen tick folds into the SAME commit (`onPersist` synchronously
+      // drives the registry's commit funnel → the orchestrator's turn-driven tick, all inside this
+      // call, all before we reach this line). The FE caches whatever this method returns as its next
+      // compare-and-swap token — a response reporting the PRE-commit counter makes the FE's own very
+      // next mutation self-409 as stale, even with zero concurrency (audit finding: 5 closed-set
+      // reconciliations / a false-positive desync-burst alarm in a single-window session). Patch it to
+      // the counter's CURRENT (fully-committed, post-tick) value now that the whole commit has landed —
+      // a VALUE correction, never a new field — and it only runs after a successful commit (a refused/
+      // failed `onPersist` throws on the line above, before this runs, so `out` is never returned then).
+      out.beatSeq = this.beatSeq;
     }
     return out;
   }
@@ -1311,7 +1327,15 @@ export class GameSessionAdapter implements GameSession {
     // effort + fail-soft: a persist hiccup must never turn an already-committed progression into an error.
     if (isNew) {
       try {
-        this.persist();
+        this.persist(); // outside any `inOneCommit` depth ⇒ fires `onPersist` DIRECTLY, a SECOND real commit
+        // Issue #1725 (C1) — this is a genuine SECOND bump through the SAME commit funnel (the idempotency
+        // entry is durable state, so backfilling it commits again), landing AFTER `inOneCommit` already
+        // built+corrected `view.beatSeq` for the FIRST commit. Without this, the cached/returned view would
+        // report a counter one commit further behind current — the same "FE caches a stale token, its own
+        // next mutation self-409s" failure mode, just via the idempotency path instead of the tick. `view`
+        // is the SAME object reference stored in `idempotencyCache` above, so this also keeps a later
+        // verbatim replay of this key correct.
+        view.beatSeq = this.beatSeq;
       } catch {
         /* the cache is a durability optimization; a persist failure must not break the committed view */
       }
