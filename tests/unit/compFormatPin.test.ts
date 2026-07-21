@@ -314,4 +314,79 @@ describe("L-F4 (#1743) — adapter-level themed pin: whereabouts().houseEvent.co
     // And the pin is the frozen SEEDED THEME, not the late authored theme.
     expect(seen[0]!).not.toContain("a late model-authored premise");
   });
+
+  it("a LEGACY in-progress comp (no frozen fields) is LAZY-FROZEN on first read, then can't flip across remaining rounds", () => {
+    const sb = newThemedGame("lf4-legacy", 31);
+    const s = sb.session;
+
+    // Advance into the first STAGED competition.
+    let reached = false;
+    for (let i = 0; i < 400 && !reached; i++) {
+      if (compPinString(sb) !== null) { reached = true; break; }
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+    }
+    expect(reached, "the drive must reach a staged competition").toBe(true);
+
+    // Simulate a PRE-#1743 save: STRIP the frozen theme fields so the comp is loaded "legacy" (every read
+    // would otherwise fall back to mutable live state).
+    const live = (s as unknown as { live: { competition?: { themeWeek?: number; themeCycle?: number; themeAuthored?: boolean }; twist?: unknown } }).live;
+    const c = live.competition!;
+    delete c.themeWeek; delete c.themeCycle; delete c.themeAuthored;
+    expect(c.themeWeek, "the legacy comp starts with no frozen fields").toBeUndefined();
+
+    // FIRST READ lazy-freezes the presentation from the current live state (persisted onto the comp).
+    const first = compPinString(sb);
+    expect(first, "the legacy staged comp still surfaces a pin").not.toBeNull();
+    expect(c.themeWeek, "the first read froze the theme inputs onto the comp (persists in the snapshot)").not.toBeUndefined();
+    expect(c.themeAuthored, "the source decision is frozen too").not.toBeUndefined();
+
+    // From here the pin must stay byte-identical across remaining rounds even as the live twist flips —
+    // the lazy-freeze on first read closed the legacy flip.
+    const seen: string[] = [first!];
+    for (let i = 0; i < 40; i++) {
+      const savedTwist = live.twist;
+      live.twist = { kind: "double-eviction", phase: "running" }; // would re-skin a legacy comp if unpinned
+      const underFlip = compPinString(sb);
+      live.twist = savedTwist;
+      if (underFlip !== null) seen.push(underFlip);
+
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+      const next = compPinString(sb);
+      if (next === null) break;
+      seen.push(next);
+    }
+    expect(seen.length, "the comp spanned multiple beats after the lazy-freeze").toBeGreaterThanOrEqual(2);
+    expect(new Set(seen).size, "the lazy-frozen legacy comp must be byte-identical across every remaining round + twist flip").toBe(1);
+  });
+
+  it("the lazy-freeze is idempotent — it never re-freezes an already-frozen comp to a new live value", () => {
+    const sb = newThemedGame("lf4-legacy-idem", 7);
+    const s = sb.session;
+    let reached = false;
+    for (let i = 0; i < 400 && !reached; i++) {
+      if (compPinString(sb) !== null) { reached = true; break; }
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+    }
+    expect(reached).toBe(true);
+    const live = (s as unknown as { live: { competition?: { themeWeek?: number; themeCycle?: number }; twist?: unknown } }).live;
+    const c = live.competition!;
+    delete c.themeWeek; delete c.themeCycle;
+    (c as { themeAuthored?: boolean }).themeAuthored = undefined;
+
+    compPinString(sb);                    // first read freezes (twist absent ⇒ cycle 0)
+    const frozenWeek = c.themeWeek;
+    const frozenCycle = c.themeCycle;
+    expect(frozenWeek).not.toBeUndefined();
+
+    live.twist = { kind: "double-eviction", phase: "running" }; // a later live change
+    compPinString(sb);                    // a subsequent read must NOT re-freeze
+    expect(c.themeWeek, "the frozen week is not re-frozen").toBe(frozenWeek);
+    expect(c.themeCycle, "the frozen cycle is not re-frozen to the new live twist").toBe(frozenCycle);
+  });
 });

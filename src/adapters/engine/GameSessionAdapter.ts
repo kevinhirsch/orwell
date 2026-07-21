@@ -10467,13 +10467,18 @@ export class GameSessionAdapter implements GameSession {
         // context (a restart) re-grounds the narrator in the authored staging instead of the library
         // floor. PRESENTATION ONLY — the winner/format are unchanged; the per-drop fiction rides the
         // comp-elimination beats, so the preview `beats` stay the generic library scaffold (no spoiler).
+        // L-F4 (#1743): the presentation SOURCE (authored fiction vs. seeded theme) is decided by the
+        // FROZEN pin, NOT the live fiction — so a late first-fiction write-back can never re-skin the
+        // active comp's name/premise (and this preview matches whereabouts().houseEvent.comp round to
+        // round). `competitionPresentation` also LAZY-FREEZES a legacy in-progress comp on this first read.
+        const pres = competitionPresentation(this.live); // non-null for a staged comp; null for a pre-stage preview
         const f = this.live.competitionFiction;
-        const authored = f && f.comp === peek.beat && f.week === this.week ? f : undefined;
+        const authored = pres?.authored ? f : undefined; // pres.authored already honors the frozen source
         // 0125: the seeded theme is the deterministic floor's skin; #1400's model-authored fiction still
         // overrides it (a fresh restart re-grounds the narrator in the authored staging). Precedence:
         // model fiction > seeded theme > bare 0042 library.
-        // L-F4 (#1743): for an in-progress staged comp read the theme from its FROZEN draw-time inputs, so
-        // this preview matches whereabouts().houseEvent.comp round to round even if the live twist flips.
+        // For an in-progress staged comp read the theme from its FROZEN inputs (pinned at draw, or lazy-
+        // frozen just above for a legacy save), so it stays byte-identical round to round.
         const skin = this.themedScaffold(peek.def, this.frozenCompTheme());
         return {
           started: true, type: peek.type, week: this.week, phase: this.phase,

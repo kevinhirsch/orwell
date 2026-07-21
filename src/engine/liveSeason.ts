@@ -812,6 +812,23 @@ function freezeCompTheme(s: LiveSeasonState): void {
 }
 
 /**
+ * L-F4 (#1743) — LAZY-FREEZE for a LEGACY save. An in-progress staged comp loaded from a pre-#1743 save
+ * carries no frozen theme fields, so every read would fall back to MUTABLE live state (a twist-phase
+ * change or a late fiction write-back could then re-skin its remaining rounds — the flip this feature
+ * closes). Freeze them ONCE, at the FIRST read, from the current live state, and persist onto the comp,
+ * so from that point the presentation is pinned for the comp's remaining rounds. STRICTLY idempotent: a
+ * comp that already carries the fields is NEVER re-frozen (a later live twist/week change must not shift
+ * an already-pinned comp), and a pre-stage / no-comp state is left to live resolution. Presentation-only
+ * (freezeCompTheme consumes no rng, folds nothing) — the frozen values equal what a fresh draw would have
+ * pinned, so nothing calibration-relevant changes. Called at the top of every presentation read.
+ */
+export function ensureCompThemeFrozen(s: LiveSeasonState): void {
+  const c = s.competition;
+  if (!c || c.themeWeek !== undefined) return; // no staged comp, or already frozen ⇒ never re-freeze
+  freezeCompTheme(s);
+}
+
+/**
  * Resolve the veto competition beat — STAGED exactly like the HOH beat (the chip-draw ceremony, E35,
  * still precedes it). Presentation-only over the single calibrated outcome; crowns the Power of Veto.
  */
@@ -1163,6 +1180,9 @@ export interface CompetitionPresentation {
 }
 
 export function competitionPresentation(s: LiveSeasonState): CompetitionPresentation | null {
+  // L-F4 (#1743): a legacy in-progress comp (no frozen fields) is pinned ONCE here, on first read, so it
+  // can't flip for its remaining rounds. A comp drawn under this change is already frozen ⇒ a no-op.
+  ensureCompThemeFrozen(s);
   let comp: "hoh-competition" | "veto-competition" | undefined;
   let def: CompetitionDef | undefined;
   if (s.competition) {
