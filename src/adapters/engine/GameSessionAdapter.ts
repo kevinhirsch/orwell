@@ -470,6 +470,17 @@ const TRAJECTORIES_ENABLED_DEFAULT = process.env.ORWELL_TRAJECTORIES === "1";
 const STRATEGIC_CADENCE_ENABLED_DEFAULT = process.env.ORWELL_STRATEGIC_CADENCE === "1";
 
 /**
+ * Wave-2 off-screen-society fidelity — whether OFF-SCREEN SCHEMING NAMES A REAL TARGET runs by DEFAULT.
+ * OFF unless `ORWELL_SCHEME_TARGETS=1`. A DEDICATED flag (sibling to `ORWELL_STRATEGIC_CADENCE`/
+ * `ORWELL_TRAJECTORIES`) so calibration neutrality is provable in isolation: unset ⇒ the off-screen tick
+ * passes no `nameSchemeTargets` ⇒ no target clause is appended and every seeded gate is byte-identical (the
+ * clause rides a per-scene SIDE rng, so even ON the main stream is byte-identical — the flag keeps the
+ * hidden CONTENT byte-identical when off too). The calibration/UAT harness never sets it; the live deploy
+ * does. A test overrides per-session via `setSchemeTargetsEnabled`.
+ */
+const SCHEME_TARGETS_ENABLED_DEFAULT = process.env.ORWELL_SCHEME_TARGETS === "1";
+
+/**
  * 0121 — whether the DEAL-DEPTH layer runs by DEFAULT (the active-obligation kinds `comp-throw`/`veto-save`
  * + the reliability rewards). OFF unless `ORWELL_DEAL_DEPTH=1`. A DEDICATED flag (sibling to
  * `ORWELL_STRATEGIC_CADENCE`/`ORWELL_CAMPAIGNS`) so calibration neutrality is provable in isolation: unset ⇒
@@ -926,6 +937,8 @@ export class GameSessionAdapter implements GameSession {
   private trajectoriesEnabled = TRAJECTORIES_ENABLED_DEFAULT;
   /** 0120 — strategic-drive initiator cadence (off ⇒ uniform off-screen initiator draw, byte-identical). */
   private strategicCadenceEnabled = STRATEGIC_CADENCE_ENABLED_DEFAULT;
+  /** Wave-2 — off-screen scheming names a real target (off ⇒ no target clause; byte-identical hidden content). */
+  private schemeTargetsEnabled = SCHEME_TARGETS_ENABLED_DEFAULT;
   /** 0121 — deal-depth layer (active-obligation kinds + reliability rewards); off ⇒ 0039/0109 exactly. */
   private dealDepthEnabled = DEAL_DEPTH_ENABLED_DEFAULT;
   /** 0121 R1 — seed a diffusing "keeps their word" reputation when a deal is kept (registry-wired; it holds
@@ -6871,6 +6884,13 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the strategic-drive cadence is live (0120) — the orchestrator reads this so it passes
    *  `initiatorDriveOf` ONLY when on (off ⇒ the off-screen initiator is the uniform `rng.pick`). */
   strategicCadenceEnabledNow(): boolean { return this.strategicCadenceEnabled; }
+
+  /** Turn the Wave-2 off-screen-scheming-names-a-real-target layer on/off. Off by default — the calibration
+   *  harness leaves it off (off ⇒ the off-screen tick passes no `nameSchemeTargets` ⇒ byte-identical). */
+  setSchemeTargetsEnabled(on: boolean): void { this.schemeTargetsEnabled = on; }
+  /** Whether the off-screen scheme-target layer is live — the orchestrator reads this so it passes
+   *  `nameSchemeTargets` ONLY when on (off ⇒ no third-party target clause is appended to hidden scenes). */
+  schemeTargetsEnabledNow(): boolean { return this.schemeTargetsEnabled; }
 
   /** 0120 — how often this houseguest INITIATES off-screen scheming, weighted by strategic intelligence
    *  (Mental stat) + personality (strategyStyle). Engine-internal (the off-screen society is hidden) —
