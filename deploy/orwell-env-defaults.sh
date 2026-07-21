@@ -36,6 +36,9 @@
 #       (The five above are the B2 2026-07-05 "living house" activation; the God-Mode "Living house"
 #        dial overrides them per-sandbox at runtime, and /health's `flags` block reports the boot state.)
 #   ORWELL_STRATEGIC_CADENCE    Strategic-drive off-screen cadence (0120) — sharper NPCs scheme a touch more.
+#   ORWELL_SCHEME_TARGETS       Off-screen scheming names a real third-party target (Wave-2 fidelity) — the
+#       initiator's strongest threat read is named in the HIDDEN scene; reaches the player only via gossip.
+#       Vault-safe (side rng, no number) — the seeded comp/vote spine is byte-identical even while ON.
 #   ORWELL_CONFESSIONAL_DEPTH   Deeper daily NPC confessionals (0122) — Vault-only, clock-gated.
 #   ORWELL_DEAL_DEPTH           Deal depth (0121) — comp-throw / veto-save deals + reliability rewards.
 #   ORWELL_NPC_DEAL_OFFERS      NPC-initiated deal offers (0123) — a motivated NPC floats a deal at a lull.
@@ -68,6 +71,7 @@ ORWELL_SECRET_PACING=1
 ORWELL_JURY_HOUSE=1
 ORWELL_SEEDED_TIE_SURFACING=1
 ORWELL_STRATEGIC_CADENCE=1
+ORWELL_SCHEME_TARGETS=1
 ORWELL_CONFESSIONAL_DEPTH=1
 ORWELL_DEAL_DEPTH=1
 ORWELL_NPC_DEAL_OFFERS=1

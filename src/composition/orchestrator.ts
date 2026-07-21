@@ -723,6 +723,10 @@ export function defaultApply(sandbox: UserSandbox, trigger: Trigger, rng: Seeded
         ...(sandbox.session.strategicCadenceEnabledNow()
           ? { initiatorDriveOf: (id: EntityId) => sandbox.session.initiatorDrive(id) }
           : {}),
+        // Wave-2: off-screen scheming names a real third-party target (grounded in the initiator's threat
+        // read). Passed ONLY when enabled so the off-screen call is byte-identical when off; the clause rides
+        // a per-scene SIDE rng, so even ON the seeded competition/vote spine stays in phase.
+        ...(sandbox.session.schemeTargetsEnabledNow() ? { nameSchemeTargets: true } : {}),
         ...(occupancy ? { occupancy } : {}),
       })
     : []; // too few living NPCs to pair (deep endgame) — no off-screen society

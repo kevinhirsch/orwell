@@ -95,6 +95,19 @@ export const SOCIETY = {
    * occasional, exactly like the B50 hidden-element reveal it sits beside.
    */
   playerSubjectProb: 0.1,
+  /**
+   * OFF-SCREEN SCHEMING NAMES A REAL TARGET (Wave-2 fidelity enrichment; opt-in via `ORWELL_SCHEME_TARGETS`).
+   * The NPC counterpart of `playerSubjectProb`: a strategy/alliance/conflict scene between two NPCs is
+   * really ABOUT a THIRD houseguest — the person they're plotting against — yet the scene names only its
+   * two participants, so the hidden layer (and the gossip that rises from it) carried no concrete target.
+   * When on, such a scene occasionally names the initiator's strongest live THREAT read among the OTHER
+   * houseguests as the scheme's target — grounded in the real NPC→NPC edge, never invented. The target is
+   * a SUBJECT only (named in still-hidden content), NEVER added to the witness set / made an actor, and it
+   * reaches the player ONLY via the existing gossip/pathway mechanism. Rolled on the SAME kind of per-scene
+   * SIDE rng as PV1 (distinct salt) so the main `rng` stream — and the seeded calibration spine — stays
+   * byte-identical. Bounded / occasional, exactly like the B50 reveal and PV1 it sits beside.
+   */
+  schemeTargetProb: 0.14,
 } as const;
 
 /**
@@ -112,6 +125,40 @@ export function playerSubjectClause(e: EdgeSignals, initiator: EntityId, player:
     return ` — ${initiator} counts ${player} as someone to work with to the end`;
   }
   return ` — ${initiator} is still reading ${player}, unsure where they land`;
+}
+
+/**
+ * OFF-SCREEN SCHEMING NAMES A REAL TARGET — the initiator's strongest live THREAT read among the OTHER
+ * houseguests (never the scene partner, never the player), or `undefined` when no candidate reads as a
+ * genuine threat (no incentive to scheme about anyone — no target is invented). Pure over the supplied
+ * edge reader; grounded in the real NPC→NPC edge, so a scheme names a plausible target, never a random
+ * name. Returns the entity id; the caller appends the clause to the scene's already-HIDDEN content.
+ */
+export function schemeTargetOf(
+  edgeOf: (from: EntityId, to: EntityId) => EdgeSignals,
+  initiator: EntityId,
+  exclude: readonly EntityId[],
+  pool: readonly EntityId[],
+): EntityId | undefined {
+  let best: EntityId | undefined;
+  let bestThreat: number = SOCIETY.betrayalThreatFloor; // a real incentive floor — below it, nobody is worth scheming on
+  for (const c of pool) {
+    if (c === initiator || exclude.includes(c)) continue;
+    const threat = edgeOf(initiator, c).threat;
+    if (threat > bestThreat) {
+      bestThreat = threat;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** The clause a scheming scene gets when it names its real third-party target — grounded in the
+ *  initiator's threat read, appended to the scene's still-hidden content. No number ever crosses. */
+export function npcTargetClause(initiator: EntityId, target: EntityId, type: InteractionType): string {
+  if (type === "alliance") return ` — plotting to take ${target} out`;
+  if (type === "conflict") return ` — both fed up with ${target}`;
+  return ` — ${initiator} wants ${target} gone next`;
 }
 
 /** One weighted draw. `weights` must be non-negative; zero-total falls back to the first item. */
@@ -251,10 +298,23 @@ export function richOffscreenStretch(deps: {
    * `rng.pick` exactly (byte-identical). Requires `edgeOf` (the motivated path).
    */
   initiatorDriveOf?: (id: EntityId) => number;
+  /**
+   * OFF-SCREEN SCHEMING NAMES A REAL TARGET (Wave-2 fidelity enrichment, opt-in via `ORWELL_SCHEME_TARGETS`).
+   * When true (and `edgeOf` present), a strategy/alliance/conflict scene occasionally NAMES the initiator's
+   * strongest live THREAT read among the OTHER houseguests as the scheme's target in its still-HIDDEN content
+   * (`schemeTargetOf`/`npcTargetClause`, gated by `SOCIETY.schemeTargetProb`). CRITICAL (Vault Wall): the
+   * named target is a SUBJECT only — never added to `witnessSet`, never an initiator/partner, and reaches the
+   * player ONLY via the existing gossip/pathway mechanism (the scene is hidden here). CRITICAL (calibration):
+   * rolled on a per-scene SIDE rng (keyed off the event id, distinct salt from the B50 reveal and PV1) so the
+   * main `rng` stream stays byte-identical — absent/false ⇒ no target clause (the pure tests and the seeded
+   * spine are untouched). Requires `edgeOf` (the motivated path has the reads to ground a real target).
+   */
+  nameSchemeTargets?: boolean;
 }): OffscreenScene[] {
   const {
     events, rng, npcs, interactions, hiddenElementsOf, edgeOf, occupancy,
     showmancePlausible, hasActiveShowmance, playerSubject, trajectoryOf, initiatorDriveOf,
+    nameSchemeTargets,
   } = deps;
   const scenes: OffscreenScene[] = [];
   // #840 — houseguests who pick up a NEW showmance partner during this stretch, so a later scene in
@@ -362,6 +422,20 @@ export function richOffscreenStretch(deps: {
       const side = new SeededRandom(hashSeed(`${event.id}:player-subject`));
       if (side.next() < SOCIETY.playerSubjectProb) {
         event.content += playerSubjectClause(edgeOf(a, playerSubject), a, playerSubject);
+      }
+    }
+    // OFF-SCREEN SCHEMING NAMES A REAL TARGET — a strategy/alliance/conflict scene occasionally names the
+    // initiator's strongest THREAT read among the OTHER houseguests as the scheme's target (grounded in the
+    // real NPC→NPC edge). The target is a SUBJECT only: never a witness, never an actor — it surfaces only
+    // later via gossip/pathways. The side rng (distinct salt) keeps the main stream byte-identical; requires
+    // `edgeOf`. The player is never a target here (PV1 above owns the player-subject case; excluded below).
+    if (nameSchemeTargets && edgeOf
+        && (type === "strategy" || type === "conflict" || type === "alliance")) {
+      const side = new SeededRandom(hashSeed(`${event.id}:scheme-target`));
+      if (side.next() < SOCIETY.schemeTargetProb) {
+        const exclude = playerSubject ? [b, playerSubject] : [b];
+        const target = schemeTargetOf(edgeOf, a, exclude, npcs);
+        if (target) event.content += npcTargetClause(a, target, type);
       }
     }
     events.record(event);
