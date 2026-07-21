@@ -388,14 +388,17 @@ def main() -> int:
             # non-holder line that shares the DR secret's distinctive vocabulary WITHOUT reciting it, so
             # the paraphrase residual is surfaced for human review rather than silently passing. LOG-ONLY
             # (SOFT-*), never fails the run; fail-soft (any import/eval hiccup ⇒ no flag, never a crash).
+            # Check the FULL active roster as candidate speakers (Greptile #1763), not just `target` — a
+            # paraphrase by ANY houseguest is the residual, and scoping to one name would miss the rest.
             para_suspect = False
             try:
                 from routes import chat_helpers as _ch  # noqa: PLC0415
                 _facts = [{"content": dr_secret_line, "knownTo": [],
                            "signatures": _ch._sealed_signatures(dr_secret_line)}]
+                _speakers = [h["name"] for h in house] or [target]
                 for _body in leak_bodies:
                     for _sent in re.split(r"(?<=[.!?\n])", _body):
-                        if _ch._paraphrase_suspect(_sent, _facts, [target]):
+                        if _ch._paraphrase_suspect(_sent, _facts, _speakers):
                             para_suspect = True
                             break
                     if para_suspect:

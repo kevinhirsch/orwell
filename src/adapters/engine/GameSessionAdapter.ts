@@ -2047,15 +2047,32 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * ADR 0019 guardian caveat C1 — the producer-only casting material the player told production at the
-   * casting interview, which has NO in-game pathway to ANY houseguest. It lives on the player object
-   * (never seeded into the knowledge layer), so the ADR 0019 Layer 2/3 knowledge manifests never saw
-   * it; this collects it as prose so `sealedFromHouse` can seal it globally. Vault-free by construction:
-   * the player's OWN authored casting words (motivation / private strategy / backstory / interview
-   * notes) — never a stat, a soul number, or any hidden layer. Absent ⇒ []. Distinctive-prose only: a
-   * short/generic label would risk a false positive in the FE shingle guard, and the short public
-   * persona labels are already dropped from the context by #1727, so they are NOT sealed here.
+   * ADR 0019 guardian caveat C1 — the genuinely PRODUCER-ONLY casting intake the player told production
+   * at the casting interview, which has NO in-game pathway to ANY houseguest AND is never spoken in the
+   * house: their motivation ("why I came"), their private strategy (recorded "this stays with
+   * production"), and their casting interview notes. It lives on the player object (never seeded into
+   * the knowledge layer), so the ADR 0019 Layer 2/3 knowledge manifests never saw it; this collects it
+   * as prose so `sealedFromHouse` can seal it GLOBALLY (`knownTo` empty ⇒ no houseguest may ever voice
+   * it). Vault-free by construction: the player's OWN authored casting words — never a stat, a soul
+   * number, or any hidden layer. Absent ⇒ [].
+   *
+   * DELIBERATELY EXCLUDED — `character.background` (the player's BACKSTORY). Backstory is SHAREABLE
+   * public biography: in ordinary house play the player tells houseguests where they're from / what
+   * they do, so a houseguest the player told LEGITIMATELY references it. A global seal cannot tell
+   * "no one has been told yet" from "this houseguest was told," so it would DROP that legitimate
+   * open-set narration all season — a false hold worse than a missed phantom (ADR 0005 #1, the same
+   * principle the C2 arm cites). Backstory's casting-turn recital is handled by Layer 1 (context
+   * removal + tool-result redaction), and any later reference belongs to the pathway model, NEVER a
+   * global seal. Likewise the short public persona labels stay out (already dropped from context by
+   * #1727 and false-positive-prone in the shingle guard). Distinctive prose only.
    */
+  /** A seal needs ≥ this many words to be distinctive enough for the FE shingle guard (Greptile/CR
+   *  #1763): a terse casting answer ("revenge", "the money") would otherwise mint a broad single-word
+   *  signature that `_sentence_leaks_sealed`'s substring match hard-drops in EVERY sentence carrying
+   *  that common word all season — a false hold on the open set (ADR 0005 #1). A short answer relies on
+   *  Layer 1 (context removal) alone; only distinctive prose earns the Layer-3 global seal. */
+  private static readonly MIN_SEAL_WORDS = 3;
+
   private producerOnlyCastingSeals(): string[] {
     if (!this.house) return [];
     const p = this.house.player;
@@ -2063,12 +2080,15 @@ export class GameSessionAdapter implements GameSession {
     const out: string[] = [];
     const push = (raw: string | undefined) => {
       const content = this.humanize((raw ?? "").trim()).trim();
-      // Dedup: motivation lands both directly and as a "why I came" Soul-memory entry.
-      if (content && !seen.has(content)) { seen.add(content); out.push(content); }
+      if (!content || seen.has(content)) return;
+      // Distinctiveness floor — a too-terse value can't be safely shingle-matched (see MIN_SEAL_WORDS).
+      if (content.split(/\s+/).length < GameSessionAdapter.MIN_SEAL_WORDS) return;
+      seen.add(content);
+      out.push(content);
     };
     push(p.motivation);
     push(p.privateStrategy);
-    push(p.character.background);
+    // NB: p.character.background is NOT sealed — shareable public bio (see the doc comment above).
     // The casting-interview notes were folded into Soul memory as "casting interview — <note>" entries
     // (mirrors `carryOverFields`); each is producer-only intake with no NPC pathway.
     const PREFIX = "casting interview — ";

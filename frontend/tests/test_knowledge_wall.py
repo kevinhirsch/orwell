@@ -357,6 +357,19 @@ def test_fetch_surfaces_the_casting_class_from_sealed_from_house(monkeypatch):
     assert casting["knownTo"] == []  # globally sealed ⇒ ANY staged houseguest voicing it is dropped
 
 
+def test_a_houseguest_referencing_the_players_shared_backstory_is_NOT_dropped():
+    # Greptile #1763 / ADR 0005 #1: backstory is shareable public bio, so it is NOT in the sealed set —
+    # a houseguest the player told legitimately references it, and the guard must never hold that line.
+    # Only the producer-only motivation is sealed here; the backstory reference has no signature to match.
+    _seed(_USER, sealed=[{"content": _CASTING, "knownTo": []}], active_names=["HOH", "Nominee"])
+    transcript = (
+        'the Nominee smiled and said, "you mentioned you\'re a nurse from Ohio — that must be intense." '
+        "You nodded and told them more about the ward."
+    )
+    out = _run(chat_helpers.screen_knowledge_wall(_USER, transcript))
+    assert out == transcript  # byte-identical: shared backstory is legitimate open-set narration
+
+
 # ── ADR 0019 guardian caveat C2 — the ACCEPTED-RESIDUAL paraphrase MONITOR (SOFT, never a drop) ── #
 #
 # C2 is ADR 0019's deliberately-accepted residual: one LLM voices every NPC from ONE shared completion,
@@ -367,8 +380,9 @@ def test_fetch_surfaces_the_casting_class_from_sealed_from_house(monkeypatch):
 # guard cannot, (b) the verbatim guard still HARD-drops a recital, and (c) it does not fire on ordinary
 # prose or on the holder alluding to their own fact. Roles only.
 
-# The sealed casting backstory (the ADR's canonical example — the player told production this at casting).
-_CAMP = "I was secretly a summer camp counselor for troubled teens before the show"
+# A genuinely producer-only casting note the player confided to production (never spoken in-house — a
+# private-strategy-class fact, not the shareable public backstory, which is NOT globally sealed).
+_CAMP = "I confided to production that my hidden edge is old summer camp counselor mind games"
 
 
 def _facts_camp():
@@ -385,7 +399,7 @@ def test_paraphrase_of_a_sealed_fact_is_a_soft_suspect_not_a_hard_leak():
 
 
 def test_verbatim_recital_is_still_hard_dropped_not_merely_soft_flagged():
-    recital = 'the Nominee grinned, "you were secretly a summer camp counselor for troubled teens, huh?"'
+    recital = 'the Nominee grinned, "your hidden edge is old summer camp counselor mind games, huh?"'
     # The verbatim class stays HARD (Layer 3 drops it); the SOFT monitor defers to it (no double-count).
     assert chat_helpers._sentence_leaks_sealed(recital, _facts_camp(), ["HOH", "Nominee"]) is True
     assert chat_helpers._paraphrase_suspect(recital, _facts_camp(), ["HOH", "Nominee"]) is False
