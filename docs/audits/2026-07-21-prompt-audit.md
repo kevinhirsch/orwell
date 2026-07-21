@@ -195,10 +195,14 @@ overwritten by "full sleeve of … tattoos" ×4 (the live bundle).
 - **Prompt**: the seeded `physicalCharacteristics` now threads into the skeleton as the LOOK BRIEF
   ("sharpen, same person"); `_SYSTEM` states THE INK BUDGET IS FIXED + the realistic mark menu
   ("a distinguishingMark is usually minor or absent … never default to a tattoo").
-- **STRUCTURAL engine backstop** (the skinTone-re-ground precedent): `recordCastProfile` refuses an
-  authored mark that **introduces** ink where the seeded deal granted none (that one field falls
-  back to the seeded mark; every other authored facet folds). An authored ink mark where the deal
-  granted ink is kept verbatim (sharpening, not inventing).
+- **STRUCTURAL engine backstop** (the skinTone-re-ground precedent): on a no-ink slot (the seeded
+  facet carries no ink in ANY portrait-rendered field), `recordCastProfile` refuses EVERY authored
+  `physicalCharacteristics` field that introduces ink — all seven fields the portrait/context
+  builders render (heightBuild/skinTone/hair/facialFeatures/distinguishingMark/ageLook/style; a
+  clean mark + a tattooed `style` was the Greptile-P1 bypass, since `style` renders into the
+  portrait's "Presentation style:" line). Each violating field falls back to its seeded floor
+  value; clean authored facets fold freely. A seeded facet that already granted ink leaves the
+  authored look untouched (sharpening, not inventing).
 Gates: `tests/unit/diversity.test.ts` ("the engine owns the visible-ink budget") +
 `frontend/tests/test_l28b_cast_authoring.py` (look-brief threading + ink-budget prompt pins).
 

@@ -2376,14 +2376,30 @@ export class GameSessionAdapter implements GameSession {
       // below): the engine deals the cast-wide visible-ink budget through the seeded distinguishing-mark
       // spread (deepProfile `dealCastPhysicalSpread`), but the authoring LLM's tattoo prior reliably
       // overwrites it ("full sleeve of … tattoos" on 4+ houseguests in one live bundle). The budget is
-      // an ENGINE guarantee: an authored mark that INTRODUCES ink where the seeded deal granted none is
-      // refused for that one field — the seeded mark stands; every other authored facet folds freely.
-      const priorMark = target.character.physicalCharacteristics?.distinguishingMark ?? "";
-      const authoredMark = req.physicalCharacteristics.distinguishingMark ?? "";
+      // an ENGINE guarantee, and it must cover EVERY facet field the portrait/context builders render
+      // (Greptile P1 on #1768: a clean mark + a tattooed `style` bypassed a mark-only guard — `style`
+      // flows into the portrait's "Presentation style:" line, and the other five fields flow through
+      // `physicalFacetToAppearance` into both the portrait and the narrator context). So: on a NO-ink
+      // slot (the seeded facet carries no ink in ANY rendered field), each authored field that
+      // INTRODUCES ink is refused per-field — the seeded floor value for THAT field stands (the same
+      // per-field fallback the skinTone re-ground uses); every clean authored facet folds freely. A
+      // seeded facet that already granted ink anywhere leaves the authored look untouched (sharpening,
+      // not inventing).
       const INK_RE = /tattoo|inked/i;
-      const inkIntroduced = INK_RE.test(authoredMark) && priorMark.length > 0 && !INK_RE.test(priorMark);
+      const RENDERED_FACET_FIELDS = [
+        "heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style",
+      ] as const;
+      const prior = target.character.physicalCharacteristics;
+      const priorHasInk = prior !== undefined
+        && RENDERED_FACET_FIELDS.some((f) => INK_RE.test(prior[f] ?? ""));
       target.character.physicalCharacteristics = req.physicalCharacteristics;
-      if (inkIntroduced) target.character.physicalCharacteristics.distinguishingMark = priorMark;
+      if (prior !== undefined && !priorHasInk) {
+        for (const f of RENDERED_FACET_FIELDS) {
+          if (INK_RE.test(req.physicalCharacteristics[f] ?? "")) {
+            target.character.physicalCharacteristics[f] = prior[f];
+          }
+        }
+      }
       // 0063 RE-GROUND (the "olive-skin collapse" fix, 2026-06-23): the FE authoring LLM re-authors the
       // WHOLE physicalCharacteristics block — including skinTone — but it is NOT given the houseguest's
       // guaranteed heritage, so it reliably defaults skinTone to a generic "olive" and silently discards

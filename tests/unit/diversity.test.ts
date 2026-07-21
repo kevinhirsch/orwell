@@ -11,6 +11,7 @@ import {
   AGE_BANDS, AGE_ELIGIBILITY_FLOOR, ageBandOf,
 } from "../../src/engine/diversityConstants";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
+import type { PhysicalCharacteristics } from "../../src/domain/physicalCharacteristics";
 import { nameGenderOf } from "../../src/engine/data/nameGender";
 
 /**
@@ -193,12 +194,15 @@ describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the
 });
 
 describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (the tattoo-uniformity fix)", () => {
+  const facetHasInk = (pc: PhysicalCharacteristics): boolean =>
+    Object.values(pc).some((v) => /tattoo|inked/i.test(String(v ?? "")));
+
   it("an authored mark that INTRODUCES ink where the seeded deal granted none is refused; other facets fold", () => {
     const { sb } = liveGame("ink-budget", 5);
-    // Find a houseguest whose SEEDED mark carries no ink (the cast-wide deal guarantees most don't).
+    // Find a houseguest whose SEEDED facet carries no ink ANYWHERE (the cast-wide deal guarantees most don't).
     const card = sb.session.getGameState().house
       .find((h) => h.status === "active" && h.physicalCharacteristics
-        && !/tattoo|inked/i.test(h.physicalCharacteristics.distinguishingMark))!;
+        && !facetHasInk(h.physicalCharacteristics))!;
     const seededMark = card.physicalCharacteristics!.distinguishingMark;
     const res = sb.session.recordCastProfile({
       houseguestId: card.id,
@@ -215,6 +219,33 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     // Every other authored facet still landed.
     expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
   });
+  it("Greptile P1 (#1768): a clean mark + a tattooed STYLE on a no-ink slot cannot smuggle ink into any portrait-rendered field", () => {
+    const { sb } = liveGame("ink-style-bypass", 5);
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !facetHasInk(h.physicalCharacteristics))!;
+    const seededStyle = card.physicalCharacteristics!.style;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      physicalCharacteristics: {
+        heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+        facialFeatures: "a square jaw", distinguishingMark: "a beauty mark on one cheek",
+        ageLook: "fresh-faced, late-twenties look", style: "tattooed rocker edge, sleeves on show",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The inked style was refused per-field — the seeded style stands; NO rendered field carries ink.
+    expect(after.physicalCharacteristics!.style).toBe(seededStyle);
+    expect(facetHasInk(after.physicalCharacteristics!)).toBe(false);
+    // The clean authored facets still folded.
+    expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe("a beauty mark on one cheek");
+    // And the portrait prompt — which renders style into "Presentation style:" — carries no ink.
+    const pp = sb.session.getPortraitPrompt(card.id)!;
+    expect(/tattoo|inked/i.test(pp.prompt)).toBe(false);
+  });
+
   it("an authored ink mark is KEPT when the seeded deal already granted ink (sharpening, not inventing)", () => {
     const { sb } = liveGame("ink-keep", 5);
     const inked = sb.session.getGameState().house
