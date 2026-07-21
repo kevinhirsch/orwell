@@ -7012,6 +7012,12 @@ async def _stream_agent_loop_impl(
                     _pending_kind_at_read = None
                     _beat_seq_at_read = None
                     _pending_sig_at_read = None
+                    # Greptile P1: track whether the pre-advance read actually SUCCEEDED. A failed
+                    # read leaves all three pre-state vars None — indistinguishable, without this
+                    # flag, from a genuine "no pending was open" — so a later no-op advance would be
+                    # misclassified as real progress (see the guard at the `_commit_advance_silently`
+                    # success branch below).
+                    _state_read_ok = False
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
@@ -7041,6 +7047,7 @@ async def _stream_agent_loop_impl(
                                   for h in ((_gs or {}).get("house") or [])
                                   if isinstance(h, dict) and h.get("name") and h.get("id")
                                   and h.get("status", "active") == "active"]
+                        _state_read_ok = True  # every extraction above completed cleanly
                     except Exception as _e:
                         logger.warning(
                             f"[orwell] error-correction state fetch failed: "
@@ -7304,6 +7311,20 @@ async def _stream_agent_loop_impl(
                                 # stall counter below every time this fired — so a soft-locked pending
                                 # (the F3 comp-buzz-in repro) could sit forever with its escalation
                                 # ladder silently restarting at zero each turn instead of climbing.
+                                # Greptile P1 (unknown pre-state): if the pre-advance state read FAILED
+                                # (`_state_read_ok` is False), all three pre-state signals are None and we
+                                # CANNOT tell a real advance from a no-op against an open pending. Blessing
+                                # it as progress here would falsely reset the stall/escalation counters and
+                                # record a phantom loop-break correction — the exact soft-lock-perpetuating
+                                # bug this ladder exists to fix. The advance call itself committed (no
+                                # exception), so end this commit attempt, but LEAVE the counters + belt state
+                                # untouched so the ladder keeps climbing off the next (clean) read.
+                                if not _state_read_ok:
+                                    logger.info(
+                                        "[orwell] silent advanceGame committed but the pre-advance state "
+                                        f"read was unavailable — NOT counting as confirmed progress ({_why}, "
+                                        f"phase={_phase}) round {round_num} user={owner}")
+                                    return True
                                 # Detect the no-op via `_advance_was_pending_noop` — PRIMARILY the
                                 # engine `beatSeq` (Greptile P1: a bare pending-`kind` comparison
                                 # misreads a STAGED competition's genuine comp-round -> comp-round
