@@ -114,6 +114,52 @@ _RESPONSE_FORMAT = {"type": "json_object"}
 # the box on the narration model), passed per-run through `resolve_authoring_llm_fn`.
 _AUTHOR_TEMPERATURE = 0.6
 
+# #1713 — the per-call WALL-CLOCK ceiling for an authoring/genesis STREAM. `stream_llm_with_fallback`
+# has no equivalent of `llm_core._bounded_impl_call`'s wall-clock wrap (that fix covers only the
+# non-streaming `llm_call_async` chokepoint): its per-chunk httpx read-timeout RESETS on any received
+# byte, so a provider that trickles keep-alive padding while contended/stalled never trips it, and the
+# call inherits `stream_llm_with_fallback`'s narration-sized default ceiling (`LLMConfig.STREAM_TIMEOUT`
+# = 300s) as its only bound. That is the diagnosed root cause of the casting-finalize → premiere hang
+# (issue #1713): genesis authors the whole 15-NPC cast ONE houseguest per call (in bounded-concurrency
+# waves) awaited INSIDE the player's chat turn — under contention (the documented #1057 concurrent-
+# authoring burst sharing the OpenRouter endpoint with premiere narration) a single stalled call could
+# ride out most of five minutes before the caller's own best-effort `except Exception` ever saw it.
+# A one-NPC JSON object needs nowhere near that; bound it far tighter so a genuinely stuck call fails
+# FAST and falls into the existing retry-once / fall-to-the-floor path instead of hanging. Raises
+# ``asyncio.TimeoutError`` — the SAME class `_exc_fail_class` already recognizes and every fail-soft
+# caller here already treats as an ordinary failure — so nothing downstream needs to change shape.
+_AUTHORING_STREAM_WALL_CLOCK_S = 30.0
+
+
+async def _bounded_stream(agen, wall_clock_s: float = _AUTHORING_STREAM_WALL_CLOCK_S):
+    """Wrap an async generator with a hard WALL-CLOCK ceiling over the WHOLE iteration — every chunk,
+    every internal retry/fallback candidate the generator itself tries — not a per-chunk read timeout
+    (see `_AUTHORING_STREAM_WALL_CLOCK_S`). On expiry the source generator is closed (best-effort) and
+    ``asyncio.TimeoutError`` is raised; a clean end-of-stream (``StopAsyncIteration``) simply ends
+    iteration as normal. A generator that finishes well inside the budget is byte-identical."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + wall_clock_s
+    it = agen.__aiter__()
+    try:
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError(
+                    f"authoring stream exceeded its {wall_clock_s}s wall-clock ceiling")
+            try:
+                chunk = await asyncio.wait_for(it.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        aclose = getattr(agen, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                pass
+
+
 # ── owner directive 2026-07-11: cast-authoring MODEL ROUTING + sampling temperature ──────────────
 #
 # Cast authoring is EXPRESSIVE end-to-end character work, so by default it now routes to the
@@ -1574,9 +1620,14 @@ async def _resolve_llm_fn(owner: Optional[str], *, prefix: str = "utility",
         # reasoning into the body. Threads through stream_llm_with_fallback → stream_llm onto the
         # OpenAI-style payload; a provider that ignores it is harmless (the strict prompt + the one-shot
         # retry in author_cast still apply). The policy already supplies the (raised, #1002) token budget.
-        async for chunk in stream_llm_with_fallback(
+        # #1713: bounded to a hard wall-clock ceiling (see `_bounded_stream`) — a JSON-authoring call
+        # must fail fast under contention, never ride the narration-sized 300s default. The ceiling is
+        # passed explicitly (read from the module global at CALL time, not `_bounded_stream`'s default
+        # parameter — a default is bound once at function-definition time) so a runtime override of
+        # `_AUTHORING_STREAM_WALL_CLOCK_S` (e.g. a test, or a future admin knob) actually takes effect.
+        async for chunk in _bounded_stream(stream_llm_with_fallback(
             candidates, messages, temperature=_temperature, policy=_policy,
-            max_tokens=cap, response_format=_RESPONSE_FORMAT):
+            max_tokens=cap, response_format=_RESPONSE_FORMAT), wall_clock_s=_AUTHORING_STREAM_WALL_CLOCK_S):
             # stream_llm yields SSE-ish data lines; keep only the assistant text deltas.
             piece = _delta_text(chunk)
             if piece:

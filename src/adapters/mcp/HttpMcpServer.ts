@@ -102,6 +102,27 @@ export interface HttpMcpOptions {
    * transport stays free of any engine-root dependency. Unset ⇒ deterministic, not degraded.
    */
   embeddingsStatus?: () => { provider: string; degraded: boolean };
+  /**
+   * #1713 — the per-request RESPONSE BUDGET (ms): the hard bound on how long a queued tool call may
+   * go unanswered before the transport answers a typed 503 (`code: "engine-busy"`) instead of holding
+   * the socket silently. Node's `server.requestTimeout` only bounds RECEIVING the request — nothing
+   * bounded the time to RESPOND, so a call parked behind the per-user serialization queue (a slow
+   * drain under CI/host contention, or a job that never settles) held its socket until the CALLER's
+   * own timeout — observed as the casting-finalize turn blocking the FE for the full
+   * `ORWELL_ENGINE_TIMEOUT` (300s) with zero feedback. Engine tool work is milliseconds; a request
+   * that cannot even be dispatched inside this budget is refused loudly and retriably. Overridable
+   * via `ORWELL_ENGINE_RESPONSE_BUDGET_MS`; this option (tests) wins over the env.
+   */
+  responseBudgetMs?: number;
+}
+
+/** #1713 — default per-request response budget (see `HttpMcpOptions.responseBudgetMs`). */
+const DEFAULT_RESPONSE_BUDGET_MS = 60_000;
+
+function resolveResponseBudgetMs(option: number | undefined): number {
+  if (option !== undefined && Number.isFinite(option) && option > 0) return option;
+  const env = parseInt((process.env.ORWELL_ENGINE_RESPONSE_BUDGET_MS ?? "").trim(), 10);
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_RESPONSE_BUDGET_MS;
 }
 
 /**
@@ -204,6 +225,37 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
     });
   };
 
+  // #1713 — the per-request RESPONSE-BUDGET watchdog (see `HttpMcpOptions.responseBudgetMs`): every
+  // queued tool call must be ANSWERED within the budget. If the deadline fires first (the per-user
+  // queue is saturated under contention, or a prior job wedged and never settles), the request gets a
+  // typed, retriable 503 — and its job, when it eventually reaches the queue head, is SKIPPED
+  // (`refused()` is checked before dispatch), so a call the caller was already told failed can never
+  // ghost-mutate the sandbox afterward. The E10 per-user serialization is untouched — jobs still run
+  // strictly in order, one at a time; the watchdog only converts "wait silently forever" into "fail
+  // typed within the budget". A job already mid-dispatch when its deadline fires still completes (the
+  // late 200 is dropped by `send`'s dead-socket guard) — the same abandonment semantics as a caller-
+  // side timeout today, and the 0065 idempotency keys keep progression at-most-once across it.
+  const responseBudgetMs = resolveResponseBudgetMs(options.responseBudgetMs);
+  const armResponseDeadline = (
+    send: (code: number, body: unknown) => void,
+    label: string,
+  ): { refused: () => boolean; clear: () => void } => {
+    let refused = false;
+    const timer = setTimeout(() => {
+      refused = true;
+      metrics.recordFailure(label, "ResponseBudgetExceeded", responseBudgetMs);
+      send(503, {
+        error:
+          `engine busy: no response within the ${responseBudgetMs}ms response budget — a call still ` +
+          "queued was refused outright (no state changed); a call already dispatched may yet apply, " +
+          "so re-ground from getGameState before retrying",
+        code: "engine-busy",
+      });
+    }, responseBudgetMs);
+    timer.unref?.();
+    return { refused: () => refused, clear: () => clearTimeout(timer) };
+  };
+
   const server = createServer((req, res) => {
     const send = (code: number, body: unknown): void => {
       // E30: the socket may be gone (request timeout, client abort) by the time a queued job
@@ -304,64 +356,77 @@ export function createHttpMcpServer(deps: HttpMcpDeps | HttpMcpResolver, options
         });
         req.on("end", () => {
           if (oversize) return;
+          // #1713: the response-budget watchdog — a queued call is ANSWERED (503, typed) within the
+          // budget even when the per-user queue cannot dispatch it; a refused job never dispatches.
+          const deadline = armResponseDeadline(send, "call");
           // E10: serialize per user — a player action can never race a sandbox swap/reset.
           enqueue(user, async () => {
-            let name: unknown, args: unknown;
+            if (deadline.refused()) return; // #1713: already answered 503 — never ghost-dispatch
+            // #1713: clear the deadline once this job is actually dispatching — whatever this job
+            // does next may take a while (or fail), but the caller either already has its answer
+            // (`send`'s dead-socket guard drops a duplicate) or is about to get a real one; either
+            // way the watchdog timer's job is done and it must never fire a stray late 503 for a
+            // completed request.
             try {
-              ({ name, args } = JSON.parse(body || "{}") as { name?: unknown; args?: unknown });
-            } catch {
-              return send(400, { error: "invalid JSON body" });
-            }
-            // E9: basic arg validation before anything touches the engine.
-            if (typeof name !== "string" || name.length === 0) return send(400, { error: "a tool name is required" });
-            if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) {
-              return send(400, { error: "args must be an object" });
-            }
-            // (4) Don't mint a sandbox for an unknown user unless they are starting a game.
-            if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
-              return send(404, { error: "no active game for this user" });
-            }
-            // G1: per-call duration tracking starts here — the dispatch path proper (resolve +
-            // callTool). Failures land in the /health ring as {ts, tool, errorClass, durationMs}.
-            const dispatchStart = Date.now();
-            // E10: the sandbox is resolved HERE, inside the serialized job — never at request start.
-            // Resolving can fail (e.g. an unreadable save) — a server error (500), distinct from a
-            // bad tool/args (400). Either way the process stays up.
-            let server: McpServer;
-            try {
-              server = pick(channel, user);
-            } catch {
-              metrics.recordFailure(name, "SandboxResolveError", Date.now() - dispatchStart);
-              return send(500, { error: "internal error" });
-            }
-            try {
-              const result = await server.callTool(name, (args as Record<string, unknown>) ?? {});
-              metrics.recordSuccess(name, Date.now() - dispatchStart);
-              send(200, { result });
-            } catch (e) {
-              // G1: the ring records the sanitized class only — never e.message (it can quote
-              // caller content), never args. Recorded BEFORE the status mapping so every
-              // failure mode (409/400/500) is visible to the admin card.
-              metrics.recordFailure(name, errorClassOf(e), Date.now() - dispatchStart);
-              // Typed engine errors first (audit E3/E7): a commit refused by the fail-closed
-              // integrity checkpoint FAILS THE REQUEST — 409, state unchanged, never a 200 whose
-              // view narrates a rolled-back beat. A durable-save failure is a 500 with a sanitized
-              // message (its own class — never misread as the caller's fault, no data-dir path).
-              // 0065 Part A — a stale compare-and-swap write is ALSO a 409, but with a stable machine
-              // `code: "stale-beat"`, the CURRENT beatSeq, and the Vault-free board so the caller can
-              // re-ground immediately (no state changed — nothing was applied to roll back).
-              if (e instanceof StaleBeatError) {
-                return send(409, { error: e.message, code: e.code, beatSeq: e.beatSeq, board: e.board });
+              let name: unknown, args: unknown;
+              try {
+                ({ name, args } = JSON.parse(body || "{}") as { name?: unknown; args?: unknown });
+              } catch {
+                return send(400, { error: "invalid JSON body" });
               }
-              if (e instanceof TurnRefusedError) return send(409, { error: e.message });
-              if (e instanceof PersistFailureError) return send(500, { error: e.message });
-              // E9/E7: a DELIBERATE refusal — `EngineRefusal`, or (back-compat) a plain Error
-              // thrown by the engine's validation (illegal nominee, unknown tool) — is the
-              // caller's fault (400). Anything else (TypeError, RangeError, a subclass) is an
-              // engine bug and must read as 500, not masquerade as a client error.
-              const deliberate = e instanceof EngineRefusal || (e instanceof Error && e.constructor === Error);
-              if (deliberate) send(400, { error: (e as Error).message });
-              else send(500, { error: "internal error" });
+              // E9: basic arg validation before anything touches the engine.
+              if (typeof name !== "string" || name.length === 0) return send(400, { error: "a tool name is required" });
+              if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) {
+                return send(400, { error: "args must be an object" });
+              }
+              // (4) Don't mint a sandbox for an unknown user unless they are starting a game.
+              if (options.knownUser && !SANDBOX_CREATING_TOOLS.has(name) && !options.knownUser(user)) {
+                return send(404, { error: "no active game for this user" });
+              }
+              // G1: per-call duration tracking starts here — the dispatch path proper (resolve +
+              // callTool). Failures land in the /health ring as {ts, tool, errorClass, durationMs}.
+              const dispatchStart = Date.now();
+              // E10: the sandbox is resolved HERE, inside the serialized job — never at request start.
+              // Resolving can fail (e.g. an unreadable save) — a server error (500), distinct from a
+              // bad tool/args (400). Either way the process stays up.
+              let server: McpServer;
+              try {
+                server = pick(channel, user);
+              } catch {
+                metrics.recordFailure(name, "SandboxResolveError", Date.now() - dispatchStart);
+                return send(500, { error: "internal error" });
+              }
+              try {
+                const result = await server.callTool(name, (args as Record<string, unknown>) ?? {});
+                metrics.recordSuccess(name, Date.now() - dispatchStart);
+                send(200, { result });
+              } catch (e) {
+                // G1: the ring records the sanitized class only — never e.message (it can quote
+                // caller content), never args. Recorded BEFORE the status mapping so every
+                // failure mode (409/400/500) is visible to the admin card.
+                metrics.recordFailure(name, errorClassOf(e), Date.now() - dispatchStart);
+                // Typed engine errors first (audit E3/E7): a commit refused by the fail-closed
+                // integrity checkpoint FAILS THE REQUEST — 409, state unchanged, never a 200 whose
+                // view narrates a rolled-back beat. A durable-save failure is a 500 with a sanitized
+                // message (its own class — never misread as the caller's fault, no data-dir path).
+                // 0065 Part A — a stale compare-and-swap write is ALSO a 409, but with a stable machine
+                // `code: "stale-beat"`, the CURRENT beatSeq, and the Vault-free board so the caller can
+                // re-ground immediately (no state changed — nothing was applied to roll back).
+                if (e instanceof StaleBeatError) {
+                  return send(409, { error: e.message, code: e.code, beatSeq: e.beatSeq, board: e.board });
+                }
+                if (e instanceof TurnRefusedError) return send(409, { error: e.message });
+                if (e instanceof PersistFailureError) return send(500, { error: e.message });
+                // E9/E7: a DELIBERATE refusal — `EngineRefusal`, or (back-compat) a plain Error
+                // thrown by the engine's validation (illegal nominee, unknown tool) — is the
+                // caller's fault (400). Anything else (TypeError, RangeError, a subclass) is an
+                // engine bug and must read as 500, not masquerade as a client error.
+                const deliberate = e instanceof EngineRefusal || (e instanceof Error && e.constructor === Error);
+                if (deliberate) send(400, { error: (e as Error).message });
+                else send(500, { error: "internal error" });
+              }
+            } finally {
+              deadline.clear();
             }
           });
         });

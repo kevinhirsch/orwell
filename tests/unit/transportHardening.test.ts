@@ -19,8 +19,9 @@ import { PLAYER, npc } from "../../src/domain/ids";
 async function withServer(
   deps: Parameters<typeof createHttpMcpServer>[0],
   fn: (base: string) => Promise<void>,
+  options?: Parameters<typeof createHttpMcpServer>[1],
 ): Promise<void> {
-  const server = createHttpMcpServer(deps);
+  const server = createHttpMcpServer(deps, options);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   try {
     await fn(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
@@ -98,6 +99,90 @@ describe("E10 — per-user serialization", () => {
       await Promise.all([a1, a2]);
       expect(order).toEqual(["other-done", "slow-done", "fast-done"]); // strict per-user order
     });
+  });
+});
+
+describe("#1713 — per-request response-budget watchdog", () => {
+  it("answers a call queued behind a saturating prior call with a typed 503 within the budget, " +
+     "never lets the client wait for the whole queue to drain, and never ghost-dispatches the refused job",
+  async () => {
+    const order: string[] = [];
+    const gate: { release?: () => void } = {};
+    // Simulates the createCharacter→premiere contention scenario: one call (e.g. the model-authored
+    // cast genesis grind) holds the queue open far longer than any caller should ever have to wait,
+    // while a second call for the SAME user (e.g. the very next turn) sits queued behind it.
+    const contended = {
+      listTools: () => [],
+      callTool: async (name: string) => {
+        if (name === "createCharacter") {
+          await new Promise<void>((r) => { gate.release = r; });
+          order.push("createCharacter-done");
+          return { started: true };
+        }
+        order.push(`${name}-dispatched`); // must NEVER fire for the refused call
+        return {};
+      },
+    } as unknown as McpServer;
+
+    await withServer({ resolve: () => contended }, async (base) => {
+      const call = (name: string) =>
+        fetch(`${base}/player/call`, {
+          method: "POST", headers: { "x-orwell-user": "user-a" }, body: JSON.stringify({ name }),
+        });
+
+      const slow = call("createCharacter"); // dispatches immediately, then hangs on the gate
+      // Give the slow call a moment to actually dispatch before queuing the second one behind it —
+      // mirrors the real ordering (finalize dispatches, THEN the next turn queues behind it).
+      await new Promise((r) => setTimeout(r, 20));
+      const t0 = Date.now();
+      const queued = await call("advanceGame"); // same user: queues behind the still-running createCharacter
+      const waited = Date.now() - t0;
+
+      // The queued call is answered with a typed, retriable 503 — it NEVER waits for the whole
+      // queue (the saturating call is still hanging on the gate at this point) — the structural
+      // guarantee at the heart of #1713: no caller can be left waiting minutes for an answer.
+      expect(queued.status).toBe(503);
+      const body = (await queued.json()) as { code: string; error: string };
+      expect(body.code).toBe("engine-busy");
+      expect(waited).toBeLessThan(2000); // bounded by the budget — nowhere near a multi-minute hang
+
+      // The refused job never actually dispatched (no ghost-mutation of the sandbox after the
+      // caller was already told it failed) — it was still queued behind createCharacter when its
+      // own deadline fired.
+      expect(order).not.toContain("advanceGame-dispatched");
+
+      // Releasing the gate lets the ALREADY-DISPATCHED createCharacter call's real work finish in
+      // the background — the watchdog only bounds the ANSWER, it never kills in-flight work. (Its
+      // own HTTP response may itself have already been forced to a 503 once its budget elapsed —
+      // the same abandonment semantics as a caller-side timeout today — but the underlying call
+      // keeps running to completion rather than being aborted.)
+      gate.release!();
+      await slow;
+      expect(order).toContain("createCharacter-done");
+
+      // The failure is visible on /health (G1) under its own error class.
+      const health = (await (await fetch(`${base}/health`)).json()) as {
+        recentFailures: Array<{ tool: string; errorClass: string }>;
+      };
+      expect(health.recentFailures.some((f) => f.errorClass === "ResponseBudgetExceeded")).toBe(true);
+    }, { responseBudgetMs: 60 });
+  });
+
+  it("does not fire when the call is answered comfortably inside the budget", async () => {
+    const quick = {
+      listTools: () => [],
+      callTool: async () => ({ ok: true }),
+    } as unknown as McpServer;
+    await withServer({ resolve: () => quick }, async (base) => {
+      const res = await fetch(`${base}/player/call`, {
+        method: "POST", body: JSON.stringify({ name: "getGameState" }),
+      });
+      expect(res.status).toBe(200);
+      const health = (await (await fetch(`${base}/health`)).json()) as {
+        recentFailures: Array<{ errorClass: string }>;
+      };
+      expect(health.recentFailures.some((f) => f.errorClass === "ResponseBudgetExceeded")).toBe(false);
+    }, { responseBudgetMs: 5000 });
   });
 });
 
