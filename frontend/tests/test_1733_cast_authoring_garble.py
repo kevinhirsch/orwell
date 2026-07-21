@@ -186,6 +186,52 @@ def test_voice_conflicts_flags_a_gendered_descriptor_in_the_signature():
     assert ca.voice_conflicts({"voice": _voice(signature="carries a fatherly warmth into every room")}, npc) is True
 
 
+def test_voice_conflicts_flags_a_gendered_descriptor_on_a_rendered_dial():
+    # P1 (Greptile on #1750): `voiceFingerprint` (src/engine/voice.ts) renders register/rhythm/
+    # directness/energy/humor/stressTell DIRECTLY into the authoritative roster line — a gendered
+    # descriptor landing on any of THOSE dials is the same defect as one landing in the signature,
+    # and must be caught even though the earlier fix only scanned `signature`.
+    npc = {"id": "npc:1", "genderPresentation": "woman"}
+    assert ca.voice_conflicts({"voice": _voice(register="fatherly")}, npc) is True
+    assert ca.voice_conflicts({"voice": _voice(stressTell="gets paternal")}, npc) is True
+    assert ca.voice_conflicts({"voice": _voice(directness="fatherly")}, npc) is True
+    assert ca.voice_conflicts({"voice": _voice(energy="fatherly")}, npc) is True
+    assert ca.voice_conflicts({"voice": _voice(humor="fatherly")}, npc) is True
+    assert ca.voice_conflicts({"voice": _voice(rhythm="fatherly")}, npc) is True
+    # The mirror: "maternal"/"motherly" on a pinned man.
+    npc_man = {"id": "npc:2", "genderPresentation": "man"}
+    assert ca.voice_conflicts({"voice": _voice(register="maternal")}, npc_man) is True
+    # A dial matching the pin (or neutral) is never flagged.
+    assert ca.voice_conflicts({"voice": _voice(register="fatherly")}, npc_man) is False
+
+
+def test_gendered_dial_dropped_end_to_end(_clean_ledger):
+    # The full pipeline: a pinned woman's authored voice carries a gendered dial (not a signature) —
+    # the whole voice object must be dropped before recordCastProfile, and the coherent biography
+    # still commits.
+    async def _llm(_messages):
+        return json.dumps({
+            "voice": _voice(register="fatherly", stressTell="gets paternal"),
+            "biography": ("She grew up in a small coastal town and always loved a good challenge. She "
+                          "applied on a whim and never once looked back, chasing her own ambition."),
+        })
+
+    written_profiles = []
+
+    async def _write(profile):
+        written_profiles.append(profile)
+        return {"accepted": True}
+
+    cast = [{"id": "npc:1", "genderPresentation": "woman"}]
+    written = _run(ca.author_cast(cast, _llm, _write, user="probe-user"))
+
+    assert written == 1
+    committed = written_profiles[0]
+    assert "voice" not in committed, "a gender-incoherent dial (not just signature) must drop the whole voice"
+    assert "biography" in committed, "the coherent remainder still commits"
+    assert "identity-incoherence" in {r["callClass"] for r in enrichment_policy.failures("probe-user")}
+
+
 def test_voice_conflicts_is_false_on_a_well_formed_coherent_voice():
     npc = {"id": "npc:1", "genderPresentation": "woman"}
     assert ca.voice_conflicts({"voice": _voice()}, npc) is False

@@ -489,11 +489,18 @@ def voice_conflicts(profile: dict, npc: dict) -> bool:
     """E1 (#1733): True iff the authored `voice` object (register/rhythm/energy/directness/humor/
     stressTell/signature/lexicon/catchphrases) should be dropped WHOLE before write-back — script
     garble in any dial/signature/lexicon/catchphrase entry, a degenerate non-answer dial value (an
-    "empty dial", e.g. `humor: "none"`), or a gendered self-descriptor in the prose `signature` that
-    contradicts the pinned gender. Voice folds WHOLE-or-NOTHING (owner ruling 2026-06-25, mirrored by
-    the engine's `sanitizeAuthoredVoice`), so any one garbled entry drops the whole object rather than
-    leaving a Frankenstein voice half seeded-floor, half authored. A well-formed, coherent voice ⇒
-    False (a byte-identical no-op) — the common case."""
+    "empty dial", e.g. `humor: "none"`), or a gendered self-descriptor that contradicts the pinned
+    gender. Voice folds WHOLE-or-NOTHING (owner ruling 2026-06-25, mirrored by the engine's
+    `sanitizeAuthoredVoice`), so any one garbled entry drops the whole object rather than leaving a
+    Frankenstein voice half seeded-floor, half authored. A well-formed, coherent voice ⇒ False (a
+    byte-identical no-op) — the common case.
+
+    P1 (Greptile on #1750): the gendered-descriptor check must run on EVERY dial `voiceFingerprint`
+    (`src/engine/voice.ts`) renders into the authoritative roster line — `register`, `rhythm`,
+    `directness`, `energy`, `humor`, `stressTell` — not just the free-prose `signature` (which never
+    reaches the template at all). A pinned woman authoring `register: "fatherly"` or `stressTell:
+    "gets paternal"` is the SAME gender-incoherent authoritative voice cue this lint already rejects
+    in a signature; it must not slip through on a dial."""
     voice = profile.get("voice") if isinstance(profile, dict) else None
     if not isinstance(voice, dict):
         return False
@@ -509,8 +516,10 @@ def voice_conflicts(profile: dict, npc: dict) -> bool:
         # never checked for degeneracy (a real sentence is never literally "none").
         if key != "signature" and _is_degenerate_dial(val):
             return True
-    if _gendered_descriptor_flip(str(voice.get("signature") or ""), pin):
-        return True
+        # Every rendered dial (AND the signature) is self-referential — a gendered descriptor on ANY
+        # of them contradicts the pin exactly like it would in prose.
+        if _gendered_descriptor_flip(val, pin):
+            return True
     lexicon = voice.get("lexicon")
     if isinstance(lexicon, list) and _any_script_garble(*[str(x) for x in lexicon]):
         return True
