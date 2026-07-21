@@ -14,9 +14,13 @@ describe("L27 — summarized social play is stored in the engine and recallable 
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor("l27-user");
     sb.session.createCharacter({ playerName: "The Player", seed: 27 });
+    sb.session.advanceGame(); // close the premiere circle so movePlayer works (0111) — co-locate for BL-014
     const ally = sb.session.livingIds().find((id) => id !== PLAYER)!;
 
     const summary = "You and your ally schemed by the hammock about backdooring the Head of Household.";
+    // BL-014: a scene is recorded from the PLAYER's room, and the engine now drops a named witness its
+    // own occupancy places elsewhere — co-locate so the ally is a genuine co-present participant.
+    sb.session.movePlayer(sb.session.occupancy()!.get(ally)!);
     sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, ally], kind: "strategy", content: summary });
 
     // (1) STORED in the event record — retrievable; the player's own witnessed knowledge.

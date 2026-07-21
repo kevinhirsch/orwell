@@ -54,12 +54,19 @@ describe("the conversation is NOT amnesic — a small life detail mentioned earl
     const before = new GameSessionRegistry(new FileSaveStore(dir));
     const sb = before.sandboxFor(USER);
     sb.session.createCharacter({ playerName: "The Player", seed: 91 });
+    // Close the premiere champagne circle so the player is in normal free-roam presence (movePlayer is
+    // pinned until then, 0111) — needed to co-locate for a genuinely co-present scene (BL-014).
+    sb.session.advanceGame();
 
     const npcs = sb.session.livingIds().filter((id) => id !== PLAYER);
     const teller = npcs[0]!;             // the houseguest who drops the small detail
     const others = npcs.slice(1);
 
     // --- EARLY game (week 1): the player witnesses the NPC passively mention the small detail. ---
+    // BL-014: a scene is recorded from the PLAYER's room, and the engine now drops a named witness its
+    // own occupancy places elsewhere (a phantom co-presence). The player witnessing the teller requires
+    // genuine co-presence — walk to the teller's room so the scene is legitimately grounded.
+    sb.session.movePlayer(sb.session.occupancy()!.get(teller)!);
     // `kind` is omitted on purpose: this is throwaway small talk, not weight-bearing social play —
     // it must still be recorded ("recorded or it didn't happen") and recalled later.
     sb.commands.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, teller], content: SMALL_DETAIL });
