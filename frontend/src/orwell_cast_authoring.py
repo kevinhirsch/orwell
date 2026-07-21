@@ -413,32 +413,159 @@ def _gender_flip(text: str, pin: str) -> bool:
     return False
 
 
+# ── E1 (#1733): mixed-script garble + gendered-descriptor + degenerate-dial extensions ──────────────
+#
+# F7/F8 (BB-Nerd audit, issue #1733): the F2 lint above catches a PRONOUN flip, but the observed bundle
+# carried two garble classes it never saw — (1) non-diegetic mixed-script junk dropped straight into an
+# English prose field ("缺乏 voice — static and unboiling"), and (2) a GENDERED SELF-DESCRIPTOR term with
+# no pronoun at all ("patient and fatherly" on a pinned 32-year-old woman) — `_gender_flip` only scans
+# pronouns, so a pronoun-free descriptor sails straight through. A third, related defect: the authored
+# `voice` object folds WHOLE onto the houseguest's public voice fingerprint (owner ruling 2026-06-25,
+# `sanitizeAuthoredVoice` in `GameSessionAdapter.ts`) and is rendered through a fixed template
+# ("{register}, {rhythm}, {directness} voice — {energy}, {humor} humor"); a hot-temperature (1.0, owner
+# ruling 2026-07-20) authoring call sometimes hands back a degenerate non-answer for a dial ("none",
+# "n/a") that the engine's structural `sanitizeAuthoredVoice` check happily accepts (it only requires a
+# non-empty, length-bounded string) — the template then renders the grammatically broken "none humor".
+# All three are caught HERE, before write-back, so garbage never reaches `recordCastProfile` — matching
+# the existing fail-soft pattern (a rejected field falls to the coherent seeded floor, never a hole).
+
+# Non-Latin scripts (CJK / Kana / Hangul / Cyrillic / Arabic / Hebrew) mixed into what must always be
+# plain English prose (a voice cue, a physical descriptor, a biography) is a reliable, cheap structural
+# signature of authoring garble — never legitimate content for these fields. A single stray codepoint is
+# enough; this is deliberately NOT a semantic/nonsense-word detector (that would false-positive on real
+# prose), just a script-mismatch scan.
+_NON_LATIN_SCRIPT_RE = re.compile(
+    r"[一-鿿぀-ヿㇰ-ㇿ가-힯Ѐ-ӿ؀-ۿ֐-׿]"
+)
+
+
+def _has_script_garble(text: str) -> bool:
+    """True iff `text` contains a non-Latin-script codepoint — garble in a field that must read as
+    plain English prose. Vault-free, pure regex; no semantic model needed."""
+    return bool(text) and bool(_NON_LATIN_SCRIPT_RE.search(text))
+
+
+def _any_script_garble(*texts: str) -> bool:
+    return any(_has_script_garble(t) for t in texts if isinstance(t, str))
+
+
+# Degenerate / non-answer dial values an LLM sometimes hands back verbatim instead of a real descriptor.
+# Grammatically broken once the engine's fixed template renders it ("none humor", "n/a voice") and never
+# a genuine authored choice — reject before write-back (owner ruling on issue #1733: "empty dial values").
+_DEGENERATE_DIAL_VALUES = frozenset({
+    "none", "n/a", "na", "unknown", "unclear", "unspecified", "tbd", "-", "—", "null", "n a",
+})
+
+
+def _is_degenerate_dial(value: str) -> bool:
+    return str(value or "").strip().strip(".").lower() in _DEGENERATE_DIAL_VALUES
+
+
+# Gendered SELF-DESCRIPTOR terms — beyond a bare pronoun, a demeanor/voice/biography can self-describe the
+# subject with a gendered noun/adjective ("fatherly", "maternal") that carries no pronoun at all, so the
+# pronoun-only `_gender_flip` scan above misses it entirely (the F7 bug: "patient and fatherly" on a
+# pinned woman). Deliberately a small, near-unambiguous closed vocabulary — avoids reclaimed/ambiguous
+# terms that would false-positive on legitimate prose.
+_MASC_DESCRIPTOR_RE = re.compile(r"\b(fatherly|paternal|gentlemanly)\b", re.I)
+_FEM_DESCRIPTOR_RE = re.compile(r"\b(motherly|maternal|ladylike|girlish)\b", re.I)
+
+
+def _gendered_descriptor_flip(text: str, pin: str) -> bool:
+    """True iff `text` carries a GENDERED SELF-DESCRIPTOR term opposite the pinned gender (e.g.
+    "fatherly" on a pinned "woman") — the non-pronoun complement to `_gender_flip`. Conservative: only
+    the OPPOSITE-of-pin term trips it; a term matching the pin (or neither) never does."""
+    if not text or pin not in ("man", "woman"):
+        return False
+    masc = bool(_MASC_DESCRIPTOR_RE.search(text))
+    fem = bool(_FEM_DESCRIPTOR_RE.search(text))
+    if pin == "man":
+        return fem
+    if pin == "woman":
+        return masc
+    return False
+
+
+def voice_conflicts(profile: dict, npc: dict) -> bool:
+    """E1 (#1733): True iff the authored `voice` object (register/rhythm/energy/directness/humor/
+    stressTell/signature/lexicon/catchphrases) should be dropped WHOLE before write-back — script
+    garble in any dial/signature/lexicon/catchphrase entry, a degenerate non-answer dial value (an
+    "empty dial", e.g. `humor: "none"`), or a gendered self-descriptor in the prose `signature` that
+    contradicts the pinned gender. Voice folds WHOLE-or-NOTHING (owner ruling 2026-06-25, mirrored by
+    the engine's `sanitizeAuthoredVoice`), so any one garbled entry drops the whole object rather than
+    leaving a Frankenstein voice half seeded-floor, half authored. A well-formed, coherent voice ⇒
+    False (a byte-identical no-op) — the common case."""
+    voice = profile.get("voice") if isinstance(profile, dict) else None
+    if not isinstance(voice, dict):
+        return False
+    pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
+    for key in _VOICE_DIAL_KEYS:  # register, rhythm, energy, directness, humor, stressTell, signature
+        val = voice.get(key)
+        if not isinstance(val, str):
+            continue
+        if _has_script_garble(val):
+            return True
+        # The dial fields (everything but the prose `signature`) are single short words/phrases — a
+        # degenerate non-answer here is what breaks the rendered template. `signature` is free prose,
+        # never checked for degeneracy (a real sentence is never literally "none").
+        if key != "signature" and _is_degenerate_dial(val):
+            return True
+    if _gendered_descriptor_flip(str(voice.get("signature") or ""), pin):
+        return True
+    lexicon = voice.get("lexicon")
+    if isinstance(lexicon, list) and _any_script_garble(*[str(x) for x in lexicon]):
+        return True
+    catchphrases = voice.get("catchphrases")
+    if isinstance(catchphrases, list) and _any_script_garble(*[str(x) for x in catchphrases]):
+        return True
+    return False
+
+
 def coherence_conflicts(profile: dict, npc: dict) -> list[str]:
     """Return the TOP-LEVEL profile keys whose authored prose contradicts the houseguest's PINNED
-    identity in `npc` (`genderPresentation` + `age`, authoritative here) — the set the caller drops
-    before the `recordCastProfile` write-back so they fall to the coherent seeded floor. Empty list ⇒
-    coherent (the common case; a byte-identical no-op). Vault-free: returns field NAMES only.
+    identity in `npc` (`genderPresentation` + `age`, authoritative here), OR whose content is
+    non-diegetic garble, before the `recordCastProfile` write-back so they fall to the coherent seeded
+    floor. Empty list ⇒ coherent (the common case; a byte-identical no-op). Vault-free: returns field
+    NAMES only, never the prose.
 
     Checks (cheap, in-object):
-      • biography — a self-referential gender flip, OR a young pinned age beside an elder self-descriptor;
-      • physicalCharacteristics — a distinguishingMark gender flip (the facet folds whole, so the WHOLE
-        facet is dropped to keep the engine's whole-or-nothing contract)."""
+      • biography — a self-referential gender-PRONOUN flip, a gendered SELF-DESCRIPTOR flip (E1/#1733:
+        "fatherly" on a pinned woman — no pronoun involved, so this is a distinct check from the
+        pronoun scan), non-Latin script garble, OR a young pinned age beside an elder self-descriptor;
+      • physicalCharacteristics — a distinguishingMark gender-pronoun flip, a gendered-descriptor flip
+        anywhere in the facet, or script garble anywhere in the facet (the facet folds whole, so the
+        WHOLE facet is dropped to keep the engine's whole-or-nothing contract);
+      • voice (E1/#1733) — script garble, a degenerate/empty dial value (e.g. `humor: "none"`), or a
+        gendered-descriptor flip in the prose signature (see `voice_conflicts`; the whole object drops,
+        matching its own whole-or-nothing fold)."""
     drop: set[str] = set()
     pin = str((npc or {}).get("genderPresentation") or "").strip().lower()
     bio = profile.get("biography") if isinstance(profile.get("biography"), str) else ""
     phys = profile.get("physicalCharacteristics")
     mark = str(phys.get("distinguishingMark") or "") if isinstance(phys, dict) else ""
+    phys_values = [str(v) for v in phys.values()] if isinstance(phys, dict) else []
 
     if pin in ("man", "woman"):
-        if _gender_flip(bio, pin):
+        if _gender_flip(bio, pin) or _gendered_descriptor_flip(bio, pin):
             drop.add("biography")
-        if _gender_flip(mark, pin):
+        if _gender_flip(mark, pin) or any(_gendered_descriptor_flip(v, pin) for v in phys_values):
             drop.add("physicalCharacteristics")
+
+    # E1 (#1733): non-diegetic mixed-script garble is rejected regardless of the gender pin — a
+    # CJK/Cyrillic/etc. codepoint in an English prose field is never legitimate content.
+    if _has_script_garble(bio):
+        drop.add("biography")
+    if _any_script_garble(*phys_values):
+        drop.add("physicalCharacteristics")
 
     age = (npc or {}).get("age")
     if isinstance(age, (int, float)) and not isinstance(age, bool) and int(age) < _YOUNG_AGE_CEILING:
         if bio and (_ELDER_LIFE_STAGE.search(bio) or _LONG_CAREER.search(bio)):
             drop.add("biography")
+
+    # E1 (#1733): the authored voice fingerprint — script garble, a degenerate dial ("none"/"n/a"), or
+    # a gendered-descriptor flip in its prose signature. Whole-or-nothing, like the field itself folds.
+    if voice_conflicts(profile, npc):
+        drop.add("voice")
     return sorted(drop)
 
 
