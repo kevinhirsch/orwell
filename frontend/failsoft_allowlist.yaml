@@ -311,13 +311,6 @@ allow:
     reason: "grandfathered pending burn-down (#1599) — background task scheduler swallows."
     approved_by: kevinhirsch
     approved: 2026-07-17
-  - id: gf-golden-path
-    site: frontend/src/golden_path.py
-    class: runtime
-    records: red-eligible
-    reason: "grandfathered pending burn-down (#1599) — 0108 golden record/replay best-effort swallow."
-    approved_by: kevinhirsch
-    approved: 2026-07-17
   - id: gf-research-handler
     site: frontend/src/research_handler.py
     class: runtime

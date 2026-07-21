@@ -120,87 +120,17 @@ instance** (Python deps installed, config set), not done blind.
 See [`README.md`](./README.md) and `requirements.txt` (FastAPI + uvicorn); `.env.example`
 documents config. During the refactor we'll run it as the Orwell front-end service.
 
-## The golden-path gate (0108 — record once, replay in CI)
+## The golden-path / visual-regression / theme gates (0108/0113/0114) — DECOMMISSIONED
 
-The model↔engine seam has a real-model regression gate: one recorded run of the golden path
-(casting → premiere → Week 1 → eviction → week roll) replays deterministically against the
-real engine + real FE on every PR — no API key (`.github/workflows/ci.yml` job
-`golden-path`), with a secret-gated nightly re-record (`golden-nightly.yml`). The seam is
-`src/golden_path.py`, wrapped inside `llm_core.stream_llm_with_fallback` / `llm_call_async`
-(byte-identical when neither env var is set).
-
-- **Regenerate the fixture** (required whenever a prompt/tool-schema change makes the replay
-  miss — that miss is the gate working):
-  `cd frontend && OPENROUTER_API_KEY=sk-… ORWELL_GOLDEN_RECORD=1 python3 scripts/golden_path_record.py`
-  then commit `tests/golden/golden_path_glm-4.7.jsonl` (defaults record the owner's two-tier
-  pair: GLM 4.7 narration + Qwen 3.6 Flash utility). The nightly's uploaded artifact is the
-  same thing pre-baked: download, eyeball the invariant diff, commit. **One driver run at a
-  time** — `frontend/data` is shared state; the driver pre-flight scrubs stale cross-run
-  state (canonical binding, old golden sessions/endpoints) before boot.
-- **Run the PR gate locally**: `python3 scripts/golden_path_replay.py --runs 2`.
-- The fixture is Vault-free by construction and leak-scanned on both record and replay
-  (`golden_path.fixture_leak_scan`); format 2 is **self-describing** (leading `meta` line +
-  per-record `writer` stamps) and `fixture_integrity_scan` fails any multi-writer or
-  off-declared-model fixture — the mid-run resolution-flip class that silently contaminated
-  the first GLM recording. A new LLM-behavioral fix still needs a hand live-verify
-  first (SOUL lesson 19) — this gate stops the *same* bug being re-discovered by hand.
-
-## The visual-regression harness (0113 — screenshot matrix + off-screen detector + baselines)
-
-A pixel-level sibling to the golden-path gate, tracking issue #1237. Rides the SAME committed
-golden fixture (`ORWELL_GOLDEN_REPLAY`, key-free, deterministic) to park a real engine + real FE
-walk at a canonical mid-week state (Tier A: 6 surfaces x 4 viewports x 5 house themes, ~120
-shots) and at up to 7 journey beats (Tier B: casting → premiere → hoh → nominations → veto →
-eviction → finale, x 2 viewports, ~14 shots — `finale` reports SKIPPED until a finale-covering
-fixture is recorded, never fabricated). Two independent checks per shot:
-
-- **Geometry/off-screen detector (BLOCKING)** — one DOM pass, off-viewport / clipped-by-ancestor
-  / zero-size / covered. Pure classification lives in `src/visual_geometry.py`
-  (`classify_shot_geometry`, unit-testable with no browser); the extraction JS is
-  `GEOMETRY_PROBE_JS` in the same module.
-- **Pixel diff vs. blessed baselines (ADVISORY)** — pure PIL (`src/visual_pixeldiff.py`), no new
-  heavyweight dependency. A shot id with no blessed baseline reports `baseline-missing`
-  (explicit, never a silent pass). Masks (`MaskRect`) blank out known time-varying regions (a
-  wall-clock readout) in both images before comparison.
-
-- **Run it**: `cd frontend && python3 scripts/visual_regression.py --tier all --out /tmp/visual-run`
-  (needs `npm run build` at the repo root first, and `playwright install chromium`).
-- **Bless a new baseline set**: `python3 scripts/visual_bless.py --run /tmp/visual-run --source "ci-artifact:<run-id>"`
-  — one command, works on any conforming run directory (a local run or an unpacked CI artifact).
-  **Policy: bless from CI artifacts, not local renders** (font/AA drift between machines would
-  otherwise poison the baseline for everyone else) — the script prints a reminder but does not
-  refuse (it can't structurally verify provenance).
-- Baselines live in `tests/visual/baselines/` (PNGs + `manifest.json`, committed — the repo is
-  private). CI job `visual-regression` is DORMANT (an explicit notice, never a silent pass) until
-  the same golden fixture the `golden-path` job needs is committed; an empty baselines set is a
-  legitimate first run (every shot advisory-skips its pixel compare; geometry still blocks).
-- Design note: `docs/features/0113-visual-regression-harness.md`. Extends
-  `scripts/responsive_matrix.py` (Stream S, ruling #16) without duplicating its
-  overflow/overlap/tap-target duties.
-
-## The theme-surface-consistency gate (0114 — computed-style probe, not pixels)
-
-A semantic sibling to 0113 — same golden-replay state source (composes 0113's own `VisualWalk`
-rather than re-driving the wire protocol), but a computed-style check instead of a pixel diff.
-Owner-reported bug: a surface hardcodes a polarity-fixed color instead of the ACTIVE theme's own
-`--bg`/`--panel` token, so it stays wrong on every theme except the one it happened to be
-authored against. Sweeps BOTH base themes (`light`, `dark`) x 2 viewports (390×844, 1440×900)
-over the registered game-build surfaces (`.ow-window`, `.ow-sheet`, gadget-rail cards, the
-sidebar(s), the headshot-studio portrait tiles) — BLOCKING, always (no advisory half; there is no
-baseline concept here, unlike 0113's pixel diff).
-
-- Pure classification lives in `src/theme_probe.py` (`classify_theme_findings`, unit-testable
-  with no browser); the extraction JS is `THEME_PROBE_JS` in the same module. A finding is a
-  surface whose effective composited background (alpha-composited over a bounded ancestor chain)
-  is far — by a calibrated "redmean" perceptual distance — from BOTH the active theme's own `--bg`
-  and `--panel`.
-- Same XFAIL-ratchet pattern as `visual_regression.py` (`scripts/theme_consistency.py`'s
-  `XFAIL`), scoped to the live colon-form shot id (`theme:<name>:<viewport>:<moment>`).
-- **Run it**: `cd frontend && python3 scripts/theme_consistency.py --out /tmp/theme-run` (needs
-  `npm run build` at the repo root first, and `playwright install chromium`).
-- CI job `theme-consistency` is DORMANT (an explicit notice, never a silent pass) until the same
-  golden fixture the `golden-path`/`visual-regression` jobs need is committed.
-- Design note: `docs/features/0114-theme-surface-consistency.md`.
+The real-model **golden-path** record/replay gate (0108) and its two screenshot siblings that
+rode the same committed fixture — the **visual-regression** harness (0113) and the
+**theme-surface-consistency** gate (0114) — were **removed entirely** (owner directive,
+2026-07-21). They were advisory / non-gating (excluded from `ci-gate.needs`), perpetually stale
+(a fixture treadmill on every prompt/schema/casting-flow change), and hang-prone (#1713). The
+committed fixture, the record/replay scripts + the `src/golden_path.py` seam, the harness scripts
+and `src/visual_*` / `theme_probe` modules, the three CI jobs, `golden-nightly.yml`, and their
+unit gates are gone. Live model-call flows (`llm_core.stream_llm_with_fallback` / `llm_call_async`)
+are plain passthroughs again; nothing else depends on the removed seam.
 
 ## The responsive contract (Stream S — ruling #16; binding)
 

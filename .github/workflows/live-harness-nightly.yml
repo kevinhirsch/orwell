@@ -16,12 +16,12 @@
 #   - #829 turn-coalescing live-verify                                  (leg: coalesce-live, auto-arms when the driver lands)
 #   - #1392 0115 Diary-Room wall red-team probe                         (leg: dr-wall-live, LIVE today)
 #
-# Secret: OPENROUTER_API_KEY (repo secret). Sibling of golden-nightly.yml.
+# Secret: OPENROUTER_API_KEY (repo secret).
 name: live-harness-nightly
 
 on:
   schedule:
-    - cron: "33 7 * * *"   # offset from golden-nightly (06:17) to spread OpenRouter spend / runner load
+    - cron: "33 7 * * *"   # early-morning UTC to spread OpenRouter spend / runner load
   workflow_dispatch: {}
 
 # Minimal token scope: the job only checks out the repo and uploads artifacts (no repo write-back).

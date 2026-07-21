@@ -33,8 +33,6 @@ import logging
 import re
 from typing import Awaitable, Callable, Optional, Union
 
-from src import golden_path
-
 logger = logging.getLogger(__name__)
 
 # The OPEN-SET public-voice fields the engine's recordProducerProfile accepts (everything else — a
@@ -279,12 +277,6 @@ def kickoff_producer_authoring(owner: Optional[str]) -> None:
     """Fire-and-forget the producer-persona deepening in the background, ONCE per season start. Never
     blocks game start; never raises into the caller. A per-user in-flight guard stops a rapid second
     createCharacter from double-authoring the same producer."""
-    # 0108: quiesced under golden record/replay — this task's engine write bumps beatSeq on a background
-    # schedule, which breaks the deterministic-replay contract (mirror orwell_zeitgeist.kickoff_capture).
-    # Fail-soft by design: the engine's deterministic producer floor simply stands.
-    if golden_path.active():
-        logger.info("[producer-authoring] skipped: golden record/replay mode (0108 determinism)")
-        return
     k = _key(owner)
     if k in _IN_FLIGHT:
         return

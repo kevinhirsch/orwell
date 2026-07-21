@@ -366,12 +366,6 @@ def test_soft_sites_record_nothing(monkeypatch, run):
 
 # ── the pinned-soft lanes (source pins, the repo convention) ─────────────────────────────
 
-def test_golden_driver_pins_soft():
-    src = _read("scripts/_golden_driver.py")
-    assert 'ORWELL_ENRICHMENT_POLICY="soft"' in src, \
-        "the golden record/replay driver must pin the legacy soft policy"
-
-
 def test_harnesses_pin_soft():
     for rel in ("scripts/boot_smoke.py", "scripts/browser_smoke.py", "scripts/responsive_matrix.py"):
         assert 'ORWELL_ENRICHMENT_POLICY="soft"' in _read(rel), f"{rel} must pin the soft policy"

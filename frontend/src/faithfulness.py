@@ -92,13 +92,6 @@ def faithfulness_mode() -> str:
     sibling. A broken settings read degrades to the env path and NEVER raises into the loop — config
     must never crash the turn.
     """
-    # 0) 0108 golden record/replay — STRUCTURALLY off, ahead of settings (2026-07-17, the sibling of
-    #    overseer_mode's pin): the fixture is recorded judge-off, and a settings round-trip (a full
-    #    merged-defaults save) can land `faithfulness_mode: "active"` in settings.json mid-run,
-    #    outranking the driver's env pin — an un-recorded judge call under replay is a fixture miss.
-    #    Env check inline so the disabled path never imports golden_path.
-    if os.environ.get("ORWELL_GOLDEN_RECORD") == "1" or os.environ.get("ORWELL_GOLDEN_REPLAY"):
-        return "off"
     # 1) the settings tier (the admin UI control). A broken read drops to the env path.
     try:
         from src.settings import get_setting, is_setting_overridden

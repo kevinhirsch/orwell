@@ -4065,20 +4065,6 @@ async def _maybe_delta_line(user, last_seen_beat_seq) -> Optional[str]:
     identity through unchanged."""
     if not isinstance(last_seen_beat_seq, int) or isinstance(last_seen_beat_seq, bool):
         return None  # no prior turn to diff against → leave today's full context untouched
-    # 0108: quiesce under the golden record/replay seam. The committed fixture was recorded while
-    # this line was dead (the old `user is None` bail — golden runs are AUTH_ENABLED=false), so its
-    # request keys hold framing WITHOUT any delta line; rendering one under replay would drift every
-    # later key off the recording (a hard GoldenReplayMiss). The delta content is also beatSeq-paced
-    # (the same tick-timing ±1 class as the dwell counters / movement cue that needed key-side
-    # neutralization, #1355), so keeping it out of BOTH record and replay keeps the seam
-    # deterministic. Drop this gate (plus a key-side neutralization mirroring _MOVEMENT_LINE_RE) at
-    # a deliberate re-record if fixture coverage of the delta line is wanted.
-    try:
-        from src import golden_path as _gp
-        if _gp.active():
-            return None
-    except Exception:
-        pass
     try:
         from src import orwell_engine
         # F-PY-4 (perf audit): the additive per-turn delta line is best-effort framing — bound it to
@@ -5201,14 +5187,6 @@ def needs_auto_name(name: str) -> bool:
 
 async def auto_name_session(session_manager, sess):
     """Generate a short title for a session from its first user message."""
-    # 0108: quiesce under the golden record/replay seam — title timing is state-paced and its
-    # request window shifts between record and replay (the memory-extractor miss class).
-    try:
-        from src import golden_path as _gp
-        if _gp.active():
-            return
-    except Exception:
-        pass
     try:
         from src.llm_core import llm_call_async
         from src.task_endpoint import resolve_task_endpoint
