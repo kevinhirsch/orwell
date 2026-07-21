@@ -52,6 +52,23 @@
 #   ORWELL_VOTE_DEDUCTION       Vote deduction (0110) — the jury grudge book reasons about who voted how
 #       (owner ruling 2026-07-17: on). Self-gated: absent/off ⇒ the grudge folds the true votes exactly
 #       as before (no deduction, no sub-rng) — the seeded jury spine is unmoved.
+#   ORWELL_GOSSIP_DRIFT         Character-mediated gossip drift (#1397) — owner ruling Q2 (2026-07-21,
+#       #1779: docs/design/2026-07-21-moonshot-round2-divergent-slate.md §5). With it unset the
+#       orchestrator passes no `voiceOf` to `diffuseGossip` (personality-agnostic drift, byte-identical
+#       to the pre-feature behavior); ON, the reteller's own voice colors the distortion. Drift is
+#       re-weighted on a per-hop FORK regardless, so the seeded comp/vote/jury draw stream is
+#       byte-identical either way — see `gossip.ts:180-358`.
+#   ORWELL_SECRET_BARTER        Off-screen NPC<->NPC secret barter (0099 hidden half) — owner ruling Q2
+#       (2026-07-21, #1779). With it unset `secretBarterTick` returns before drawing anything (the
+#       dedicated barter-rng stream never advances, no secret changes hands) — the seeded comp/vote/jury
+#       spine is byte-identical — see `secretBarterConstants.ts:14-18`.
+#   ORWELL_SHOWRUNNER           AI Showrunner (0101/#1401) Phase-1 ONLY — owner ruling Q2 (2026-07-21,
+#       #1779: "Phase-1 observe-only; REWEIGHT stays off"). Phase-1 composes on a pure scoring pass (no
+#       rng) and only routes an emphasized surfaced thread's belief to the player, fold-free — the
+#       seeded comp/vote/jury spine is byte-identical even while ON. The OUTCOME-AFFECTING sibling
+#       `ORWELL_SHOWRUNNER_REWEIGHT` (Phase-2, #1455) is DELIBERATELY NOT added here and MUST stay
+#       unset — it re-orders the scheduler and folds hidden relationship weights, so it is NOT
+#       calibration-neutral and is explicitly out of scope for #1779 — see `GameSessionAdapter.ts:610-640`.
 
 # orwell_optin_env_defaults <data_dir>
 #   Prints the opt-in KEY=VALUE lines — ONLY bare KEY=VALUE, one per line, in the installer's historical
@@ -81,5 +98,8 @@ ORWELL_COMP_MIXED=1
 ORWELL_COMP_INTENT=1
 ORWELL_MYTH_MAKING=1
 ORWELL_VOTE_DEDUCTION=1
+ORWELL_GOSSIP_DRIFT=1
+ORWELL_SECRET_BARTER=1
+ORWELL_SHOWRUNNER=1
 EOF
 }
