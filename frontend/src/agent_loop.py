@@ -4792,8 +4792,12 @@ _LOOP_BREAK_PENDING_NOTE: Dict[str, str] = {}
 def _loop_break_resolution_observed(progressed: bool, current_gate, prior_gate) -> bool:
     """L-F3 Greptile P2: pure verdict — has the loop-break-stalled gate OBSERVABLY resolved? True
     when a progression tool fired this turn, OR the framed gate changed since the streak last saw
-    it (an unknown prior gate never counts as "changed" — nothing to compare against yet)."""
-    return bool(progressed) or (prior_gate is not None and current_gate != prior_gate)
+    it. Neither an unknown PRIOR gate (nothing to compare against yet) NOR an unknown CURRENT gate
+    (#1754 Greptile P1: a failed framed-key read leaves `current_gate=None` — that missing value
+    must NOT read as a gate CHANGE, or an ignored nudge on a still-stalled beat would be falsely
+    counted as an applied belt correction) counts as resolution."""
+    return bool(progressed) or (
+        prior_gate is not None and current_gate is not None and current_gate != prior_gate)
 
 
 def _note_loop_break_if_resolved(key: str, owner, *, progressed: bool, current_gate) -> None:
