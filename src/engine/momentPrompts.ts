@@ -57,6 +57,17 @@ const WALKABLE_ROOM_NAMES: string = WALKABLE_ROOMS.map(roomDisplayName).join(", 
  * tool registry (`src/surfaces/tools/registry.ts`) — every lever the agent can
  * call should appear here with when-to-use it. Persona/framing only (mandate #2);
  * the engine enforces secrecy, not this text.
+ *
+ * #1740 (F7 audit) — the "NEVER NAME THE MACHINERY" clause below is the SAME kind of framing:
+ * wording is not the wall (same pattern as the location/knowledge findings, #1726/#1727/#1735).
+ * With reasoning OFF, GLM-4.7 has been observed narrating its own tool-planning straight into the
+ * player-facing body regardless of this ban ("I call getGameState... whereabouts... moveTo...
+ * recordInteraction"). The clause stays — it lowers HOW OFTEN the model tries — but the actual
+ * enforcement is the render-layer scrub: `frontend/static/js/markdown.js`'s
+ * `scrubMachineryAsides`/`scrubReasoningPreamble`/`redactRawIds` chain, wired into
+ * `processWithThinking`'s game-build branch. That scrub is the wall; audit/harden IT when a leak
+ * phrasing gets through, never just this prose. `frontend/tests/test_1740_machinery_scrub_corpus.py`
+ * is the coverage gate.
  */
 export const BASE_GAME_MASTER_PROMPT = [
   "You are Big Brother: the host, the narrator, and the living voice of every houseguest in an",
