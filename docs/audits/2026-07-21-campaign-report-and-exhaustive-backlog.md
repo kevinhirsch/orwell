@@ -1002,7 +1002,7 @@ each task (it names the T0/T1/T4 item(s) that absorb it, or states its own stand
 **DoR**
 - [ ] D6 is ruled: **CONFIRMED** — deploy-parity flags on dev/playtest rigs, env-level only
   (2026-07-21).
-- [ ] The full flag set is enumerated per the synthesis §7.2 reconciliation: seven flags
+- [ ] The full flag set is enumerated per the synthesis §7.2 reconciliation: six flags
   (`ORWELL_CAMPAIGNS`, `ORWELL_TRAJECTORIES`, `ORWELL_STRATEGIC_CADENCE`, `ORWELL_SCHEME_TARGETS`,
   `ORWELL_CONFESSIONAL_DEPTH`, `ORWELL_NPC_DEAL_OFFERS`), plus `ORWELL_DEAL_DEPTH` held back pending
   its own live-loop reconciliation.
@@ -1149,3 +1149,61 @@ verify bot claims against code personally.
 5. **Always (the T9 doctrine):** demote → observe → delete. No superseded guard/belt/scrub is
    removed until its replacement survives a full live season + a clean canary window; demoted
    layers stay armed and alarm RED when they fire.
+
+
+---
+
+## Part C — The wave breakout (the full backlog, ordered for execution; reconciled 2026-07-21 late)
+
+Every open item from every tier + both moonshot rounds + the session rulings, in ONE wave structure.
+(Contracts: each named item's DoR/AC/DoD is in Part B above or its tracker issue.)
+
+### Wave 0 — IN FLIGHT NOW
+| Item | Vehicle |
+|---|---|
+| Casting mandate (FacetLedger, 15-wide, prewarm-during-interview, entry gate; owner-clarified: ≤10s = the user-facing wait at the house door, authoring covers under the interview) | agent → `claude/casting-ledger-fast` |
+| #1713 premiere ~300s block bound | agent → `claude/1713-premiere-block-fix` |
+| T0-1 comparator + T0-5 scrub + #1729-B1 RED events | **PR #1774** |
+| T0-4 capability probe + attempt telemetry + TUN-10 rig parity | agent → `claude/t0-probe-rig-parity` |
+
+### Wave 1 — GROUND TRUTH ON AIR (remainder; all decision-gates cleared)
+T0-2 beats-terminate-themselves (dispatches when #1713's branch lands — same file) · T0-3 engine
+chyrons (D1 ✅) · the Q2 flag flips (`ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`,
+`ORWELL_SHOWRUNNER` observe-only) · T0-7 exit playtest (zero phantoms / retcons / livelocks /
+reasoning leaks).
+
+### Wave 2 — THE PIPELINE + RECORDING INTEGRITY
+T1-1 Act→Commit→Voice (belts DEMOTE per class, RED-on-fire) · T1-2 nightly canary (D2 ✅) ·
+T1-3 show bible · T1-4 honest delivery **+ #1728 render-log/fold-integrity + #1729-D2 resumable
+stream** (same substrate; the P1 recording-integrity pair rides here — also closes session task #20
+FE-freeze evidence) · **D7 full-WebSocket consolidation** (ADR 0017/0018 revision rides the
+implementation) · Q7 pacing-budget spec (commissioned — resolves PO-1).
+
+### Wave 2.5 — ROUND-2 QUICK WINS (Q8 hybrid: small+reversible → flagged build + live demo)
+C1 Wipeout Reel (9.0) · B1 Telephone-Game Payoffs (needs the drift flag from Wave 1) · E2
+Traitors' Fury + bearing · F1 Your Legend Precedes You (notoriety finally voiced). Each: flag,
+off ⇒ byte-identical invariant, seeded, per the slate §6 binding constraints.
+
+### Wave 3 — FOOTAGE + THE ROUND-2 SPEC BATCH (M/L: short spec first per Q8)
+T1-5 footage pool (D4 ✅, after the ledger) · specs then builds: D1 Ballot Arithmetic (typed
+voteClaims), A1 Fifteen Pairs of Eyes (bounded observer sets), C2 Odd-Couple B-Plots, E1 exit
+package (Q1 ✅ player-only, player-knowledge-layer predicate), C3 seeded partial pan (Q4 ✅), A2,
+C4 (deterministic grounding), D2, cross-season F2 + F4-without-step-2 (Q3 ✅, Q5 ❌ step-2) ·
+Q6 payoff-balance options specced both ways (PO-gated).
+
+### Wave 4 — THE EDITORIAL ORGAN
+T1-6 sifter + tension director + interstitials + Spy Screen · remaining round-2 mid-band as ruled
+via live demos (B2, B3 after B1, B4, C5, C6, E3, F3).
+
+### Wave 5 — AGENCY + ENDGAME DEPTH
+T1-7 pledges/flip-cascade/convokeHouse · T1-8 autopsy decision point (D5 parked) ·
+presence/location parity remainder (session task #14: BL-007/013/033) · ADR 0019 Layers 2-3
+(task #24, coordinate with footage redaction).
+
+### CONTINUOUS (not wave-bound)
+#1644 text standardization · #1599 fail-soft audit (with 0112) · #1413/R2+R3 render-path collapse
+(onto the Wave-2 render log) · R6/R7 · RES-2..RES-5 opportunistic · 0111/0112 in-progress specs.
+
+### PARKED / PO-GATED (no work without a new ruling)
+0097/0098/0103 wiring · D5 blindside autopsy · Q6 payoff balance · D3 Genius Back-Room ·
+TUN-2 time/sleep Phase-2 · TUN-4 Proxmox smoke (owner-run) · TUN-5 Postgres tier.
