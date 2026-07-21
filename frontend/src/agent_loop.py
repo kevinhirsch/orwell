@@ -2303,7 +2303,8 @@ def _player_turn_is_lull(messages) -> bool:
     return False
 
 
-def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat_key) -> bool:
+def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat_key,
+                                  current_pending_kind=None) -> bool:
     """ADR 0011 — did a concurrent PEER advance the beat during this turn?
 
     True iff the engine's CURRENT beat key `(week, phase, moment)` differs from the one the model was
@@ -2314,15 +2315,37 @@ def _peer_advanced_since_framing(progressed: bool, framed_beat_key, current_beat
     failed to advance" from "a peer advanced," so a lull turn does not re-fire the advance / forced-
     advance nudge against a beat that already moved (the two-tab "20-step loop").
 
+    T0-1 (#1019 follow-up fix): `chat_helpers._LAST_FRAMED_BEAT_KEY` folds an OPEN player pending's
+    `kind` in as a 4th tuple element — `(week, phase, moment, pendingKind)` — whenever a pending was
+    open at framing time (F9/#1019, so an out-of-band decision-card resolution that leaves week/
+    phase/moment untouched still flips the key). `current_beat_key` as read by the caller is always
+    the bare 3-tuple `(week, phase, moment)`, so comparing the two directly compares tuples of
+    DIFFERENT LENGTH whenever a pending was open at framing — Python tuple equality on mismatched
+    lengths is always False, so `current_beat_key != framed_beat_key` was unconditionally True on
+    EVERY pending-open turn regardless of whether anything actually moved. That falsely reads as
+    "a peer advanced," wipes the stall counters, and vetoes the stall-escalation rescue for the
+    entire pending's lifetime — a single-tab livelock. Fixed here by normalizing `current_beat_key`
+    with the IDENTICAL conditional rule the framed side uses (fold in `current_pending_kind`, the
+    kind read at THIS SAME turn, only when it is not None) before comparing, so both sides always
+    compare on the same shape.
+
     Pure + total. Unknown keys (None) ⇒ False — fail toward NOT suppressing (a missed suppression is
     recoverable next turn; a wrong suppression could freeze a genuine single-tab stall). In single-tab
-    play the beat key changes ONLY when this turn progresses, so this is always False and the stall-
-    nudge behaves byte-identically (the seeded UAT / calibration gates are single-tab)."""
+    play with no pending open, the beat key changes ONLY when this turn progresses, so this is always
+    False and the stall-nudge behaves byte-identically (the seeded UAT / calibration gates are
+    single-tab). With a pending open in single-tab play, the normalized current key now matches the
+    framed key whenever the pending's `kind` is unchanged, so this is ALSO False — the fix this
+    function exists for."""
     if progressed:
         return False
     if framed_beat_key is None or current_beat_key is None:
         return False
-    return current_beat_key != framed_beat_key
+    normalized_current_beat_key = (
+        (*current_beat_key, current_pending_kind)
+        if current_pending_kind is not None
+        else current_beat_key
+    )
+    return normalized_current_beat_key != framed_beat_key
 
 
 # ── Consequence-loop error-correction (record social play → move the weights) ─────────
@@ -2997,9 +3020,24 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # machinery fragment must never become an "(overheard, clearly)" world event. Checked on
         # BOTH the player's own turn and the model's narration (the narrator marks its own HUD/
         # producer asides with the identical ((wrap)) convention — momentPrompts.ts).
-        if _is_nondiegetic_scene_text(last_user) or _is_nondiegetic_scene_text(narration):
+        _nondiegetic_side = ("player" if _is_nondiegetic_scene_text(last_user)
+                            else "narration" if _is_nondiegetic_scene_text(narration) else None)
+        if _nondiegetic_side is not None:
             logger.info(f"[orwell] auto-record: skipped non-diegetic turn (OOC/machinery, #1729) "
                        f"user={owner}")
+            # #1599 — a would-be phantom fold (OOC vent / stream-drop machinery) is a REAL
+            # correction, not routine narration, and must never be SILENT: RED-eligible per the
+            # no-silent-fail-soft ruling, disposition auto-corrected by this gate (a correction
+            # is not a cloak — an auto-corrected fault still shows RED on /admin/status).
+            try:
+                from src import log_rings as _lr
+                _lr.record_soft_failure(
+                    "recorder:nondiegetic-content-rejected",
+                    f"the {_nondiegetic_side} turn was OOC/machinery text that would have folded "
+                    f"as an '(overheard, clearly)' world event",
+                    corrected="nondiegetic-gate", user=owner)
+            except Exception:
+                pass
             return False
         msgs = [
             {"role": "system", "content":
@@ -4373,6 +4411,104 @@ def _scrub_game_leak(text: str) -> str:
     return "".join(
         p for p in parts
         if not _GAME_LEAK_SENTENCE_RE.search(p) and not _GAME_LEAK_START_RE.match(p)
+    )
+
+
+# ── T0-5 (#1771 F3) — inline-planning / debugger-monologue leak scrub ────────────────────
+# PERMANENT defense-in-depth (T9 resiliency doctrine, owner ruling 2026-07-21): kept even
+# after provider capability pinning (T0-4) restores a genuinely separated reasoning channel
+# for models that support it. Some providers front GLM-4.7 (and similar "thinking" models) in
+# a way that returns `reasoning_content` EMPTY every round (reasoning_chars=0) while the
+# model's actual planning trace is emitted INLINE as ordinary content — the thinking-channel
+# split (`round_reasoning` / `_scrub_active` above) never engages because there is no
+# reasoning delta to split off in the first place. Live playtest leaked debugger monologue
+# verbatim into the player's bubble: "I need to ground myself in the actual game state before
+# I say anything else.", "holder is null, players array is empty". `_scrub_game_leak` above
+# does not catch this class — its markers are tool NAMES and explicit tool-process verbs, not
+# generic reasoning/debugger language.
+#
+# Two independent triggers, EACH gated on `reasoning_empty` (this round's `round_reasoning`
+# came back blank) so this layer can never fire against — or fight — a model with a genuine
+# separated reasoning channel (where the existing split is authoritative):
+#   1. A LEADING run of planning/meta-opener lines at the very START of the round's visible
+#      output (`_INLINE_PLANNING_OPENER_RE`) — mirrors the JS `scrubReasoningPreamble`
+#      preamble-stripper contract: drop the contiguous leading run only, whatever narration
+#      follows survives untouched. Gated additionally on `at_bubble_start` so a LATER flush
+#      within the same round (real narration already streamed) is never mistaken for a leak
+#      merely because it is the first line of THIS particular buffered chunk.
+#   2. Raw engine-field jargon (`_ENGINE_FIELD_JARGON_RE`) ANYWHERE in the text, dropped at
+#      sentence granularity (mirrors `_scrub_game_leak`) since debugger talk can leak
+#      mid-paragraph, not only as an opener.
+#
+# Both triggers are QUOTE-GUARDED: a line/sentence carrying a quotation mark is dialogue, never
+# the model's own planning, and is never touched — an NPC saying "I need to think about this"
+# survives byte-identical (mirrors the existing `redactRawIds` quote guard in markdown.js).
+_INLINE_PLANNING_OPENER_RE = re.compile(
+    r"^\s*(?:let(?:'s)? me\s+(?:now\s+|first\s+|then\s+|also\s+|just\s+|quickly\s+)?"
+    r"(?:think|ground myself|orient myself|reason (?:this|it) through|work through|"
+    r"figure out|process|look at|check|review|re-?read|parse|plan|map out|sort out)\b"
+    r"|i need to\s+(?:ground myself|orient myself|think|reason|figure out|process|check|"
+    r"make sure|understand|recall|remember|re-?read|review)\b"
+    r"|i should\s+(?:ground myself|orient myself|think|reason|figure out|process|check|"
+    r"consider|make sure|re-?read|review)\b"
+    r"|(?:looking|let'?s look) at (?:the )?(?:actual |current )?(?:game|engine) state\b"
+    r"|okay,?\s+(?:so\s+)?(?:let(?:'s| me)|i(?:'ll| need| should))\b"
+    r"|first,?\s+(?:let me|i(?:'ll| will| need to| should))\b"
+    r")",
+    re.IGNORECASE,
+)
+_ENGINE_FIELD_JARGON_RE = re.compile(
+    r"\b(?:holder|players?|roster|state|object|array|payload|response|field|key|value|"
+    r"json|dict(?:ionary)?|variable|param(?:eter)?s?)\b[^.!?\n\"“”]{0,40}\b"
+    r"(?:is\s+null|is\s+undefined|is\s+none|is\s+empty|is\s+not\s+defined)\b"
+    r"|\barray is empty\b"
+    r"|\b(?:returns?|returned)\s+(?:null|none|undefined|an? empty (?:array|object|list))\b"
+    r"|\bthe\s+(?:game\s+)?state\s+object\b",
+    re.IGNORECASE,
+)
+
+
+def _has_dialogue_quote(fragment: str) -> bool:
+    """A quoted fragment is NPC/player dialogue, never the model's own planning voice."""
+    return bool(re.search(r'["“”]', fragment))
+
+
+def _scrub_inline_planning_leak(text: str, *, reasoning_empty: bool,
+                                 at_bubble_start: bool = False) -> str:
+    """T0-5 — drop an inline planning/debugger-monologue leak from a model whose reasoning
+    channel came back EMPTY this round (`reasoning_empty`). A no-op when `reasoning_empty` is
+    False — a model WITH a genuine separated reasoning channel is already covered by that
+    split, so this layer is scoped to models that route NOTHING to `reasoning_content`, and can
+    never double-scrub or fight the existing contract. Fail-open to hiding: if the entire text
+    is planning preamble, returns ''."""
+    if not text or not reasoning_empty:
+        return text
+    result = text
+    if at_bubble_start:
+        # Sentence-granularity, not line-granularity: inline planning is rarely newline-
+        # separated from the narration that follows it in the SAME streamed chunk ("I need to
+        # ground myself in the actual game state before I say anything else. The room falls
+        # quiet.") — splitting only on "\n" would drop the whole chunk, real narration included,
+        # the moment ANY leading clause matched. Reuse the same sentence-boundary split
+        # `_scrub_game_leak` uses so only the offending leading sentence(s) are consumed.
+        parts = re.split(r"(?<=[.!?\n;])", result)
+        start = 0
+        for i, part in enumerate(parts):
+            if not part.strip():
+                start = i + 1
+                continue
+            if not _has_dialogue_quote(part) and _INLINE_PLANNING_OPENER_RE.search(part):
+                start = i + 1
+                continue
+            break
+        if start:
+            result = "".join(parts[start:]).lstrip()
+    if not result:
+        return result
+    parts = re.split(r"(?<=[.!?\n;])", result)
+    return "".join(
+        p for p in parts
+        if _has_dialogue_quote(p) or not _ENGINE_FIELD_JARGON_RE.search(p)
     )
 
 
@@ -6186,6 +6322,10 @@ async def _stream_agent_loop_impl(
         _visible_halted = False
         _scene_broken = False  # A2: a phantom board change cut this round's scene (halts visible stream)
         _visible_emitted_len = 0  # length of round_response already streamed as visible content
+        # T0-5: has THIS round already flushed real visible narration? Gates the inline-planning
+        # leading-preamble strip's `at_bubble_start` — a later flush within the round must never be
+        # mistaken for the round's opener merely because it's the first line of ITS buffered chunk.
+        _round_visible_emitted = False
         native_tool_calls = []  # populated if model uses function calling
         # Reset doc streaming state per round
         _doc_acc = ""
@@ -6571,6 +6711,12 @@ async def _stream_agent_loop_impl(
                             _complete, _game_buf = _split_complete_sentences(_game_buf)
                             if _complete:
                                 _clean = _scrub_game_leak(_complete)
+                                # T0-5: the inline-planning/debugger-monologue scrub, gated on this
+                                # round's reasoning channel having come back empty (see the function's
+                                # docstring — a model WITH a genuine reasoning channel is untouched).
+                                _clean = _scrub_inline_planning_leak(
+                                    _clean, reasoning_empty=not round_reasoning.strip(),
+                                    at_bubble_start=not _round_visible_emitted)
                                 if _clean:
                                     # A2: run the whole-scene circuit-breaker + 0065 Part C per-sentence
                                     # pre-emission outcome guard (see `_emit_guarded_scene`'s docstring for
@@ -6599,6 +6745,7 @@ async def _stream_agent_loop_impl(
                                         full_response += _guarded_text
                                         if _guarded_text.strip():
                                             _emitted_visible = True
+                                            _round_visible_emitted = True
                                         yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
                                     if _scene_broken:
                                         # A2: the scene is cut — halt the rest of the round's visible
@@ -6718,6 +6865,10 @@ async def _stream_agent_loop_impl(
         # nothing the round produced is left unshown or leaks through.
         if _scrub_active and _game_buf:
             _clean = _scrub_game_leak(_game_buf)
+            # T0-5: same inline-planning/debugger-monologue scrub as the mid-loop emit above.
+            _clean = _scrub_inline_planning_leak(
+                _clean, reasoning_empty=not round_reasoning.strip(),
+                at_bubble_start=not _round_visible_emitted)
             _game_buf = ""
             if _clean:
                 # 0065 Part C + A2 — the SAME scene circuit-breaker + per-sentence guard as the mid-loop
@@ -6744,6 +6895,7 @@ async def _stream_agent_loop_impl(
                     full_response += _guarded_text
                     if _guarded_text.strip():
                         _emitted_visible = True
+                        _round_visible_emitted = True
                     yield f'data: {json.dumps({"delta": _guarded_text})}\n\n'
 
         tool_blocks, used_native = _resolve_tool_blocks(round_response, native_tool_calls, round_num)
@@ -7268,7 +7420,12 @@ async def _stream_agent_loop_impl(
                         # NAR-1: _belt_key (was `owner or ""` — the same "default"-sentinel
                         # mismatch as the first read above).
                         _framed_beat_key = _ch_peer._LAST_FRAMED_BEAT_KEY.get(_belt_key(owner))
-                        if _peer_advanced_since_framing(_progressed, _framed_beat_key, _beat_key_at_read):
+                        # T0-1: pass THIS turn's pending kind so the comparator can normalize the
+                        # current key to the same shape as the framed key (see the function's
+                        # docstring) — the framed key was 4-tuple whenever a pending was open at
+                        # framing, while `_beat_key_at_read` is always a bare 3-tuple.
+                        if _peer_advanced_since_framing(_progressed, _framed_beat_key, _beat_key_at_read,
+                                                        _pending_kind_at_read):
                             _peer_advanced = True
                             # NAR-1: unconditional (was `if owner:`) — a single-tenant peer advance
                             # must reset the SAME belt state the single-tenant write path uses.

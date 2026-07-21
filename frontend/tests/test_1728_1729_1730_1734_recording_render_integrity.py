@@ -187,6 +187,48 @@ def test_ordinary_scene_still_records(monkeypatch):
     assert cap["with_ids"] == ["npc:3"]
 
 
+# ---- #1729 (B1) / #1599: the reject path is NEVER silent — a RED-eligible health event lands
+#      on the overseer ring (the no-silent-fail-soft ruling: even an auto-corrected fault is RED).
+
+def test_ooc_rejection_records_a_red_eligible_overseer_event(monkeypatch):
+    from src import log_rings as lr
+    lr.OVERSEER.buf.clear()
+    ok, cap = _drive(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}',
+                     last_user="((that was fucking weird, so combative))")
+    assert ok is False
+    events = list(lr.OVERSEER.buf)
+    assert events, "the reject must land a health event — #1599 bans a silent fail-soft"
+    ev = events[-1]
+    assert ev["overseerLevel"] == "anomaly"
+    assert ev["ok"] is False, "RED per #1599 — an auto-corrected fault is still RED, not a cloak"
+    assert ev["lever"] == "nondiegetic-gate"
+    assert "recorder:nondiegetic-content-rejected" in ev["kind"]
+
+
+def test_stream_drop_rejection_records_a_red_eligible_overseer_event(monkeypatch):
+    from src import log_rings as lr
+    lr.OVERSEER.buf.clear()
+    ok, cap = _drive(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}',
+        last_user="The stream dropped before you finished. It ended with:\n\nision. She's got that…")
+    assert ok is False
+    events = list(lr.OVERSEER.buf)
+    assert events
+    ev = events[-1]
+    assert ev["overseerLevel"] == "anomaly"
+    assert ev["ok"] is False
+    assert ev["lever"] == "nondiegetic-gate"
+
+
+def test_ordinary_scene_does_not_fire_the_nondiegetic_red_event(monkeypatch):
+    from src import log_rings as lr
+    lr.OVERSEER.buf.clear()
+    ok, cap = _drive(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"a real scene"}')
+    assert ok is True
+    kinds = [e.get("kind") for e in lr.OVERSEER.buf]
+    assert "recorder:nondiegetic-content-rejected" not in kinds
+
+
 # ---- #1730 (B3): the fold witness set is the engine-presence intersection, not the model's guess.
 
 def test_witness_set_drops_offscene_npc_the_model_guessed(monkeypatch):
