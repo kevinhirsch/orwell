@@ -320,12 +320,22 @@ export async function regenerateFrom(aiMsgElement) {
   }
 
   const keepCount = userIndex;
+  // #1728 (D1) — prefer the id-keyed supersede: the AI bubble's DB row id (stamped once the row
+  // is persisted — see chat.js `dataset.dbId`) lets the server resolve the true `keep_count` from
+  // its own `seq` order instead of trusting this function's DOM-index count, which can drift from
+  // the real DB row count (hidden/system rows persist without a rendered bubble) and leave the
+  // stale reply un-truncated — two near-identical persisted rows after "Try again" (T3). Falls
+  // back to the DOM-index count only when the row hasn't been stamped with an id yet (rare: a
+  // regenerate clicked before the bubble's own persistence round-trip completed).
+  const _aiDbId = aiMsgElement.dataset.dbId || null;
 
   try {
     await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keep_count: keepCount })
+      body: JSON.stringify(_aiDbId
+        ? { truncate_from_id: _aiDbId, keep_count: keepCount }
+        : { keep_count: keepCount })
     });
 
     for (let i = allMsgs.length - 1; i > aiIndex; i--) {

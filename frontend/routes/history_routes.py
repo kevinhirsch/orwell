@@ -141,9 +141,26 @@ def setup_history_routes(session_manager) -> APIRouter:
         _verify_session_owner(request, session_id)
         try:
             body = await request.json()
-            keep_count = body.get("keep_count", 0)
+            # #1728 (D1) — id-keyed supersede: when the caller (a regenerate) names the specific DB
+            # row it wants to supersede, resolve `keep_count` from the server's own `seq` order
+            # instead of trusting a DOM-index guess, which can drift from the true DB row count
+            # (hidden/system rows persist without a rendered bubble) and leave the stale reply
+            # un-truncated — the "two near-identical persisted rows" bug (T3). `keep_count` stays
+            # supported for every existing caller (unrelated to a specific row).
+            truncate_from_id = body.get("truncate_from_id")
+            if truncate_from_id:
+                resolved = session_manager.keep_count_before_message(session_id, truncate_from_id)
+                if resolved is None:
+                    # The named row isn't in this session (already gone, wrong session, stale
+                    # client state) — refuse to guess a count rather than truncating blind.
+                    raise HTTPException(404, "truncate_from_id not found in this session")
+                keep_count = resolved
+            else:
+                keep_count = body.get("keep_count", 0)
             result = session_manager.truncate_messages(session_id, keep_count)
             return {"status": "ok", "kept": keep_count, "truncated": result}
+        except HTTPException:
+            raise
         except KeyError:
             raise HTTPException(404, "Session not found")
         except Exception as e:

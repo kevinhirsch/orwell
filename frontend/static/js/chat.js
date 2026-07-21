@@ -4628,9 +4628,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   // auto-continue loop-breaker supersede the old "still working?" banner; see
   // CLAUDE.md "Front-end client conventions".)
 
-  /** Show a "Cancelled by user" record in `holder` and persist an empty
-   *  assistant placeholder server-side so the turn survives a refresh.
-   *  Called from both abort paths when no tokens had streamed yet. */
+  /** Show a "Cancelled by user" record in `holder` for THIS tab's live view only.
+   *
+   *  #1728 (D1/T2) — cancel = discard: a generation cancelled before any tokens streamed must
+   *  NOT persist a durable assistant row. This used to `inject_messages` an empty
+   *  `{stopped:true, cancelled:true}` placeholder "so the turn survives a refresh" — which is
+   *  exactly the bug (a fresh bundle showed TWO such zero-length rows at one timestamp). There is
+   *  nothing to survive a refresh WITH: the turn produced no content, so discarding it entirely
+   *  (no DB row at all) is the correct "cancel" — not persisting an empty stand-in for it. The
+   *  local indicator below is purely transient UI feedback for the tab that clicked Stop. */
   function _renderCancelledBubble(holder) {
     if (!holder) return;
     holder.dataset.raw = '';
@@ -4648,33 +4654,6 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     }
     if (typeof createMsgFooter === 'function' && !holder.querySelector('.msg-footer')) {
       holder.appendChild(createMsgFooter(holder));
-    }
-    // Persist as an assistant message with stopped+cancelled metadata so the
-    // chat-history loader renders the same indicator after a refresh.
-    // Include the model name so the bubble header still shows which model
-    // was running when the user hit Stop.
-    const sid = sessionModule.getCurrentSessionId();
-    if (sid) {
-      let modelName = '';
-      try { modelName = sessionModule.getCurrentModel?.() || ''; } catch {}
-      // Fallback: pull from the holder's existing meta (the streaming
-      // placeholder usually has the model set in the header already).
-      if (!modelName) {
-        modelName = holder.dataset.model
-          || holder.querySelector('.msg-header .msg-model')?.textContent
-          || '';
-      }
-      fetch(`${API_BASE}/api/session/${sid}/inject_messages`, {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [{
-            role: 'assistant',
-            content: '',
-            metadata: { stopped: true, cancelled: true, model: modelName },
-          }],
-        }),
-      }).catch(() => {});
     }
   }
 

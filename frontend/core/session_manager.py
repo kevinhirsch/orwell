@@ -548,6 +548,31 @@ class SessionManager:
         finally:
             db.close()
 
+    def keep_count_before_message(self, session_id: str, msg_id: str) -> Optional[int]:
+        """#1728 (D1) — resolve the `keep_count` (in server `seq` order, ADR 0008's authoritative
+        order) that truncates a session down to everything BEFORE the given DB message id —
+        deleting that message and everything after it.
+
+        This is the id-keyed "supersede by row" counterpart to the DOM-index-based `keep_count` a
+        caller like "Try again" (regenerate) used to compute client-side: the DOM's `.msg` elements
+        and the DB's message rows are not guaranteed 1:1 (hidden/system rows persist without ever
+        rendering a bubble), so a DOM-index guess can under- or over-count and leave the stale reply
+        un-truncated — the exact "two near-identical persisted rows" bug (#1728 T3). Deriving the
+        count from the DB's own `seq` order instead makes the truncate exact regardless of what the
+        DOM looked like. Returns None when `msg_id` isn't found in this session (the caller should
+        refuse to truncate rather than guess a count)."""
+        db = SessionLocal()
+        try:
+            db_messages = db.query(DbChatMessage).filter(
+                DbChatMessage.session_id == session_id
+            ).order_by(DbChatMessage.seq).all()  # ADR 0008: authoritative order
+            for i, msg in enumerate(db_messages):
+                if msg.id == msg_id:
+                    return i
+            return None
+        finally:
+            db.close()
+
     def replace_messages(self, session_id: str, messages: list) -> bool:
         """Replace a session's persisted and in-memory history atomically."""
         session = self.get_session(session_id)
