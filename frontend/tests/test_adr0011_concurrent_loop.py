@@ -76,6 +76,55 @@ def test_peer_advance_fails_safe_on_unknown_keys():
     assert _peer_advanced_since_framing(False, None, None) is False
 
 
+# ── T0-1: the framed-4-tuple vs raw-3-tuple comparator fix (#1019 follow-up) ──
+# `chat_helpers._LAST_FRAMED_BEAT_KEY` folds an open pending's `kind` in as a 4th tuple element
+# whenever a pending was open AT FRAMING TIME (F9/#1019). The agent loop's own current-turn read
+# (`_beat_key_at_read`) is always the bare (week, phase, moment) 3-tuple. Before this fix, comparing
+# a 4-tuple to a 3-tuple is NEVER equal in Python regardless of content, so EVERY single-tab turn
+# where a pending was still open at framing read as "a peer advanced" — wiping the stall counters
+# and vetoing the stall-escalation rescue for the pending's entire lifetime (a real 17-turn livelock
+# at a veto/eviction pending in live play). The fix: the comparator normalizes the current key with
+# the SAME conditional 4th-element rule, using the pending kind read at the SAME turn.
+
+def test_single_tab_pending_open_turn_is_not_misread_as_peer_advance():
+    from src.agent_loop import _peer_advanced_since_framing
+    # framed WITH an open pending (the 4-tuple #1019 shape) — the model was grounded on this beat
+    # while a comp-intent / veto / eviction-vote pending sat open.
+    framed = (1, "eviction", "eviction", "eviction-vote")
+    # this turn's OWN read of the SAME still-open pending (single tab: nothing else touched it) —
+    # same week/phase/moment, same pending kind.
+    current = (1, "eviction", "eviction")
+    current_pending_kind = "eviction-vote"
+    # no progression tool fired this turn (a lull) — this is exactly the shape of the livelock.
+    assert _peer_advanced_since_framing(False, framed, current, current_pending_kind) is False
+
+
+def test_pending_open_and_resolved_mid_turn_still_detected_as_peer_advance():
+    from src.agent_loop import _peer_advanced_since_framing
+    # framed WITH an open pending; by the time THIS turn reads state, the pending resolved (a peer's
+    # decision-card POST, or another device's turn) — the #1019 case the 4th element exists to catch.
+    framed = (1, "eviction", "eviction", "eviction-vote")
+    current = (1, "eviction", "eviction")
+    assert _peer_advanced_since_framing(False, framed, current, None) is True
+
+
+def test_pending_kind_changed_mid_turn_is_a_peer_advance():
+    from src.agent_loop import _peer_advanced_since_framing
+    # the pending at framing and the pending at read are BOTH open but of a DIFFERENT kind — someone
+    # else resolved the old one and a new one opened (still no week/phase/moment change).
+    framed = (1, "eviction", "eviction", "comp-intent")
+    current = (1, "eviction", "eviction")
+    assert _peer_advanced_since_framing(False, framed, current, "eviction-vote") is True
+
+
+def test_call_site_threads_this_turns_pending_kind_into_the_comparator():
+    js = _read("src", "agent_loop.py")
+    # the call site must pass the SAME-turn pending kind so the comparator can normalize shapes —
+    # a regression here silently reintroduces the 4-tuple-vs-3-tuple false-positive.
+    assert ("_peer_advanced_since_framing(_progressed, _framed_beat_key, _beat_key_at_read,\n"
+            "                                                        _pending_kind_at_read):") in js
+
+
 # ── The wiring (source-pins: the stash, the gate, the clock reset) ────────────
 
 def test_framing_stashes_the_beat_key():
