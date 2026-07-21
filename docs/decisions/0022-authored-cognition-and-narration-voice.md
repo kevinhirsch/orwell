@@ -96,19 +96,37 @@ an NPC's cognition; the engine keeps the *magnitude* and owns every outcome. Con
 | **resolve** (who wins, what happens) | **engine only** (closed set) | Seeded `resolveCompetition` / the deterministic resolver. Never the model. |
 | **state** (relationship magnitudes, board, persistence, the Vault) | **engine only** (closed set) | The model never sees or sets a number. |
 
-The magnitude/shape split of ADR 0005 is **preserved exactly** and reuses the existing seam: the
-`recordInteraction` `consequence` descriptor (PR #355). The **actual** contract (`ConsequenceDescriptor`
-in `src/ports/EngineCommands.ts`, cite it exactly — a wrong shape produces a no-op write) is
-`{ edges?: Array<{ toward, direction, emphasis? }>, aboutEdges?, rationale? }`, where `direction` is a
-member of the **closed** `ConsequenceDirection` set (`warmer`/`cooler`/`more-trust`/`less-trust`/
-`more-threatened`/`less-threatened`/`more-aligned`/`less-aligned`) and `emphasis` is a **relative**
-weight only (`slight`/`notable`/`strong`) — never a magnitude. The `kind` is **not** part of the
-descriptor: it is a **separate request-level field** on `RecordInteractionReq` (`kind?: string`) that
-seeds the engine's base magnitude and is the **floor + default** (no `consequence` descriptor ⇒ the
-fold is byte-identical to the legacy `kind`-only path). So the model proposes *which* edges move, *in
-which* closed direction, with *what relative* emphasis, and *why* (`rationale`, recorded losslessly,
-never scored); the engine keeps the bounded, seeded amount. "Model proposes, engine disposes."
-Authored cognition is a **bounded weighted input** to engine resolution, never the resolution.
+**Two distinct contracts — do not conflate them (the design's load-bearing correction).** Authoring
+cognition and folding a consequence are *different* shapes, and the earlier drafts wrongly used one
+for both:
+
+- **The cognition-authoring contract (INPUT the model emits) — a NEW structured type** the feature
+  must define, provisionally **`AuthoredCognition`** (a.k.a. `NpcIntent`):
+  `{ want, attempt, read }` — the open-set cognitive primitives (what the NPC is trying to get, the
+  move they make toward it, their subjective belief/memory of the scene). This is what a per-NPC
+  scoped call returns. It is **not** `ConsequenceDescriptor`: cognition frequently has **no**
+  relationship-edge change at all (an NPC forms a plan, mis-remembers a scene, decides to lie low),
+  and that intent must still reach the resolver — forcing it into an edge-only descriptor would
+  **silently discard** valid cognition as a generic `kind` fold or a no-op. `AuthoredCognition`
+  carries the intent as structured data regardless of whether any edge moves.
+- **`ConsequenceDescriptor` (ONE possible OUTPUT the ENGINE emits)** — the shape of a *resulting
+  relationship-edge fold*, produced by the engine **after** it adjudicates the authored cognition,
+  and only **when an edge actually moves**. The actual contract (`ConsequenceDescriptor` in
+  `src/ports/EngineCommands.ts`) is `{ edges?: Array<{ toward, direction, emphasis? }>, aboutEdges?,
+  rationale? }`, `direction` a member of the **closed** `ConsequenceDirection` set
+  (`warmer`/`cooler`/`more-trust`/`less-trust`/`more-threatened`/`less-threatened`/`more-aligned`/
+  `less-aligned`), `emphasis` a **relative** weight only (`slight`/`notable`/`strong`), never a
+  magnitude; `kind` is the **separate request-level field** on `RecordInteractionReq` (the base
+  magnitude floor/default). It is an **output fold shape, not the authoring shape.**
+
+The corrected flow (ADR 0005 preserved exactly — model proposes shape/intent, engine keeps the
+seeded magnitude): **model authors `AuthoredCognition {want, attempt, read}`** → **engine adjudicates
+it against the closed set** (seeded resolver; the intent is a bounded weighted input, never the
+outcome) → **engine MAY emit a `ConsequenceDescriptor` fold and/or other bounded state changes** as
+the seeded RESULT. Cognition that implies no edge change **still reaches the resolver as intent** and
+is persisted to soul (0131-S2 `read`) — it is not dropped or no-op'd. "Model proposes, engine
+disposes." The model **never authors** a `ConsequenceDescriptor` to express `want/attempt/read`; the
+#355 descriptor is referenced here only as the engine's *output* fold when a relationship edge moves.
 
 The three sub-designs that deliver this are specced in **feature 0131**:
 - **S1 — per-NPC authored intent (salience-gated).** A scoped sub-call authors `want/attempt` for
@@ -209,15 +227,19 @@ still pass the existing sentinels; that is exactly why the new gates are require
    ignores it and the seeded result stands). The existing `expressiveNonCollapse.test.ts` +
    `frontend/tests/test_expressive_non_collapse.py` remain the proof **only** for the descriptor
    path they cover (no descriptor ⇒ byte-identical fold), not for the cognition boundary.
-2. **Bounded-input-to-resolution.** Authored cognition enters resolution only through the
-   `ConsequenceDescriptor` shape (`src/ports/EngineCommands.ts`, the #355 pattern) —
-   `{ edges?: [{ toward, direction, emphasis? }], aboutEdges?, rationale? }`, with `direction` from
-   the **closed** `ConsequenceDirection` set and `emphasis` a **relative** weight
-   (`slight`/`notable`/`strong`), never a magnitude; `kind` is the **separate request-level field**
-   on `RecordInteractionReq` that seeds the engine's base. No raw number and no free text crosses
-   into the closed set. *Proof:* the descriptor-shape guard on the resolver path (the `McpServer`
-   arg-guard already refuses malformed `consequence.edges[]`); a planted intent cannot move an
-   outcome beyond the engine's bounded, seeded amount.
+2. **Bounded-input-to-resolution (two contracts, kept separate).** The model authors cognition as the
+   NEW `AuthoredCognition {want, attempt, read}` INPUT type — **not** `ConsequenceDescriptor`. The
+   engine adjudicates that intent and MAY emit a `ConsequenceDescriptor` (`src/ports/EngineCommands.ts`,
+   the #355 pattern) — `{ edges?: [{ toward, direction, emphasis? }], aboutEdges?, rationale? }`,
+   `direction` from the **closed** `ConsequenceDirection` set, `emphasis` a **relative** weight
+   (`slight`/`notable`/`strong`), never a magnitude; `kind` is the **separate request-level field** on
+   `RecordInteractionReq` that seeds the engine's base — as the bounded, seeded **OUTPUT** fold when an
+   edge moves. No raw number and no free text crosses into the closed set in either direction. *Proof:*
+   **(NEW gate — build with the feature)** a test that authored cognition with **no edge implication**
+   still reaches the resolver as intent (persisted to soul, not dropped/no-op'd) — proving the input is
+   not forced through the edge-only descriptor — plus the existing descriptor-shape guard on the
+   OUTPUT path (the `McpServer` arg-guard already refuses malformed `consequence.edges[]`); a planted
+   intent cannot move an outcome beyond the engine's bounded, seeded amount.
 3. **Knowledge-scoped (on ENGINE presence). (NEW gate — build with the feature.)** Every per-NPC
    call is scoped to what the engine says that NPC knows, gated on **engine** presence (#1726 / A2),
    never on what the narrator happens to hold in context (ADR 0019). *Proof:* **two new tests**
