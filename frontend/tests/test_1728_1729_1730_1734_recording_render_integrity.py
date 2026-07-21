@@ -218,12 +218,27 @@ def test_whereabouts_read_failure_fails_open(monkeypatch):
 
 
 def test_no_whereabouts_present_key_fails_open(monkeypatch):
-    # A pre-live-season / non-presence context: whereabouts() returns None or an empty read.
+    # A pre-live-season / non-presence context: whereabouts() returns None entirely (no read at
+    # all) — genuinely nothing to filter against, so fail OPEN.
     ok, cap = _drive(
         monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"x"}',
         whereabouts=None)
     assert ok is True
     assert cap["with_ids"] == ["npc:3"]
+
+
+def test_valid_empty_presence_read_still_applies_the_filter(monkeypatch):
+    # CodeRabbit/Greptile review fix — a VALID whereabouts read reporting an EMPTY room
+    # ("present": []) is NOT the same as a failed/absent read: the engine is affirmatively
+    # telling us nobody else is there. `if present_ids:` (an empty set is falsy) used to treat
+    # this identically to a None/failed read and skip the intersection entirely, letting the
+    # model's unverified withIds fold as-is — the exact phantom-witness case #1730 closes. A
+    # real empty presence read must still zero out an unverified proposal.
+    ok, cap = _drive(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"x"}',
+        whereabouts={"room": "kitchen", "present": []})
+    assert ok is False, "an empty (but VALID) presence read must reject an unverified withIds proposal"
+    assert cap["record_called"] is False
 
 
 # ---- #1734 (B4): a malformed withIds shape from the extraction is normalized/rejected before it
@@ -350,3 +365,47 @@ def test_cancelled_bubble_still_renders_local_indicator():
     fn = js[js.index("function _renderCancelledBubble(holder)"):]
     fn = fn[:fn.index("\n  }\n") + 4]
     assert "[Cancelled by user]" in fn, "the local transient UI feedback must remain"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1728 (D1/T3) — regenerateFrom must check the truncate response BEFORE mutating the DOM /
+# resubmitting: CodeRabbit/Greptile review fix. fetch() never rejects on an HTTP error status, so
+# an unchecked truncate 404 (a stale/missing truncate_from_id) used to fall through — the client
+# stripped the DOM rows and fired the regenerate ANYWAY, leaving the un-truncated stale DB row
+# behind and reintroducing the "two near-identical rows" bug (T3).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_chat_message_actions_js():
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "static", "js", "chatMessageActions.js")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _regenerate_from_body():
+    js = _read_chat_message_actions_js()
+    fn = js[js.index("export async function regenerateFrom(aiMsgElement)"):]
+    return fn[:fn.index("\n}\n") + 3]
+
+
+def test_regenerate_checks_truncate_response_status():
+    fn = _regenerate_from_body()
+    assert "_truncRes.ok" in fn, (
+        "regenerateFrom must inspect the truncate response's HTTP status — fetch() does not "
+        "reject on a non-2xx response, so an unchecked 404 silently falls through"
+    )
+    assert "throw new Error" in fn, "a failing truncate must throw so the existing catch handles it"
+
+
+def test_regenerate_throws_before_removing_dom_rows_on_truncate_failure():
+    fn = _regenerate_from_body()
+    ok_check_at = fn.index("_truncRes.ok")
+    # Every DOM-mutating / resubmit statement this function performs on the happy path must come
+    # AFTER the status check, so a failed truncate never strips rows or fires the regenerate.
+    for marker in ("allMsgs[i].remove()", "aiMsgElement.remove()", "_handleChatSubmit(null, userText)"):
+        marker_at = fn.index(marker)
+        assert ok_check_at < marker_at, (
+            f"the truncate response status check must run BEFORE `{marker}` — otherwise a stale/"
+            f"missing truncate_from_id (404) leaves the DOM stripped and a duplicate row behind"
+        )

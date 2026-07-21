@@ -330,13 +330,22 @@ export async function regenerateFrom(aiMsgElement) {
   const _aiDbId = aiMsgElement.dataset.dbId || null;
 
   try {
-    await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
+    const _truncRes = await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(_aiDbId
         ? { truncate_from_id: _aiDbId, keep_count: keepCount }
         : { keep_count: keepCount })
     });
+    // CodeRabbit/Greptile review (both independently confirmed) — fetch() does NOT reject on an
+    // HTTP error status. `truncate_session` now 404s a stale/missing `truncate_from_id` (#1728):
+    // left unchecked, the client fell through and stripped the DOM rows + fired the regenerate
+    // ANYWAY, leaving the un-truncated stale DB row behind — reintroducing the exact "two
+    // near-identical rows" bug (T3) this change was meant to close. Throw BEFORE touching the DOM
+    // or resubmitting so the existing catch below handles it like any other network failure.
+    if (!_truncRes.ok) {
+      throw new Error('Truncate failed (' + _truncRes.status + ')');
+    }
 
     for (let i = allMsgs.length - 1; i > aiIndex; i--) {
       allMsgs[i].remove();

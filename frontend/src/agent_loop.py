@@ -3089,7 +3089,13 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                           if isinstance(wb, dict) else None)
         except Exception:
             present_ids = None
-        if present_ids:
+        # CodeRabbit/Greptile review (both independently confirmed) — `if present_ids:` treated a
+        # VALID EMPTY read (the engine says "nobody else is in the room") the same as a failed/None
+        # read, since an empty set is falsy: the intersection was skipped and the model's unverified
+        # withIds folded as-is — exactly the phantom-witness case this issue closes. `is not None`
+        # applies the filter whenever we got a real (possibly empty) presence read, and reserves the
+        # fail-OPEN behavior for a genuine None (read failed / no whereabouts available at all).
+        if present_ids is not None:
             _off_scene = [i for i in ids if i not in present_ids]
             ids = [i for i in ids if i in present_ids]
             if _off_scene:
