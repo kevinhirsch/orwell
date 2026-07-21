@@ -71,6 +71,56 @@ def test_history_follows_canonical_rebinding_on_404(tmp_path, monkeypatch):
     assert d.session == "chat-new"                            # the driver adopted the rebinding
 
 
+def test_history_follows_a_double_rotation(tmp_path, monkeypatch):
+    """Greptile P2: the follow is a BOUNDED LOOP, not a single shot. If the canonical id rotates
+    AGAIN between the resolver call and the re-read (a restart AND an admin wipe inside the same
+    window), the freshly-adopted id ALSO 404s — the driver re-resolves + retries and converges on the
+    settled id instead of aborting the run. Here two consecutive rotations (old → mid → new) resolve to
+    a live read."""
+    d = _driver(tmp_path)
+    monkeypatch.setattr(gd.time, "sleep", lambda *_a, **_k: None)
+    resolves = iter(["chat-mid", "chat-new"])  # successive GET /api/orwell/game-session results
+
+    def _urlopen(url, timeout=None):
+        if "/api/orwell/game-session" in url:
+            return _ok_body({"sessionId": next(resolves)})
+        if "/api/history/chat-new" in url:  # only the SETTLED id serves history
+            return _ok_body({"history": [{"role": "assistant", "content": "done"}]})
+        raise urllib.error.HTTPError(url, 404, "Not Found", None, None)  # old + mid both 404
+
+    monkeypatch.setattr(gd.urllib.request, "urlopen", _urlopen)
+
+    msgs = d._history()
+    assert msgs == [{"role": "assistant", "content": "done"}]  # converged past the double rotation
+    assert d.session == "chat-new"                             # adopted the final settled id
+
+
+def test_history_bounded_rebind_budget_still_raises(tmp_path, monkeypatch):
+    """The bound is ENFORCED: if the id keeps rotating out from under every read (more DISTINCT dead
+    rebinds than the budget allows), the driver does NOT chase forever — it raises after
+    ``_CANONICAL_REBIND_ATTEMPTS`` distinct rebinds. A genuinely-unstable/dead session fails loudly
+    rather than looping. This is the guarantee that keeps the convergence loop honest."""
+    d = _driver(tmp_path)
+    monkeypatch.setattr(gd.time, "sleep", lambda *_a, **_k: None)
+    calls = {"game_session": 0}
+    seq = {"n": 0}
+
+    def _urlopen(url, timeout=None):
+        if "/api/orwell/game-session" in url:
+            calls["game_session"] += 1
+            seq["n"] += 1
+            return _ok_body({"sessionId": f"chat-{seq['n']}"})  # a fresh DISTINCT id every time
+        # every history read 404s — the id is never settled/live
+        raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+    monkeypatch.setattr(gd.urllib.request, "urlopen", _urlopen)
+
+    with pytest.raises(RuntimeError, match="rotating faster"):
+        d._history()
+    # bounded: exactly ATTEMPTS+1 reads each resolve once, so ATTEMPTS+1 distinct rebinds then stop
+    assert calls["game_session"] == GoldenDriver._CANONICAL_REBIND_ATTEMPTS + 1
+
+
 def test_history_404_without_a_rebinding_still_raises(tmp_path, monkeypatch):
     """NON-masking: when the canonical resolver returns the SAME (dead) id — nothing new to follow —
     the 404 propagates loudly. A genuinely dropped session is a real fault, never silently swallowed."""

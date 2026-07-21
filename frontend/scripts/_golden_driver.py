@@ -655,34 +655,52 @@ class GoldenDriver:
         except Exception:
             return ""
 
+    # Bound on the rebind-follow LOOP (below). A rapid double-rotation (e.g. a restart AND an admin
+    # wipe inside the resolve→read window) should still converge, but a genuinely-dead id must fail
+    # after a small, fixed number of DISTINCT rebinds — never chase an endless rebind churn.
+    _CANONICAL_REBIND_ATTEMPTS = 3
+
     def _history(self) -> list[dict]:
         # L-F6 / #1745 — a FIXED-session REST client MUST FOLLOW canonical-session rebindings, or it
         # 404s forever exactly where a browser converges. The canonical game-session id (ADR 0008/0012)
         # is first-writer-wins and STABLE during a started game, so under continuous single-season play
-        # this branch never fires. But a season-lifecycle event — a new-game/restart clears the binding
+        # this loop never iterates. But a season-lifecycle event — a new-game/restart clears the binding
         # (orwell_routes.py `clear_game_session`), a session delete, or an admin chat-wipe — ROTATES it
         # and deletes the old chat row, so `GET /api/history/{old}` 404s (get_session → KeyError → 404).
         # A browser re-resolves via `GET /api/orwell/game-session` and re-selects the new chat; this
         # pinned-session driver does the SAME instead of hammering the dead id (the L-F6 ~turn-58 false
         # alarm was this artifact, not a user-facing binding bug — the rebinding IS followed by a real
-        # client). NON-masking: a 404 with NO live rebinding to follow (same id back, or nothing bound)
-        # still raises loudly, so a genuine dropped-session fault is never hidden. The one-call transient
-        # 404 (a SQLite reader briefly behind a writer) is already absorbed inside `_get`'s retry budget,
-        # so only a PERSISTENT 404 — a true rotation — reaches here.
-        try:
-            h = self._get(self.fe, f"/api/history/{self.session}")
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                raise
-            canonical = self._canonical_session()
-            if not canonical or canonical == self.session:
-                raise  # the pinned id is really gone with no live rebinding to follow — a real fault
-            print(f"  history 404 on {self.session} — following canonical rebinding → {canonical} "
-                  "(L-F6/#1745: a browser follows GET /api/orwell/game-session; so does the driver)",
-                  flush=True)
-            self.session = canonical
-            h = self._get(self.fe, f"/api/history/{self.session}")
-        return h.get("messages") or h.get("history") or (h if isinstance(h, list) else [])
+        # client).
+        #
+        # The follow is a BOUNDED LOOP, not a single shot: if the canonical id rotates AGAIN between the
+        # resolver call and the re-read (a rapid double-rotation — a restart AND an admin wipe inside the
+        # same window), the freshly-adopted id also 404s, so we re-resolve + retry up to
+        # `_CANONICAL_REBIND_ATTEMPTS` DISTINCT rebinds and converge instead of aborting the run. Each
+        # iteration keeps the NON-masking guards: a non-404 error propagates untouched (a server fault is
+        # not a rebinding), and a 404 with NO NEW live rebinding to follow (the resolver returns the SAME
+        # id, or nothing bound) still raises loudly — so a genuinely-dropped session fails after the
+        # bounded attempts and is never hidden. The one-call transient 404 (a SQLite reader briefly behind
+        # a writer) is already absorbed inside `_get`'s retry budget, so only a PERSISTENT 404 — a true
+        # rotation — reaches this loop.
+        for _ in range(self._CANONICAL_REBIND_ATTEMPTS + 1):
+            try:
+                h = self._get(self.fe, f"/api/history/{self.session}")
+                return h.get("messages") or h.get("history") or (h if isinstance(h, list) else [])
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    raise
+                canonical = self._canonical_session()
+                if not canonical or canonical == self.session:
+                    raise  # no NEW live rebinding to follow — the pinned id is really gone (a real fault)
+                print(f"  history 404 on {self.session} — following canonical rebinding → {canonical} "
+                      "(L-F6/#1745: a browser follows GET /api/orwell/game-session; so does the driver)",
+                      flush=True)
+                self.session = canonical
+        # Exhausted the bounded rebind budget (the id kept rotating out from under us every read) — a
+        # persistent instability, not a convergence; surface it loudly rather than looping forever.
+        raise RuntimeError(
+            f"history kept 404-ing across {self._CANONICAL_REBIND_ATTEMPTS} canonical rebinds "
+            f"(last id {self.session}) — the session is rotating faster than the driver can follow")
 
     def _await_new_assistant(self, prior_assistants: int) -> list[dict]:
         """Re-read history until a NEW assistant row is observed, or the convergence budget
