@@ -2372,7 +2372,43 @@ export class GameSessionAdapter implements GameSession {
     const occupationChanged = target.character.vocation !== priorVocation;
     if (req.biography !== undefined) target.character.biography = req.biography;
     if (req.physicalCharacteristics !== undefined) {
+      // 2026-07-21 prompt audit — the INK-BUDGET backstop (same precedent as the skinTone re-ground
+      // below): the engine deals the cast-wide visible-ink budget through the seeded distinguishing-mark
+      // spread (deepProfile `dealCastPhysicalSpread`), but the authoring LLM's tattoo prior reliably
+      // overwrites it ("full sleeve of … tattoos" on 4+ houseguests in one live bundle). The budget is
+      // an ENGINE guarantee, and it must cover EVERY facet field the portrait/context builders render
+      // (Greptile P1 on #1768: a clean mark + a tattooed `style` bypassed a mark-only guard — `style`
+      // flows into the portrait's "Presentation style:" line, and the other five fields flow through
+      // `physicalFacetToAppearance` into both the portrait and the narrator context). So: on a NO-ink
+      // slot (the seeded facet carries no ink in ANY rendered field), each authored field that
+      // INTRODUCES ink is refused per-field — the seeded floor value for THAT field stands (the same
+      // per-field fallback the skinTone re-ground uses); every clean authored facet folds freely. A
+      // seeded facet that already granted ink anywhere leaves the authored look untouched (sharpening,
+      // not inventing).
+      // Word-bounded ink lexicon (CodeRabbit + Greptile on #1768): `\btattoo` covers
+      // tattoo/tattoos/tattooed; `\bink(ed)?\b` covers "forearm ink" / "inked" WITHOUT the unbounded
+      // substring false-positives ("blinked") that would wrongly hold a clean authored field. The
+      // EUPHEMISM tail closes the Greptile bypass class — the live bundle's defects were literally
+      // "full sleeve of …" phrasings that carry neither "tattoo" nor "ink": "blackwork" and "body
+      // art" are unambiguous ink terms (unconditional), and "full/half sleeve(s)" counts as ink
+      // EXCEPT when a clothing noun follows (a "half-sleeve tee" in the style field is a shirt, not
+      // ink — the negative lookahead excludes tee/shirt/top/blouse/sweater/kurta). Kept IDENTICAL to
+      // the test suite's INK_LEXICON (tests/unit/diversity.test.ts) — one lexicon, two pinned sites.
+      const INK_RE = /\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i;
+      const RENDERED_FACET_FIELDS = [
+        "heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style",
+      ] as const;
+      const prior = target.character.physicalCharacteristics;
+      const priorHasInk = prior !== undefined
+        && RENDERED_FACET_FIELDS.some((f) => INK_RE.test(prior[f] ?? ""));
       target.character.physicalCharacteristics = req.physicalCharacteristics;
+      if (prior !== undefined && !priorHasInk) {
+        for (const f of RENDERED_FACET_FIELDS) {
+          if (INK_RE.test(req.physicalCharacteristics[f] ?? "")) {
+            target.character.physicalCharacteristics[f] = prior[f];
+          }
+        }
+      }
       // 0063 RE-GROUND (the "olive-skin collapse" fix, 2026-06-23): the FE authoring LLM re-authors the
       // WHOLE physicalCharacteristics block — including skinTone — but it is NOT given the houseguest's
       // guaranteed heritage, so it reliably defaults skinTone to a generic "olive" and silently discards

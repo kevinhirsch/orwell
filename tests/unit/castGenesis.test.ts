@@ -5,7 +5,8 @@ import { ARCHETYPES } from "../../src/engine/characterFactory";
 import { GIVEN_NAMES } from "../../src/engine/data/givenNames";
 import {
   validateCastGenesis, clampStatsIntoBand, castVarianceOk, isPlausibleGenesisName,
-  hitsLegacyDenyList, generateSeasonBrief, assignGenesisSlots, LEGACY_BIBLE_NAMES,
+  hitsLegacyDenyList, generateSeasonBrief, assignGenesisSlots, renderSlotDirective,
+  LEGACY_BIBLE_NAMES,
 } from "../../src/engine/castGenesis";
 import {
   GENESIS_ROLE_MAX_PER_CAST, GENESIS_CEREBRAL_MAX_PER_CAST, GENESIS_AMPLIFIED_MIN,
@@ -405,6 +406,58 @@ describe("0116 — post-hoc near-duplicate nudge (§2)", () => {
     expect(res.npcs[0]!.hometown).toBe("Austin, TX"); // the rest of the identity preserved
     expect(res.npcs[0]!.identityConcept).toBe("a warm floor-nurse");
     expect(res.violations.some((v) => v.npcId === npc(1) && v.field === "vocation" && v.action === "re-roll")).toBe(true);
+  });
+});
+
+describe("2026-07-21 prompt audit — cross-cast facet dedupe backstop (the 'San Diego ×2' defect)", () => {
+  it("a duplicate hometown CITY is dropped (state-spelling variants collide); the first stands", () => {
+    const ctx = mkCtx(15);
+    const proposal = mkProposal(ctx, (i, id) => {
+      if (id === npc(1)) return { hometown: "San Diego, CA" };
+      if (id === npc(2)) return { hometown: "San Diego, California" }; // same city, different spelling
+      return { hometown: `Distinct Town ${i}, TX` };
+    });
+    const res = validateCastGenesis(proposal, ctx);
+    expect(res.npcs[0]!.hometown).toBe("San Diego, CA");
+    expect(res.npcs[1]!.hometown).toBeUndefined(); // dropped ⇒ the floor's unique dealt hometown stands
+    expect(res.violations.some((v) => v.npcId === npc(2) && v.field === "hometown" && v.action === "dropped")).toBe(true);
+  });
+  it("a vocation already used twice is dropped for the third houseguest (mirrors MAX_PER_VOCATION)", () => {
+    const ctx = mkCtx(15);
+    const proposal = mkProposal(ctx, (i, id) => {
+      if (id === npc(1) || id === npc(2) || id === npc(3)) return { vocation: "Barista" };
+      return { vocation: `distinct job ${i}` };
+    });
+    const res = validateCastGenesis(proposal, ctx);
+    expect(res.npcs[0]!.vocation).toBe("Barista");
+    expect(res.npcs[1]!.vocation).toBe("Barista");
+    expect(res.npcs[2]!.vocation).toBeUndefined(); // third pile-up dropped ⇒ the floor's capped deal stands
+    expect(res.violations.some((v) => v.npcId === npc(3) && v.field === "vocation" && v.action === "dropped")).toBe(true);
+  });
+});
+
+describe("2026-07-21 prompt audit — the seeded LOOK LANE (the visible-ink budget)", () => {
+  it("deals 2-4 inked slots per cast; every other slot carries a suggested feature; deterministic", () => {
+    for (const seed of [108108, 0, 5, 7, 42, 999, 2147483647]) {
+      const slots = assignGenesisSlots(seed, 15);
+      expect(assignGenesisSlots(seed, 15)).toEqual(slots); // deterministic (the new lane included)
+      const inked = slots.filter((s) => s.ink);
+      expect(inked.length).toBeGreaterThanOrEqual(2);
+      expect(inked.length).toBeLessThanOrEqual(4); // a real cast's small tattooed minority, never 15/15
+      for (const s of slots) {
+        if (s.ink) expect(s.lookFeature).toBe("");
+        else expect(s.lookFeature.length).toBeGreaterThan(0);
+      }
+    }
+  });
+  it("the rendered casting card carries the look line (ink grant vs no-ink + feature)", () => {
+    const slots = assignGenesisSlots(108108, 15);
+    const inkedIx = slots.findIndex((s) => s.ink);
+    const plainIx = slots.findIndex((s) => !s.ink);
+    expect(renderSlotDirective(npc(inkedIx + 1), slots[inkedIx]!)).toContain("visible tattoos ARE part of their look");
+    const plain = renderSlotDirective(npc(plainIx + 1), slots[plainIx]!);
+    expect(plain).toContain("NO visible tattoos");
+    expect(plain).toContain(slots[plainIx]!.lookFeature);
   });
 });
 

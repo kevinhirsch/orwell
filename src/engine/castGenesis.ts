@@ -17,6 +17,7 @@ import {
   GENESIS_ENERGY_LOUD, GENESIS_EXPRESSIVENESS_LOUD, GENESIS_EMOTIONAL_REGISTER_LOUD,
   GENESIS_SOCIAL_GRAVITY_LOUD, GENESIS_AMPLIFIED_MIN, GENESIS_AMPLIFIED_SPAN,
   GENESIS_AGE_BANDS, GENESIS_CASTING_ROLES, GENESIS_ROLE_MAX_PER_CAST, GENESIS_CEREBRAL_MAX_PER_CAST,
+  GENESIS_INK_MIN, GENESIS_INK_SPAN, GENESIS_LOOK_FEATURES,
 } from "./genesisConstants";
 import type { GenesisCastingRole } from "./genesisConstants";
 
@@ -104,6 +105,14 @@ export interface GenesisSlotDirective {
   emotionalRegister: string;
   selfAwareness: string;
   socialGravity: string;
+  /**
+   * 2026-07-21 prompt audit (the cast-uniformity index case): the seeded LOOK LANE. A seeded 2-4 slots
+   * per cast are the visibly-tattooed contingent (`ink: true`); every other slot is explicitly
+   * no-visible-ink and carries a suggested distinguishing `lookFeature` (empty string on an ink slot).
+   * Steering only — the model elaborates; it never invents the ink budget itself.
+   */
+  ink: boolean;
+  lookFeature: string;
 }
 
 /** Fisher–Yates in-place shuffle driven by a seeded RNG (identical stream ⇒ identical permutation; the FE mirrors it). */
@@ -214,6 +223,17 @@ export function assignGenesisSlots(seed: number, count: number): GenesisSlotDire
   seededShuffle(accentPool, cRng);
   let accentCursor = 0;
 
+  // 3.5. LOOK LANE (2026-07-21 prompt audit) — a seeded 2-4 slots carry the cast's visible ink; every
+  // other slot is explicitly no-visible-ink with a suggested distinguishing feature from a shuffled
+  // wide pool. Its OWN dedicated side-stream (`:genesis:looks`) so it never perturbs the other deals.
+  const lRng = new SeededRandom(hashSeed(`${seed}:genesis:looks`));
+  const inkCount = Math.max(0, Math.min(count, GENESIS_INK_MIN + lRng.int(GENESIS_INK_SPAN + 1)));
+  const inked: boolean[] = [...Array(inkCount).fill(true), ...Array(count - inkCount).fill(false)];
+  seededShuffle(inked, lRng);
+  const featurePool = [...GENESIS_LOOK_FEATURES];
+  seededShuffle(featurePool, lRng);
+  let featureCursor = 0;
+
   // 4. AXES — six delivery dials; a seeded 4–5 "amplified" slots draw ONLY from the loud ends.
   const xRng = new SeededRandom(hashSeed(`${seed}:genesis:axes`));
   const amplifiedCount = Math.max(0, Math.min(count, GENESIS_AMPLIFIED_MIN + xRng.int(GENESIS_AMPLIFIED_SPAN + 1)));
@@ -241,6 +261,8 @@ export function assignGenesisSlots(seed: number, count: number): GenesisSlotDire
       emotionalRegister: pick(GENESIS_EMOTIONAL_REGISTER_AXIS, GENESIS_EMOTIONAL_REGISTER_LOUD, amp),
       selfAwareness: GENESIS_SELF_AWARENESS_AXIS[xRng.int(GENESIS_SELF_AWARENESS_AXIS.length)]!,
       socialGravity: pick(GENESIS_SOCIAL_GRAVITY_AXIS, GENESIS_SOCIAL_GRAVITY_LOUD, amp),
+      ink: inked[i]!,
+      lookFeature: inked[i] ? "" : featurePool[featureCursor++ % featurePool.length]!,
     });
   }
   return out;
@@ -251,10 +273,14 @@ export function renderSlotDirective(id: EntityId, d: GenesisSlotDirective): stri
   const accent = d.accent ? `house-accent: ${d.accent}` : "no house-accent (their own person)";
   const phys = d.physical ? " PHYSICAL COMPETITOR (give a high physical stat + an athletic/first-responder/performer vocation)." : "";
   const big = d.amplified ? " BIG PERSONALITY — write them genuinely loud/reactive/unfiltered; do NOT let the accent tone them down." : "";
+  const look = d.ink
+    ? "look: visible tattoos ARE part of their look (one of the cast's few inked houseguests — make the ink specific and personal)"
+    : `look: NO visible tattoos; distinguishing feature, if any: ${d.lookFeature}`;
   return `${id} — cast as: ${d.role} (${d.roleNote}); archetype tag: ${d.archetype}; `
     + `age ~${d.ageLo}-${d.ageHi} (name from that birth era); ${accent}; `
     + `energy: ${d.energy}; register: ${d.register}; expressiveness: ${d.expressiveness}; `
-    + `reactivity: ${d.emotionalRegister}; self-awareness: ${d.selfAwareness}; social-gravity: ${d.socialGravity}.`
+    + `reactivity: ${d.emotionalRegister}; self-awareness: ${d.selfAwareness}; social-gravity: ${d.socialGravity}; `
+    + `${look}.`
     + phys + big;
 }
 
@@ -653,6 +679,16 @@ export function validateCastGenesis(proposal: CastGenesisProposal, ctx: GenesisC
   const usedGiven = new Set<string>();
   const usedSurname = new Set<string>();
   const usedFull = new Set<string>();
+  // 2026-07-21 prompt audit — cross-cast FACET dedupe backstop (the "San Diego ×2" defect): per-NPC
+  // genesis calls can't see their siblings, so the model repeats hometowns (and piles up a vocation).
+  // The prompt-side used-facet ledger reduces it; THIS is the authoritative backstop. Keyed on the CITY
+  // token (before the comma, lowercased) so "San Diego, CA" and "San Diego, California" collide. A
+  // duplicate is DROPPED (the floor's dealt hometown — unique per cast — stands); a vocation already
+  // used twice (mirroring the floor's MAX_PER_VOCATION) is likewise dropped.
+  const usedHometownCities = new Set<string>();
+  const vocationUses = new Map<string, number>();
+  const GENESIS_MAX_PER_VOCATION = 2;
+  const cityKey = (s: string): string => s.split(",")[0]!.trim().toLowerCase();
   const priorGiven = new Set<string>((ctx.priorSeasonNames ?? []).map((n) => (n ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "").filter(Boolean));
   const playerName = (ctx.playerName ?? "").trim();
   const playerLower = playerName.toLowerCase();
@@ -727,10 +763,29 @@ export function validateCastGenesis(proposal: CastGenesisProposal, ctx: GenesisC
     violations.push(...he.violations);
 
     // PUBLIC PERSONA PROSE — recorded faithfully (C8-capped), never normalized (ADR 0005 open set).
+    // The 2026-07-21 cross-cast facet backstop: a DUPLICATE hometown city or an over-represented
+    // vocation is dropped (the floor facet — dealt unique/capped — stands); the accepted value is
+    // recorded VERBATIM (dedupe never rewrites prose, ADR 0005).
     const vocation = neutralizeProse(p.vocation);
     const hometown = neutralizeProse(p.hometown);
-    if (vocation) out.vocation = vocation;
-    if (hometown) out.hometown = hometown;
+    if (vocation) {
+      const vKey = vocation.toLowerCase();
+      if ((vocationUses.get(vKey) ?? 0) >= GENESIS_MAX_PER_VOCATION) {
+        violations.push({ scope: "npc", npcId: cx.id, field: "vocation", rule: "vocation already used twice within the cast", action: "dropped" });
+      } else {
+        vocationUses.set(vKey, (vocationUses.get(vKey) ?? 0) + 1);
+        out.vocation = vocation;
+      }
+    }
+    if (hometown) {
+      const hKey = cityKey(hometown);
+      if (usedHometownCities.has(hKey)) {
+        violations.push({ scope: "npc", npcId: cx.id, field: "hometown", rule: "duplicate hometown within the cast", action: "dropped" });
+      } else {
+        usedHometownCities.add(hKey);
+        out.hometown = hometown;
+      }
+    }
     const demeanor = neutralizeProse(p.demeanor);
     if (demeanor) out.demeanor = demeanor;
     const background = neutralizeProse(p.background);

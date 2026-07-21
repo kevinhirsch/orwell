@@ -11,6 +11,8 @@ import {
   AGE_BANDS, AGE_ELIGIBILITY_FLOOR, ageBandOf,
 } from "../../src/engine/diversityConstants";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
+import type { PhysicalCharacteristics } from "../../src/domain/physicalCharacteristics";
+import { adrFixture } from "../support/adr0003";
 import { nameGenderOf } from "../../src/engine/data/nameGender";
 
 /**
@@ -189,6 +191,121 @@ describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the
     const pp = sb.session.getPortraitPrompt(card.id)!;
     expect(pp.prompt).toContain(grounded);
     expect(pp.prompt).not.toContain(override);
+  });
+});
+
+describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (the tattoo-uniformity fix)", () => {
+  // Canonical-factory convention (CLAUDE.md testing rules): these tests build their game through the
+  // support-factory family, not manual wiring — `adrFixture` (tests/support/adr0003.ts), the
+  // registry-built production object graph with a started game. (`tests/support/sandbox.ts`'s
+  // `buildSandbox` is the Vault-sentinel factory and exposes no GameSession surface, so it cannot
+  // drive recordCastProfile/getPortraitPrompt — adrFixture is the canonical fit here.)
+  // The ink lexicon — kept IDENTICAL to the adapter's INK_RE: word-bounded so "forearm ink" /
+  // "inked" classify as ink while "blinked"-style substrings can never false-positive, plus the
+  // euphemism tail (Greptile #1768): "blackwork" / "body art" unconditionally, and "full/half
+  // sleeve(s)" EXCEPT when a clothing noun follows (a "half-sleeve tee" is a shirt, not ink).
+  const INK_LEXICON = /\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i;
+  const facetHasInk = (pc: PhysicalCharacteristics): boolean =>
+    Object.values(pc).some((v) => INK_LEXICON.test(String(v ?? "")));
+
+  it("the ink lexicon classifies real model phrasings and rejects substring false-positives", () => {
+    const base: PhysicalCharacteristics = {
+      heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+      facialFeatures: "a square jaw", distinguishingMark: "none notable",
+      ageLook: "fresh-faced, late-twenties look", style: "sporty and laid-back",
+    };
+    // "visible forearm ink" is a real model phrasing — it must classify as ink.
+    expect(facetHasInk({ ...base, style: "visible forearm ink" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "an inked half-sleeve" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "a full sleeve of tattoos" })).toBe(true);
+    // EUPHEMISMS (Greptile #1768): the live bundle's defects were literally "full sleeve of …"
+    // phrasings carrying neither "tattoo" nor "ink" — they must classify as ink.
+    expect(facetHasInk({ ...base, distinguishingMark: "a full sleeve of botanical blackwork" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "traditional body art across the shoulder" })).toBe(true);
+    expect(facetHasInk({ ...base, style: "fine-line blackwork on both forearms" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "a half-sleeve of geometric linework" })).toBe(true);
+    // CLOTHING sleeves are NOT ink (option B lookahead): a half-sleeve tee is a shirt.
+    expect(facetHasInk({ ...base, style: "a breezy half-sleeve tee and shorts" })).toBe(false);
+    expect(facetHasInk({ ...base, style: "rolled full-sleeve shirts and chinos" })).toBe(false);
+    // Substring false-positives must NOT classify (the false-hold CodeRabbit flagged).
+    expect(facetHasInk({ ...base, facialFeatures: "eyes that look like they just blinked awake" })).toBe(false);
+    expect(facetHasInk(base)).toBe(false);
+  });
+
+  it("an authored mark that INTRODUCES ink where the seeded deal granted none is refused; other facets fold", () => {
+    const { sb } = adrFixture("ink-budget", 5);
+    // Find a houseguest whose SEEDED facet carries no ink ANYWHERE (the cast-wide deal guarantees most don't).
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !facetHasInk(h.physicalCharacteristics))!;
+    const seededMark = card.physicalCharacteristics!.distinguishingMark;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      physicalCharacteristics: {
+        heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+        facialFeatures: "a square jaw", distinguishingMark: "a full sleeve of intricate tattoos",
+        ageLook: "fresh-faced, late-twenties look", style: "sporty and laid-back",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The ink the seeded deal never granted was refused — the seeded mark stands.
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe(seededMark);
+    // Every other authored facet still landed.
+    expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
+  });
+  it("Greptile P1 (#1768): a clean mark + a tattooed STYLE on a no-ink slot cannot smuggle ink into any portrait-rendered field", () => {
+    const { sb } = adrFixture("ink-style-bypass", 5);
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !facetHasInk(h.physicalCharacteristics))!;
+    const seededStyle = card.physicalCharacteristics!.style;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      physicalCharacteristics: {
+        heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+        facialFeatures: "a square jaw", distinguishingMark: "a beauty mark on one cheek",
+        ageLook: "fresh-faced, late-twenties look", style: "tattooed rocker edge, sleeves on show",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The inked style was refused per-field — the seeded style stands; NO rendered field carries ink.
+    expect(after.physicalCharacteristics!.style).toBe(seededStyle);
+    expect(facetHasInk(after.physicalCharacteristics!)).toBe(false);
+    // The clean authored facets still folded.
+    expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe("a beauty mark on one cheek");
+    // And the portrait prompt — which renders style into "Presentation style:" — carries no ink.
+    const pp = sb.session.getPortraitPrompt(card.id)!;
+    expect(INK_LEXICON.test(pp.prompt)).toBe(false);
+  });
+
+  it("an authored ink mark is KEPT when the seeded deal already granted ink (sharpening, not inventing)", () => {
+    // Deterministic fixture hunt: the mark deal grants ~1-2 tattoo marks per cast on average, so a
+    // small fixed seed sweep is GUARANTEED to surface an inked card — and we ASSERT it does, so this
+    // test can never silently pass while testing nothing (the CodeRabbit vacuity finding).
+    let found: { sb: ReturnType<typeof adrFixture>["sb"]; id: string } | undefined;
+    for (const seed of [5, 1, 2, 3, 4, 6, 7, 8, 9, 10]) {
+      const { sb } = adrFixture(`ink-keep-${seed}`, seed);
+      const inked = sb.session.getGameState().house
+        .find((h) => h.status === "active" && h.physicalCharacteristics
+          && /\btattoo/i.test(h.physicalCharacteristics.distinguishingMark));
+      if (inked) { found = { sb, id: inked.id }; break; }
+    }
+    expect(found, "the fixed seed sweep must surface an ink-granted card").toBeDefined();
+    const { sb, id } = found!;
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      physicalCharacteristics: {
+        heightBuild: "stocky and powerful", skinTone: "warm tan complexion", hair: "a close-cropped fade",
+        facialFeatures: "an open friendly face", distinguishingMark: "a forearm tattoo of a compass rose",
+        ageLook: "settled, thirties presence", style: "streetwear and bold sneakers",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === id)!;
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe("a forearm tattoo of a compass rose");
   });
 });
 

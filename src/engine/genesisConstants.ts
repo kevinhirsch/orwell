@@ -330,3 +330,33 @@ export const GENESIS_CEREBRAL_MAX_PER_CAST = 3;
 
 /** The seeded per-cast ENSEMBLE-ACCENT fraction band: 20–30% of the cast carries an accent (§ accent redesign). */
 export const GENESIS_ACCENT_FRACTION: { min: number; max: number } = { min: 0.2, max: 0.3 };
+
+// ── The seeded LOOK LANE (2026-07-21 prompt audit — the cast-uniformity index case) ─────────────────
+/**
+ * Per-NPC genesis calls cannot see their siblings, so left unconstrained the model's appearance prior
+ * dominates — a live bundle showed EVERY houseguest authored with visible tattoos ("full sleeve of …
+ * tattoos" ×4) and repeated hometowns. The fix is STRUCTURAL, not prose pleading: the engine deals a
+ * seeded, deterministic LOOK LANE per slot — a small minority of slots (`GENESIS_INK_MIN`..`+SPAN`)
+ * are the cast's visibly-tattooed contingent (a real BB cast has ~2-4/16), every other slot is
+ * explicitly no-visible-ink and carries a suggested distinguishing feature drawn from a wide pool
+ * (scars / freckles / glasses / jewelry / teeth / nothing-notable). Dealt on its own dedicated
+ * side-stream (`:genesis:looks` — the #338 RNG-isolation lesson), mirrored byte-for-byte by the FE.
+ * Steering only (open set — the model may write the feature in its own words); never a validator.
+ */
+export const GENESIS_INK_MIN = 2;
+export const GENESIS_INK_SPAN = 2; // 2-4 visibly-tattooed slots per cast
+export const GENESIS_LOOK_FEATURES: readonly string[] = [
+  "wire-rimmed glasses",
+  "a faint scar with a story behind it",
+  "freckles",
+  "a gap-toothed grin",
+  "a birthmark",
+  "deep dimples",
+  "a chipped front tooth",
+  "a distinctive piece of everyday jewelry",
+  "laugh lines",
+  "a beauty mark",
+  "no single notable mark — a plain, clean look",
+  "no single notable mark — ordinary and unremarkable up close",
+  "no single notable mark — the kind of face that blends into a crowd photo",
+];

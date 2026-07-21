@@ -174,15 +174,29 @@ const FACIAL = [
   "a narrow refined face", "a warm crinkle-eyed smile", "an even symmetrical face",
   "a broad expressive grin",
 ];
+// 2026-07-21 prompt audit (the cast-uniformity index case, part 2): the old 10-entry pool was 20%
+// tattoos and drawn per-NPC with NO cast-wide cap — measured over 40 seeds, the average floor cast
+// carried 3.1 tattoo-marks (worst 7) and 95% of casts dealt some mark 3+ times ("a half-sleeve
+// tattoo" on up to six houseguests). A real BB cast has maybe 3-5/16 with visible ink TOTAL (across
+// every axis), and most people's "distinguishing mark" is minor — or nothing. The pool is widened to
+// span scars/birthmarks/freckles/glasses/jewelry/teeth/dimples, tattoos stay 2 entries (~11%), and
+// "none notable" is deliberately repeated (same string): many real faces have no single salient mark.
+// The cast-wide deal below caps every NAMED mark at MAX_PER_MARK while "none…" stays uncapped.
 const MARKS = [
   "a faint scar above one eyebrow", "a half-sleeve tattoo", "a beauty mark on one cheek",
   "freckles across the nose", "a small nose ring", "a gap-toothed grin",
-  "none notable", "none notable", "wire-rimmed glasses", "a wrist tattoo",
+  "wire-rimmed glasses", "a small wrist tattoo", "a chipped front tooth",
+  "a birthmark along the jaw", "deep dimples", "a thin scar across the chin",
+  "a stud earring", "sun-weathered laugh lines",
+  "none notable", "none notable", "none notable", "none notable",
 ];
+// 2026-07-21 prompt audit: "tattooed rocker edge" mandated body ink from the CLOTHING-STYLE axis —
+// a second ink source beside the capped distinguishing-mark deal. The rocker style stays ink-free;
+// visible ink is the mark budget's alone (one authority, the index-case fix).
 const STYLE_DESC = [
   "streetwear and bold sneakers", "polished and camera-ready", "sporty and laid-back",
   "bohemian and layered", "sharp and put-together", "vintage thrift-store finds",
-  "preppy and buttoned-up", "tattooed rocker edge", "beachy and sun-faded",
+  "preppy and buttoned-up", "rocker edge — all black, leather, band tees", "beachy and sun-faded",
   "minimalist monochrome",
 ];
 
@@ -200,6 +214,12 @@ export const MAX_PER_STYLE = 2;
 // across at least 5 distinct values per axis instead of risking the same build/tone piling up.
 export const MAX_PER_HEIGHT_BUILD = 2;
 export const MAX_PER_SKIN_TONE = 2;
+// 2026-07-21 prompt audit: `distinguishingMark` was the last physical axis drawn with a bare per-NPC
+// `rng.pick()` — no cast-wide cap — so one mark could pile up across the cast (the "full sleeve of
+// tattoos ×4" defect). Named marks are now dealt cast-wide at ≤2 each; "none notable" (deliberately
+// repeated in the pool — most faces have no salient mark) is EXEMPT from the cap, so a realistic
+// majority-plain cast stays legal.
+export const MAX_PER_MARK = 2;
 
 /** An age-look cue keyed off the houseguest's age band — keeps the look age-appropriate (0058 §3). */
 export function ageLookFor(age: number): string {
@@ -222,6 +242,30 @@ export interface PhysicalSpread {
   hair: string;
   facial: string;
   style: string;
+  /** 2026-07-21 prompt audit: the cast-wide capped distinguishing-mark deal (named marks ≤MAX_PER_MARK; "none…" uncapped). */
+  mark: string;
+}
+
+/**
+ * Deal `count` distinguishing marks off a seeded rng: every NAMED mark is capped at `maxEach`
+ * cast-wide (the spreadFacet discipline), while a "none…" draw is EXEMPT — most real faces have no
+ * single salient mark, so the plain majority must stay legal. Deterministic per rng stream; the guard
+ * budget relaxes rather than spins (unreachable in practice — the pool comfortably covers a 15-cast).
+ */
+function dealMarksSpread(rng: RandomnessSource, count: number, maxEach: number): string[] {
+  const out: string[] = [];
+  const uses = new Map<string, number>();
+  for (let i = 0; i < count; i++) {
+    let picked: string | undefined;
+    for (let g = 0; g < 400; g++) {
+      const v = rng.pick(MARKS);
+      if (/^none\b/i.test(v) || (uses.get(v) ?? 0) < maxEach) { picked = v; break; }
+    }
+    const v = picked ?? rng.pick(MARKS); // budget exhausted — take the draw rather than loop forever
+    uses.set(v, (uses.get(v) ?? 0) + 1);
+    out.push(v);
+  }
+  return out;
 }
 
 /**
@@ -236,8 +280,10 @@ export function dealCastPhysicalSpread(rng: RandomnessSource, count: number): Ph
   const hair = spreadFacet(rng, HAIR_DESC, count, MAX_PER_HAIR);
   const facial = spreadFacet(rng, FACIAL, count, MAX_PER_FACIAL);
   const style = spreadFacet(rng, STYLE_DESC, count, MAX_PER_STYLE);
+  const mark = dealMarksSpread(rng, count, MAX_PER_MARK);
   return Array.from({ length: count }, (_, i) => ({
     heightBuild: heightBuild[i]!, skinTone: skinTone[i]!, hair: hair[i]!, facial: facial[i]!, style: style[i]!,
+    mark: mark[i]!,
   }));
 }
 
@@ -259,7 +305,9 @@ export function generatePhysicalCharacteristics(
     skinTone: spread ? spread.skinTone : rng.pick(SKIN_TONE),
     hair: spread ? spread.hair : rng.pick(HAIR_DESC),
     facialFeatures: spread ? spread.facial : rng.pick(FACIAL),
-    distinguishingMark: rng.pick(MARKS),
+    // 2026-07-21 prompt audit: the mark rides the cast-wide capped deal when a spread is supplied (the
+    // live path) — a lone regeneration without cast context keeps the per-NPC pick over the same pool.
+    distinguishingMark: spread ? spread.mark : rng.pick(MARKS),
     ageLook: ageLookFor(age),
     style: spread ? spread.style : rng.pick(STYLE_DESC),
   };

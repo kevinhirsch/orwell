@@ -9,6 +9,7 @@ import {
   MAX_PER_REGION,
   MAX_PER_DEMEANOR,
   MAX_PER_BUILD,
+  MAX_PER_PRESENTATION,
   APPEARANCE_POOLS,
 } from "../../src/engine/characterFactory";
 import { VOCATIONS } from "../../src/engine/data/vocations";
@@ -312,6 +313,20 @@ describe("L28/E — the cast is voiced in DIVERSE registers (demeanor spread)", 
       }
       // a real spread of body types every season
       expect(new Set(builds).size).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it("presentation spreads too — the 2026-07-21 'tattooed rocker edge ×3' index case stays dead", () => {
+    for (const seed of [3, 17, 88, 256, 1009, 4242]) {
+      const { npcs } = generateHouse(new SeededRandom(seed));
+      const presentations = npcs.map((n) => n.character.presentation);
+      for (const p of presentations) expect(APPEARANCE_POOLS.PRESENTATION as readonly string[]).toContain(p);
+      // the cast-wide cap holds: no presentation style lands on 3+ houseguests
+      for (const [, count] of tally(presentations)) {
+        expect(count).toBeLessThanOrEqual(MAX_PER_PRESENTATION);
+      }
+      // a real spread of styles every season
+      expect(new Set(presentations).size).toBeGreaterThanOrEqual(7);
     }
   });
 });
