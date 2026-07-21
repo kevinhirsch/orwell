@@ -24,6 +24,11 @@ true post-scrub surface the player sees) and asserts the wall holds:
   • SOFT  — a heuristic "houseguest acting on the secret" flag (target + blindside/
             final-two language attributed to the target), logged for human review (the
             subtle indirect-leak class the mechanical scrub cannot fully adjudicate).
+  • SOFT  — ADR 0019 guardian caveat C2 (the accepted-residual PARAPHRASE monitor): a
+            houseguest paraphrasing the sealed secret's distinctive vocabulary WITHOUT
+            reciting it (the "counselor vibe" class). One LLM voices every NPC from one
+            shared context, so this residual is NAMED and monitored, never a blocking
+            gate — flagged via the shipped `_paraphrase_suspect` detector for review.
 
 Non-blocking nightly leg (`live-harness-nightly.yml`) — a live regression WARNS with
 evidence rather than failing the run. Sibling of `_verify_two_window_live.py`.
@@ -375,6 +380,38 @@ def main() -> int:
             verdicts.append(("SOFT-target-acting-on-secret", not npc_quote_leak,
                              "no heuristic acting-on-secret signal" if not npc_quote_leak
                              else "review: target + blindside language co-occurs — inspect narration.json"))
+
+            # SOFT — ADR 0019 guardian caveat C2 (the ACCEPTED-RESIDUAL paraphrase monitor). One LLM
+            # voices every NPC from ONE shared context, so a VAGUE PARAPHRASE of the sealed secret (the
+            # ADR's "counselor vibe" — not a verbatim shingle) is a NAMED, monitored residual, NOT a
+            # blocking gate. We reuse the shipped `_paraphrase_suspect` detector to flag any staged
+            # non-holder line that shares the DR secret's distinctive vocabulary WITHOUT reciting it, so
+            # the paraphrase residual is surfaced for human review rather than silently passing. LOG-ONLY
+            # (SOFT-*), never fails the run; fail-soft (any import/eval hiccup ⇒ no flag, never a crash).
+            # Check the FULL active roster as candidate speakers (Greptile #1763), not just `target` — a
+            # paraphrase by ANY houseguest is the residual, and scoping to one name would miss the rest.
+            para_suspect = False
+            try:
+                from routes import chat_helpers as _ch  # noqa: PLC0415
+                _facts = [{"content": dr_secret_line, "knownTo": [],
+                           "signatures": _ch._sealed_signatures(dr_secret_line)}]
+                _speakers = [h["name"] for h in house] or [target]
+                for _body in leak_bodies:
+                    for _sent in re.split(r"(?<=[.!?\n])", _body):
+                        if _ch._paraphrase_suspect(_sent, _facts, _speakers):
+                            para_suspect = True
+                            break
+                    if para_suspect:
+                        break
+            except Exception as _pe:  # pragma: no cover — advisory only
+                verdicts.append(("SOFT-c2-paraphrase-monitor-skipped", True,
+                                 f"paraphrase monitor unavailable (advisory): {_pe}"))
+            else:
+                verdicts.append(("SOFT-c2-paraphrase-suspect", not para_suspect,
+                                 "no paraphrase suspect over the sealed secret's vocabulary"
+                                 if not para_suspect else
+                                 "review (C2 accepted residual): a houseguest paraphrased the sealed "
+                                 "secret's distinctive vocabulary — inspect narration.txt"))
             _flush()
 
             with open(os.path.join(OUT, "narration.txt"), "w", encoding="utf-8") as fh:

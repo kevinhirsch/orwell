@@ -2013,12 +2013,23 @@ export class GameSessionAdapter implements GameSession {
    * A0 — the knowledge-wall manifest: the player's private disclosures that are sealed from the house,
    * for the front-end narration guard to enforce (no houseguest may voice what no pathway ever gave
    * them). Vault-free by construction — it reads the PLAYER's OWN knowledge (never a Vault read, never
-   * an NPC's hidden layer). It surfaces ONLY the Diary-Room-tagged facts: the class provably sealed
-   * from the WHOLE house (`NO_NPC_PATHWAY` — an OOC channel with no in-game pathway to ANY npc, ever),
-   * so `knownTo` is empty and the guard's rule is absolute with zero false positives. Non-diary player
-   * knowledge is deliberately NOT surfaced here: a player-witnessed secret can legitimately diffuse
-   * NPC-to-NPC as gossip, so a blunt content scrub would fight the very pathway model that makes it
-   * legal — that class is enforced through the per-NPC `npcVoice.knows` manifest instead.
+   * an NPC's hidden layer). It surfaces the classes provably sealed from the WHOLE house (`knownTo`
+   * empty ⇒ the guard's rule is absolute with zero false positives):
+   *   • the Diary-Room-tagged player knowledge (`NO_NPC_PATHWAY` — an OOC channel with no in-game
+   *     pathway to ANY npc, ever); and
+   *   • ADR 0019 guardian caveat C1 — the player's `privateStrategy` (`producerOnlyCastingSeals`): the
+   *     one casting field private BY DEFINITION (never voluntarily spoken in-house — the DR-class
+   *     analog), told to production with NO in-game pathway to any houseguest. It lives on the player
+   *     object, never in the knowledge layer, so neither the `NO_NPC_PATHWAY` player-knowledge facts
+   *     above nor `knowledgeScopeManifest` covered it — a staged houseguest reciting it had NOTHING
+   *     downstream to drop it (Layer 1 was its sole, un-backstopped defense); this is that backstop.
+   *     Deliberately NARROW: motivation / backstory / open-ended interview notes are SHAREABLE and are
+   *     NOT sealed (a global seal would false-hold legitimate open-set narration — ADR 0005 #1; see
+   *     `producerOnlyCastingSeals`). The ADR's "camp counselor" leak was backstory — now Layer 1's job.
+   * Non-diary player knowledge is deliberately NOT surfaced here: a player-witnessed secret can
+   * legitimately diffuse NPC-to-NPC as gossip, so a blunt content scrub would fight the very pathway
+   * model that makes it legal — that class is enforced through the per-NPC `npcVoice.knows` manifest
+   * (Layer 2) and `knowledgeScopeManifest` (Layer 3) instead.
    */
   sealedFromHouse(): SealedFact[] {
     if (!this.house) return [];
@@ -2029,7 +2040,50 @@ export class GameSessionAdapter implements GameSession {
       const content = this.humanize(f.content).trim();
       if (content) out.push({ content, knownTo: [] });
     }
+    // ADR 0019 C1 — append the producer-only casting class as globally-sealed facts (knownTo empty).
+    for (const content of this.producerOnlyCastingSeals()) out.push({ content, knownTo: [] });
     return out;
+  }
+
+  /** A seal needs ≥ this many words to be distinctive enough for the FE shingle guard (Greptile/CR
+   *  #1763): a terse answer ("revenge", "the money") would otherwise mint a broad single-word signature
+   *  that `_sentence_leaks_sealed`'s substring match hard-drops in EVERY sentence carrying that common
+   *  word all season — a false hold on the open set (ADR 0005 #1). A short answer relies on Layer 1
+   *  (context removal) alone; only distinctive prose earns the Layer-3 global seal. */
+  private static readonly MIN_SEAL_WORDS = 3;
+
+  /**
+   * ADR 0019 guardian caveat C1 — the ONE producer-only casting field that is private BY DEFINITION and
+   * so is never voluntarily spoken in the house: `privateStrategy` (the casting intake records it as the
+   * player's TRUE gameplan, prompted "assure them it stays with production" — the DR-class analog). It
+   * lives on the player object (never seeded into the knowledge layer), so the ADR 0019 Layer 2/3
+   * knowledge manifests never saw it; this collects it as prose so `sealedFromHouse` can seal it GLOBALLY
+   * (`knownTo` empty ⇒ no houseguest may ever voice it) — the defense-in-depth backstop behind Layer 1.
+   * Vault-free by construction: the player's OWN authored words — never a stat, a soul number, or any
+   * hidden layer. Absent ⇒ [].
+   *
+   * THE SEAL SET IS DELIBERATELY NARROW — only what the player would NEVER voluntarily say in-house.
+   * DELIBERATELY EXCLUDED (all SHAREABLE, so a global `knownTo:[]` seal would FALSE-HOLD legitimate
+   * open-set narration all season — a false hold worse than a missed phantom, ADR 0005 #1, the same
+   * principle the C2 arm cites; a global seal cannot tell "no one told yet" from "this houseguest was
+   * told" — that IS the pathway model's job, and these fields are not in it, so it can only over-reach):
+   *   • `character.background` (BACKSTORY) — public bio; the player tells houseguests where they're from
+   *     / what they do, so a houseguest they told legitimately references it.
+   *   • `motivation` ("why I came on the show") — ordinary house small-talk a player openly discusses.
+   *     VERIFIED (#1763 repro): sealing it globally hard-dropped a legitimate shared-motivation line.
+   *   • the open-ended casting `interviewNotes` — a mixed bag (some private, some shareable like "I'm a
+   *     nurse"); indistinguishable, so the safe default is NOT to globally seal them.
+   * Their casting-turn recital is Layer 1's job (context removal + tool-result redaction); any LATER
+   * reference belongs to the pathway model, never a global seal. The short public persona labels stay
+   * out for the same reason (also #1727 drops them from context). Distinctive prose only.
+   */
+  private producerOnlyCastingSeals(): string[] {
+    if (!this.house) return [];
+    const content = this.humanize((this.house.player.privateStrategy ?? "").trim()).trim();
+    // Distinctiveness floor — a too-terse value can't be safely shingle-matched (see MIN_SEAL_WORDS):
+    // a short private strategy relies on Layer 1 (context removal) alone rather than earning the seal.
+    if (content && content.split(/\s+/).length >= GameSessionAdapter.MIN_SEAL_WORDS) return [content];
+    return [];
   }
 
   /** Cap the scope manifest so a long season's guard payload stays bounded (most-recent facts kept). */

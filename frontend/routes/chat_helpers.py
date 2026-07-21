@@ -2997,6 +2997,62 @@ def _sentence_leaks_sealed(sentence: str, facts: list, active_names: list) -> bo
     return False
 
 
+# ── ADR 0019 guardian caveat C2 — the ACCEPTED-RESIDUAL paraphrase monitor (SOFT, never a drop) ─── #
+#
+# C2 is ADR 0019's DELIBERATELY-ACCEPTED residual: one LLM voices every NPC from ONE shared
+# completion, and the transcript is legitimately the PLAYER's own knowledge union (the player was
+# present for all of it), so it cannot simply be deleted. The verbatim/shingle guard
+# (`_sentence_leaks_sealed`) drops a RECITAL, but a VAGUE PARAPHRASE — the ADR's own "you've got a
+# counselor vibe" — is not a verbatim shingle and CANNOT be shingle-matched without also dropping
+# legitimate creative prose (ADR 0005 #1: a false hold on the open set is worse than a missed phantom).
+# So this is NOT closed structurally — that is by design. Instead this heuristic SUSPECTS a paraphrase
+# for LOGGING / nightly-red-team review ONLY. It NEVER drops a sentence; the caller must treat it as a
+# soft, advisory signal (mirroring the nightly probe's SOFT flags), never a blocking gate.
+_KW_PARAPHRASE_MIN_OVERLAP = 2   # ≥2 shared distinctive content words ⇒ "talking about the same secret"
+_KW_PARAPHRASE_RARE_LEN = 7      # …or ONE long/rare shared word (the ADR's "counselor" — 9 chars)
+
+
+def _kw_distinctive_words(text: str) -> set:
+    """The distinctive (non-stopword, >3-char) content words of `text` — the paraphrase overlap alphabet
+    (a coarser cut than the shingle signature: single words, not ordered runs)."""
+    return {w for w in _kw_norm_words(text) if w not in _KW_STOPWORDS and len(w) > 3}
+
+
+def _paraphrase_suspect(sentence: str, facts: list, active_names: list) -> bool:
+    """SOFT (advisory, never-drop) — True when a STAGED houseguest OUTSIDE a sealed fact's pathway seems
+    to PARAPHRASE that fact (shares its distinctive vocabulary) WITHOUT reciting it verbatim. This is
+    ADR 0019 caveat C2, the accepted residual: `_sentence_leaks_sealed` already catches the verbatim
+    recital, so this deliberately fires only on the SUBTLER case the shingle guard cannot (and must not)
+    drop. LOG-ONLY: it is a red-team/monitoring signal, never a scrub decision.
+
+    A suspect requires ALL of: (a) a staged houseguest speaker not in `knownTo`; (b) the sentence is NOT
+    already a hard verbatim leak (that is a different, already-handled class); and (c) distinctive-word
+    overlap with the sealed content of ≥`_KW_PARAPHRASE_MIN_OVERLAP`, OR one shared word ≥
+    `_KW_PARAPHRASE_RARE_LEN` chars (a rare/long term is distinctive on its own — the 'counselor' case).
+    """
+    staged = [n for n in active_names if _stages_in_scene(sentence, n)]
+    if not staged:
+        return False
+    # If it is already a hard verbatim leak, that class is handled by `_sentence_leaks_sealed` — this
+    # monitor is for the residual BEYOND verbatim, so never double-count it here.
+    if _sentence_leaks_sealed(sentence, facts, active_names):
+        return False
+    sent_words = _kw_distinctive_words(sentence)
+    if not sent_words:
+        return False
+    for fact in facts:
+        allowed = set(fact.get("knownTo") or [])
+        # Only a staged NON-holder is a suspect (a holder alluding to their own fact is legitimate).
+        non_holders = [n for n in staged
+                       if n.lower() not in allowed and not any(n.lower() in a or a in n.lower() for a in allowed)]
+        if not non_holders:
+            continue
+        shared = sent_words & _kw_distinctive_words(fact.get("content") or "")
+        if len(shared) >= _KW_PARAPHRASE_MIN_OVERLAP or any(len(w) >= _KW_PARAPHRASE_RARE_LEN for w in shared):
+            return True
+    return False
+
+
 def stash_knowledge_wall_reground(user) -> None:
     """Stash a next-turn re-ground after a sealed-content leak was stripped — reminding the model the
     Diary Room is OOC and no houseguest can EVER voice it. Combines with (never clobbers) any re-ground
