@@ -103,6 +103,26 @@ XFAIL = {
     "#1418-finale-banner": "banner-inset: .ow-window top",
 }
 
+# #1822 — measure at MOTION QUIESCENCE. The sweeps read getBoundingClientRect on elements the
+# sub-passes just (re)mounted; at the narrow tiers those surfaces animate in (the ≤768px rail
+# presents as a bottom SHEET, #893), and a rect read mid-settle-transform measures a 44×44 tap
+# target fractionally under the floor (~43.6px, printed rounded as "44x44") — an intermittent
+# required-gate failure on unrelated PRs. The matrix asserts GEOMETRY, never motion craft, so all
+# transitions/animations are stamped out for the audited page: every state change lands at its
+# final layout instantly and every rect is a rest-state rect. (The tap-target XFAIL route is
+# ratcheted shut by test_738_glass_polish_8_13_22 — this is the sanctioned fix, not a registry
+# entry.)
+QUIESCE_CSS = ("*, *::before, *::after { transition: none !important; "
+               "animation: none !important; scroll-behavior: auto !important; }")
+
+
+def quiesce_motion(page):
+    """Disable CSS motion on the audited page so sweeps measure rest-state geometry (#1822)."""
+    try:
+        page.add_style_tag(content=QUIESCE_CSS)
+    except Exception:
+        pass  # never let the probe stylesheet sink a run — worst case is the old timing behavior
+
 passes, failures, xfails, xpasses = [], [], [], []
 
 
@@ -801,6 +821,7 @@ def main():
                                           has_touch=coarse)
                 page = ctx.new_page()
                 page.goto(FE, wait_until="domcontentloaded")
+                quiesce_motion(page)  # #1822: sweeps measure rest-state geometry, never mid-settle
                 audit_page(page, vp_name, w, h, coarse, with_game)
 
                 # #758: a top system-banner must reserve space + compress the fixed-chrome layer
@@ -911,6 +932,7 @@ def main():
             ctx = browser.new_context(viewport={"width": 1366, "height": 768})
             page = ctx.new_page()
             page.goto(FE, wait_until="domcontentloaded")
+            quiesce_motion(page)  # #1822
             page.evaluate("document.documentElement.style.fontSize = '200%'")
             page.wait_for_timeout(1200)
             over = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
