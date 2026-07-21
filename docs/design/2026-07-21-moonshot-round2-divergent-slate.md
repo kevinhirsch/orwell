@@ -33,7 +33,7 @@ The strongest non-obvious findings from the mining passes, each with its evidenc
 - **Belts-on-belts is an unbounded fix generator** (128 "belt" commits; `agent_loop.py` at 70% fix ratio) — the one structural fix that stuck replaced a belt with a contract (engine-signaled `requiredLever`).
 - **The casting→premiere seam is the most re-broken player-facing flow** (299 commits, incl. a Vault Wall P0) and just lost its only end-to-end gate with the golden-path decommission.
 - **A-S3** (stale-409 can drop a scene's only consequence fold) has been "fixed" three times; the fold path needs an invariant property test, not more retry logic.
-- **CLAUDE.md currently documents the decommissioned golden-path gate as armed and blocking** — a doc-reconcile is owed.
+- *(A CLAUDE.md doc-reconcile flagged during mining was already completed — CLAUDE.md now records 0108 as decommissioned.)*
 
 ### 1.4 Built-but-unfelt & dormant (the highest-leverage finding class)
 
@@ -364,3 +364,29 @@ Independent convergences across miners, experts, and lenses:
 **Q7 — The beat-length budget.** Cabin-Fever rituals (C5) and the pacing want-map both point at the unwritten pacing spec (dramatic beats = full ceremony; mechanical beats = near-instant), which would also finally resolve PO-1 (eviction-night length, PENDING since 06-20). Commission that one-page budget doc?
 
 **Q8 — Decision format.** The record shows you decide fast on live play and stall on prose. For the accepted subset here, should each ship behind its flag straight into your unsealed-playthrough ritual (approve/kill after one live session), rather than through further design memos? The frozen-spec decisions (0097/0098/0103) and the six dark behavioral flags from BL-059 could ride the same live-demo batch.
+
+---
+
+## 5) Owner rulings — 2026-07-21, LOCKED (same session as publication)
+
+| Q | Ruling |
+|---|---|
+| Q1 | **Exit door APPROVED, player-only.** The structurally-filtered eviction-night exit package (speaker = evictee; subjects = the player, prior evictees, already-public facts; adversarial-test-gated like producerVault; flag-gated off-by-default) becomes the second sanctioned Vault door. The gossip-diffusion variant ("…Airs") is NOT approved. |
+| Q2 | **All three dark flags go live in deploy defaults:** `ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`, `ORWELL_SHOWRUNNER` Phase-1 (observe-only; REWEIGHT stays off). |
+| Q3 | **Full cross-season carry-in** (content, never outcomes): legend precedes you + cold cases + production memory. Flag-gated + seeded each. |
+| Q4 | **Seeded partial reaction pan** — the camera catches a temperature-rolled subset each ceremony, never all 15. |
+| Q5 | **Engagement-biased surfacing is OUT** — no player-derived input influences any engine selection, including presentation routing. (F4 ships without step 2.) |
+| Q6 | **Payoff-mass balance: spec both options, defer, PO-GATED** — the E1 door itself is approved (Q1); how much aggregate reveal-mass shifts weekly-vs-finale is specced both ways and judged later. |
+| Q7 | **The one-page pacing budget is COMMISSIONED** — per-beat-class time/ceremony allocation; resolves PO-1 (eviction-night length); becomes the pacing authority future beats must cite. |
+| Q8 | **HYBRID decision format adopted:** small/reversible ideas go flag-gated straight into the unsealed-playthrough ritual (approve/kill from play); M/L-cost ideas get a short spec first. Rule-bending items always get memos. |
+
+**Greenlit for spec/build under Q8:** small+reversible → straight to flagged build + live demo (C1 Wipeout Reel, B1 Telephone-Game payoffs, E2 Traitors' Fury, F1 Legend); M/L → short spec first (D1 Ballot Arithmetic, A1 Fifteen Pairs of Eyes, C2 Odd-Couple B-Plots, A2, C3 partial-pan, C4, D2, E1 exit package, the cross-season pair F2/F4-without-step-2). D3 Genius Back-Room stays parked on its flagged tensions.
+
+## 6) Review addendum — binding spec-time constraints (from the #1773 review, accepted)
+
+Every accepted idea's spec MUST carry these, surfaced by automated review and adopted as contract:
+
+1. **Typed beliefs, never bare facts** — vote claims, deductions, and any possibly-false information persist as typed belief/claim records (claimant, audience, confidence, provenance); solvency checks and diffusion run over CLAIMS, never promote a lie to engine truth (D1, E3, vote-deduction consumers).
+2. **Bounded observer sets** — absence/attention facts derive an eligible-observer set from presence/adjacency/coverage windows BEFORE the seeded noticed-by roll; witness scope persists with the fact (A1 and kin). Aggregate ground truth must never leak to observers who couldn't have seen it.
+3. **Deterministic grounding before persistence** — anything LLM-derived that becomes durable canon (running bits, yearbook prose) extracts candidates + source event ids deterministically from the EventStore, validates exact text and knowledge scope before persisting; the LLM only ranks or words, never originates canon (C4, F3).
+4. **Per-idea reversibility fields** — each accepted idea's spec declares its flag, off ⇒ byte-identical invariant (stagedTrajectoryNeutral-style test), fallback, and rollback condition, per the T9 doctrine. Ideas lacking these are incomplete for build.
