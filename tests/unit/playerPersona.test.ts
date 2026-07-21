@@ -22,7 +22,14 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
     expect(v.player!.strategyStyle).toBe("a quiet social floater");
   });
 
-  it("weaves those exact words into the injected moment prompt", () => {
+  // #1727 (A1, P0) — the player's typed archetype/strategyStyle resolve to the SEALED casting
+  // self-description (`persona.*` when the interview recorded one), which NPCs were voicing back at
+  // the player (measured 4/8 live). Per the owner ruling (accept the drop), the moment prompt no
+  // longer echoes the player's persona at all — the house forms its OWN read of the player from
+  // watching them play (ADR 0003 "remove, don't add"). The persona still reaches the STATE VIEW
+  // (test above) and still shapes the game via hidden stats + the casting card; it is only kept out
+  // of the narrator prompt, where it leaked. So the prompt carries the player NAME and nothing else.
+  it("keeps the player's typed persona OUT of the injected moment prompt (#1727 A1 leak fix)", () => {
     const s = new GameSessionAdapter();
     s.createCharacter({
       playerName: "The Player",
@@ -32,8 +39,8 @@ describe("0023/0027 — the player's typed persona reaches the narrative", () =>
     });
     const { systemPrompt } = s.getMomentPrompt({});
     expect(systemPrompt).toContain("The Player");
-    expect(systemPrompt).toContain("the lovable underdog");
-    expect(systemPrompt).toContain("a quiet social floater");
+    expect(systemPrompt).not.toContain("the lovable underdog");
+    expect(systemPrompt).not.toContain("a quiet social floater");
   });
 
   it("falls back to a canonical label when the player types nothing", () => {

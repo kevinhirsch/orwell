@@ -882,6 +882,16 @@ export interface MomentPromptView {
   moment: string;
   /** The composed system prompt to inject for this moment — base persona + beat fragment + Vault-free context. */
   systemPrompt: string;
+  /**
+   * #1735 (A4) — the terminal HARD-CONSTRAINTS block: THIS turn's binding pins (scene occupancy,
+   * present-NPC pronoun locks, per-present-NPC knowledge scope), stated IMPERATIVELY and meant for the
+   * caller to append as the LAST message of the turn, nearest generation — measured (live A/B on
+   * GLM-4.7, reasoning-off) to bind pronoun/location far more reliably than the SAME facts stated once,
+   * softly, mid-`systemPrompt` (the "lost in the middle" region on a long turn). A pure, Vault-free
+   * restatement of facts already carried elsewhere in `systemPrompt` — never a new source of truth.
+   * Absent when there is nothing to pin (pre-game, or the player has no live whereabouts this turn).
+   */
+  hardConstraints?: string;
   /** The producer persona's public name — the casting-interview voice / narrator byline (producer-persona
    *  feature). Vault-free (public voice flavor only). The FE uses it as the chat sender name so the
    *  producer reads as a real person, not the generic "Production" label. Always present. */
