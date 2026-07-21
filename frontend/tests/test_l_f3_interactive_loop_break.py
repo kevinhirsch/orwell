@@ -84,21 +84,33 @@ def test_pending_no_op_advance_no_longer_falsely_resets_counters():
 
 
 def test_greptile_p1_failed_prestate_read_not_counted_as_progress():
-    # Greptile P1 (#1754, unknown pre-state): if the pre-advance state read FAILS, all three
-    # pre-state signals are None — indistinguishable, without an explicit flag, from a genuine
+    # Greptile/CodeRabbit P1 (#1754, unknown pre-state): if the pre-advance state read FAILS, all
+    # three pre-state signals are None — indistinguishable, without an explicit flag, from a genuine
     # "no pending was open". A later no-op advance would then be misclassified as real progress,
     # falsely resetting the stall/escalation counters and recording a phantom loop-break correction
-    # (the exact soft-lock-perpetuating bug this ladder fixes). The fix: a `_state_read_ok` flag,
-    # set True ONLY after every extraction in the read try-block completes, gates the "real progress"
-    # branch — a failed read commits the advance but leaves the counters + belt state untouched.
+    # (the exact soft-lock-perpetuating bug this ladder fixes). The fix: a `_state_read_ok` flag, set
+    # True ONLY after every extraction in the read try-block completes, gates the "real progress"
+    # branch — and on a failed read the commit returns FALSE (never the success sentinel True, which
+    # would drive success-only callers to log a forced advance / inject a nudge / record an applied
+    # overseer action) with a `_silent_advance_unconfirmed` sidecar flag the emitted-visible caller
+    # reads to END the turn safely, leaving the counters + belt state untouched.
     js = _read("src", "agent_loop.py")
     assert "_state_read_ok = False" in js  # initialized pessimistic before the read
     assert "_state_read_ok = True" in js   # flipped only on a clean read
     assert "if not _state_read_ok:" in js  # guards the confirmed-progress branch
+    assert "_silent_advance_unconfirmed = [False]" in js  # the sidecar flag exists
     # the guard must precede (and thus short-circuit) the no-op classification + counter reset
     guard = js.index("if not _state_read_ok:")
     noop = js.index("_advance_was_pending_noop(_pending_kind_at_read, _beat_seq_at_read,")
     assert guard < noop
+    # the unknown-pre-state branch sets the sidecar flag and returns False (NOT the success sentinel):
+    # the first `return` after the guard is a `return False`, and the flag is set before it.
+    branch = js[guard:noop]
+    assert "_silent_advance_unconfirmed[0] = True" in branch
+    assert "return False" in branch
+    assert "return True" not in branch
+    # the emitted-visible caller ends the turn on the unconfirmed flag (no second narration)
+    assert "if _silent_advance_unconfirmed[0]:" in js
 
 
 def test_advance_was_pending_noop_behavioral():

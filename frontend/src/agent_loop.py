@@ -7201,6 +7201,14 @@ async def _stream_agent_loop_impl(
                         # frozen narration. The caller reads it to END the turn (a scene already shown) with
                         # the anti-stale reground queued, instead of racing the engine further ahead.
                         _silent_advance_capped = [False]
+                        # Greptile/CodeRabbit P1 (unknown pre-state): set when the advance COMMITTED (no
+                        # exception) but the pre-advance state read FAILED, so we cannot confirm it was real
+                        # progress vs. a no-op against an open pending. The function returns False (NOT the
+                        # success sentinel — that would drive success-only callers to log a forced advance,
+                        # inject a follow-up nudge, or record an applied overseer action, all phantom on a
+                        # no-op), and the caller reads this flag to END the turn safely without a second
+                        # narration and WITHOUT resetting the stall/escalation counters.
+                        _silent_advance_unconfirmed = [False]
 
                         async def _commit_advance_silently(_why: str) -> bool:
                             """Progress the beat in the engine WITHOUT re-prompting the model — so a
@@ -7218,6 +7226,7 @@ async def _stream_agent_loop_impl(
                             does NOT then blindly retry into a stomp."""
                             _silent_advance_reconciled[0] = False  # reset per call (finding 4)
                             _silent_advance_capped[0] = False       # reset per call (F1 anti-stale)
+                            _silent_advance_unconfirmed[0] = False  # reset per call (unknown pre-state)
                             # F1 ANTI-STALE CAP — scoped to the emitted-visible PLAIN-stall silent commit
                             # ("stall L{level}"): the exact path where a scene was already shown and the
                             # turn breaks silently with NO next-turn voicing obligation (the 141× premiere-
@@ -7311,20 +7320,28 @@ async def _stream_agent_loop_impl(
                                 # stall counter below every time this fired — so a soft-locked pending
                                 # (the F3 comp-buzz-in repro) could sit forever with its escalation
                                 # ladder silently restarting at zero each turn instead of climbing.
-                                # Greptile P1 (unknown pre-state): if the pre-advance state read FAILED
-                                # (`_state_read_ok` is False), all three pre-state signals are None and we
-                                # CANNOT tell a real advance from a no-op against an open pending. Blessing
+                                # Greptile/CodeRabbit P1 (unknown pre-state): if the pre-advance state read
+                                # FAILED (`_state_read_ok` is False), all three pre-state signals are None and
+                                # we CANNOT tell a real advance from a no-op against an open pending. Blessing
                                 # it as progress here would falsely reset the stall/escalation counters and
                                 # record a phantom loop-break correction — the exact soft-lock-perpetuating
-                                # bug this ladder exists to fix. The advance call itself committed (no
-                                # exception), so end this commit attempt, but LEAVE the counters + belt state
-                                # untouched so the ladder keeps climbing off the next (clean) read.
+                                # bug this ladder exists to fix. It also must NOT return the success sentinel
+                                # True: True drives success-only callers (the forced path logs a forced
+                                # advance + injects a follow-up nudge; the active-overseer path records an
+                                # applied action), all phantom when the advance was actually a no-op. So set
+                                # the `_silent_advance_unconfirmed` sidecar flag and return False — the
+                                # emitted-visible caller reads the flag and ENDS the turn (no second
+                                # narration) with the counters + belt state left intact so the ladder keeps
+                                # climbing off the next (clean) read. (The forced-advance callers already
+                                # skip this call when the beat re-read is unknown — `_beat_key_at_read is
+                                # None` — so they never reach here on a failed read.)
                                 if not _state_read_ok:
+                                    _silent_advance_unconfirmed[0] = True
                                     logger.info(
                                         "[orwell] silent advanceGame committed but the pre-advance state "
                                         f"read was unavailable — NOT counting as confirmed progress ({_why}, "
                                         f"phase={_phase}) round {round_num} user={owner}")
-                                    return True
+                                    return False
                                 # Detect the no-op via `_advance_was_pending_noop` — PRIMARILY the
                                 # engine `beatSeq` (Greptile P1: a bare pending-`kind` comparison
                                 # misreads a STAGED competition's genuine comp-round -> comp-round
@@ -7398,6 +7415,15 @@ async def _stream_agent_loop_impl(
                                 # SECOND narration): end the turn; the next real beat surfaces next turn.
                                 logger.info("[orwell] visible-scene turn ended after a reconciled double-"
                                             f"stale advance (no second narration) round {round_num} user={owner}")
+                                break
+                            if _silent_advance_unconfirmed[0]:
+                                # Unknown pre-state (the pre-advance read failed): the advance committed but
+                                # we cannot confirm it was progress vs. a no-op. A scene already streamed this
+                                # turn, so END the turn (no second narration) rather than falling through to
+                                # the text nudge — the counters/belt state are intact, so the ladder re-climbs
+                                # off the next clean read next turn.
+                                logger.info("[orwell] visible-scene turn ended after an unconfirmed silent "
+                                            f"advance (pre-state read failed) round {round_num} user={owner}")
                                 break
                             if _silent_advance_capped[0]:
                                 # F1 anti-stale CAP: the engine is already _SILENT_FORCE_ADVANCE_CAP beats
