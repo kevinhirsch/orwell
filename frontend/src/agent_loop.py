@@ -4335,6 +4335,60 @@ async def _knowledge_wall_guard(text: str, owner) -> str:
         return text
 
 
+async def _presence_wall_guard(text: str, owner) -> str:
+    """A2 (#1726) — the PRE-EMISSION structural presence guard, a location analog of
+    `_knowledge_wall_guard` above. Drops any sentence that stages a houseguest the engine places
+    off-scene or already-evicted as present/acting in the player's room — the empirically load-bearing
+    half of #1726 (the terminal whereabouts prompt pin alone only halved the failure rate, never
+    zeroed it). Everything else streams verbatim. Delegates to `chat_helpers.screen_presence_wall`,
+    which is fail-open by construction. Fires single-tenant too (`owner` None ⇒ the desync key falls
+    back to the canonical game-session id, NAR-1-safe). Any hiccup returns the text unchanged."""
+    if not text:
+        return text
+    try:
+        from routes import chat_helpers
+        return await chat_helpers.screen_presence_wall(owner, text)
+    except Exception:
+        return text
+
+
+def _mirror_wall_drop(round_response: str, before: str, after: str) -> str:
+    """Greptile P1 (#1746) — durability fix. `_knowledge_wall_guard`/`_presence_wall_guard` only
+    filter what streams to the CLIENT (`full_response`); `round_response` — the raw per-round
+    accumulator — was left untouched, and `cleaned_round`/`round_texts` (the persisted/reload text,
+    `dataset.raw` on the FE) are derived from `round_response`. So a dropped phantom sentence (e.g.
+    an off-scene/evicted houseguest staged in the player's scene) survived in saved history and
+    reappeared after a reload — and could still feed a post-turn raw-text belt — even though the
+    player never saw it live. This mirrors the SAME drop back into `round_response` before that
+    derivation happens.
+
+    `before` is the pre-wall chunk fed to the guards (`_guarded.text`); `after` is what survived
+    (`_guarded_text`). Both guards only ever DROP whole sentences — they never edit a surviving one
+    (`screen_knowledge_wall`/`screen_presence_wall` both split on the SAME `(?<=[.!?\\n])` sentence
+    boundary and reassemble a subsequence of the parts) — so a two-pointer walk over that same split
+    recovers exactly what was removed, in order. Each dropped sentence is erased from the RIGHTMOST
+    (latest) matching occurrence in `round_response`, since the guarded chunk is always this round's
+    most-recently-appended tail — an earlier, unrelated repeat of identical prose elsewhere in the
+    round is never touched. A sentence that can't be found at all (e.g. the guards saw a
+    leak-scrubbed form that differs from the still-raw `round_response`) is safely skipped — this
+    never corrupts `round_response`, it only fails to mirror that one edge case."""
+    if after == before or not before:
+        return round_response  # nothing dropped — the hot path
+    b_parts = re.split(r"(?<=[.!?\n])", before)
+    a_parts = re.split(r"(?<=[.!?\n])", after)
+    ai = 0
+    for bp in b_parts:
+        if ai < len(a_parts) and a_parts[ai] == bp:
+            ai += 1
+            continue
+        if not bp.strip():
+            continue
+        idx = round_response.rfind(bp)
+        if idx >= 0:
+            round_response = round_response[:idx] + round_response[idx + len(bp):]
+    return round_response
+
+
 _GuardedScene = collections.namedtuple("_GuardedScene", ["text", "scene_broken", "cutaway_emitted"])
 
 
@@ -6231,10 +6285,18 @@ async def _stream_agent_loop_impl(
                                     )
                                     _scene_broken = _guarded.scene_broken
                                     _cutaway_emitted = _guarded.cutaway_emitted
-                                    # A0 knowledge wall runs LAST and is NEVER overridden by a blank-turn
-                                    # fallback: a houseguest voicing the player's sealed Diary-Room content
-                                    # is a Vault-Wall leak that must never reach the player.
+                                    # A0 knowledge wall: NEVER overridden by a blank-turn fallback — a
+                                    # houseguest voicing the player's sealed Diary-Room content is a
+                                    # Vault-Wall leak that must never reach the player. A2 (#1726)
+                                    # presence wall runs right after it and is equally non-overridden: it
+                                    # drops a phantom (off-scene/evicted) houseguest staged as present,
+                                    # same-turn, before the player ever sees it.
                                     _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                                    _guarded_text = await _presence_wall_guard(_guarded_text, owner)
+                                    # Greptile P1 (#1746): mirror any DROP back into the raw round
+                                    # buffer so a phantom sentence the player never saw also never
+                                    # survives into the persisted/reload text or a post-turn belt.
+                                    round_response = _mirror_wall_drop(round_response, _guarded.text, _guarded_text)
                                     if _guarded_text:
                                         full_response += _guarded_text
                                         if _guarded_text.strip():
@@ -6371,8 +6433,15 @@ async def _stream_agent_loop_impl(
                 )
                 _scene_broken = _guarded.scene_broken
                 _cutaway_emitted = _guarded.cutaway_emitted
-                # A0 knowledge wall runs LAST — a Vault-Wall leak is never re-admitted by a fallback.
+                # A0 knowledge wall: a Vault-Wall leak is never re-admitted by a fallback. A2 (#1726)
+                # presence wall runs right after it, equally non-overridden — drops a phantom
+                # (off-scene/evicted) houseguest staged as present, same-turn, before the player sees it.
                 _guarded_text = await _knowledge_wall_guard(_guarded.text, owner)
+                _guarded_text = await _presence_wall_guard(_guarded_text, owner)
+                # Greptile P1 (#1746): mirror any DROP back into the raw round buffer (see
+                # `_mirror_wall_drop`'s docstring) so a phantom sentence never survives into the
+                # persisted/reload text or a post-turn belt.
+                round_response = _mirror_wall_drop(round_response, _guarded.text, _guarded_text)
                 if _guarded_text:
                     full_response += _guarded_text
                     if _guarded_text.strip():
