@@ -1166,6 +1166,11 @@ Every open item from every tier + both moonshot rounds + the session rulings, in
 | T0-1 comparator + T0-5 scrub + #1729-B1 RED events | **PR #1774** |
 | T0-4 capability probe + attempt telemetry + TUN-10 rig parity | agent → `claude/t0-probe-rig-parity` |
 
+### Wave 0.5 — RECORDING INTEGRITY, PULLED FORWARD (owner ruling OQ3, 2026-07-21)
+**#1728 fold-integrity half** (defer-fold-to-settle + supersede-by-id — every "Try again" double-folds
+the hidden layer TODAY) ships immediately after Wave 0; the D2 stream-resume half stays in Wave 2 on
+the shared render log.
+
 ### Wave 1 — GROUND TRUTH ON AIR (remainder; all decision-gates cleared)
 T0-2 beats-terminate-themselves (dispatches when #1713's branch lands — same file) · T0-3 engine
 chyrons (D1 ✅) · the Q2 flag flips (`ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`,
@@ -1179,7 +1184,7 @@ stream** (same substrate; the P1 recording-integrity pair rides here — also cl
 FE-freeze evidence) · **D7 full-WebSocket consolidation** (ADR 0017/0018 revision rides the
 implementation) · Q7 pacing-budget spec (commissioned — resolves PO-1).
 
-### Wave 2.5 — ROUND-2 QUICK WINS (Q8 hybrid: small+reversible → flagged build + live demo)
+### Wave 2.5 — ROUND-2 QUICK WINS (owner ruling OQ2: start after Wave 1 lands, run ALONGSIDE Wave 2)
 C1 Wipeout Reel (9.0) · B1 Telephone-Game Payoffs (needs the drift flag from Wave 1) · E2
 Traitors' Fury + bearing · F1 Your Legend Precedes You (notoriety finally voiced). Each: flag,
 off ⇒ byte-identical invariant, seeded, per the slate §6 binding constraints.
@@ -1191,9 +1196,17 @@ package (Q1 ✅ player-only, player-knowledge-layer predicate), C3 seeded partia
 C4 (deterministic grounding), D2, cross-season F2 + F4-without-step-2 (Q3 ✅, Q5 ❌ step-2) ·
 Q6 payoff-balance options specced both ways (PO-gated).
 
-### Wave 4 — THE EDITORIAL ORGAN
-T1-6 sifter + tension director + interstitials + Spy Screen · remaining round-2 mid-band as ruled
-via live demos (B2, B3 after B1, B4, C5, C6, E3, F3).
+### Wave 4 — THE EDITORIAL ORGAN + THE MID-BAND
+T1-6 sifter + tension director + interstitials + Spy Screen. **Mid-band adoption rule (owner ruling
+OQ1): score ≥7.5 auto-greenlit into the hybrid pipeline** — A2, C4, D2, B2, B3 (after B1), C5 enter
+now; the 7.0–7.3 band (B4, C6, F2, F3, E3) waits on the first live-demo batch's verdicts.
+
+### COMMISSIONED FROM THE V1 ARCHAEOLOGY (owner ruling OQ4, 2026-07-21)
+**The Producer Read** — the post-scene beat where the show accounts the exchange itself ("you got
+nothing concrete; he got a read on your strategy"), Vault-free, computed from the recorded
+interaction — and **the Player Dossier** — the player's own stated reads curated back to them,
+OOC/no-NPC-pathway like the Diary Room. Both get specs (M-cost → Q8 spec-first path); slot with
+Wave 2.5.
 
 ### Wave 5 — AGENCY + ENDGAME DEPTH
 T1-7 pledges/flip-cascade/convokeHouse · T1-8 autopsy decision point (D5 parked) ·
