@@ -82,6 +82,25 @@ def _endpoint_enabled_models(ep) -> list:
     return [m for m in _endpoint_cached_models(ep) if m not in hidden]
 
 
+def _model_available(ep, m) -> bool:
+    """Is model ``m`` actually SERVED on endpoint ``ep``? A model is unavailable when it is
+    explicitly hidden/disabled, OR when the endpoint's cached model list is known (non-empty)
+    and ``m`` is absent from it (a configured model the provider does not serve → 400s).
+
+    Conservative on missing data: an endpoint whose models were never cached (empty list)
+    can't be verified, so a configured model is assumed available — never substituted on a
+    hunch. This is the predicate the narrator↔utility mutual fallback tests each candidate with.
+    """
+    if not m:
+        return False
+    if m in _endpoint_hidden_models(ep):
+        return False
+    enabled = _endpoint_enabled_models(ep)
+    if enabled and m not in enabled:
+        return False
+    return True
+
+
 # Cache for Tailscale hostname → IP resolution
 _tailscale_cache: Dict[str, Optional[str]] = {}
 
@@ -399,11 +418,20 @@ def resolve_endpoint(
         # OpenRouter endpoint, so the picker fell through to the endpoint's first chat model.
         _configured_model = model
 
-        # Discard a configured model the user has since disabled on the
-        # endpoint (e.g. a stale `default_model` left pointing at a now-hidden
-        # model). Treat it as unset so the picker below selects a live one
-        # instead of dispatching to a disabled model that 400s.
-        if model and model in _endpoint_hidden_models(ep):
+        # Discard a configured model the user has since disabled on the endpoint (e.g. a stale
+        # `default_model` left pointing at a now-hidden model, or the reported case: `utility_model =
+        # qwen/qwen3.6-flash` configured but disabled on the OpenRouter endpoint). Instead of dropping
+        # to an ARBITRARY "first enabled chat model" (thinkingmachines/inkling in the owner's log — a
+        # model that could be slow/broken and hangs the casting-finalize burst), apply the
+        # narrator↔utility MUTUAL FALLBACK: the two configured models are each other's fallback.
+        #
+        # Owner ruling 2026-07-21: a utility-class call whose model is unavailable falls back to the
+        # configured NARRATOR/default model (known-served), and vice-versa; only when BOTH configured
+        # models are unavailable do we reach the documented last resort (the endpoint's first enabled
+        # chat model). Never substitute an arbitrary model while a working configured model exists.
+        _default_model = _stg("default_model")
+        _utility_model = _stg("utility_model")
+        if model and not _model_available(ep, model):
             if auto_bound:
                 # An auto-bound endpoint whose configured default the operator HID: staying
                 # unresolved (loud) beats silently swapping in an arbitrary first-listed model.
@@ -411,11 +439,33 @@ def resolve_endpoint(
                     "[resolve_endpoint] auto-default declined: the configured model %r is "
                     "hidden on endpoint '%s'", model, getattr(ep, "name", None) or ep.id)
                 return fallback_url, fallback_model, fallback_headers
-            logger.warning(
-                "[resolve_endpoint] '%s' configured model %r is HIDDEN/disabled on endpoint '%s' — "
-                "substituting the endpoint's first enabled chat model (config vs served mismatch)",
-                setting_prefix, model, getattr(ep, "name", None) or ep.id)
-            model = ""
+            # Prefer the SIBLING configured model: if we were about to serve the utility model, fall
+            # back to the narrator/default model first (and vice-versa). Dedup + skip the model we
+            # already know is unavailable.
+            if model == _utility_model:
+                _chain = [_default_model, _utility_model]
+            else:
+                _chain = [_utility_model, _default_model]
+            _chosen = ""
+            for _cand in _chain:
+                if _cand and _cand != model and _model_available(ep, _cand):
+                    _chosen = _cand
+                    break
+            if _chosen:
+                logger.warning(
+                    "[resolve_endpoint] '%s' configured model %r is not served on endpoint '%s' — "
+                    "falling back to the configured %s model %r (narrator↔utility mutual fallback), "
+                    "NOT an arbitrary first-enabled model",
+                    setting_prefix, model, getattr(ep, "name", None) or ep.id,
+                    "narrator/default" if _chosen == _default_model else "utility", _chosen)
+                model = _chosen
+            else:
+                logger.warning(
+                    "[resolve_endpoint] '%s' configured model %r is not served on endpoint '%s' and "
+                    "neither configured narrator nor utility model is available — substituting the "
+                    "endpoint's first enabled chat model (documented last resort)",
+                    setting_prefix, model, getattr(ep, "name", None) or ep.id)
+                model = ""
         # If no (usable) model specified, pick the first enabled chat model.
         if not model:
             model = _first_chat_model(_endpoint_enabled_models(ep)) or ""
