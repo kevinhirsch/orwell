@@ -2586,7 +2586,18 @@ async def _settle_pending_fold(owner, session_id) -> bool:
     against a non-truncate deletion path (`edit-message`/`delete-messages`/`merge-last-assistant`)
     that bypassed the truncate route's `discard_pending_fold` call entirely. A vanished-row entry
     is DROPPED (never re-queued — there is nothing to retry) and draining continues to the next
-    entry."""
+    entry.
+
+    **SINGLE CUSTODY (PR #1825 fix #4).** An anchored entry lives in EXACTLY ONE queue —
+    `fold_ledger`'s own — from the moment it's staged until it either commits or is discarded. It
+    must NEVER migrate to `routes/chat_helpers.py`'s `_DEFERRED_FOLDS` (the CON-11 safety net the
+    OTHER, non-anchored fold-bearing belts — `_auto_record_deal`/`_auto_confide`/
+    `_auto_expose_secret`/`_auto_trade_secret`, and the `session_id=None` faithfulness path — use
+    on a double stale-beat conflict): that queue is keyed only by owner, carries no
+    session_id/row_anchor, and so a truncate on THIS session can't see an entry sitting there at
+    all. The `_backfill_with_cas` call below passes `defer_fold=False` specifically to suppress
+    that self-enqueue; a double stale-beat here re-queues in THIS ledger instead (same as any other
+    retryable failure), whose truncate/settle checks are anchor-aware."""
     from src import fold_ledger as _fl
     from src import orwell_engine as _oe
     settled_any = False
@@ -2602,19 +2613,33 @@ async def _settle_pending_fold(owner, session_id) -> bool:
                 f"a phantom user={owner}")
             continue  # nothing to retry — keep draining the rest of the queue
         try:
+            # #1728 (B2, PR #1825 fix #4 — SINGLE CUSTODY): defer_fold=False, DELIBERATELY, unlike
+            # every OTHER fold-bearing `_backfill_with_cas` call site in this file. An anchored
+            # entry must live in EXACTLY ONE queue (this ledger) until it commits or is discarded —
+            # it must NEVER migrate to the un-anchored `chat_helpers._DEFERRED_FOLDS` CON-11 safety
+            # net on a double stale-beat conflict, because that queue is keyed only by owner and
+            # carries no session_id/row_anchor: a later truncate on THIS session can't see an entry
+            # sitting there at all, so it would drain later and fold content the render log no
+            # longer contains (a T-Rex-confirmed phantom-fold side door). See the function/module
+            # docstrings for the full single-custody rule.
             result = await _backfill_with_cas(
                 owner, _oe.record_interaction, entry["content"],
                 with_ids=entry["with_ids"], kind=entry["kind"], consequence=entry["consequence"],
-                felt_minutes=entry["felt_minutes"], user=owner, defer_fold=True,
+                felt_minutes=entry["felt_minutes"], user=owner, defer_fold=False,
                 idempotency_key=entry["idempotency_key"])
         except Exception as _e:
             logger.warning(f"[orwell] settle deferred fold failed, re-queuing at front for retry: {_e}")
             _fl.requeue_pending_fold_front(owner, session_id, entry)
             break  # never settle a newer entry ahead of this one still stuck retrying
         if result is None:
-            # `_backfill_with_cas` already queued this onto the CON-11 deferred-retry mechanism
-            # (`defer_fold=True`) on a double stale-beat conflict — not lost, just delayed there
-            # instead of here; stop draining here too so order stays preserved.
+            # A double stale-beat conflict — `_backfill_with_cas` reconciled twice and gave up.
+            # With `defer_fold=False` it did NOT enqueue anywhere (custody stays with THIS ledger).
+            # Re-queue exactly like any other retryable failure, and stop draining so a newer entry
+            # never settles ahead of this one.
+            logger.warning(
+                f"[orwell] settle deferred fold hit a double stale-beat conflict, re-queuing at "
+                f"front for retry (kind={entry['kind']}) user={owner}")
+            _fl.requeue_pending_fold_front(owner, session_id, entry)
             break
         logger.info(f"[orwell] settled deferred scene fold (kind={entry['kind']}, "
                     f"with={entry['with_ids']}) user={owner}")

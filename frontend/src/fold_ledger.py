@@ -95,6 +95,34 @@ never cached across a request boundary:
     anchor by the time the NEXT turn's settle runs — attach happens synchronously within the SAME
     request that staged the fold, long before a client could ever send the next one).
 
+**SINGLE CUSTODY — an anchored fold lives in EXACTLY ONE queue (PR #1825 Greptile P1 fix #4 — the
+custody leak, T-Rex-confirmed).** `frontend/src/agent_loop.py`'s `_backfill_with_cas` has its OWN
+opportunistic retry queue for fold-bearing back-fills — `routes/chat_helpers.py`'s
+`_DEFERRED_FOLDS` (CON-11): on a SECOND consecutive stale-beat 409, a call made with
+`defer_fold=True` self-enqueues there rather than dropping the fold. That queue predates this
+module and is the right safety net for belts with NO anchored ledger of their own
+(`_auto_record_deal`/`_auto_confide`/`_auto_expose_secret`/`_auto_trade_secret`, and the
+`session_id=None` faithfulness retro-adopt path) — but it is keyed ONLY by owner and carries no
+session_id/row_anchor at all. If a fold staged HERE (in this anchored ledger) were ever allowed to
+self-enqueue there on a settle failure, a later truncate on this session could not see it sitting
+in that other queue — it would drain later, opportunistically, on the owner's next UNRELATED
+back-fill call, and fold content the render log no longer contains: a phantom fold via a side
+door the anchor-aware truncate/settle checks never look at.
+
+**The ruling: an anchored entry must live in EXACTLY ONE queue — this one — from the moment it is
+staged until it either commits or is discarded.** `agent_loop._settle_pending_fold` enforces this
+by calling `_backfill_with_cas` with `defer_fold=False` — DELIBERATELY the one fold-bearing call
+site in the file that does NOT pass `defer_fold=True`. With `defer_fold=False`, a double
+stale-beat conflict reconciles and returns `None` WITHOUT touching `_DEFERRED_FOLDS` at all (the
+exact same shape `_auto_move_player`'s positional `moveTo` belt already relies on — see
+`tests/test_0065_backfill_cas.py::test_move_backfill_stale_twice_still_drops_no_defer`), and the
+settle loop re-queues the entry at the FRONT of THIS ledger instead — the retry horizon stays
+entirely inside the anchor-aware machinery, where truncate can always find and discard it. No
+other change was needed: `_ch._defer_fold` (the only function that ever writes to
+`_DEFERRED_FOLDS`) has exactly one call site, gated on `defer_fold`, so `defer_fold=False`
+provably closes the escape path completely — there is no remaining route by which a fold staged
+here can reach the un-anchored queue.
+
 **Idempotency (AC #5).** Each entry's idempotency key is minted ONCE, at stage time, and carried
 unchanged through to the engine `recordInteraction` call at settle time (0065 Part B — the engine
 dedups a repeated key and returns the prior eventId without re-folding) — so a retried settle, or

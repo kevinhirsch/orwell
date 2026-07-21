@@ -937,6 +937,113 @@ def test_settle_still_applies_an_unanchored_entry_normally():
     assert fl.entry_exists_at_settle("any-session", None) is True
 
 
+# ── PR #1825 (Greptile P1 #4) — the CUSTODY LEAK. `_backfill_with_cas` self-enqueues a fold onto
+# `chat_helpers._DEFERRED_FOLDS` on a DOUBLE stale-beat conflict when called with `defer_fold=True`
+# — but that queue is keyed only by owner, carrying no session_id/row_anchor, so a later truncate on
+# the anchored session can't see the entry sitting there at all. It drains later (opportunistically,
+# on the NEXT unrelated back-fill call for this owner) and folds content the render log no longer
+# contains — a phantom fold via a side door the anchor-based truncate/settle checks never see.
+# RULING: SINGLE CUSTODY — an anchored fold lives in exactly ONE queue (`fold_ledger`'s own) until
+# it commits or is discarded; it must NEVER migrate to `_DEFERRED_FOLDS`. Fixed by calling
+# `_backfill_with_cas` with `defer_fold=False` from the settle path specifically (every OTHER
+# fold-bearing call site — `_auto_record_deal`/`_auto_confide`/`_auto_expose_secret`/
+# `_auto_trade_secret`, and the `session_id=None` faithfulness path — keeps `defer_fold=True`
+# unchanged, since THEY have no anchored ledger to fall back on and `_DEFERRED_FOLDS` is their only
+# safety net; `test_move_backfill_stale_twice_still_drops_no_defer` in
+# `tests/test_0065_backfill_cas.py` already proves `defer_fold=False` cleanly skips the self-enqueue
+# for a positional belt — this is the same proven shape, applied to the settle path). ────────────
+
+def _stale_409(now: int):
+    from src import orwell_engine as oe
+    return oe.EngineToolError(
+        f"stale write refused — expected beatSeq is behind the current board (now {now}); re-ground",
+        status=409)
+
+
+def test_settle_double_stale_beat_never_leaks_into_the_deferred_folds_queue(monkeypatch):
+    """The T-Rex repro, end to end: stage an anchored fold, force a DOUBLE stale-beat at settle
+    (so `_backfill_with_cas` would have self-enqueued under the old `defer_fold=True` call), then
+    truncate the row BEFORE any retry drains, then drain BOTH queues — `recordInteraction` must
+    never be called for the truncated content, because the entry was discarded by the truncate
+    (custody never left the anchored ledger in the first place)."""
+    from routes import chat_helpers
+    from src import orwell_engine as oe
+    chat_helpers._DEFERRED_FOLDS.clear()
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 1
+
+    sm = SessionManager()
+    sid = "b2-custody-leak"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"bonding","content":"content that will be truncated away"}',
+        "u1", "a1")
+
+    call_count = {"n": 0}
+
+    async def flaky_record(*a, **k):
+        call_count["n"] += 1
+        raise _stale_409(9 + call_count["n"])  # always stale — the board keeps moving
+
+    async def fake_status(user=None):
+        return {"week": 3, "phase": "veto", "pending": None, "veto": {}, "beatSeq": 99}
+
+    async def fake_state(user=None, **kw):
+        return {"week": 3, "phase": "veto", "finished": False, "house": [], "beatSeq": 99}
+
+    monkeypatch.setattr(oe, "record_interaction", flaky_record)
+    monkeypatch.setattr(oe, "game_status", fake_status)
+    monkeypatch.setattr(oe, "get_game_state", fake_state)
+
+    settled = _run(al._settle_pending_fold("owner", sid))
+    assert settled is False
+    assert call_count["n"] == 2, "tried once + re-attempted once against the reconciled token, then gave up"
+
+    # SINGLE CUSTODY: the double-stale-beat fold must NEVER have reached the un-anchored deferred
+    # queue — that is the exact custody leak this fix closes.
+    assert chat_helpers.deferred_fold_count("owner") == 0, (
+        "a settle-path fold must never migrate to _DEFERRED_FOLDS — it carries no session_id/"
+        "row_anchor there, so a later truncate on this session couldn't see it at all"
+    )
+    # It must instead be back in the ANCHORED ledger, ready for the next settle to retry.
+    assert fl.pending_fold_count("owner", sid) == 1
+
+    # "Try again" (or an edit) truncates the row BEFORE any retry ever drains.
+    keep_count = sm.keep_count_before_message(sid, row_id)
+    discarded = fl.discard_pending_fold("owner", sid, keep_count)
+    assert discarded == 1
+    assert fl.has_pending_fold("owner", sid) is False
+
+    # Draining BOTH queues must never fold the truncated content.
+    async def boom(*a, **k):
+        raise AssertionError(
+            "recordInteraction must never be called for content a truncate already discarded")
+
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    settled_again = _run(al._settle_pending_fold("owner", sid))
+    assert settled_again is False
+    _run(chat_helpers._drain_deferred_folds("owner"))  # must be a clean no-op — nothing was ever there
+
+
+def test_settle_path_never_passes_defer_fold_true():
+    """Source pin: EVERY other fold-bearing `_backfill_with_cas` call site in this file passes
+    `defer_fold=True` (they have no anchored ledger to fall back on); the settle path is the ONE
+    exception, and it must stay that way — a future edit that flips it back to `True` reopens the
+    custody leak."""
+    src = _read_agent_loop_py()
+    fn = src[src.index("async def _settle_pending_fold("):]
+    fn = fn[:fn.index("\n# ── Whereabouts cohesion")]
+    assert "defer_fold=False" in fn, (
+        "the settle path must call _backfill_with_cas with defer_fold=False (PR #1825 fix #4 — "
+        "single custody) so a double stale-beat re-queues in the ANCHORED ledger, never the "
+        "un-anchored _DEFERRED_FOLDS side door"
+    )
+    assert "defer_fold=True" not in fn, (
+        "defer_fold=True in the settle path would silently reopen the custody-leak bug"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # #1728 (B2) — the wiring source pins: the truncate route discards by anchor, the agent-mode
 # persist path attaches the anchor, and the settle-at-turn-start call sits at the top of the turn

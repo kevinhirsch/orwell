@@ -368,6 +368,35 @@ column `SessionManager.keep_count_before_message` orders by) in a fresh query at
 while `entry_exists_at_settle` only ever needs a yes/no existence check (order-independent by
 construction) and so is safe with the raw id as-is.
 
+**SINGLE CUSTODY — an anchored fold lives in exactly ONE queue (PR #1825 Greptile P1 fix #4, the
+custody leak, T-Rex-confirmed).** `agent_loop._backfill_with_cas` (unrelated to this feature,
+pre-existing) has its own opportunistic retry queue for fold-bearing back-fills —
+`routes/chat_helpers.py`'s `_DEFERRED_FOLDS` (CON-11): on a SECOND consecutive stale-beat 409, a
+call made with `defer_fold=True` self-enqueues there instead of dropping the fold. That queue is
+the right safety net for belts with no anchored ledger of their own (`makeDeal`/`confide`/
+`exposeSecret`/`tradeSecret`, and the `session_id=None` faithfulness path) — but it is keyed ONLY
+by owner, with no session_id/row_anchor at all. The bug: `_settle_pending_fold` was calling
+`_backfill_with_cas` with `defer_fold=True` too, so a double stale-beat at settle time handed the
+fold to that un-anchored queue — where a later truncate on the anchored session couldn't see it.
+It would drain later, opportunistically, on the owner's NEXT unrelated back-fill call, and fold
+content the render log no longer contained: a phantom fold via a side door the anchor-aware
+truncate/settle checks never look at.
+
+**The ruling: an anchored entry lives in EXACTLY ONE queue — `fold_ledger`'s own — from staging
+until it commits or is discarded; it must NEVER migrate to `_DEFERRED_FOLDS`.** The fix is
+`_settle_pending_fold` calling `_backfill_with_cas` with `defer_fold=False` — deliberately the ONE
+fold-bearing call site in the file that does not pass `defer_fold=True`. With `defer_fold=False`
+a double stale-beat reconciles and returns `None` without enqueuing anywhere (the identical shape
+the pre-existing positional `moveTo` belt already relies on), and the settle loop re-queues the
+entry at the front of the anchored ledger instead — the retry horizon never leaves the
+anchor-aware machinery. **No remaining escape path exists:** `chat_helpers._defer_fold` (the only
+function that ever writes to `_DEFERRED_FOLDS`) has exactly one call site in the whole codebase,
+gated on `defer_fold`, inside `_backfill_with_cas` itself — so `defer_fold=False` structurally and
+completely closes the leak; a belt-and-suspenders "carry session_id/row_anchor into the deferred
+queue" mechanism was considered and is NOT needed. Every OTHER fold-bearing `_backfill_with_cas`
+call site keeps `defer_fold=True` unchanged (byte-identical CON-11 behavior — proved by the full
+`tests/test_0065_backfill_cas.py` suite staying green) since they have no ledger to fall back on.
+
 **The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
 issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
 an explicit "un-fold" if the take turns out superseded. No such seam exists on this build's
@@ -405,7 +434,14 @@ anchor-aware discard call, the chat-routes persist-time attach wiring, settle si
 round loop starts, and settle's row-existence check — plus the PR #1825 fix-#3 case: 3 rows, a
 fold anchored to the MIDDLE row, that row deleted via a non-truncate path while the row before and
 after it survive (the row after shifts down a position) — settle drops the entry via the id-based
-existence check rather than being fooled by the shifted position, and nothing folds.
+existence check rather than being fooled by the shifted position, and nothing folds — plus the PR
+#1825 fix-#4 (single-custody) case: stage an anchored fold, force a double stale-beat at settle
+(the exact shape that used to self-enqueue onto `_DEFERRED_FOLDS`), truncate the row BEFORE any
+retry drains, then drain BOTH queues and prove `recordInteraction` is never called for the
+truncated content, plus a source pin that the settle path is the one fold-bearing
+`_backfill_with_cas` call site that stays `defer_fold=False`. `tests/test_0065_backfill_cas.py`
+(unchanged) stays green in full, proving the pre-existing CON-11 belt users' behavior is
+byte-identical.
 
 ## Traceability
 
