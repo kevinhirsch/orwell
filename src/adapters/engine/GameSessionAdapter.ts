@@ -8291,10 +8291,6 @@ export class GameSessionAdapter implements GameSession {
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
     const view = this.inOneCommit(() => {
-      // 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER. No-op unless
-      // the layer is on; when it fires it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the
-      // beat does NOT advance this turn — the player answers the offer first. Flag off ⇒ byte-identical.
-      this.maybeOfferPlayerDeal();
       const ev = this.advanceOneBeat();
       // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
       // and every ceremony beat are visible in the view, not only recorded to the event store.
@@ -8305,18 +8301,30 @@ export class GameSessionAdapter implements GameSession {
   }
 
   /**
-   * The deterministic "one more step" of the live loop: draw the CURRENT beat's outcome (or raise
-   * its pending), apply the SAME ADR-0006 clock/night bookkeeping a plain `advanceGame` call would,
-   * and commit. A no-op (returns `null`, mutates nothing) when the loop is already blocked on a
-   * decision, a standing deal offer, or the season is finished — so callers may invoke it
-   * unconditionally without re-deriving that guard themselves.
+   * The deterministic "one more step" of the live loop: offer the LULL-gated NPC deal check (0123),
+   * then draw the CURRENT beat's outcome (or raise its pending), apply the SAME ADR-0006 clock/night
+   * bookkeeping a plain `advanceGame` call would, and commit. A no-op (returns `null`, mutates
+   * nothing) when the loop is already blocked on a decision, a standing deal offer, or the season is
+   * finished — so callers may invoke it unconditionally without re-deriving that guard themselves.
    *
    * Shared by `advanceGame`'s own main path AND T0-2's `submitDecision` auto-advance (below), so a
    * beat reached by chaining off a resolved pending is BYTE-IDENTICAL to the same beat reached via a
    * separate `advanceGame` call — same rng draw (`beatRng` is a pure function of the current
    * week/beat, not of how many calls got us here), same clock/fatigue/conflict folds, same commit.
+   *
+   * 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER.
+   * `maybeOfferPlayerDeal` MUST run before the pending/dealOffer/finished guard below — not after —
+   * because it is what CAN set `live.dealOffer`: the guard's own `!this.live!.dealOffer` check has to
+   * see whatever this SAME call just floated, or a beat could advance in the very turn a fresh offer
+   * was raised (a #1824/Greptile P1 finding: the chained `submitDecision` path used to skip this gate
+   * entirely, since it called `advanceBeat` directly instead of going through `advanceGame`'s
+   * sequence). Folded HERE (not left as a separate call at each call site) so both callers get the
+   * gate by construction and can never drift apart again. No-op unless the layer is on; when it fires
+   * it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the beat does NOT advance this
+   * turn — the player answers the offer first. Flag off ⇒ byte-identical.
    */
   private advanceOneBeat(): BeatEvent | null {
+    this.maybeOfferPlayerDeal();
     if (!this.live!.pending && !this.live!.dealOffer && !this.live!.finished) {
       const ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
       // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
@@ -8418,6 +8426,12 @@ export class GameSessionAdapter implements GameSession {
       // step already ran — returns that already-committed result as a genuine no-op rather than doing
       // fresh work). Excluded kinds (goodbye-message, the interactive finale, self-evict, secret-veto,
       // deal-offer) are unaffected — this block never runs for them.
+      //
+      // #1824 (Greptile P1) — `advanceOneBeat` folds the 0123 `maybeOfferPlayerDeal` LULL-gated NPC
+      // deal check BEFORE its own pending/dealOffer/finished guard (see that method's doc comment), so
+      // this chained call honors the SAME gate a separate `advanceGame` call would: if a deal is due at
+      // the post-resolution lull, it sets `live.dealOffer` and the beat does NOT advance here either —
+      // byte-identical to the un-chained two-call path, never bypassed by going straight to a beat draw.
       if (AUTO_ADVANCE_PENDING_KINDS.has(pendingKind!)) this.advanceOneBeat();
       return this.advanceView(ev);
     }));

@@ -25,17 +25,26 @@ import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
  * HARD rule: roles only — no fixture names asserted.
  */
 
-/** Resolve a pending decision LEGALLY, whatever kind it is (a generic driver, no strategy asserted). */
-function resolveLegally(s: GameSessionAdapter, p: PendingDecisionView): void {
-  if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
-  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
-  else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
-  else if (p.kind === "comp-intent" || p.kind === "comp-round") s.submitDecision({ kind: p.kind, intent: "compete" });
-  else if (p.kind === "finale-statement") s.submitDecision({ kind: "finale-statement", statement: "x" });
-  else if (p.kind === "finale-answer") s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
-  else if (p.kind === "juror-vote") s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
-  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
+/** Resolve a pending decision LEGALLY, whatever kind it is (a generic driver, no strategy asserted).
+ *  Returns the `submitDecision` result so a caller can inspect what the SAME call also did. */
+function resolveLegally(s: GameSessionAdapter, p: PendingDecisionView): AdvanceView {
+  if (p.kind === "nominations") return s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  if (p.kind === "veto-decision") return s.submitDecision({ kind: "veto-decision", use: false });
+  if (p.kind === "replacement") return s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  if (p.kind === "comp-intent" || p.kind === "comp-round") return s.submitDecision({ kind: p.kind, intent: "compete" });
+  if (p.kind === "finale-statement") return s.submitDecision({ kind: "finale-statement", statement: "x" });
+  if (p.kind === "finale-answer") return s.submitDecision({ kind: "finale-answer", appeal: p.appeals![0]! });
+  if (p.kind === "juror-vote") return s.submitDecision({ kind: "juror-vote", vote: p.options[0]!.id });
+  return s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
 }
+
+/** The T0-2 auto-advance-eligible pending kinds (mirrors `AUTO_ADVANCE_PENDING_KINDS` in
+ *  `GameSessionAdapter.ts` — kept as a literal set here so this suite fails loudly, not silently,
+ *  if the two ever drift). */
+const AUTO_ADVANCE_KINDS = new Set<PendingDecisionView["kind"]>([
+  "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
+  "replacement", "eviction-vote", "tie-break", "final-eviction",
+]);
 
 /** Drive a live game (via plain `advanceGame`, resolving every OTHER pending generically) until a
  *  pending of exactly `kind` appears for the player, or the season finishes. */
@@ -148,6 +157,72 @@ describe("T0-2 — the EXCLUDED pending kinds keep their CURRENT (non-auto-advan
     // beatSeq) — proving the goodbye-message resolution itself did not chain forward.
     const r2 = session.advanceGame();
     expect(r2.beatSeq).toBeGreaterThan(r1.beatSeq);
+  });
+});
+
+describe("T0-2 — the chained auto-advance honors the 0123 NPC deal-offer LULL gate (#1824)", () => {
+  it("a deal due at the post-resolution lull sets dealOffer and the beat does NOT advance — matching the un-chained advanceGame path", () => {
+    // Greptile P1 (#1824, PR #1824): `advanceGame` runs `maybeOfferPlayerDeal()` BEFORE its beat-draw
+    // guard, so a standing lull can intercept the beat and set `live.dealOffer` instead of advancing.
+    // The FIRST cut of the T0-2 auto-advance called `advanceOneBeat()` directly from `submitDecision`,
+    // skipping that gate entirely — dropping the offer opportunity and breaking the byte-identical-path
+    // promise. The fix folds `maybeOfferPlayerDeal()` INTO `advanceOneBeat()` itself (ahead of its own
+    // guard), so both callers honor it by construction. Seed 3 deterministically reaches a lull — right
+    // after a `nominations` pending resolves — where the 0123 layer floats an NPC deal offer.
+    const { session } = startedGame(3);
+    session.setNpcDealOffersEnabled(true);
+
+    let view: AdvanceView = session.advanceGame();
+    let caught: AdvanceView | null = null;
+    let beforeSeq = -1;
+    let resolvedKind: PendingDecisionView["kind"] | null = null;
+    for (let i = 0; i < 1500 && !view.finished && !caught; i++) {
+      if (view.pending?.kind === "deal-offer") {
+        // An offer surfaced via a PLAIN advanceGame call earlier in the drive — decline it and keep
+        // going; we're specifically looking for one that surfaces via the CHAINED submitDecision path.
+        view = session.submitDecision({ kind: "deal-offer", vote: "decline" });
+        continue;
+      }
+      if (view.pending && AUTO_ADVANCE_KINDS.has(view.pending.kind)) {
+        beforeSeq = session.gameStatus().beatSeq;
+        const kind = view.pending.kind;
+        const result = resolveLegally(session, view.pending);
+        if (result.pending?.kind === "deal-offer") { caught = result; resolvedKind = kind; break; }
+        view = result;
+        continue;
+      }
+      if (view.pending) resolveLegally(session, view.pending);
+      view = session.advanceGame();
+    }
+
+    expect(caught, "seed 3 should reach a chained submitDecision call that surfaces a deal-offer").not.toBeNull();
+    const r1 = caught!;
+    // Documents exactly which resolution seed 3 is pinned to (so a future drift reads as a clear
+    // "expected nominations, got X" rather than a confusing downstream assertion failure below).
+    expect(resolvedKind).toBe("nominations");
+
+    // THE PROOF (the gate is honored): the offer is real and well-formed...
+    expect(r1.pending!.kind).toBe("deal-offer");
+    expect(r1.pending!.offer).toBeDefined();
+    expect(r1.pending!.offer!.from.id).not.toBe("player");
+    expect(["safety", "final-two"]).toContain(r1.pending!.offer!.kind);
+
+    // ...it happened in the SAME single commit as the pending's own resolution (one beatSeq bump,
+    // exactly like every other T0-2 auto-advance case — the deal check adds no extra transaction)...
+    expect(r1.beatSeq).toBe(beforeSeq + 1);
+
+    // ...and CRITICALLY, the beat itself did NOT advance past the gate: the veto field is NOT yet
+    // drawn (unlike the plain-nominations auto-advance case above, where it always is by this point) —
+    // proof that `advanceOneBeat`'s beat-draw guard correctly saw the FRESH `dealOffer` this SAME call
+    // just set, rather than racing ahead of it.
+    expect(r1.status.veto.players.length).toBe(0);
+
+    // A follow-up advanceGame() call is a genuine no-op — the offer stands until the player answers,
+    // exactly matching what a separate (un-chained) advanceGame call would have produced.
+    const r2 = session.advanceGame();
+    expect(r2.event).toBeNull();
+    expect(r2.beatSeq).toBe(r1.beatSeq);
+    expect(r2.pending?.kind).toBe("deal-offer");
   });
 });
 
