@@ -1209,7 +1209,9 @@ OOC/no-NPC-pathway like the Diary Room. Both get specs (M-cost → Q8 spec-first
 Wave 2.5.
 
 ### Wave 5 — AGENCY + ENDGAME DEPTH
-T1-7 pledges/flip-cascade/convokeHouse · T1-8 autopsy decision point (D5 parked) ·
+**Specs 0128 (three-part Final HOH) + 0129 (the jury house experience)** — PO-authorized
+spec-only expansions of 0045/0046 (completeness sweep 2026-07-21; build in this wave's endgame
+family) · T1-7 pledges/flip-cascade/convokeHouse · T1-8 autopsy decision point (D5 parked) ·
 presence/location parity remainder (session task #14: BL-007/013/033) · ADR 0019 Layers 2-3
 (task #24, coordinate with footage redaction).
 
@@ -1218,5 +1220,9 @@ presence/location parity remainder (session task #14: BL-007/013/033) · ADR 001
 (onto the Wave-2 render log) · R6/R7 · RES-2..RES-5 opportunistic · 0111/0112 in-progress specs.
 
 ### PARKED / PO-GATED (no work without a new ruling)
-0097/0098/0103 wiring · D5 blindside autopsy · Q6 payoff balance · D3 Genius Back-Room ·
+**0131/0132 (ADR 0022 arms B/C — per-NPC authored cognition builds)** — specs exist, each needs
+its own gate + an owner build-go (completeness sweep 2026-07-21) · **ADR 0018's open red-line** —
+may the engine EVER originate a beat between player turns (bounded in-session activity window vs.
+turn-only status quo)? A live owner question the 2026-07-21 session never asked — queue for the
+next decision round · 0097/0098/0103 wiring · D5 blindside autopsy · Q6 payoff balance · D3 Genius Back-Room ·
 TUN-2 time/sleep Phase-2 · TUN-4 Proxmox smoke (owner-run) · TUN-5 Postgres tier.
