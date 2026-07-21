@@ -70,9 +70,13 @@ deliver this:
   - Cost control: **1–2 NPCs per turn** (salience-gated); cached as soul state so repeated calls to
     the same NPC within a lull (e.g., multiple scenes with the same NPC) don't re-fire.
   - Integrity gates:
-    - *(a) Bounded input:* authored intent is a structured descriptor (kind, target, emphasis),
-      never raw text; the engine magnitude is fixed (seeded, bounded). `recordInteraction`'s
-      `consequence` descriptor (#355) is the reused pattern.
+    - *(a) Bounded input:* authored intent is a structured descriptor — the real
+      `ConsequenceDescriptor` shape (`src/ports/EngineCommands.ts`): `{ edges?: [{ toward,
+      direction, emphasis? }], aboutEdges?, rationale? }`, `direction` from the closed
+      `ConsequenceDirection` set, `emphasis` relative-only — never raw text; the engine magnitude is
+      fixed (seeded, bounded). `recordInteraction`'s `consequence` descriptor (#355) is the reused
+      pattern (`kind` is the SEPARATE request-level floor/default on `RecordInteractionReq`, not part
+      of the descriptor).
     - *(b) Knowledge-scoped:* each per-NPC call is gated on **engine** presence (`A2` / #1726),
       not narrated — only what the engine says they know reaches the call.
     - *(c) Soul-anchored:* the call *continues* the persisted character (no re-roll; stable
@@ -117,7 +121,9 @@ deliver this:
     beat.
   - Input: the NPC's character + soul + relationships + the `stateDelta` since their last sim
     (feature 0065; tight context, no full history).
-  - Output: structured `{kind, target, emphasis}` (reuse `ConsequenceDescriptor` from #355).
+  - Output: a structured `ConsequenceDescriptor` (#355) — `{ edges?: [{ toward, direction,
+    emphasis? }], aboutEdges?, rationale? }` (`direction` closed-set, `emphasis` relative-only;
+    `kind` is the separate request-level floor on `RecordInteractionReq`, not a descriptor field).
   - Fold into the resolver's input: the authored intent weights the outcome, but never **is** it.
   - Cache the result: repeated scenes with the same NPC within the same lull use the cached intent,
     no re-call.
@@ -148,7 +154,7 @@ deliver this:
 0131 Per-NPC cognition (S1/S2/S3):
   S1 (intent, salience-gated):
     off-screen tick → compute salience per NPC (situation changed? mentioned? nominated?)
-    → fire scoped call for top 1–2 by salience → author {kind, target, emphasis}
+    → fire scoped call for top 1–2 by salience → author ConsequenceDescriptor {edges:[{toward,direction,emphasis?}], rationale?}
     → fold into resolver (input to outcome, not the outcome itself)
     → cache per lull (repeated scenes = cached intent, no re-call)
     integrity: bounded input (seeded magnitude), knowledge-scoped (engine presence gated), soul-anchored

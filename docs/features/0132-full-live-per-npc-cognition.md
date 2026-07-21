@@ -52,8 +52,10 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
   - **Delta-driven prompts:** each NPC call fed only a `stateDelta` (feature 0065: "what changed for
     you since your last sim"), not the full context. Keeps per-call tokens tiny (O(1) to O(N) instead
     of O(N²)).
-  - **Output:** same as 0131-S1 — structured intent {kind, target, emphasis}, persisted as soul
-    state, folded into the resolver.
+  - **Output:** same as 0131-S1 — a structured `ConsequenceDescriptor` (`src/ports/EngineCommands.ts`):
+    `{ edges?: [{ toward, direction, emphasis? }], aboutEdges?, rationale? }` (`direction` closed-set,
+    `emphasis` relative-only; `kind` is the separate request-level floor on `RecordInteractionReq`,
+    not a descriptor field), persisted as soul state, folded into the resolver.
   - **Budget guard:** per-turn ceiling on tokens + latency. When pressure exceeds budget:
     **graceful degrade to 0131-S1 (salience-gated mode)** — fire only for the top K by salience,
     rest use deterministic floor. Make this a **flag** so full vs. gated can be A/B'd.
@@ -141,7 +143,7 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
     
   per-NPC call (parallel, cheap-tier, delta-fed):
     input: character + soul + relationships + divergent memories + stateDelta (0065)
-    output: structured intent {kind, target, emphasis}
+    output: structured ConsequenceDescriptor {edges:[{toward,direction,emphasis?}], rationale?} (direction closed-set, emphasis relative-only; kind = separate request-level floor)
     validate JSON; fail-soft (timeout / malformed → deterministic floor for that NPC)
     fold into resolver (input to outcome, not the outcome itself; ADR 0005)
     persist in soul state (cache for repeated scenes within lull)
