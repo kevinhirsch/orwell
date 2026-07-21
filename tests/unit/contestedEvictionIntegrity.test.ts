@@ -172,12 +172,24 @@ describe("#1106 — a REAL contested eviction (player-HOH TIE) through the produ
    * The mission-critical empirical fact behind the #1106 diagnosis: the ENGINE's contested-eviction
    * path — the staged secret-ballot reveal in batched rounds, a genuinely TIED vote, the player-HOH
    * tie-break pending, the goodbye stage, the week rollover — commits CLEAN through the production
-   * spine (composeRuntime: LogicalClock, turn-driven ticks, the checkpointed commit funnel). Seed 45
+   * spine (composeRuntime: LogicalClock, turn-driven ticks, the checkpointed commit funnel). Seed 14
    * deterministically produces a tied eviction vote with the player as HOH. Zero integrity faults on
    * the whole drive proves the #1106 faults were EXTERNALLY-induced degrading candidates (the
    * narrate-ahead writes), not an eviction-path bug and not a checkpoint false-positive on mid-stage
    * eviction state. The storm/recovery/stale/duplicate arms then re-run the #1106 sequence AT the
    * live tie-break beat — the commit spine's worst-case moment.
+   *
+   * Seed re-selected 2026-07-21 (T0-2, "beats terminate themselves"): resolving a CLOSED-SET ceremony
+   * pending (veto-decision/replacement/eviction-vote/…) now auto-advances the live loop one more
+   * deterministic step in the SAME `submitDecision` call — this test's drive loop pairs one
+   * `advanceGame` with one decision-resolve per iteration, so the same 2000-iteration budget now
+   * covers MORE of the season per iteration, and (per ADR "one off-screen tick per committed player
+   * turn," not per beat) a turn that now carries two beats still earns exactly one tick — fewer ticks
+   * land between some ceremony beats than before, which can shift a relationship-driven vote (NPCs'
+   * `voteChoice`) from tied to not (or vice versa) for a given seed. Seed 45 no longer produces a
+   * player-HOH tie within the budget under the new interleave; seed 14 does. Harness-timing retune
+   * only — the engine's tie/vote-count LOGIC is untouched, and the whole #1106 non-degradation/
+   * checkpoint story this test exists to pin is orthogonal to which seed reaches the contested beat.
    */
   it("tie-break fires; a 3-fault storm at the beat opens the circuit; the tie still resolves clean; no data loss; stale/duplicate submits are inert", () => {
     const dir = freshDir();
@@ -188,7 +200,7 @@ describe("#1106 — a REAL contested eviction (player-HOH TIE) through the produ
     const runtime = composeRuntime({ saveStore: new FileSaveStore(dir) }); // the PRODUCTION clock/wiring
     const reg = runtime.registry;
     const orch = runtime.orchestrator;
-    reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 45 });
+    reg.sandboxFor(user).session.createCharacter({ playerName: "The Player", seed: 14 });
 
     // Drive the real game to the CONTESTED beat: a tied eviction vote with the player holding HOH.
     let view: AdvanceView = reg.sandboxFor(user).session.advanceGame();
