@@ -19,7 +19,7 @@ tool_choice honoring is assumed unless a DeepSeek substring matches (`agent_loop
 Four partially-overlapping authoring lanes (deterministic floor, genesis, deep authoring, identity quotas); any facet not explicitly dealt falls to the model's reality-TV prior; the merge is non-transactional, grafting bios onto skeleton ages/genders/Vault secrets. **Recurrence engine:** per-facet regex whack-a-mole (#533, 0063, #544, #850, #1140, #1317, #1706, #1733, #1768's INK_RE…) — each patches one escaped facet, none closes the class. **Evidence:** F6 — 3/15 fire-service vocations (the un-ledgered "first-responder" steering line ×3), smokejumper identity bleed, chimera cards (Donna authored 58 / live 22), 66/71 Vault secrets keyed to a phantom pre-genesis cast; #1768's fixes verified NOT on main.
 
 ### E. The madlib compression funnel — rich society, seven sentences
-The off-screen society is structurally real (13 weeks demonstrated) but textually templated: RICH_VERBS=7, RUMOR_GLOSS=7, LEGEND_GLOSS=5, confessional line-pools — verbatim cross-NPC repetition is mathematically guaranteed. Four sequential valves starve delivery: burst-then-silence cadence (SOCIAL-6), riseProb 0.15/transmit 0.25 (week-1 house→player flow was literally ZERO, SOCIAL-7), gloss compression, and narrator under-delivery (npcVoice called 0/24 — the richest voice data is pull-only and never pulled). **Recurrence engine:** template floors treated as adequate because anti-sycophancy was over-read as "no model text anywhere hidden"; five enrichment flags default OFF in code (`GameSessionAdapter.ts:460-500`).
+The off-screen society is structurally real (13 weeks demonstrated) but textually templated: RICH_VERBS=7, RUMOR_GLOSS=7, LEGEND_GLOSS=5, confessional line-pools — verbatim cross-NPC repetition is mathematically guaranteed. Four sequential valves starve delivery: burst-then-silence cadence (SOCIAL-6), riseProb 0.15/transmit 0.25 (week-1 house→player flow was literally ZERO, SOCIAL-7), gloss compression, and narrator under-delivery (npcVoice called 0/24 — the richest voice data is pull-only and never pulled). **Recurrence engine:** template floors treated as adequate because anti-sycophancy was over-read as "no model text anywhere hidden"; five enrichment flags default OFF in code (`GameSessionAdapter.ts:460-500`) *[flag count + the design intent behind the OFF defaults reconciled in §7.2]*.
 
 ### F. The bilingual fail-open scrub stack
 ~9 sequential lexical layers in two languages, hand-"parity-locked" and drifting (#1749: patterns "in the Python side all along but MISSING here"); five commits in one week each independently rediscover "prompt wording is not the wall." **Recurrence engine:** post-hoc lexical matching on semantic content, with fail-open as the site-local default and corrections delivered as *silent* next-turn regrounds — the playtest's silent retcons are the design working as built. **Evidence:** F3 (engine jargon in NPC dialogue), F9 (real host named; "jury house" for a first evictee — the only playtest class with zero structural defense), F10.
@@ -44,7 +44,7 @@ Three stages, strictly ordered:
 A ~10-call probe at endpoint registration + nightly, persisting a per-endpoint `CapabilityProfile`: forced-tool_choice honoring rate, json_schema conformance, reasoning-channel separation, `require_parameters` acceptance. Wire `require_parameters:true` + `provider.only` pinning on any request carrying tool_choice/response_format; split by role (decide pass → schema-verified endpoint, e.g. pinned glm-4.7-flash at $0.06/M; voice pass keeps the prose model). Enforcement, not telemetry: red capability ⇒ admin banner + automatic downgrade to the enumerated-JSON path. Flip belt telemetry to attempt-counted with an honored/ignored outcome field. Re-arm a minimal real-model nightly canary (probe + one scripted ceremony turn, non-blocking, key-gated). **Retires:** class C; F3 fixed at transport by pinning alone; de-risks P1's decide pass.
 
 ### P3 — One Casting Bible (#26 + #11) — **Cost: M**
-One cast-wide seeded `FacetLedger` minted BEFORE any LLM call: stratified-sampled budgets (with jitter + rare-outlier slots) for vocation family, region/hometown, marks/ink, heightBuild, skinTone, hair, voice tics, name phonology — the Nemotron-Personas pattern (structure sampled deterministically; LLM only elaborates). Every lane receives its NPC's dealt hand + the cast-wide taken-list; delete the un-ledgered "first-responder" steering line. Transactional adopt-or-regenerate merge — never graft; Vault secrets key to the post-merge identity. One *generic* facet-diff validator at `recordCastProfile` (closed facets only, per ADR 0005's spirit) replaces per-facet regexes. Start from the #1768 branch. **Retires:** class D — and it's the hard precondition for P4.
+One cast-wide seeded `FacetLedger` minted BEFORE any LLM call: stratified-sampled budgets (with jitter + rare-outlier slots) for vocation family, region/hometown, marks/ink, heightBuild, skinTone, hair, voice tics, name phonology — the Nemotron-Personas pattern (structure sampled deterministically; LLM only elaborates). Every lane receives its NPC's dealt hand + the cast-wide taken-list; delete the un-ledgered "first-responder" steering line. Transactional adopt-or-regenerate merge — never graft; Vault secrets key to the post-merge identity. One *generic* facet-diff validator at `recordCastProfile` (closed facets only, per ADR 0005's spirit) replaces per-facet regexes. Start from the #1768 branch *[#1768 has since merged — start from `main`, §7.3]*. **Retires:** class D — and it's the hard precondition for P4.
 
 ### P4 — The Footage Pool (#20 + #25 + #6) — **Cost: M**
 A quarantined, fail-soft FE background lane (the `orwell_zeitgeist.py` pattern; own token/process, no shared logger): per committed off-screen event, a cheap-model fan-out (GLM-4.7-Flash, ~$0.003/turn for all 15 minds) authors 4–8 lines of real scene dialogue from a redaction-at-source brief — each speaker's prompt containing ONLY their KnowledgeService block + voice fingerprint (no sibling facts in context ⇒ smokejumper-bleed dies at the source). Written back via a new `recordFootage` write-back (the documented four-place seam + a mandatory `McpServer.callTool` boundary test). Footage is Vault-stored beside its event, inherits its witness set, is constrained to the event's own facts and non-canonical for outcomes, and NEVER reaches the narrator context (distinct port; dependency-cruiser edge + boundary test) — it surfaces only when the event legally surfaces: gossip quotes a drifted line, recaps excerpt it, the 0048 retrospective replays scenes. Also: push voiceFingerprint/lexicon on the roster (fixing the npcVoice 0/24 starvation) and flip the five enrichment flags ON in code. **Retires:** class E's template layer; makes mandate #4 experiential.
@@ -99,14 +99,14 @@ Ack-is-the-row (clientMsgId → unique-constraint inbox → outbox clears only o
 
 **Wave 1 — Ground Truth On Air (the launch-blocker axis: false narration + ignored tool_choice + reasoning leak).** Ship P1 stages 1–2 + P2, in parallel with P3.
 - 1a: `#27a` in-transaction auto-advance + the 7372 comparator fix. *Accept:* replay the playtest's eviction-reveal scenario — the wedge is unrepresentable; a suite test proves pending-resolve ⇒ advance in one commit.
-- 1b: Chyron cards for all committed ceremony beats; claim guards → hard-drop; blank-turn re-emit deleted. *Accept:* a scripted ceremony run shows zero closed-set outcome tokens originating in model prose; E12 ballot sequence byte-equal to engine data; F5 two-window parity green; golden fixture re-recorded in the same PR.
+- 1b: Chyron cards for all committed ceremony beats; claim guards → hard-drop; blank-turn re-emit deleted. *Accept:* a scripted ceremony run shows zero closed-set outcome tokens originating in model prose; E12 ballot sequence byte-equal to engine data; F5 two-window parity green; golden fixture re-recorded in the same PR *[inapplicable — the fixture apparatus is decommissioned, §7.1]*.
 - 1c: Probe/pin (P2): `require_parameters:true` + provider pinning; role-split routing; attempt-counted honoring telemetry. *Accept:* probe shows reasoning-channel separation restored (`reasoning_chars>0`) or the endpoint auto-downgrades with an admin banner; honoring rate is a stored per-endpoint fact.
 - 1-parallel: P3 ledger + transactional merge. *Accept:* 30-cast A/B — zero facet triple-dups, zero chimeras, 0 mis-keyed Vault secrets; #1768 merged/superseded.
 - **Wave-1 exit criterion:** a live playtest week 1 with zero phantom outcomes, zero silent retcons, zero livelocks, and no reasoning text in visible bubbles.
 
 **Wave 2 — The Pipeline.** P1 stage 3 (decide/commit/voice) flag-staged per beat-class, ceremonies first; belts deleted per flipped class; nightly canary armed; P7 canon bible; P8 delivery-lite. *Accept:* per flipped class, the class's belts are deleted (not disabled) and the canary's phantom-claim rate is 0 across 7 nights; F9 denylist lint green.
 
-**Wave 3 — Footage.** P4 lane + boundary tests; consumers wired (gossip quotes, 0102 recaps, 0048 retrospective). *Accept:* dep-cruiser proves no narrator-context path to the footage port; a season's retrospective contains zero template-pool sentences; fail-soft verified by killing the utility model mid-season.
+**Wave 3 — Footage.** P4 lane + boundary tests; consumers wired (gossip quotes, 0102 recaps, 0048 retrospective). *Accept:* dep-cruiser proves no narrator-context path to the footage port; a season's retrospective contains zero template-pool sentences; fail-soft verified by killing the utility model mid-season *[these two criteria are split by run type in §7.4 — zero-template applies to the healthy path only]*.
 
 **Wave 4 — The Editorial Organ.** P5 sifter + tension director + interstitials + Spy Screen. *Accept:* instrumented week-1 house→player information flow > 0 by design (≥1 thread/lull); no Director advance over an engaged player turn across a full UAT; Spy-Screen selector boundary test excludes beat-pre-resolving events; UAT spine byte-identical with the director flagged off.
 
@@ -121,15 +121,16 @@ Ack-is-the-row (clientMsgId → unique-constraint inbox → outbox clears only o
 3. **Provider posture:** accept `provider.only` pinning's failover tradeoff (ordered, probed fallback chain), and/or a direct z.ai endpoint for the reasoning-channel fix?
 4. **Footage Pool:** sanction a second quarantined Vault-adjacent lane (automated, unlike producerVault's manual unseal), on structural-quarantine terms? (Blocks Wave 3.)
 5. **Blindside autopsy:** is any bounded mid-season Vault exception *ever* rulable, or is the design space closed? (Determines whether Wave-5's decision point exists.)
-6. **Enrichment flags:** confirm flipping the five drama flags ON in code (not just deploy env) — dev/playtest rigs currently run the impoverished society.
-7. **Golden-path treadmill:** Waves 1–2 churn the prompt/tool surface heavily — accept per-PR re-record cadence, or temporarily soften `golden-path` to non-blocking for the flagged migration window?
+6. **Enrichment flags:** confirm flipping the five drama flags ON in code (not just deploy env) — dev/playtest rigs currently run the impoverished society. *[Reframed in §7.2: seven flags, and the actionable ask is deploy-parity envs on dev/playtest rigs — never code defaults, which exist for calibration neutrality.]*
+7. **Golden-path treadmill:** Waves 1–2 churn the prompt/tool surface heavily — accept per-PR re-record cadence, or temporarily soften `golden-path` to non-blocking for the flagged migration window? *[Moot — §7.1: the apparatus was decommissioned before this synthesis landed; only the Q2 probe-canary decision remains.]*
 8. **ADR 0017:** willing to reopen post-Wave-2 for the single-log consolidation, or is dual-transport permanence absolute?
 ---
 
 ## 7) Overseer reconciliation note (post-synthesis, same day)
 
-The synthesis above is the mixture-of-experts output, published verbatim. Three claims need
-reconciling against the tree as of `main @ 6e1994f3` before anyone builds from this doc:
+The synthesis above is the mixture-of-experts output, published verbatim except for bracketed
+*[…§7.n]* pointers marking each superseded line. Four points need reconciling against the tree as
+of `main @ 6e1994f3` before anyone builds from this doc:
 
 1. **The golden-path gate is GONE, not blocking.** #1765 (commit referenced above as `840e5f92`)
    removed the fixture and the `golden-path`/`visual-regression`/`theme-consistency` jobs and
@@ -149,9 +150,17 @@ reconciling against the tree as of `main @ 6e1994f3` before anyone builds from t
    calibration neutrality. `ORWELL_DEAL_DEPTH` is additionally *deliberately* not yet in the deploy
    (its live-loop reconciliation lands first, per its own comment) — it is not merely "forgotten".
 3. **#1768 is now merged** (`main @ 6e1994f3`), so the cast-drift evidence line "#1768's fixes
-   verified NOT on main" is resolved: P3 starts from main, not from the audit branch, and the §3
-   acceptance check for the tattoo fix (next fresh cast: 2–4 inked of 16, varied hometowns) is the
-   live acceptance path.
+   verified NOT on main" is resolved: P3 starts from main, not from the audit branch. The
+   acceptance check for the tattoo fix is the one in `HANDOFF.md` §3 (the next *freshly generated*
+   cast: 2–4 inked of 16, varied hometowns/vocations, committed dups structurally 0) — it is a live
+   acceptance path, not a criterion already written into this roadmap.
+4. **Wave-3's acceptance conflates two run types.** "Zero template-pool sentences" and "kill the
+   utility model mid-season" cannot hold in the same run — P4 is *specified* fail-soft, so killing
+   the model legitimately returns bounded template output. Split the criterion: on a **healthy**
+   run, the retrospective contains zero template-pool sentences; under **failure injection**
+   (utility model killed mid-season), delivery continues with bounded template fallback and no
+   stall — the dependency-boundary criterion (dep-cruiser proves no narrator-context path to the
+   footage port) applies to both.
 
 Everything else in the map was spot-verified during the campaign (the `agent_loop.py:2306-25` /
 `chat_helpers.py:4543-47` framed-key comparator, the `:7372` veto, the `:4553-54` blank-turn
