@@ -2889,6 +2889,78 @@ async def _auto_mark_premiere_intros(narration, owner) -> int:
     return marked
 
 
+# ── #1729 (B1) — the recorder's non-diegetic content gate ──────────────────────────────────────
+# `_auto_record_scene` must never fold OOC/machinery text as an "(overheard, clearly)" world event
+# (a real bundle folded the player's own private vent AND a stream-recovery fragment this way).
+# Both markers below are STRUCTURAL, not prose-sniffing: the ((double-parentheses))/"ooc:" wrap is
+# the SAME out-of-character convention `momentPrompts.ts` documents for the narrator's own HUD/
+# producer asides ("text wrapped in ((double parentheses)) or prefixed 'ooc:' is out of character
+# without exception"), and the machinery prefixes are the EXACT strings chat.js puppeteers back
+# into the conversation as a synthetic user turn when a stream drops (`_renderStreamDropRetry` /
+# the auto-continue prompt) — never real player speech.
+_OOC_WRAP_RE = re.compile(r"^\s*\(\(.*\)\)\s*$", re.DOTALL)
+_OOC_PREFIX_RE = re.compile(r"^\s*ooc\s*:", re.IGNORECASE)
+_NONDIEGETIC_MACHINERY_PREFIXES = (
+    "the stream dropped before you finished",
+    "your previous response was interrupted",
+    "connection dropped",
+)
+
+
+def _is_nondiegetic_scene_text(text: Optional[str]) -> bool:
+    """#1729 (B1) — True when `text` is OOC (the ((wrap))/"ooc:" convention) or FE stream-recovery
+    machinery, i.e. content that must NEVER be folded into the hidden layer as a witnessed scene.
+    The Diary-Room/OOC channel has no in-game pathway to any NPC (CLAUDE.md) — a vent or a pasted
+    "stream dropped" fragment is not something that happened between the player and a houseguest."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _OOC_WRAP_RE.match(t) or _OOC_PREFIX_RE.match(t):
+        return True
+    low = t.lower()
+    return any(low.startswith(p) for p in _NONDIEGETIC_MACHINERY_PREFIXES)
+
+
+# ── #1734 (B4) — normalize + validate withIds at the extraction boundary ───────────────────────
+def _normalize_with_ids(raw, valid_ids) -> tuple:
+    """#1734 (B4) — normalize a model-proposed `withIds` list to the engine's canonical EntityId
+    form (`"npc:<n>"`, matching `src/domain/ids.ts` `npc()`) against the LIVING roster, and report
+    what was rejected instead of silently coercing it.
+
+    Observed drift in the wild: `["npc:2"]` (already canonical), `[2, 5]` / `["2","5"]` (bare
+    numeric — accepted ONLY when `"npc:<n>"` is a real roster id, never invented), and a literally
+    invalid unquoted `[npc:6]` (fails JSON parsing upstream and never reaches here at all — this
+    function only ever sees values `json.loads` already accepted). Anything that does not resolve
+    to a living roster id after normalization is REJECTED, never guessed at.
+
+    Returns `(normalized_ids, rejected_raw_entries)` — the caller folds on `normalized_ids` only
+    (fail-soft: a rejected entry is dropped, logged, and never mis-attributed to the wrong id)."""
+    out: list = []
+    rejected: list = []
+    if not isinstance(raw, list):
+        return out, ([raw] if raw is not None else [])
+    seen = set()
+    for entry in raw:
+        cand = None
+        if isinstance(entry, str):
+            s = entry.strip()
+            if s in valid_ids:
+                cand = s
+            elif re.fullmatch(r"\d+", s) and f"npc:{s}" in valid_ids:
+                cand = f"npc:{s}"
+        elif isinstance(entry, int) and not isinstance(entry, bool):
+            probe = f"npc:{entry}"
+            if probe in valid_ids:
+                cand = probe
+        if cand is not None:
+            if cand not in seen:
+                seen.add(cand)
+                out.append(cand)
+        else:
+            rejected.append(entry)
+    return out, rejected
+
+
 async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
     """GUARANTEE the consequence loop fires (0055). When the model narrated a player↔houseguest
     scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
@@ -2921,6 +2993,14 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                            for h in house if h.get("id") and h.get("name"))
         if not roster:
             return False
+        # #1729 (B1) — reject non-diegetic content BEFORE folding: an OOC vent or a stream-recovery
+        # machinery fragment must never become an "(overheard, clearly)" world event. Checked on
+        # BOTH the player's own turn and the model's narration (the narrator marks its own HUD/
+        # producer asides with the identical ((wrap)) convention — momentPrompts.ts).
+        if _is_nondiegetic_scene_text(last_user) or _is_nondiegetic_scene_text(narration):
+            logger.info(f"[orwell] auto-record: skipped non-diegetic turn (OOC/machinery, #1729) "
+                       f"user={owner}")
+            return False
         msgs = [
             {"role": "system", "content":
                 _EXTRACTION_UNTRUSTED_FENCE +
@@ -2949,7 +3029,11 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 "threat/an ally/lying to them' — never for the player's own standing (use `edges` for "
                 "that). Propose only direction and relative emphasis — NEVER any number or magnitude "
                 "(the engine decides how far, and whether it lands at all). If no houseguest was "
-                'genuinely engaged (a solo/internal beat), reply {"withIds":[]}.'},
+                'genuinely engaged (a solo/internal beat), reply {"withIds":[]}. #1729 — if THE '
+                "PLAYER'S MOVE reads as private out-of-character reflection/venting about the scene "
+                "rather than something said or done TO a houseguest, or if it looks like leftover "
+                "system/stream-recovery text rather than real player speech, that is NOT a recordable "
+                'scene either — reply {"withIds":[]}.'},
             {"role": "user", "content":
                 f"ROSTER (id = name):\n{roster}\n\nTHE PLAYER'S MOVE:\n{(last_user or '')[:800]}\n\n"
                 f"WHAT HAPPENED:\n{(narration or '')[:1500]}\n\nJSON:"},
@@ -2983,9 +3067,42 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
                 pass
             return False
         valid = {h.get("id") for h in house}
-        ids = [i for i in (obj.get("withIds") or []) if i in valid]
+        # #1734 (B4) — normalize the raw withIds to the canonical `npc:<n>` EntityId form and
+        # validate against the living roster; a malformed/unresolvable entry is REJECTED and
+        # logged, never coerced or silently mis-attributed.
+        ids, _rejected_with_ids = _normalize_with_ids(obj.get("withIds"), valid)
+        if _rejected_with_ids:
+            logger.info(f"[orwell] auto-record: rejected malformed withIds entries "
+                       f"{_rejected_with_ids!r} (#1734 normalize/validate boundary) user={owner}")
         if not ids:
             return False
+        # #1730 (B3) — the witness set must be derived from ENGINE whereabouts at scene time, not
+        # trusted from the model's withIds guess (which follows the narrated — possibly
+        # hallucinated — blocking). The model still PROPOSES participants; the engine INTERSECTS
+        # the proposal with who was actually present, dropping any off-scene id (no phantom
+        # knowledge). A whereabouts read failure fails OPEN (keep the roster-validated proposal
+        # unchanged) — presence is an extra filter on top of the 0055 guarantee, never a
+        # precondition for it (a presence-read hiccup must not zero out the whole safety net).
+        try:
+            wb = await _oe.whereabouts(user=owner)
+            present_ids = ({p.get("id") for p in (wb.get("present") or []) if isinstance(p, dict)}
+                          if isinstance(wb, dict) else None)
+        except Exception:
+            present_ids = None
+        # CodeRabbit/Greptile review (both independently confirmed) — `if present_ids:` treated a
+        # VALID EMPTY read (the engine says "nobody else is in the room") the same as a failed/None
+        # read, since an empty set is falsy: the intersection was skipped and the model's unverified
+        # withIds folded as-is — exactly the phantom-witness case this issue closes. `is not None`
+        # applies the filter whenever we got a real (possibly empty) presence read, and reserves the
+        # fail-OPEN behavior for a genuine None (read failed / no whereabouts available at all).
+        if present_ids is not None:
+            _off_scene = [i for i in ids if i not in present_ids]
+            ids = [i for i in ids if i in present_ids]
+            if _off_scene:
+                logger.info(f"[orwell] auto-record: dropped off-scene withIds {_off_scene} "
+                           f"(#1730 — not in engine whereabouts) user={owner}")
+            if not ids:
+                return False
         kind = obj.get("kind") if obj.get("kind") in _RECORD_KINDS else "strategy"
         content = (obj.get("content") or "").strip() or "The player and a houseguest had a private exchange."
         # 0066 Ext 6 (PR 2) — the model's proposed scene DURATION in minutes. The engine bounds it
