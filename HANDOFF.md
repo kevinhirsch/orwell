@@ -44,10 +44,19 @@ session task ledger, each with a disposition. Read it before starting any new wo
 | #1769 | HANDOFF.md v1 |
 | #1770 | Moonshot refactor synthesis (breakage map A–G, portfolio P1–P8, five-wave roadmap, owner questions Q1–Q8) |
 
-## 2. In flight — check these FIRST on resume
+## 2. In flight — check these FIRST on resume (updated 2026-07-21 evening, ~90% session)
 
-- **The exhaustive backlog PR** (branch `claude/playtest-protocol-review-u4wxaz`, this doc + the
-  backlog): merge on green; a sweep is armed.
+- **#1772** (rulings doc, this branch): merge on green — sweep armed.
+- **Casting-speed build (LEADS Wave 1, owner order):** two worktree agents dispatched —
+  `claude/1713-premiere-block-fix` (bound the createCharacter→premiere ~300s block) and
+  `claude/casting-ledger-fast` (FacetLedger + 15-wide genesis + early kickoff during the interview +
+  strict all-profiles-before-entry gate; target <10s finalize-to-house). They push branches only;
+  the overseer opens PRs one at a time.
+- **Round-2 moonshot** (divergent ideation, full rated slate, nothing dropped): workflow run
+  `wf_f64dc993-284` — on completion extract the synthesize agent's `result` string from
+  `<transcriptDir>/journal.jsonl` (`type=result` lines), commit to `docs/design/`, deliver to owner.
+  Container rollbacks happen: fetch origin first; only pushed things are durable.
+- Rulings D1–D10 + casting mandate + full-WebSocket + PO-gates: recorded in the backlog §T7 (this PR).
 - **Both playtests are DONE and triaged.** Headless: 5 seeds to finale, 0 structural/Vault/ceremony
   findings — the engine is launch-ready. Live (GLM-4.7/novita shipped default): findings F1–F10 —
   every week-1 closed-set outcome narrated falsely first, forced tool_choice ignored (17-turn
@@ -59,12 +68,11 @@ session task ledger, each with a disposition. Read it before starting any new wo
 
 ## 3. Owed / obligations
 
-1. **🔑 ROTATE KEYS (owner action — as soon as practical, not at a milestone):** the provider keys
-   and the GitHub PAT used across this campaign passed through chat and should be rotated/revoked
-   now. The inventory lives in `SOUL.md`'s carry-forward notes (values never committed anywhere;
-   the live key sits only in the session scratchpad, 600-perm). Scrub the scratchpad copy after.
-2. **Owner decisions D1–D10** — backlog §T7. D1 (engine chyrons / scoped ADR 0003 amendment) gates
-   the heart of Wave 1.
+1. **🔑 Key rotation: CLOSED (D9, 2026-07-21)** — the owner rotated all exposed keys; the session
+   scratchpad copy was destroyed by the container rollback. Nothing outstanding.
+2. **Owner decisions D1–D10 are ALL RULED** (backlog §T7 rulings table, finalized via #1772) — no
+   operator should wait on them. The only live gates are sequencing ones: the casting mandate leads
+   Wave 1, and T0-6 must land before the Footage Pool (D4's condition).
 3. **Post-#1768 acceptance:** the next *freshly generated* cast is the acceptance check for the
    tattoo fix (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
 
