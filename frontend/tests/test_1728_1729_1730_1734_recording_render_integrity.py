@@ -451,3 +451,212 @@ def test_regenerate_throws_before_removing_dom_rows_on_truncate_failure():
             f"the truncate response status check must run BEFORE `{marker}` — otherwise a stale/"
             f"missing truncate_from_id (404) leaves the DOM stripped and a duplicate row behind"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1728 (B2) — defer-fold-to-settle: the consequence half. A cancelled/superseded take's fold must
+# never reach the engine, and the surviving take's fold must land exactly once (idempotent under
+# retry). See `src/fold_ledger.py` for the full design (incl. the T9-doctrine retract fallback,
+# documented but NOT built) and `src/agent_loop.py::_settle_pending_fold`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from src import fold_ledger as fl
+
+
+def setup_function(_fn=None):
+    fl.clear_all()
+
+
+def _drive_staged(monkeypatch, extraction_json, owner="owner", session_id="sess-1",
+                   last_user="Let's talk strategy with npc:3",
+                   narration="They schemed in the backyard for a while.", whereabouts=None):
+    """Like `_drive` above, but with `session_id` supplied — the fold STAGES instead of
+    committing (the live per-turn belt call sites always pass `session_id`; only the decoupled
+    0081 faithfulness retro-adopt path calls with `session_id=None`, exercised separately)."""
+    captured = {"llm_called": False, "record_called": False}
+
+    async def fake_llm(*a, **k):
+        captured["llm_called"] = True
+        return extraction_json
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        captured["record_called"] = True
+        captured["with_ids"] = with_ids
+        captured["content"] = content
+        captured["idempotency_key"] = idempotency_key
+        return {"recorded": True, "beatSeq": 2}
+
+    async def fake_whereabouts(user=None):
+        return whereabouts
+
+    from src import llm_core, orwell_engine as oe
+    from routes import chat_helpers
+    chat_helpers._LAST_BEAT_SEQ[owner] = 1
+    monkeypatch.setattr(llm_core, "llm_call_async", fake_llm)
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    monkeypatch.setattr(oe, "whereabouts", fake_whereabouts)
+
+    ok = _run(al._auto_record_scene(
+        narration=narration, last_user=last_user,
+        house=_HOUSE, endpoint_url="http://x", model="m", headers={}, owner=owner,
+        session_id=session_id))
+    return ok, captured
+
+
+def test_staged_fold_does_not_commit_immediately(monkeypatch):
+    ok, cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"a real scene"}')
+    assert ok is True, "staging a validated payload is still the belt FIRING (telemetry contract)"
+    assert cap["record_called"] is False, "session_id given ⇒ STAGE, never commit mid-turn (#1728 B2)"
+    assert fl.has_pending_fold("owner", "sess-1") is True
+
+
+def test_settle_commits_the_staged_fold_exactly_once(monkeypatch):
+    ok, cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"a real scene"}')
+    assert ok is True
+    settled = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled is True
+    assert cap["record_called"] is True
+    assert cap["with_ids"] == ["npc:3"]
+    assert cap["content"] == "a real scene"
+    assert fl.has_pending_fold("owner", "sess-1") is False, "settle drains the staged entry"
+
+    # A second settle (nothing left to settle) must be a clean no-op — never a second engine call.
+    cap["record_called"] = False
+    settled_again = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled_again is False
+    assert cap["record_called"] is False
+
+
+def test_settle_with_nothing_staged_is_a_no_op():
+    settled = _run(al._settle_pending_fold("owner", "no-such-session"))
+    assert settled is False
+
+
+def test_regenerate_discards_the_staged_fold_before_settle_ever_runs(monkeypatch):
+    """The F5/F6 repro, end to end at the ledger layer: take A stages a fold, "Try again" discards
+    it (mirroring `routes/history_routes.py::truncate_session`'s unconditional discard), take B
+    stages its OWN fold, and the next turn's settle commits ONLY take B — never both, and never
+    take A's (possibly distorted, per F6) content."""
+    ok_a, cap_a = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"take A content (discarded)"}')
+    assert ok_a is True
+    assert fl.has_pending_fold("owner", "sess-1") is True
+
+    # "Try again" truncates the row that produced take A's fold.
+    discarded = fl.discard_pending_fold("owner", "sess-1")
+    assert discarded is True
+    assert fl.has_pending_fold("owner", "sess-1") is False
+
+    ok_b, cap_b = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"take B content (kept)"}')
+    assert ok_b is True
+
+    settled = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled is True
+    assert cap_b["record_called"] is True, "exactly ONE consequence fold must land for this beat"
+    assert cap_b["content"] == "take B content (kept)", (
+        "the surviving fold must reflect the SURVIVING take's content — never the superseded "
+        "take's (F6 distortion is structurally impossible: the superseded take never folds)")
+
+
+def test_settle_reuses_the_stage_time_idempotency_key(monkeypatch):
+    """AC — re-applying the surviving fold is idempotent: settle carries the SAME key minted at
+    stage time (0065 Part B), so a retried settle/engine call can never double-apply."""
+    ok, _cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}')
+    entry_key = fl._PENDING[("owner", "sess-1")]["idempotency_key"]
+    _ok2, cap = ok, {}
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        cap["idempotency_key"] = idempotency_key
+        return {"recorded": True, "beatSeq": 3}
+
+    from src import orwell_engine as oe
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    _run(al._settle_pending_fold("owner", "sess-1"))
+    assert cap["idempotency_key"] == entry_key
+
+
+def test_settle_failure_re_stages_the_entry_instead_of_losing_it(monkeypatch):
+    """mandate #4 (non-degradation) — a validated fold must never silently evaporate on a
+    transient hiccup; it re-stages for the next settle opportunity instead."""
+    ok, _cap = _drive_staged(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}')
+    assert ok is True
+
+    async def boom(*a, **k):
+        raise RuntimeError("network blip")
+
+    from src import orwell_engine as oe
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    settled = _run(al._settle_pending_fold("owner", "sess-1"))
+    assert settled is False
+    assert fl.has_pending_fold("owner", "sess-1") is True, "a failed settle must re-stage, never drop"
+
+
+def test_faithfulness_retro_adopt_path_without_session_id_still_commits_immediately(monkeypatch):
+    """`session_id=None` (the 0081 faithfulness retro-adopt call site — a background correction
+    decoupled from any one streamed turn) keeps the pre-#1728 immediate-commit behavior: there is
+    no "next turn" to defer against for it."""
+    ok, cap = _drive(monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"x"}')
+    assert ok is True
+    assert cap["record_called"] is True
+    assert fl.has_pending_fold("owner", "sess-1") is False
+
+
+def test_two_sessions_stage_independently():
+    fl.stage_pending_fold("owner", "sess-1", content="a", with_ids=["npc:3"], kind="bonding",
+                          consequence=None, felt_minutes=None, idempotency_key="k1")
+    fl.stage_pending_fold("owner", "sess-2", content="b", with_ids=["npc:5"], kind="strategy",
+                          consequence=None, felt_minutes=None, idempotency_key="k2")
+    assert fl.has_pending_fold("owner", "sess-1") is True
+    assert fl.has_pending_fold("owner", "sess-2") is True
+    assert fl.discard_pending_fold("owner", "sess-1") is True
+    assert fl.has_pending_fold("owner", "sess-1") is False
+    assert fl.has_pending_fold("owner", "sess-2") is True, "discarding one session must not touch another"
+
+
+def test_discard_returns_false_when_nothing_was_staged():
+    assert fl.discard_pending_fold("owner", "sess-empty") is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1728 (B2) — the truncate route's discard wiring: any truncate on a session unconditionally
+# clears a staged fold, and the settle-at-turn-start call sits at the top of the turn (before ANY
+# narration is generated) — both source-pinned so a future refactor can't silently reorder them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_history_routes_py():
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "routes", "history_routes.py")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_truncate_route_discards_a_staged_fold():
+    src = _read_history_routes_py()
+    fn = src[src.index("async def truncate_session("):]
+    fn = fn[:fn.index("\n    @router.post(\"/api/session/{session_id}/message\")")]
+    assert "fold_ledger" in fn and "discard_pending_fold" in fn, (
+        "truncate must discard a staged fold (#1728 B2) — a superseded take's fold must never "
+        "reach the engine"
+    )
+
+
+def _read_agent_loop_py():
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "src", "agent_loop.py")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_settle_pending_fold_is_called_before_the_round_loop_starts():
+    src = _read_agent_loop_py()
+    impl_at = src.index("async def _stream_agent_loop_impl(")
+    settle_call_at = src.index("await _settle_pending_fold(owner, session_id)", impl_at)
+    round_loop_at = src.index("for round_num in range(1, max_rounds + 1):", impl_at)
+    assert settle_call_at < round_loop_at, (
+        "the deferred fold must settle BEFORE the new turn generates anything — never mid-stream"
+    )

@@ -2557,6 +2557,48 @@ async def _backfill_with_cas(owner, fn, *args, defer_fold: bool = False, **kwarg
     return result
 
 
+# ── #1728 (B2) — settle a deferred scene fold ──────────────────────────────────────────────────
+async def _settle_pending_fold(owner, session_id) -> bool:
+    """Commit a fold `_auto_record_scene` STAGED (`fold_ledger.stage_pending_fold`) on a PRIOR
+    turn, now that a NEW turn is beginning for this session — proof the prior take was accepted,
+    not regenerated. A "Try again" truncates that prior row BEFORE this ever runs and the
+    truncate route discards the staged fold as part of that (`routes/history_routes.py
+    ::truncate_session`), so a superseded take can never reach here at all.
+
+    Called once, at the very start of `_stream_agent_loop_impl`, before the new turn generates
+    anything (see the call site's own comment). At-most-once via the idempotency key minted when
+    the fold was staged — reused unchanged, so a retry of this exact settle (or the engine's own
+    CAS retry inside `_backfill_with_cas`) can never double-apply.
+
+    Fail-open for the NEW turn (a settle hiccup never blocks it from starting) but never silently
+    loses the fold (mandate #4): a transient failure re-stages the identical entry for the next
+    settle opportunity rather than dropping it. Returns True only when the fold was actually
+    applied this call (or there was nothing to settle → False, same as "no-op")."""
+    from src import fold_ledger as _fl
+    entry = _fl.pop_pending_fold(owner, session_id)
+    if entry is None:
+        return False
+    from src import orwell_engine as _oe
+    try:
+        result = await _backfill_with_cas(
+            owner, _oe.record_interaction, entry["content"],
+            with_ids=entry["with_ids"], kind=entry["kind"], consequence=entry["consequence"],
+            felt_minutes=entry["felt_minutes"], user=owner, defer_fold=True,
+            idempotency_key=entry["idempotency_key"])
+    except Exception as _e:
+        logger.warning(f"[orwell] settle deferred fold failed, re-staging for retry: {_e}")
+        _fl.stage_pending_fold(owner, session_id, **entry)
+        return False
+    if result is None:
+        # `_backfill_with_cas` already queued this onto the CON-11 deferred-retry mechanism
+        # (`defer_fold=True`) on a double stale-beat conflict — not lost, just delayed there
+        # instead of here; re-staging it too would just duplicate that queue.
+        return False
+    logger.info(f"[orwell] settled deferred scene fold (kind={entry['kind']}, "
+                f"with={entry['with_ids']}) user={owner}")
+    return True
+
+
 # ── Whereabouts cohesion error-correction (auto-move belt — L21/L24) ──────────────────
 # Owner ledger (L21/L24 — "the single biggest immersion-killer"): turn to turn the world resets
 # because the model invents positions instead of grounding to the engine. The engine grounding
@@ -2984,11 +3026,23 @@ def _normalize_with_ids(raw, valid_ids) -> tuple:
     return out, rejected
 
 
-async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner) -> bool:
+async def _auto_record_scene(narration, last_user, house, endpoint_url, model, headers, owner,
+                              session_id=None) -> bool:
     """GUARANTEE the consequence loop fires (0055). When the model narrated a player↔houseguest
     scene but never recorded it, a constrained extraction call proposes {withIds, kind, content}
     and we call recordInteraction ourselves — so the hidden trust/affinity/threat weights actually
     move. The model OWNS the magnitude; we only supply a direction-correct kind it proposed.
+
+    #1728 (B2) — DEFER-FOLD-TO-SETTLE: when `session_id` is given (the live per-turn belt call
+    sites), the validated payload is STAGED (`fold_ledger.stage_pending_fold`) rather than
+    committed here. It only actually reaches the engine once this turn is confirmed non-
+    superseded — settled at the START of the next turn for this session
+    (`_settle_pending_fold`) — and a "Try again" regenerate discards the staged entry outright
+    (`routes/history_routes.py::truncate_session`) before that can ever happen, so a superseded
+    take's fold can never double the hidden layer (see `src/fold_ledger.py` for the full design +
+    the T9-doctrine retract fallback note). `session_id=None` (the 0081 faithfulness retro-adopt
+    call site, a background correction decoupled from any one streamed turn) keeps the pre-#1728
+    immediate-commit behavior unchanged — there is no "next turn" to defer against there.
 
     ADR 0005 — the extraction MAY ALSO propose a richer `consequence` descriptor (which edges move,
     which way, relative emphasis only, and why) for a scene that moves houseguests in DIFFERENT
@@ -3170,21 +3224,35 @@ async def _auto_record_scene(narration, last_user, house, endpoint_url, model, h
         # can never double-apply — CAS alone can't prevent it (both re-drives carry a valid token).
         from routes import chat_helpers as _ch_idem
         _scene_idem_key = _ch_idem._mint_idempotency_key()
-        if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
-                                    with_ids=ids, kind=kind, consequence=consequence,
-                                    felt_minutes=felt_minutes,
-                                    user=owner, defer_fold=True,
-                                    idempotency_key=_scene_idem_key) is None:
-            return False
         n_edges = len(consequence["edges"]) if consequence and "edges" in consequence else 0
         n_about = len(consequence["aboutEdges"]) if consequence and "aboutEdges" in consequence else 0
-        logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
-                    f"edges={n_edges}, aboutEdges={n_about}, feltMinutes={felt_minutes}) user={owner}")
+        if session_id is not None:
+            # #1728 (B2) — STAGE, don't commit. See the function/module docstrings for the full
+            # defer-fold-to-settle design; `_settle_pending_fold` performs the actual (CAS-guarded,
+            # at-most-once) engine call later, once this turn is confirmed non-superseded.
+            from src import fold_ledger as _fl
+            _fl.stage_pending_fold(owner, session_id, content=content[:400], with_ids=ids,
+                                   kind=kind, consequence=consequence, felt_minutes=felt_minutes,
+                                   idempotency_key=_scene_idem_key)
+            logger.info(f"[orwell] staged scene fold for deferred settle (kind={kind}, with={ids}, "
+                        f"edges={n_edges}, aboutEdges={n_about}, feltMinutes={felt_minutes}) user={owner}")
+        else:
+            # No session to defer against (the 0081 faithfulness retro-adopt path) — commit now,
+            # exactly the pre-#1728 behavior.
+            if await _backfill_with_cas(owner, _oe.record_interaction, content[:400],
+                                        with_ids=ids, kind=kind, consequence=consequence,
+                                        felt_minutes=felt_minutes,
+                                        user=owner, defer_fold=True,
+                                        idempotency_key=_scene_idem_key) is None:
+                return False
+            logger.info(f"[orwell] auto-recorded scene (kind={kind}, with={ids}, "
+                        f"edges={n_edges}, aboutEdges={n_about}, feltMinutes={felt_minutes}) user={owner}")
         try:  # 0079: surface this gap-repair on the overseer diagnostic log
             from src import log_rings as _lr
+            _verb = "staged (deferred settle)" if session_id is not None else "recorded"
             _lr.record_overseer(
                 "action", "gap-repair",
-                f"recorded a missed player↔house scene (kind={kind}, "
+                f"{_verb} a missed player↔house scene (kind={kind}, "
                 f"with={len(ids)} houseguest(s), "
                 f"edges={n_edges}, aboutEdges={n_about})",
                 lever="propose-record", ok=True, user=owner)
@@ -6264,6 +6332,19 @@ async def _stream_agent_loop_impl(
     _premiere_opener_refire_used = False
     _visible_chars_at_finalize = None
 
+    # #1728 (B2) — settle-at-turn-start: commit any fold the PREVIOUS turn on this session STAGED
+    # (`_auto_record_scene` / `fold_ledger`) but never committed. Reaching a new turn is the proof
+    # that the prior take was accepted — a "Try again" regenerate would have already discarded the
+    # staged entry via the truncate route before a new turn could ever start (see
+    # `_settle_pending_fold`'s docstring). Runs BEFORE the ledger baseline capture below so this
+    # turn's own ledger entry honestly reflects the settle's own beatSeq movement. Best-effort:
+    # never blocks the new turn from starting.
+    if _is_live_game and session_id:
+        try:
+            await _settle_pending_fold(owner, session_id)
+        except Exception as _settle_e:
+            logger.warning(f"[orwell] settle pending fold failed: {_settle_e}")
+
     # 0065 Part D — the per-turn sync-ledger baselines. Captured at turn START so the end-of-turn
     # entry records the beatSeq this turn moved (before→after) and the stale-beat 409s reconciled
     # DURING this turn (the process-global counter is diffed against its turn-start value). Cheap
@@ -8003,7 +8084,8 @@ async def _stream_agent_loop_impl(
                                                 # consequence is banked and the turn ends.
                                                 _ok = await _auto_record_scene(
                                                     cleaned_round, _extract_last_user_message(messages),
-                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner)
+                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner,
+                                                    session_id=session_id)
                                                 if _ok:
                                                     _ov_flow["act"] = "break"
                                                 return bool(_ok)
@@ -8340,7 +8422,8 @@ async def _stream_agent_loop_impl(
                     if _want_record and _touched and _turn_record_nudges < _MAX_RECORD_NUDGES_PER_TURN:
                         _turn_record_nudges += 1  # once per turn
                         if await _auto_record_scene(cleaned_round, _extract_last_user_message(messages),
-                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner):
+                                                    _house, _belt_endpoint, _belt_model, _belt_headers, owner,
+                                                    session_id=session_id):
                             # gap #3 telemetry — only a recordInteraction the belt actually FIRED
                             # counts (a withIds:[] extraction / failed call is a no-op)
                             _note_belt(owner, "auto-record-scene")

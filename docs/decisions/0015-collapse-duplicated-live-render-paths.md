@@ -216,6 +216,106 @@ gates (ADR 0008's `seq`/reconcile contract, the `_Run` replay-then-tail behaviou
   replay + scoped dup-abort + one-burst `[DONE]` paint flush), which turned it **green** and **promoted it
   to a required CI gate** (`mirror-parity`, under `ci-gate`, FE path filter).
 
+## Addendum (2026-07-21) — the persisted render-log + fold-deferral (issue #1728)
+
+> **Scope note:** the ADR body above is about the **live-stream** render path (F5, two-window
+> mirror parity — a purely in-flight-turn concern). This addendum is about the **persisted**
+> render log one layer down — the durable row list a session's live stream and its `/api/history`
+> reload both ultimately read back from — plus a **non-degradation (mandate #4) tail** the
+> reconciliation/BB-Nerd audits (T2/T3 + F5/F6) found riding on top of it: a cancelled generation
+> left an empty durable row, "Try again" appended a second row instead of superseding, and BOTH
+> takes folded into the hidden relationship/soul layer — sometimes with the SUPERSEDED take's
+> (fabricated) content surviving. Source: `kevinhirsch/orwell#1728`.
+
+### D1 — the persisted render log is id-keyed, single-mutator, supersede-by-id
+
+**Decision (shipped, PR #1751, then completed here):**
+
+1. **One append-only, server-`seq`-ordered assistant-row list per session is the single source of
+   truth.** `core.session_manager.SessionManager` + the DB `ChatMessage.seq` ordering ARE that
+   log — both the live stream (which stamps each persisted row's real DB id onto its bubble,
+   `dataset.dbId` in `frontend/static/js/chat.js`) and a reload (`GET /api/history/{id}`) read the
+   same rows in the same order. There is no second, DOM-index-only source of row identity.
+2. **Cancel = discard.** `_renderCancelledBubble` (`frontend/static/js/chat.js`) never calls
+   `inject_messages` for a stopped/cancelled generation — a cancelled take leaves **zero** durable
+   rows (kills T2 — the old `stopped+cancelled, len=0` persisted row).
+3. **Regenerate = supersede by id, never append.** `regenerateFrom`
+   (`frontend/static/js/chatMessageActions.js`) resolves the row to discard from the AI bubble's
+   OWN stamped DB id (`truncate_from_id`), not a DOM-index guess that can drift from the true row
+   count whenever a hidden/system row persists without a rendered bubble (the root cause of T3's
+   "two near-identical rows"). `POST /api/session/{id}/truncate`
+   (`routes/history_routes.py::truncate_session`) resolves the exact `keep_count` from the
+   server's own `seq` order (`SessionManager.keep_count_before_message`) and 404s a stale/unknown
+   id rather than guessing — and the client checks that response status BEFORE mutating the DOM or
+   resubmitting, so a failed truncate can never leave a duplicate row behind.
+4. **FE tier only.** None of the above touches `src/` (the engine) — narration rows are not, and
+   never become, engine/Vault state (ADR 0003).
+
+Live == reload by construction for a regenerated turn: both render the same server-`seq`-ordered,
+id-keyed row list, and superseded rows are gone from that list, not merely hidden client-side.
+
+### B2 — fold integrity: defer-fold-to-settle (chosen primary; compensating-retract documented, not built)
+
+**The problem this closes.** Even with D1 shipped, the *consequence* layer had its own copy of the
+same defect: the 0055 `_auto_record_scene` belt (`frontend/src/agent_loop.py`) folded a scene's
+hidden impact into the relationship/soul layer **immediately**, mid-stream, per take. A "Try
+again" produces a brand-new take with its OWN extraction+fold call — but the first take's fold had
+already committed and cannot be un-narrated. Every regenerate **permanently double-folded** the
+hidden layer (F5), and because the surviving fold was picked independently of which take actually
+survived, its content could belong to neither take as narrated (F6 — a fabricated/distorted fold).
+
+**Decision — DEFER-FOLD-TO-SETTLE is the primary mechanism (owner ruling, issue #1728).** A
+scene's fold is no longer committed at proposal time. `frontend/src/fold_ledger.py` is a small,
+Vault-free, in-memory, per-`(owner, session)` staging slot (one entry at most, mirroring the
+established `routes/chat_helpers.py` `_DEFERRED_FOLDS`/`_LAST_BEAT_SEQ` pattern for exactly this
+class of short-lived FE bookkeeping):
+
+- `_auto_record_scene` validates the extraction exactly as before (the OOC/machinery gate, the
+  engine-whereabouts witness-set intersection, the `withIds` roster normalization — #1729/#1730/
+  #1734, unchanged) and then **stages** the payload instead of calling `recordInteraction`.
+- The fold **settles** (the actual, CAS-guarded `recordInteraction` call) at the **start of the
+  next turn** for that same session (`agent_loop._settle_pending_fold`, called before the new
+  turn's round loop begins — never mid-stream) — reaching a new turn is the proof the prior take
+  was accepted, not regenerated.
+- A **regenerate discards the staged fold unconditionally** as part of the truncate it already
+  performs (`routes/history_routes.py::truncate_session` calls `fold_ledger.discard_pending_fold`)
+  — provably correct because a truncate always cuts this session's tail from some point to the
+  end, and a staged fold only ever exists for the session's most-recent turn (settle always drains
+  any earlier one first), so the row that produced a staged fold — if any — is always inside every
+  truncate's discarded range.
+- **Idempotency (AC):** the idempotency key is minted once, at stage time, and carried unchanged
+  to the settle-time engine call (0065 Part B) — the engine dedups a repeated key, so a retried
+  settle can never double-apply. A settle that fails on a transient error (not a stale-beat
+  conflict, which `_backfill_with_cas`'s existing CON-11 deferred-retry queue already absorbs)
+  **re-stages the identical entry** rather than dropping it (mandate #4 — a validated fold must
+  never silently evaporate).
+
+**The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
+issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
+an explicit "un-fold" if the take turns out superseded. No such seam exists on this build's
+surface — staging is a plain in-process dict write that happens strictly before the engine is ever
+touched, so there is nothing for deferral to fail past. Per the T9 doctrine ("if you implement
+deferral, note the retract design as the designated fallback, don't build both"), the shape is
+recorded in `src/fold_ledger.py`'s module docstring: `recordInteraction` would grow an explicit
+`retract` verb keyed by the original `idempotencyKey`, resolved to the exact prior fold and
+reversed via the SAME bounded/seeded magnitude math applied forward (never a raw-number rollback
+the FE could game). Build it only if a future seam genuinely forces committing before a take's
+fate is known.
+
+**Boundaries preserved:** the engine's fold **magnitude** is still entirely engine-decided at
+settle time — nothing about *what* gets validated or *how much* it moves changed, only *when* the
+already-validated call reaches `recordInteraction` — so `tests/unit/expressiveNonCollapse.test.ts`
++ `frontend/tests/test_expressive_non_collapse.py` (creative prose stays un-normalized) and the
+belt-fire telemetry contract (`frontend/tests/test_belt_telemetry.py` — a fire still means an
+applied/guaranteed-to-apply correction, never a bare attempt) both stay green unchanged.
+
+**Tests:** `frontend/tests/test_1728_1729_1730_1734_recording_render_integrity.py` — the D1 id-
+keyed-truncate + cancel-discard source pins (already landed with PR #1751) plus the B2 section
+added here: stage-not-commit, settle-commits-once, the regenerate/discard/one-surviving-fold
+repro (the F5/F6 case end to end), idempotency-key reuse, re-stage-on-transient-failure, the
+`session_id=None` (0081 faithfulness retro-adopt) immediate-commit fallback, and two source pins
+(the truncate route's discard call; settle sitting before the round loop starts).
+
 ## Traceability
 
 - Source: the streaming-text-parity investigation, 2026-06-27 (branch `claude/streaming-text-parity-*`).
@@ -227,6 +327,11 @@ gates (ADR 0008's `seq`/reconcile contract, the `_Run` replay-then-tail behaviou
   completion-broadcast model — the **delivery** half that is sound and stays).
 - Bounded by: the Vault Wall (mandate #2) and cross-user isolation (0021) — both unchanged; ADR 0003; the
   reasoning-scrub render contract (the `roundReplyText`/`roundReasoningText` channel split).
+- **Addendum (2026-07-21) source:** `kevinhirsch/orwell#1728` — the persisted render-log
+  supersede-by-id/cancel-discard half (D1, PR #1751) + the defer-fold-to-settle consequence half
+  (B2) closing the multi-audit BB-Nerd F5/F6 = reconciliation T2/T3 finding. See
+  `frontend/src/fold_ledger.py`, `agent_loop._settle_pending_fold`, and
+  `frontend/tests/test_1728_1729_1730_1734_recording_render_integrity.py`.
 - Executable backing: `docs/audits/playtest-harness/mirror_live_parity.mjs` (+ `run_mirror_gate.sh`) and
   `frontend/tests/test_0012_mirror.py` (the former `xfail` tripwire, now passing outright); harness §10 of
   `docs/audits/playtest-harness/README.md`.
