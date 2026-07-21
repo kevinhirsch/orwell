@@ -97,7 +97,7 @@ that decision.
 
 | ID | Item | Source | Effort | Depends on |
 |---|---|---|---|---|
-| T1-1 | **Act→Commit→Voice** — DECIDE constrained-JSON micro-call from engine-enumerated legal actions → FE executes with `expectedBeatSeq`+`idempotencyKey` → bounded retries → seeded default → VOICE narrates only the committed stateDelta. Flag-staged per beat-class, ceremonies first; **belts deleted (not disabled) per flipped class** (~15 of 21 registry belts, #1154, L39b + its three bounding belts, the eviction drain). | P1 stage 3 (Wave 2) | L | T0-2, T0-3, T0-4 |
+| T1-1 | **Act→Commit→Voice** — DECIDE constrained-JSON micro-call from engine-enumerated legal actions → FE executes with `expectedBeatSeq`+`idempotencyKey` → bounded retries → seeded default → VOICE narrates only the committed stateDelta. Flag-staged per beat-class, ceremonies first; **belts DEMOTED, not deleted, per flipped class** (owner resiliency ruling 2026-07-21, §T9): each superseded belt (~15 of 21 registry belts, #1154, L39b + its three bounding belts, the eviction drain) drops to an armed, alarmed fallback behind a per-class flag — it fires only if the new path fails, and every fire shows RED per #1599; deletion only after the class survives a full live season + clean canary window. | P1 stage 3 (Wave 2) | L | T0-2, T0-3, T0-4 |
 | T1-2 | **Nightly probe canary** — non-blocking, key-gated, ~cents: capability probe + one scripted ceremony turn; phantom-claim rate alarmed. Explicitly *not* 0108 revived. | P2 tail (Wave 2) | S | **Q2** |
 | T1-3 | **Show Bible** — seeded fictional canon (show name, host persona + tics, 6–10 past seasons) via a `recordShowCanon` write-back (four-place seam + boundary test); ~400-token whitelist into narrator context + cast genesis; real-show denylist in the shared scrub corpus. Fixes the only playtest class with zero structural defense. | P7; F9 (Wave 2) | S | — |
 | T1-4 | **Honest Delivery Lite** — ack-is-the-row (clientMsgId → unique-constraint inbox), minimum-viable-turn gate (below-threshold / dangling-markdown tails re-render, never air), diegetic control-room correction card (never a silent reground). | P8; F7/F8/F10 (Wave 2) | S–M | coordinates with GH-1728/GH-1729 (same render-log family) |
@@ -189,6 +189,67 @@ that decision.
 *(Q7 — the golden-path treadmill — is moot: the apparatus was decommissioned by #1765 before the
 synthesis landed. No decision needed.)*
 
+### T9 — Resiliency: the fallback & defense-in-depth register (owner ruling 2026-07-21)
+
+**The ruling.** The judged portfolio gets built — but every non-winning proposal stays in the back
+pocket as a designated fallback, and compensating layers are **demoted, never deleted**, until their
+replacement has survived a full live season plus a clean canary window. A demoted layer is an armed,
+alarmed fallback: it fires only when the primary fails, and every fire shows RED per the #1599
+no-silent-fail-soft ruling. Nothing that hardens the game is thrown away.
+
+**Primary → fallback → keep-anyway map (the build items):**
+
+| Primary | If it flakes / is denied | Keep-anyway layers (defense in depth) |
+|---|---|---|
+| T0-2 beats terminate themselves | The repaired L39b escalation (post-comparator-fix) stays armed as the watchdog; the progression belts remain demoted-armed | Stall-nudge telemetry stays permanently |
+| T0-3 chyrons (needs D1) | Fallback A: "the board speaks in its own voice" — copy-constrained prose rendering of the same engine beat cards (no new UI, no ADR 0003 question). Fallback B: "one grounding spec, compiled twice" — fail-closed claim-type policy compiled to both languages (also fixes #1749 parity drift structurally) | The 11 claims-guards stay as hard-drop rails even after chyrons ship; the pre-emission outcome guard stays |
+| T0-4 provider probe/pin (D3) | Enumerated-JSON downgrade path (in the P2 spec); ordered probed fallback chain; worst case the DECIDE pass routes to a schema-verified utility endpoint | Attempt-counted honoring telemetry stays permanently |
+| T0-5 reasoning scrub | — (it IS a fallback layer) | **Permanent** — kept even after pinning restores the separated reasoning channel |
+| T0-6 casting ledger | Per-facet regex guards (INK_RE et al.) demote to alarmed monitors — they stay as canaries that the generic facet-diff validator is working | The #1768 ink backstop stays |
+| T1-1 Act→Commit→Voice | Per-beat-class flag rollback to the demoted belt path; the engine seeded default guarantees liveness on either path | The forced-tool_choice rung stays demoted-armed per class |
+| T1-4 honest delivery | If the streaming G-class persists after it: escalate to "one log, one channel" (parked under D7) — that proposal is the designated escalation, not dead | The send outbox + existing recovery mechanisms demote, never delete |
+| T1-5 footage pool (D4) | "The House You Can Hear" — the salience-sifted ambient feed over EXISTING template pools + widened gloss pools + roster voiceFingerprint push: real texture improvement with zero Vault authorship, shippable if D4 is denied or the lane misbehaves | Template pools stay as the fail-soft floor (they are the fallback by spec) |
+| T1-6 editorial organ | Ships flag-gated; flag-off is byte-identical (UAT spine) — rollback is the flag | The engagement detector gating stays |
+
+**All 27 proposals, accounted for by name** *(numbering across the artifacts drifts — names are
+canonical; full sketches were delivered to the owner in-session 2026-07-21, and each champion's
+mechanics are preserved in the synthesis §2, the merged keeper-details in §4)*:
+
+| Proposal (persona) | Home |
+|---|---|
+| Air From the Board (designer) | ADOPTED — P1 stages ①② |
+| Ceremonies are liturgy (designer) | ADOPTED — T0-2 |
+| The House You Can Hear (designer) | MERGED into P5 sifter + **designated fallback for T1-5** |
+| A turn is a durable object (designer) | ADOPTED — T1-4 |
+| One Casting Bible (designer) | ADOPTED — T0-6 |
+| The Chenbot Protocol (superfan) | MERGED into P1 ② — keeper: ceremony-frame pacing, "sameness is the feature" |
+| convokeHouse (superfan) | ADOPTED — T1-7 |
+| Whip count in the fog (superfan) | ADOPTED — T1-7 (pledges now, cascade behind the gradient gate) |
+| The show bible (superfan) | ADOPTED — T1-3 |
+| The blindside autopsy (superfan) | PARKED — D5, reopen after T1-5 + adversarial redaction suite |
+| Shoot the footage when it happens (superfan) | ADOPTED — T1-5 (co-champion with Footage Pool, same build) |
+| Act→Commit→Voice (engineer) | ADOPTED — T1-1 |
+| The board speaks in its own voice (engineer) | MERGED into P1 ② + **designated fallback for T0-3**; keeper: Pitwall sentence repair |
+| Provider capability contract (engineer) | ADOPTED — T0-4 |
+| One log, one channel (engineer) | PARKED — D7; **designated escalation for T1-4** if the G-class persists |
+| One grounding spec, compiled twice (engineer) | PARKED — **designated fallback B for T0-3**; also the structural fix for #1749 parity drift if ever needed |
+| Commit-before-speak (contrarian) | MERGED into T1-1 (alt implementation shape); keeper: pause/host/resume mix-in |
+| Outcomes leave the model's mouth (contrarian) | MERGED into P1 ② (duplicate) |
+| The provider is on probation (contrarian) | MERGED into T0-4 + T1-2; keeper: attempt-counted telemetry |
+| Author the Vault, don't madlib it (contrarian) | MERGED into T1-5 (duplicate); keeper: per-speaker scoping |
+| One seeded identity ledger (contrarian) | MERGED into T0-6 (duplicate) |
+| Beats terminate themselves (contrarian) | ADOPTED — T0-2 (the minimal-surgery implementation doc) |
+| Cut To VT (narrative designer) | ADOPTED — P1 ② ceremony grammar (champion) |
+| The Beat Card (narrative designer) | MERGED into P5 + **promoted keep-anyway layer for Wave 1**: compile the narrator's per-turn factual world into a tight beat card (narrower context ⇒ fewer invented facts) — grounding hardening independent of chyrons |
+| The Tension Director (narrative designer) | ADOPTED — T1-6 |
+| The Footage Pool (narrative designer) | ADOPTED — T1-5 (champion) |
+| The Spy Screen (narrative designer) | ADOPTED — T1-6 |
+
+**Keeper details that must not get lost in the merges** (from the synthesis §4): drop-on-timeout
+color calls (never load-bearing) · pause/host/resume mix-in · Pitwall sentence repair ·
+attempt-counted telemetry · per-speaker scoping · the belt-demolition inventory (now a
+belt-DEMOTION inventory per this ruling).
+
 ### T8 — Standing discipline (not work items; the operating rules that keep the above true)
 
 Unchanged from `HANDOFF.md` §5 / `SOUL.md`: worktree isolation for all code agents · one GitHub
@@ -208,3 +269,6 @@ verify bot claims against code personally.
    D4) → T1-6 → T1-7 → T1-8 (on D5).
 4. **Continuously:** #1644 text standardization · #1599 fail-soft audit (with 0112) · T4/T6
    opportunistic batches.
+5. **Always (the T9 doctrine):** demote → observe → delete. No superseded guard/belt/scrub is
+   removed until its replacement survives a full live season + a clean canary window; demoted
+   layers stay armed and alarm RED when they fire.
