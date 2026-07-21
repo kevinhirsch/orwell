@@ -151,7 +151,7 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
     else: fire awake-set per-NPC intent calls under a bounded in-flight concurrency cap
           (semaphore over the awake set; each call's budget reserved before dispatch;
            unadmitted NPCs → deterministic floor, turn never blocks)
-    
+
   per-NPC call (parallel, cheap-tier, delta-fed):
     input: character + soul + relationships + divergent memories + stateDelta (0065)
     output: structured AuthoredCognition/NpcIntent {want, attempt, read}   # cognition INPUT, NOT ConsequenceDescriptor
@@ -160,13 +160,13 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
       → engine MAY emit ConsequenceDescriptor {edges:[{toward,direction,emphasis?}], rationale?} as seeded OUTPUT, ONLY when an edge moves
       → intent with no edge implication still reaches resolver + soul (never dropped)
     persist in soul state (cache for repeated scenes within lull)
-    
+
   budget guard:
     tokens_budget_max = BUDGET_MAX_TOKENS (e.g., 2000 per turn)
     latency_budget_max = BUDGET_MAX_LATENCY (e.g., 500ms)
     graceful_degrade: when pressure > budget, switch to salience-gated (K NPCs by salience)
     ledger: per-turn {cognitionMode, npcCount, tokensUsed, latency, gracefulDegrades, beltsFired}
-    
+
   integrity gates (inherited from 0131 + new cost-control):
     cognition-only (engine owns resolve/state)
     funnel narration (one voice, not N per-NPC; ADR 0021)
