@@ -71,12 +71,78 @@ def test_pending_no_op_advance_no_longer_falsely_resets_counters():
     # no-op (the engine returns the pending unchanged), but a bare "no exception" success used to
     # be read as real progress, silently zeroing the stall/staleness counters every time it fired —
     # so the escalation ladder could never climb and the loop ran indefinitely with no rung ever
-    # actually landing. Now the no-op is detected and reported as a non-progress (False).
+    # actually landing. Now the no-op is detected via the stable beatSeq-primary identity (Greptile
+    # P1 — see the staged-comp regression tests below) and reported as non-progress (False).
     js = _read("src", "agent_loop.py")
     assert "_pending_kind_at_read = None" in js
-    assert "_pend_after_kind == _pending_kind_at_read" in js
+    assert "_beat_seq_at_read = None" in js
+    assert "_pending_sig_at_read = None" in js
+    assert "def _advance_was_pending_noop(" in js
+    assert "_advance_was_pending_noop(_pending_kind_at_read, _beat_seq_at_read," in js
     assert "silent advanceGame NO-OP" in js
     assert "return False" in js  # the no-op path returns False, not a false success
+
+
+def test_advance_was_pending_noop_behavioral():
+    al = importlib.import_module("src.agent_loop")
+    # No pending open at read time ⇒ never a no-op (an ordinary advance).
+    assert not al._advance_was_pending_noop(None, 10, None, {"beatSeq": 10})
+    # A TRUE no-op: same pending kind, beatSeq did NOT advance (the engine returned it unchanged).
+    assert al._advance_was_pending_noop(
+        "comp-round", 10, ("comp-round", ("h1", "h2")),
+        {"beatSeq": 10, "pending": {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}]}})
+    # beatSeq unavailable on the response ⇒ falls back to the round-aware signature: SAME kind +
+    # SAME stillIn ⇒ no-op.
+    assert al._advance_was_pending_noop(
+        "comp-round", None, ("comp-round", ("h1", "h2")),
+        {"pending": {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}]}})
+
+
+def test_greptile_p1_staged_comp_round_advance_is_progress_not_a_noop():
+    # Greptile P1 (#1754) — the exact bug reproduced: a STAGED competition advances comp-round ->
+    # comp-round, keeping the SAME `kind` ("comp-round") while the field narrows. A kind-only
+    # comparison would misread this as a no-op (skip the counter cleanup, risk escalating/forcing
+    # the NEW round prematurely). beatSeq — which bumps once per committed mutation — is the
+    # PRIMARY signal and correctly reads it as PROGRESS regardless of the unchanged kind.
+    al = importlib.import_module("src.agent_loop")
+    pending_kind_before = "comp-round"
+    beat_seq_before = 41
+    pending_sig_before = al._pending_signature(
+        {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}, {"id": "h3"}, {"id": "h4"}]})
+    # The response: SAME kind, beatSeq advanced (a real committed round-advance mutation), and the
+    # stillIn set narrowed (round-aware fallback would ALSO correctly read this as progress).
+    adv_response = {
+        "beatSeq": 42,
+        "pending": {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}, {"id": "h3"}]},
+    }
+    assert not al._advance_was_pending_noop(
+        pending_kind_before, beat_seq_before, pending_sig_before, adv_response), (
+        "a staged comp-round -> comp-round advance (SAME kind, beatSeq bumped) must be treated as "
+        "PROGRESS, not a false no-op")
+
+
+def test_greptile_p1_staged_comp_true_noop_still_detected_via_beatseq():
+    # The companion case: kind AND stillIn happen to be identical (e.g. a genuinely stuck round)
+    # but beatSeq is the authoritative tell — unchanged beatSeq means nothing committed.
+    al = importlib.import_module("src.agent_loop")
+    pending_sig_before = al._pending_signature(
+        {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}]})
+    adv_response = {
+        "beatSeq": 41,  # unchanged
+        "pending": {"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}]},
+    }
+    assert al._advance_was_pending_noop("comp-round", 41, pending_sig_before, adv_response)
+
+
+def test_pending_signature_is_round_aware_not_just_kind():
+    al = importlib.import_module("src.agent_loop")
+    sig_a = al._pending_signature({"kind": "comp-round", "stillIn": [{"id": "h2"}, {"id": "h1"}]})
+    sig_b = al._pending_signature({"kind": "comp-round", "stillIn": [{"id": "h1"}, {"id": "h2"}]})
+    sig_c = al._pending_signature({"kind": "comp-round", "stillIn": [{"id": "h1"}]})
+    assert sig_a == sig_b  # order-independent
+    assert sig_a != sig_c  # a narrowed field is a DIFFERENT signature, even though kind is identical
+    assert al._pending_signature(None) is None
+    assert al._pending_signature({"kind": ""}) is None
 
 
 def test_generic_intent_tolerance_named_in_the_escalation_text():

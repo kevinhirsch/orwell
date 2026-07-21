@@ -52,8 +52,22 @@ replies as advance intent even when they miss `_LULL_READY_RE`'s exact phrasing 
 fix in `_commit_advance_silently` closes the gap that let the original repro run 15 turns: a
 successful-but-no-op `advanceGame` call against an unresolved pending used to be read as real
 progress and silently reset every stall/staleness counter, so the escalation ladder could never
-actually climb; it now compares the pending `kind` before/after the call and reports `False` (no
-progress) when the SAME pending is still open.
+actually climb. `_advance_was_pending_noop` now decides it: PRIMARILY via the engine's `beatSeq`
+(bumps once per committed mutation — a genuine advance strictly increases it, a true no-op does
+not), falling back to a round-aware pending signature (`_pending_signature` — kind **+** `stillIn`)
+only when `beatSeq` is unavailable. A pending `kind`-only comparison (the first cut) was **wrong**:
+a STAGED competition advances round → round while keeping the identical `kind`
+(`"comp-round"` → `"comp-round"`), so comparing kind alone misread every real round advance as a
+no-op — skipping the counter cleanup and risking an escalation/forced-advance against the NEW round
+(Greptile P1, #1754). beatSeq tells the two apart correctly regardless of `kind`.
+
+Belt-fire telemetry for this belt is **success-gated** (§5's contract, Greptile P2, #1754):
+selecting a loop-break nudge is only an attempt, so the belt name is stashed
+(`_LOOP_BREAK_PENDING_NOTE`) at selection time and noted only once `_note_loop_break_if_resolved`
+observes a real resolution — a progression tool firing (the model complied) or the framed gate
+itself changing (a forced advance committed, or a peer/later turn moved it), checked both on the
+next round/turn's generic pass and synchronously inside `_commit_advance_silently`'s real-progress
+branch. An ignored nudge that leaves the identical gate stalled notes nothing.
 
 ### 2.2 The consequence loop (social play must fold)
 

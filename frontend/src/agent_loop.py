@@ -4730,6 +4730,83 @@ def _loop_break_streak_update(key: str, framed_key, *, progressed: bool, runway_
     return _LOOP_STREAK.get(key, 0) >= _LOOP_BREAK_THRESHOLD
 
 
+def _pending_signature(pending):
+    """L-F3 Greptile P1: a ROUND-AWARE identity for an open player pending — `(kind, stillIn-ids)`
+    — used ONLY as the degraded-mode fallback (below) when `beatSeq` is unavailable. `kind` ALONE
+    is not enough: a STAGED competition advances round → round while keeping the SAME `kind`
+    (e.g. "comp-round" stays "comp-round" as the field narrows), so comparing kind alone would
+    read a genuine round advance as a no-op. Folding in the pending's `stillIn` set (which DOES
+    change every round) fixes that even without beatSeq. Returns None for a non-pending/garbage
+    input (kind absent ⇒ no signature)."""
+    if not isinstance(pending, dict):
+        return None
+    kind = (pending.get("kind") or "").strip() or None
+    if not kind:
+        return None
+    still_in = pending.get("stillIn")
+    ids = tuple(sorted(
+        str((s or {}).get("id") or "") for s in still_in if isinstance(s, dict)
+    )) if isinstance(still_in, list) else ()
+    return (kind, ids)
+
+
+def _advance_was_pending_noop(pending_kind_before, beat_seq_before, pending_sig_before,
+                              adv_response) -> bool:
+    """L-F3 (#1742) + Greptile P1: was this `advanceGame` call a documented NO-OP against an
+    unresolved player pending (the engine returns the pending unchanged), or did it represent
+    REAL progress? A pure decision (no engine I/O), unit-testable in isolation.
+
+    No pending was open at read time ⇒ never a no-op (an ordinary advance). Otherwise prefer the
+    STABLE, authoritative signal — the engine's `beatSeq` (bumps once per committed mutation; a
+    genuine advance — INCLUDING a staged competition's comp-round -> comp-round round advance —
+    strictly increases it, a true no-op against an open pending does not). `kind` alone can't
+    tell those apart (a staged comp keeps the SAME `kind` across rounds — the bug Greptile
+    reproduced: the old kind-only check misread a real round advance as a no-op, skipped the
+    counter cleanup, and could escalate/force-advance the new round prematurely). Only when
+    `beatSeq` is unavailable on either side does this fall back to the round-aware pending
+    signature (`_pending_signature` — kind + stillIn, not kind alone)."""
+    if not pending_kind_before:
+        return False
+    beat_seq_after = (adv_response or {}).get("beatSeq") if isinstance(adv_response, dict) else None
+    beat_seq_after = (beat_seq_after if isinstance(beat_seq_after, int)
+                      and not isinstance(beat_seq_after, bool) else None)
+    if beat_seq_before is not None and beat_seq_after is not None:
+        return beat_seq_after <= beat_seq_before
+    pending_after = (adv_response or {}).get("pending") if isinstance(adv_response, dict) else None
+    return _pending_signature(pending_after) == pending_sig_before
+
+
+# L-F3 (#1742) Greptile P2 — belt-fire telemetry is SUCCESS-GATED (CLAUDE.md §5 / the mandate: "a
+# count means an APPLIED correction ... never a mere selection or a no-op"). Selecting a loop-break
+# nudge is only an ATTEMPT — the model may ignore it and leave the SAME gate stalled. So the belt
+# name is STASHED here (mirroring `_forced_belt_tool`'s deferred-note pattern) at selection time and
+# noted ONLY once an OBSERVED resolution lands: a progression tool actually fires (the model
+# complied — caught on a later round/turn's `_progressed`), or the framed gate itself changes
+# relative to what the streak was tracking (a forced advance committed, or a peer/later turn moved
+# it — caught either synchronously inside `_commit_advance_silently`'s real-progress branch, or on
+# the next round/turn's generic check). An ignored nudge that leaves the identical gate stalled
+# notes nothing.
+_LOOP_BREAK_PENDING_NOTE: Dict[str, str] = {}
+
+
+def _loop_break_resolution_observed(progressed: bool, current_gate, prior_gate) -> bool:
+    """L-F3 Greptile P2: pure verdict — has the loop-break-stalled gate OBSERVABLY resolved? True
+    when a progression tool fired this turn, OR the framed gate changed since the streak last saw
+    it (an unknown prior gate never counts as "changed" — nothing to compare against yet)."""
+    return bool(progressed) or (prior_gate is not None and current_gate != prior_gate)
+
+
+def _note_loop_break_if_resolved(key: str, owner, *, progressed: bool, current_gate) -> None:
+    """Fire the STASHED loop-break belt note (from a prior nudge selection) only once its
+    resolution is observed against the gate the streak was tracking BEFORE this call — so call
+    this BEFORE `_loop_break_streak_update` mutates `_LOOP_LAST_FRAMED_KEY` for the same key.
+    Pops the stash on fire so a repeat call never double-counts; a persistent stall notes nothing."""
+    belt = _LOOP_BREAK_PENDING_NOTE.get(key)
+    if belt and _loop_break_resolution_observed(progressed, current_gate, _LOOP_LAST_FRAMED_KEY.get(key)):
+        _note_belt(owner, belt)
+        _LOOP_BREAK_PENDING_NOTE.pop(key, None)
+
+
 # Generic-intent tolerance (AC #2): a stalled beat's escalation text explicitly tells the model to
 # read "keep moving / what's next / skip it" and kin as the player's intent to resolve the gate
 # NOW, rather than waiting on exact phrasing it was fishing for. Two flavors — a beat with NO open
@@ -6780,6 +6857,14 @@ async def _stream_agent_loop_impl(
                 # just above for the eviction-drain check (zero extra work); `_runway_holding` /
                 # `_pre_resolved` are already computed for this turn.
                 _loop_engaged = _player_replied_engaged(messages)
+                # L-F3 Greptile P2 (belt telemetry, success-gated): check for an OBSERVED resolution
+                # of a PRIOR loop-break nudge — a progression tool fired this round/turn, or the
+                # framed gate itself moved — BEFORE `_loop_break_streak_update` overwrites
+                # `_LOOP_LAST_FRAMED_KEY` for this key. Covers the "model complied on a later round"
+                # and "a peer/later turn moved the beat" cases; the direct forced-advance-committed
+                # case is noted synchronously inside `_commit_advance_silently`.
+                _note_loop_break_if_resolved(_belt_key(owner), owner,
+                                             progressed=_progressed, current_gate=_fk)
                 _loop_stalled = _loop_break_streak_update(
                     _belt_key(owner), _fk, progressed=_progressed, runway_holding=_runway_holding,
                     pre_resolved=_pre_resolved, engaged=_loop_engaged)
@@ -6904,10 +6989,16 @@ async def _stream_agent_loop_impl(
                 if _want_confide or _want_expose or _want_trade or _want_advance or _want_record or _want_deal or _want_move or _want_npc_move or _want_approach or _want_reapproach:
                     _phase, _house, _moment = None, [], None
                     _beat_key_at_read = None  # F7: the beat we OBSERVED stalled, to detect a race before forcing
-                    # L-F3 (#1742): the open player pending's `kind` AT THIS READ, if any — used both to
-                    # pick the pending-aware loop-break nudge text below AND (via `_gs`, captured by the
-                    # closure) to detect a `_commit_advance_silently` NO-OP against an unresolved pending.
+                    # L-F3 (#1742): the open player pending's identity AT THIS READ, if any — used
+                    # both to pick the pending-aware loop-break nudge text below AND (via `_gs`,
+                    # captured by the closure) to detect a `_commit_advance_silently` NO-OP against
+                    # an unresolved pending. `_beat_seq_at_read` is the PRIMARY no-op signal
+                    # (Greptile P1 — kind alone can't tell a staged comp's round advance from a true
+                    # no-op, since `kind` stays "comp-round" across rounds); `_pending_sig_at_read`
+                    # (kind + stillIn) is the degraded-mode fallback when beatSeq is unavailable.
                     _pending_kind_at_read = None
+                    _beat_seq_at_read = None
+                    _pending_sig_at_read = None
                     try:
                         from src import orwell_engine as _oe
                         _gs = await _oe.get_game_state(owner)
@@ -6917,6 +7008,10 @@ async def _stream_agent_loop_impl(
                         _pending_kind_at_read = (
                             (_pd_ar.get("kind") or "").strip() or None
                             if isinstance(_pd_ar, dict) else None)
+                        _pending_sig_at_read = _pending_signature(_pd_ar)
+                        _bs_ar = (_gs or {}).get("beatSeq")
+                        _beat_seq_at_read = (_bs_ar if isinstance(_bs_ar, int)
+                                             and not isinstance(_bs_ar, bool) else None)
                         # F7: a coarse identity for THIS beat (week + phase + moment). If it differs on a
                         # re-read just before the forced advance, the game moved on under us (another device
                         # or the model's own tool path advanced) and the forced advance would double-advance.
@@ -7196,22 +7291,27 @@ async def _stream_agent_loop_impl(
                                 # stall counter below every time this fired — so a soft-locked pending
                                 # (the F3 comp-buzz-in repro) could sit forever with its escalation
                                 # ladder silently restarting at zero each turn instead of climbing.
-                                # Detect the no-op by comparing the pending `kind` BEFORE this call
-                                # (`_pending_kind_at_read`, captured from the SAME `_gs` this closure
-                                # already reads) to the one the engine still reports AFTER it: if the
-                                # SAME pending is still open, nothing progressed — do not reset the
-                                # counters, and report False so the caller keeps escalating instead of
-                                # believing the beat moved.
-                                _pend_after = (_adv or {}).get("pending") if isinstance(_adv, dict) else None
-                                _pend_after_kind = (
-                                    (_pend_after.get("kind") or "").strip() or None
-                                    if isinstance(_pend_after, dict) else None)
-                                if _pending_kind_at_read and _pend_after_kind == _pending_kind_at_read:
+                                # Detect the no-op via `_advance_was_pending_noop` — PRIMARILY the
+                                # engine `beatSeq` (Greptile P1: a bare pending-`kind` comparison
+                                # misreads a STAGED competition's genuine comp-round -> comp-round
+                                # round advance as a no-op, since `kind` stays identical across
+                                # rounds — this now strictly increases `beatSeq`, so it is correctly
+                                # read as PROGRESS), falling back to the round-aware pending
+                                # signature (kind + stillIn) only if beatSeq is unavailable.
+                                if _advance_was_pending_noop(_pending_kind_at_read, _beat_seq_at_read,
+                                                             _pending_sig_at_read, _adv):
                                     logger.info(
                                         f"[orwell] silent advanceGame NO-OP — pending "
-                                        f"`{_pending_kind_at_read}` still open ({_why}, phase={_phase}) "
+                                        f"`{_pending_kind_at_read}` still open ({_why}, phase={_phase}, "
+                                        f"beatSeq {_beat_seq_at_read}->{(_adv or {}).get('beatSeq')}) "
                                         f"round {round_num} user={owner}")
                                     return False
+                                # Real progress (INCLUDING a same-`kind` staged-comp round advance).
+                                # L-F3 Greptile P2: if a loop-break nudge is awaiting confirmation for
+                                # this owner, THIS is the observed resolution — note the belt now
+                                # (success-gated: a stalled gate that never resolves notes nothing).
+                                _note_loop_break_if_resolved(_belt_key(owner), owner,
+                                                             progressed=True, current_gate=_fk)
                                 # The beat moved — reset the staleness clock AND clear the
                                 # persisted escalation so the next stall (if any) starts gentle,
                                 # mirroring the model-driven progression cleanup below. NAR-1:
@@ -7673,14 +7773,17 @@ async def _stream_agent_loop_impl(
                             # "call advanceGame" (the mandate: never infer the player's binding pick,
                             # and calling advanceGame against an open pending is a documented no-op
                             # anyway). Escalate the ASK ITSELF instead — stop inventing sub-questions,
-                            # reduce to the engine's literal legal options.
+                            # reduce to the engine's literal legal options. Greptile P2: SELECTING this
+                            # nudge is only an ATTEMPT — stash the belt name; `_note_loop_break_if_resolved`
+                            # notes it only once an OBSERVED resolution lands (never a bare selection).
                             _nudge, _why = _PENDING_LOOP_BREAK_NUDGE, "loop-break-pending"
-                            _note_belt(owner, "loop-break-pending")  # gap #3 telemetry
+                            _LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-pending"
                         elif _loop_stalled:
                             # No pending is blocking — the generic case (a premiere intro, an
                             # un-gated advance-phase beat): break the loop by simply advancing.
+                            # Greptile P2: same deferred-note contract as the pending branch above.
                             _nudge, _why = _ADVANCE_LOOP_BREAK_NUDGE, "loop-break"
-                            _note_belt(owner, "loop-break-advance")  # gap #3 telemetry
+                            _LOOP_BREAK_PENDING_NOTE[_belt_key(owner)] = "loop-break-advance"
                         else:
                             _nudge, _why = _ADVANCE_NUDGES[min(_level, len(_ADVANCE_NUDGES) - 1)], f"stall L{_level}"
                         logger.info(f"[orwell] advance nudge ({_why}, phase={_phase}) round {round_num} user={owner}")
