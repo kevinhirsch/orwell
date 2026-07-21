@@ -53,7 +53,7 @@ os.makedirs(OUT, exist_ok=True)
 # utility_endpoint_id MUST point at a real text/chat endpoint or the active path silently no-ops to
 # the deterministic floor (§5 of 0080). We wire both to the same OpenRouter endpoint.
 NARRATION = os.environ.get("OV_NARRATION_MODEL", "z-ai/glm-4.7")
-UTILITY = os.environ.get("OV_UTILITY_MODEL", "qwen/qwen3.6-flash")
+UTILITY = os.environ.get("OV_UTILITY_MODEL", "qwen/qwen3.6-27b")
 BASE_URL = os.environ.get("OV_BASE_URL", "https://openrouter.ai/api/v1")
 SEED = int(os.environ.get("OV_SEED", "76676"))
 TURN_BUDGET = int(os.environ.get("OV_TURN_BUDGET", "34"))

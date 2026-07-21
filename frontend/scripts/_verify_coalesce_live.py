@@ -70,7 +70,7 @@ OUT = os.path.join(FRONTEND, "data", "_coalesce_live")
 os.makedirs(OUT, exist_ok=True)
 
 NARRATION = os.environ.get("COALESCE_NARRATION_MODEL", "z-ai/glm-4.7")
-UTILITY = os.environ.get("COALESCE_UTILITY_MODEL", "qwen/qwen3.6-flash")
+UTILITY = os.environ.get("COALESCE_UTILITY_MODEL", "qwen/qwen3.6-27b")
 BASE_URL = os.environ.get("COALESCE_BASE_URL", "https://openrouter.ai/api/v1")
 SEED = int(os.environ.get("COALESCE_SEED", "82982"))
 

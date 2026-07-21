@@ -178,7 +178,7 @@ def test_overseer_reports_resolution_when_the_auto_default_can_fix_it(
     # ENDPOINT keeps the CONFIGURED utility MODEL (the ADR 0016 qwen tier) instead of
     # collapsing to the narrator — either way it must be a CONFIGURED identity, never an
     # arbitrary provider-list pick.
-    assert verdict.get("model") == "qwen/qwen3.6-flash", \
+    assert verdict.get("model") == "qwen/qwen3.6-27b", \
         "the reported resolution must be the CONFIGURED utility identity"
     _, lines = lr.OVERSEER.since(0)
     ours = [l for l in lines if l.get("kind") == "model-wiring" and l.get("user") == "rhino"]

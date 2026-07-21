@@ -73,14 +73,18 @@ def test_image_autodetect_leads_with_gemini_flash_image():
     )
 
 
-def test_oob_default_utility_model_is_qwen_flash():
-    """ADR 0016 as amended (2026-07-07/09 two-tier retarget, M0-6) — the OOB utility model
-    (background JSON: cast authoring/prewarm/zeitgeist, summarization, naming) is the Qwen 3.6 Flash
-    tier on OpenRouter: cheap, fast, verified tool-calling clean on the M0-1 golden record. It is
-    its OWN key (utility_model), so it does NOT inherit the narrator swap."""
+def test_oob_default_utility_model_is_served_qwen():
+    """ADR 0016 as amended (2026-07-07/09 two-tier retarget; corrected 2026-07-21) — the OOB utility
+    model (background JSON: cast authoring/prewarm/zeitgeist, summarization, naming) is a cheap, fast
+    Qwen 3.6 tier on OpenRouter. OWNER RULING 2026-07-21 (live prod debug bundle): the previously
+    shipped `qwen/qwen3.6-flash` slug is NOT served on OpenRouter — every OOB utility/faithfulness
+    call fell through to an arbitrary first-enabled model and hung casting-finalize — so the default
+    is the SERVED `qwen/qwen3.6-27b`. It is its OWN key (utility_model), so it does NOT inherit the
+    narrator swap."""
     from src.settings import DEFAULT_SETTINGS
-    assert DEFAULT_SETTINGS["utility_model"] == "qwen/qwen3.6-flash", (
-        "the assumed default utility model must be Qwen 3.6 Flash (qwen/qwen3.6-flash)"
+    assert DEFAULT_SETTINGS["utility_model"] == "qwen/qwen3.6-27b", (
+        "the assumed default utility model must be the SERVED Qwen 3.6 27B (qwen/qwen3.6-27b); "
+        "the old qwen/qwen3.6-flash slug is not served on OpenRouter"
     )
 
 

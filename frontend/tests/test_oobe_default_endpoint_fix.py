@@ -144,7 +144,7 @@ def test_ship_gate_utility_class_resolves_too(post_reset_settings, rhino_is_admi
     the narrator model out of the box."""
     _seed_single_openrouter_endpoint(owner=None)
     url, model, _h = endpoint_resolver.resolve_endpoint("utility", owner="rhino")
-    assert url and model == "qwen/qwen3.6-flash"
+    assert url and model == "qwen/qwen3.6-27b"
 
 
 def test_ship_gate_preflight_unwired_is_empty(post_reset_settings, rhino_is_admin, run):
@@ -507,7 +507,7 @@ def test_utility_resolver_binds_the_configured_default_model(post_reset_settings
     assert fn is not None
     run(fn([{"role": "user", "content": "probe"}]))
     cands = captured.get("candidates") or []
-    assert cands and cands[0][1] == "qwen/qwen3.6-flash"
+    assert cands and cands[0][1] == "qwen/qwen3.6-27b"
 
 
 def test_faithfulness_judge_resolves_the_cheap_utility_tier_not_the_narrator(
@@ -526,7 +526,7 @@ def test_faithfulness_judge_resolves_the_cheap_utility_tier_not_the_narrator(
     run(fn([{"role": "user", "content": "probe"}]))
     cands = captured.get("candidates") or []
     assert cands, "the resolved judge fn must dispatch to real candidates"
-    assert cands[0][1] == "qwen/qwen3.6-flash", (
+    assert cands[0][1] == "qwen/qwen3.6-27b", (
         "the faithfulness judge must default to the cheap utility tier (qwen), never the narrator; "
         f"got {cands[0][1]!r}")
 
@@ -536,14 +536,14 @@ def test_non_utility_prefix_falls_back_to_the_configured_utility_model_not_the_n
         prefix, post_reset_settings, rhino_is_admin):
     """Greptile P1 repro (2026-07-13): a NON-utility prefix (task/faithfulness/research) whose own
     endpoint is unconfigured falls back THROUGH the utility tier. With the shipped two-tier defaults
-    (utility_model=qwen/qwen3.6-flash, utility_endpoint_id EMPTY so it rides the default endpoint),
+    (utility_model=qwen/qwen3.6-27b, utility_endpoint_id EMPTY so it rides the default endpoint),
     the resolved UTILITY model must be the CHEAP qwen tier — NOT the narrator (z-ai/glm-4.7). The
     prior fix covered only the `utility` prefix's own block; this pins the non-utility fallback so
     utility/background calls never silently run the expensive narrator model."""
     _seed_single_openrouter_endpoint(owner=None)
     url, model, _h = endpoint_resolver.resolve_endpoint(prefix, owner="rhino")
     assert url and url.endswith("/chat/completions")
-    assert model == "qwen/qwen3.6-flash", (
+    assert model == "qwen/qwen3.6-27b", (
         f"the {prefix!r} utility-tier fallback must resolve the configured utility model (qwen), "
         f"never the narrator; got {model!r}"
     )
