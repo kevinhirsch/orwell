@@ -56,6 +56,21 @@ npm install --ignore-scripts        # GOTCHA: plain `npm install` fails — fast
                                     # We don't need it: embeddings fall back to a deterministic fake, and
                                     # esbuild's platform binary still installs. --ignore-scripts is the fix.
 npm run build                       # bundles dist/main.js (+ dist/embedWorker.js)
+# TUN-10 (deploy-parity, docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md): boot with
+# the SAME opt-in behavioral flags the real deploy ships (ORWELL_CAMPAIGNS / _TRAJECTORIES / _TRIGGERS /
+# _SECRET_PACING / _JURY_HOUSE / _SEEDED_TIE_SURFACING / _STRATEGIC_CADENCE / _SCHEME_TARGETS /
+# _CONFESSIONAL_DEPTH / _NPC_DEAL_OFFERS / _SOUL_DEPTH / _COMP_MECHANICS_PLUS / _COMP_MIXED / _COMP_INTENT /
+# _MYTH_MAKING / _VOTE_DEDUCTION) — an engine boot with every layer OFF (the code default, kept flags-off
+# for calibration neutrality) plays an "impoverished" house with none of the off-screen scheming /
+# deal-making / character evolution depth this audit is meant to surface. Single-sourced from
+# deploy/orwell-env-defaults.sh — the SAME (KEY, DEFAULT) list the real deploy writes/backfills — so this
+# can never silently drift from what ships. ORWELL_DEAL_DEPTH is deliberately EXCLUDED even though the
+# deploy currently ships it: its live-loop reconciliation is still pending (owner ruling), so it stays off
+# here regardless of the deploy's current value.
+. deploy/orwell-env-defaults.sh
+eval "$(orwell_optin_env_defaults "$PWD/.audit-telemetry/engine-data" | sed 's/^/export /')"
+unset ORWELL_EMBEDDINGS ORWELL_EMBED_CACHE   # keep the deterministic-fake embeddings path (below)
+unset ORWELL_DEAL_DEPTH                      # TUN-10: pending its live-loop reconciliation
 ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$PWD/.audit-telemetry/engine-data" node dist/main.js
 ```
 
@@ -65,6 +80,9 @@ ORWELL_ENGINE_PORT=8765 ORWELL_DATA_DIR="$PWD/.audit-telemetry/engine-data" node
 - Health: `curl -s http://127.0.0.1:8765/health` → `{"ok":true,...,"embeddings":{"provider":"deterministic"}}`.
 - Embeddings unset ⇒ deterministic fake (fine for the audit). The engine's tool transport is
   `POST /player/call` with `{"name":<tool>,"args":{...}}` and header `X-Orwell-User: <user>`.
+- **Never flip a code default to get this parity** (calibration neutrality — the seeded gates depend on
+  flags-off defaults in `src/adapters/engine/GameSessionAdapter.ts`); the flags above are env-only, exactly
+  mirroring how the real deploy opts in.
 
 ### 2b. The front-door (Python/FastAPI, port 7000)
 

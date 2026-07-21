@@ -10,6 +10,13 @@ Vault-free 0065 sync ledger, so playtests can MEASURE belt reliance instead of f
 
 Also pins (source-level) that every named belt call site actually notes its fire, and that the
 agent-loop helper is fail-soft. Roles only — belt/tool NAMES are app capabilities, never a body.
+
+T0-4 (telemetry + probe arm, docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md)
+adds a SIBLING, ATTEMPT-counted dimension for forced ``tool_choice`` specifically — a live
+playtest logged 20 forced selections against only 7 honored ``beltsFired`` counts, and the
+ledger had no record of the other 13 at all. ``note_forced_choice`` / ``forcedChoice`` /
+``get_forced_choice_totals`` record EVERY resolved attempt with an honored/ignored outcome,
+additive to (never redefining) the success-gated ``note_belt_fire`` contract above.
 """
 
 import importlib
@@ -26,8 +33,10 @@ _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _tmp_store(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger, "LEDGER_PATH", tmp_path / "orwell_sync_ledger.json")
     ledger._PENDING_BELTS.clear()
+    ledger._PENDING_FORCED.clear()
     yield
     ledger._PENDING_BELTS.clear()
+    ledger._PENDING_FORCED.clear()
 
 
 # ── the buffer → record_turn drain ───────────────────────────────────────────────────────────
@@ -143,6 +152,103 @@ def test_log_line_carries_the_belt_counts(caplog):
     assert len(lines) == 1 and "auto-record-scene:2" in lines[0]
 
 
+# ── T0-4: ATTEMPT-counted forced-tool_choice telemetry (honored/ignored outcome) ────────────────
+# Additive sibling to note_belt_fire/beltsFired/get_belt_totals above — those keep their existing
+# success-gated contract untouched (every test above still passes unmodified). This dimension
+# answers the denominator question success-gating structurally can't: how many forced selections
+# were ATTEMPTED, and of those, how many actually landed (honored) vs were ignored.
+
+
+def test_note_forced_choice_counts_honored_and_ignored_separately():
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.note_forced_choice("player", "advanceGame", honored=False)
+    ledger.note_forced_choice("player", "runCompetition", honored=False)
+    totals = ledger.get_forced_choice_totals("player")
+    assert totals == {
+        "advanceGame": {"honored": 2, "ignored": 1, "attempted": 3},
+        "runCompetition": {"honored": 0, "ignored": 1, "attempted": 1},
+    }
+
+
+def test_forced_choice_drains_into_the_next_recorded_turn():
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.note_forced_choice("player", "advanceGame", honored=False)
+    ledger.record_turn("player", session="s", turn_id="t")
+    e = ledger.get_recent("player")[0]
+    assert e["forcedChoice"] == {"advanceGame": {"honored": 1, "ignored": 1}}
+    # drained: a second turn with no new attempts records an empty map
+    ledger.record_turn("player", session="s", turn_id="t2")
+    assert ledger.get_recent("player")[-1]["forcedChoice"] == {}
+    # and beltsFired stays completely untouched by the new dimension
+    assert e["beltsFired"] == {}
+
+
+def test_forced_choice_explicit_arg_merges_with_the_buffer():
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.record_turn("player", session="s", turn_id="t",
+                       forced_choice={"advanceGame": {"honored": 2, "ignored": 1}})
+    e = ledger.get_recent("player")[0]
+    assert e["forcedChoice"] == {"advanceGame": {"honored": 3, "ignored": 1}}
+
+
+def test_forced_choice_totals_sum_the_ring_and_the_pending_buffer():
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.record_turn("player", session="s", turn_id="t1")  # → ring
+    ledger.note_forced_choice("player", "advanceGame", honored=False)  # still pending
+    totals = ledger.get_forced_choice_totals("player")
+    assert totals == {"advanceGame": {"honored": 1, "ignored": 1, "attempted": 2}}
+
+
+def test_forced_choice_totals_are_per_user_isolated():
+    ledger.note_forced_choice("player-a", "advanceGame", honored=True)
+    ledger.note_forced_choice("player-b", "runCompetition", honored=False)
+    assert ledger.get_forced_choice_totals("player-a") == {
+        "advanceGame": {"honored": 1, "ignored": 0, "attempted": 1}}
+    assert ledger.get_forced_choice_totals("player-b") == {
+        "runCompetition": {"honored": 0, "ignored": 1, "attempted": 1}}
+    assert ledger.get_forced_choice_totals("player-c") == {}
+
+
+def test_forced_choice_map_is_bounded_and_names_clipped():
+    for i in range(ledger._MAX_FORCED_TOOLS + 20):
+        ledger.note_forced_choice("player", f"tool-{i}", honored=True)
+    assert len(ledger.get_forced_choice_totals("player")) <= ledger._MAX_FORCED_TOOLS
+    big = "tool " + "x" * 500
+    ledger.note_forced_choice("player2", big, honored=False)
+    (name,) = ledger.get_forced_choice_totals("player2").keys()
+    assert len(name) <= ledger._MAX_NAME_LEN
+
+
+def test_note_forced_choice_never_raises_on_garbage():
+    class _Evil:
+        def __str__(self):
+            raise RuntimeError("no name for you")
+    ledger.note_forced_choice("player", _Evil(), honored=True)
+    ledger.note_forced_choice("player", None, honored=False)
+    ledger.note_forced_choice(None, "advanceGame", honored=True)  # missing user → "default"
+    assert ledger.get_forced_choice_totals("default") == {
+        "advanceGame": {"honored": 1, "ignored": 0, "attempted": 1}}
+
+
+def test_clear_drops_the_pending_forced_buffer_too():
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.record_turn("player", session="s", turn_id="t")
+    ledger.note_forced_choice("player", "advanceGame", honored=False)
+    ledger.clear("player")
+    assert ledger.get_forced_choice_totals("player") == {}
+
+
+def test_log_line_carries_the_forced_choice_outcomes(caplog):
+    import logging
+    ledger.note_forced_choice("player", "advanceGame", honored=True)
+    ledger.note_forced_choice("player", "advanceGame", honored=False)
+    with caplog.at_level(logging.INFO, logger="src.orwell_sync_ledger"):
+        ledger.record_turn("player", session="s", turn_id="t")
+    lines = [r.getMessage() for r in caplog.records if "sync-ledger turn" in r.getMessage()]
+    assert len(lines) == 1 and "advanceGame:h1/i1" in lines[0]
+
+
 # ── the agent-loop helper is fail-soft ───────────────────────────────────────────────────────
 
 
@@ -160,6 +266,59 @@ def test_agent_loop_note_belt_counts_into_the_ledger():
     al = importlib.import_module("src.agent_loop")
     al._note_belt("player", "eviction-reveal-steer")
     assert ledger.get_belt_totals("player") == {"eviction-reveal-steer": 1}
+
+
+def test_agent_loop_note_forced_choice_is_fail_soft(monkeypatch):
+    al = importlib.import_module("src.agent_loop")
+
+    def boom(*_a, **_k):
+        raise RuntimeError("telemetry store on fire")
+
+    monkeypatch.setattr(ledger, "note_forced_choice", boom)
+    al._note_forced_choice("player", "advanceGame", honored=True)  # must not raise
+
+
+def test_agent_loop_note_forced_choice_counts_into_the_ledger():
+    al = importlib.import_module("src.agent_loop")
+    al._note_forced_choice("player", "advanceGame", honored=True)
+    al._note_forced_choice("player", "advanceGame", honored=False)
+    assert ledger.get_forced_choice_totals("player") == {
+        "advanceGame": {"honored": 1, "ignored": 1, "attempted": 2}}
+
+
+# ── T0-4 source pin: the forced-choice attempt is resolved at BOTH outcomes ──────────────────
+# The success-gated `_note_belt(owner, "forced-tool-choice:"...)` note (pinned above) fires only
+# on a landed match, and test_1659_r4_escalation.py pins that its OWN `_forced_belt_tool = None`
+# clear sits within 120 chars of that note — so the honored `_note_forced_choice` call sits AFTER
+# the clear (using `block.tool_type`, which still holds the just-matched tool name) rather than
+# between the note and the clear. `_note_forced_choice` must resolve BOTH outcomes so no attempt
+# is dropped: once at that honored site, and once more where an unmatched selection reconciles as
+# ignored before the next round's top-of-loop reset overwrites the marker.
+
+
+def test_forced_choice_attempt_is_resolved_honored_at_the_belt_note_site():
+    src = _src("src/agent_loop.py")
+    note_at = src.index('_note_belt(owner, "forced-tool-choice:"')
+    tail = src[note_at:note_at + 300]
+    assert '_note_forced_choice(owner, block.tool_type, honored=True)' in tail
+    clear_idx = tail.index('_forced_belt_tool = None')
+    assert clear_idx < tail.index('_note_forced_choice')
+    # And the clear itself stays close to the note (test_1659_r4_escalation.py's own 120-char pin).
+    assert clear_idx < 120
+
+
+def test_forced_choice_attempt_is_resolved_ignored_when_never_matched():
+    src = _src("src/agent_loop.py")
+    # Exactly one reconciliation site, sitting AFTER the per-round tool-call loop that hosts the
+    # honored note above (never inside it, or every unmatched tool call in a multi-call round
+    # would double-count the same unresolved attempt as ignored).
+    assert src.count('_note_forced_choice(owner, _forced_belt_tool, honored=False)') == 1
+    honored_note_at = src.index('_note_forced_choice(owner, block.tool_type, honored=True)')
+    ignored_note_at = src.index('_note_forced_choice(owner, _forced_belt_tool, honored=False)')
+    assert ignored_note_at > honored_note_at
+    tail = src[ignored_note_at - 40:ignored_note_at + 120]
+    assert 'if _forced_belt_tool:' in tail
+    assert '_forced_belt_tool = None' in tail
 
 
 # ── source pins: every named belt call site notes its fire ──────────────────────────────────

@@ -1760,6 +1760,30 @@ def setup_model_routes(model_discovery):
                 _save_settings(settings)
             _invalidate_models_cache()
             _local_probe_cache["data"] = None
+
+            # T0-4 (telemetry + probe arm): kick a best-effort ~10-call CAPABILITY probe for a
+            # freshly-registered LLM endpoint — measures forced-tool_choice honoring, json
+            # conformance, and reasoning-channel separation; persists a per-endpoint
+            # CapabilityProfile surfaced Vault-free on /admin/status. Fire-and-forget on a daemon
+            # thread (src.capability_probe.probe_endpoint_background) — never blocks this
+            # response, never raises. Skips image endpoints (the probe is chat-completions-shaped)
+            # and an endpoint with no discovered chat model to target.
+            if not _ep_is_image and model_ids:
+                try:
+                    from src.endpoint_resolver import _first_chat_model as _probe_first_chat_model
+                    _probe_model = None
+                    _configured_default = (settings.get("default_model") or "").strip()
+                    if _configured_default and _configured_default in model_ids:
+                        _probe_model = _configured_default
+                    if not _probe_model:
+                        _probe_model = _probe_first_chat_model(model_ids) or model_ids[0]
+                    if _probe_model:
+                        from src.capability_probe import probe_endpoint_background
+                        probe_endpoint_background(ep_id, base_url, api_key.strip() or None,
+                                                  _probe_model, user=_owner_val)
+                except Exception as _probe_kick_err:
+                    logger.warning("[model-endpoints] capability probe kickoff skipped "
+                                   "(fail-soft): %s", _probe_kick_err)
         finally:
             db.close()
 

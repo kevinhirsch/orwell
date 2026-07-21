@@ -112,8 +112,20 @@ printf 'ADMIN_USER=%s\nADMIN_PW=%s\n' "$ADMIN_USER" "$ADMIN_PW" > "$HARNESS/.sec
 # 1) engine
 say "1) engine :$ENGINE_PORT"
 rm -rf "$SANDBOX/engine-data"; mkdir -p "$SANDBOX/engine-data"
-( cd "$ROOT" && ORWELL_ENGINE_PORT=$ENGINE_PORT ORWELL_DATA_DIR="$SANDBOX/engine-data" \
-    exec node dist/main.js >"$LOGS/engine.log" 2>&1 ) & PIDS+=($!)
+# TUN-10 (deploy-parity, docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md): boot
+# with the SAME opt-in behavioral flags the real deploy ships, single-sourced from
+# deploy/orwell-env-defaults.sh (never a hand-typed copy that can drift). These flags are all
+# calibration-neutral / own-isolated-rng by design (Vault-only content, no relationship-edge fold,
+# never touch the seeded comp/vote spine — see the source comments in orwell-env-defaults.sh), so
+# turning them on does not threaten this gate's actual invariant: window B mirrors window A's LIVE
+# render of the SAME session, not a fixed golden transcript. ORWELL_EMBEDDINGS/_EMBED_CACHE stay
+# unset (unchanged — the deterministic-fallback embeddings path this gate has always used) and
+# ORWELL_DEAL_DEPTH stays off (pending its live-loop reconciliation, same carve-out as the README).
+. "$ROOT/deploy/orwell-env-defaults.sh"
+mapfile -t MIRROR_FLAGS < <(orwell_optin_env_defaults "$SANDBOX/engine-data" \
+  | grep -Ev '^ORWELL_EMBED(DINGS|_CACHE)=|^ORWELL_DEAL_DEPTH=')
+( cd "$ROOT" && exec env ORWELL_ENGINE_PORT=$ENGINE_PORT ORWELL_DATA_DIR="$SANDBOX/engine-data" \
+    "${MIRROR_FLAGS[@]}" node dist/main.js >"$LOGS/engine.log" 2>&1 ) & PIDS+=($!)
 wait_http "$ENGINE_URL/health" engine || { tail -20 "$LOGS/engine.log"; exit 1; }
 
 # 2) model: the deterministic fake (default) OR a real provider for the live pre-merge pass

@@ -1688,6 +1688,22 @@ def _note_belt(owner, belt: str, n: int = 1) -> None:
         pass
 
 
+def _note_forced_choice(owner, tool: str, *, honored: bool) -> None:
+    """T0-4 (telemetry + probe arm) — count one forced-``tool_choice`` ATTEMPT, with its
+    outcome, in the Vault-free sync ledger (`orwell_sync_ledger.note_forced_choice`). Unlike
+    `_note_belt` (success-gated — a count means the correction landed), this fires for EVERY
+    resolved attempt so the denominator is never invisible again: a live playtest showed 20
+    forced selections against only 7 honored `beltsFired` counts, with the other 13 leaving no
+    trace anywhere. Call exactly once per forced selection, after the round has resolved
+    whether the forced tool landed (`honored=True`) or was ignored (`honored=False`). Fail-soft
+    by construction: telemetry must never hurt the turn."""
+    try:
+        from src import orwell_sync_ledger as _led
+        _led.note_forced_choice(owner, tool, honored=honored)
+    except Exception:
+        pass
+
+
 # DeepSeek-V4 (the prior OOB narrator) returned HTTP 400 on `tool_choice` in always-thinking mode (the
 # 2026-06-21 conformance audit) — so forcing must NEVER be sent to it. GLM-4.7 (the current OOB model)
 # honors it. We gate forcing to models NOT on this known-rejecter list rather than allow-listing one
@@ -8794,6 +8810,7 @@ async def _stream_agent_loop_impl(
             if _forced_belt_tool and block.tool_type == _forced_belt_tool:
                 _note_belt(owner, "forced-tool-choice:" + _forced_belt_tool)
                 _forced_belt_tool = None
+                _note_forced_choice(owner, block.tool_type, honored=True)  # T0-4 attempt sibling
             if block.tool_type in _VERIFIER_EFFECTFUL_TOOLS:
                 _effectful_used = True
             # #1312 (Vault Wall): the MODEL called createCharacter itself and the engine started the
@@ -8858,6 +8875,16 @@ async def _stream_agent_loop_impl(
                         _note_belt(owner, "day-break-steer")  # gap #3 telemetry
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
+
+        # T0-4 (telemetry + probe arm): the loop above only resolves `_forced_belt_tool` on a
+        # HONORED match (clearing it there). If a forced tool_choice was selected this round but
+        # no matching tool call landed, the attempt was IGNORED — resolve it here, before the
+        # next round's top-of-loop reset zeroes the marker, so the denominator this telemetry
+        # exists to create is never silently dropped (§ note_belt_fire stays success-gated;
+        # this is the additive attempt-counted sibling — see `_note_forced_choice`).
+        if _forced_belt_tool:
+            _note_forced_choice(owner, _forced_belt_tool, honored=False)
+            _forced_belt_tool = None
 
         # If budget was hit, stop the loop
         if budget_hit:
