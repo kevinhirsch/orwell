@@ -59,6 +59,12 @@ logger = logging.getLogger(__name__)
 _active_streams: Dict[str, dict] = {}
 _IMAGE_MODEL_PREFIXES = ("gpt-image", "dall-e", "chatgpt-image")
 
+# Strong refs to fire-and-forget background tasks (e.g. the post-turn recordInteraction
+# fallback). asyncio.create_task holds only a WEAK ref, so a task can be garbage-collected
+# mid-flight before it completes — silently dropping the work. Retain each task here and
+# discard it in a done-callback (the canonical asyncio pattern).
+_BG_TASKS: set = set()
+
 
 def _stream_set(session_id: str, **fields) -> None:
     """Update fields on the active-stream entry for `session_id`, or
@@ -1897,6 +1903,9 @@ def setup_chat_routes(
                                 _rec_task = asyncio.create_task(ensure_turn_recorded(
                                     ctx.user, message, full_response, _agent_tools_called,
                                 ))
+                                # Retain a strong ref until the task finishes (weak-ref GC guard).
+                                _BG_TASKS.add(_rec_task)
+                                _rec_task.add_done_callback(_BG_TASKS.discard)
                                 _rec_task.add_done_callback(_push_after_fallback)
                             if full_response:
                                 # M2-6: the beat's IN-WORLD moment (from this turn's framing state)
