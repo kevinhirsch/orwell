@@ -371,7 +371,7 @@ Independent convergences across miners, experts, and lenses:
 
 | Q | Ruling |
 |---|---|
-| Q1 | **Exit door APPROVED, player-only.** The structurally-filtered eviction-night exit package (speaker = evictee; subjects = the player, prior evictees, already-public facts; adversarial-test-gated like producerVault; flag-gated off-by-default) becomes the second sanctioned Vault door. The gossip-diffusion variant ("…Airs") is NOT approved. |
+| Q1 | **Exit door APPROVED, player-only.** The structurally-filtered eviction-night exit package (speaker = evictee; subjects = the player, prior evictees, facts already in the player's knowledge layer (the same predicate as the mechanism text — one boundary, not two); adversarial-test-gated like producerVault; flag-gated off-by-default) becomes the second sanctioned Vault door. The gossip-diffusion variant ("…Airs") is NOT approved. |
 | Q2 | **All three dark flags go live in deploy defaults:** `ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`, `ORWELL_SHOWRUNNER` Phase-1 (observe-only; REWEIGHT stays off). |
 | Q3 | **Full cross-season carry-in** (content, never outcomes): legend precedes you + cold cases + production memory. Flag-gated + seeded each. |
 | Q4 | **Seeded partial reaction pan** — the camera catches a temperature-rolled subset each ceremony, never all 15. |

@@ -91,7 +91,7 @@ leak-prone build is a **failure state**, not a partial success.
    enforced in code at the port/tool boundary, *never* by prompt wording. The model "cannot
    leak what it never receives." **God Mode / admin is walled from the Vault too** (the human
    has never read it and must not be able to — spoilers ruin the game above all else).
-   **The ONE sanctioned exception (owner-ruled DEBUG override): `producerVault`** — a live-Vault
+   **TWO sanctioned exceptions exist — and only these two.** (1) **owner-ruled DEBUG override: `producerVault`** — a live-Vault
    *unseal* for operator debugging. It is deliberately quarantined and is NOT a hole in the wall for
    normal play: it lives in `DEBUG_VAULT_TOOLS` (the *only* `readsVault: true` registry — the literal
    `ToolDescriptor.readsVault: false` guard still holds for every advertised tool), is **out-of-band**
@@ -99,7 +99,12 @@ leak-prone build is a **failure state**, not a partial success.
    explicit FE "unseal" on `/admin/status` (hidden by default). Every "admin allowlist is Vault-free"
    guarantee stays literally true; `tests/unit/producerVault.test.ts` is the gate. Do **not** "fix" it
    as a leak — it is intentional; do **not** widen it (never the player channel, never an advertised
-   tool, never always-on).
+   tool, never always-on). (2) **The eviction-night exit package (owner-ruled 2026-07-21, Q1 —
+   player-only):** a structurally-filtered unseal at the player's OWN eviction — speaker = the
+   evictee; subjects limited to the player, prior evictees, and facts already in the player's
+   knowledge layer; never living players' secrets; adversarial-test-gated like `producerVault`;
+   flag-gated off-by-default. Spec: `docs/design/2026-07-21-moonshot-round2-divergent-slate.md`
+   §5 Q1. Never extend Vault exposure beyond these two doors.
 3. **Anti-sycophancy.** The deterministic core + seeded randomness decide outcomes; the LLM
    only *narrates*. Ground truth lives in the stores and is *queried*, never "remembered"
    and bent to please the player.
