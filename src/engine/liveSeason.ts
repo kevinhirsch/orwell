@@ -304,6 +304,18 @@ export interface CompetitionProgress {
    */
   themeWeek?: number;
   themeCycle?: number;
+  /**
+   * L-F4 (#1743) — the presentation SOURCE decision, FROZEN at draw. #1400 model fiction is authored a
+   * turn or more AFTER the roll stages (the model dresses a decided result), so a first-fiction write-back
+   * that lands mid-comp would otherwise flip the name/premise from the seeded theme to the authored one
+   * PART-WAY through the comp — the same flip-flop this feature prevents. This pins the choice at draw:
+   * `true` only if VALIDATED fiction already existed when the comp staged (in practice only after a reload
+   * of a comp whose fiction was authored before the save); `false` ⇒ the comp is committed to the frozen
+   * seeded theme for its whole duration and a LATE fiction is still stored (its per-drop lines ride the
+   * `comp-elimination` beats) but never re-skins the active comp's name/premise. Absent on a legacy save ⇒
+   * live resolution (back-compat). Seed-NEUTRAL. Vault-free.
+   */
+  themeAuthored?: boolean;
 }
 
 /**
@@ -792,6 +804,11 @@ function freezeCompTheme(s: LiveSeasonState): void {
   if (!s.competition) return;
   s.competition.themeWeek = s.week;
   s.competition.themeCycle = s.twist?.phase === "running" ? 1 : 0;
+  // Pin the presentation SOURCE too: whether this comp is dressed by authored #1400 fiction or the frozen
+  // seeded theme is decided NOW. In normal play no fiction exists yet at draw ⇒ false ⇒ the comp is
+  // committed to the seeded theme, and a late first-fiction write-back cannot re-skin it mid-comp.
+  const f = s.competitionFiction;
+  s.competition.themeAuthored = !!(f && f.comp === s.competition.comp && f.week === s.week);
 }
 
 /**
@@ -1160,7 +1177,16 @@ export function competitionPresentation(s: LiveSeasonState): CompetitionPresenta
   }
   if (!comp || !def) return null;
   const f = s.competitionFiction;
-  const authored = !!(f && f.comp === comp && f.week === s.week);
+  const fictionPresent = !!(f && f.comp === comp && f.week === s.week);
+  // L-F4 (#1743) — the presentation SOURCE is FROZEN at draw for a staged comp, so a first-fiction
+  // write-back that lands AFTER staged rounds began cannot retroactively re-skin the in-progress comp
+  // (the authored-fiction variant of the flip-flop). Honor the frozen decision; fall back to the live
+  // read only for a legacy save (no frozen field) or a pre-stage comp (no `s.competition`). A frozen
+  // "authored" still requires the fiction to actually be present (it always is — cleared only at crown).
+  const sourceAuthored = s.competition && s.competition.themeAuthored !== undefined
+    ? s.competition.themeAuthored
+    : fictionPresent;
+  const authored = sourceAuthored && fictionPresent;
   return {
     comp, def,
     name: authored ? f!.theme : def.name,

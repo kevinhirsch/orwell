@@ -102,11 +102,11 @@ describe("L-F4 (#1743) — the comp format/premise is pinned across a competitio
     });
   }
 
-  it("the HARD format pin: the #1400 authored fiction can never rename the format, and its premise is immutable", () => {
-    const h = buildHouse(12, 5);
+  /** Drive to a RESOLVED staged HOH comp (winner + drop order fixed) so a fiction write-back is legal. */
+  function resolvedStagedHoh(seed: number): { s: LiveSeasonState; ctx: SeasonCtx } {
+    const h = buildHouse(12, seed);
     const s: LiveSeasonState = newLiveSeason(h.active);
-    const rng = new SeededRandom(5);
-    // Drive to a RESOLVED staged HOH comp (winner + drop order fixed) so a fiction write-back is legal.
+    const rng = new SeededRandom(seed);
     for (let guard = 0; guard < 200 && !(s.competition && s.competition.winner !== undefined && s.competition.dropOrder); guard++) {
       if (s.pending?.kind === "comp-round" || s.pending?.kind === "comp-intent") {
         applyDecision(s, { kind: s.pending.kind, intent: "compete" }, h.ctx, rng);
@@ -114,35 +114,66 @@ describe("L-F4 (#1743) — the comp format/premise is pinned across a competitio
         advance(s, h.ctx, rng);
       } else break;
     }
-    const c = s.competition!;
-    expect(c.winner, "the comp must have resolved for this test").toBeDefined();
+    expect(s.competition?.winner, "the comp must have resolved for this test").toBeDefined();
+    return { s, ctx: h.ctx };
+  }
 
+  it("LATE fiction (authored AFTER staging began) does NOT re-skin the active comp's name/premise; format stays the library format", () => {
+    const { s } = resolvedStagedHoh(5);
+    const c = s.competition!;
+    // The comp staged with no fiction ⇒ the source is FROZEN to the seeded/library floor at draw.
+    expect(c.themeAuthored, "the source is pinned to the theme at draw (no fiction present)").toBe(false);
     const floor = competitionPresentation(s)!;
+    const floorPremise = floor.premise;
+    const floorName = floor.name;
     const pinnedFormat = floor.format;
 
-    // The model authors its own theme + premise + per-drop fiction MATCHED to the fixed drop order.
+    // A LATE first-fiction write-back arrives (the #1400 flow — the model always dresses a decided result).
     const authored = {
       comp: c.comp, week: s.week, theme: "A Model-Invented Theme",
       premise: "a wholly different, model-authored premise",
       eliminations: c.dropOrder!.map((id) => ({ id, fiction: `${id} goes out` })),
     };
     const v = validateCompetitionFiction(s, authored);
-    expect(v.ok, "the drop-order-matched fiction must validate").toBe(true);
+    expect(v.ok, "the drop-order-matched fiction must validate + STORE (its per-drop lines ride comp-elimination)").toBe(true);
     if (v.ok) s.competitionFiction = v.fiction;
+    expect(s.competitionFiction, "the fiction IS stored (not dropped) — only the name/premise pin ignores it").toBeDefined();
 
-    const withFiction = competitionPresentation(s)!;
-    // The authored PREMISE flows through (the open set — the model may invent the flavor)...
-    expect(withFiction.premise).toBe("a wholly different, model-authored premise");
-    expect(withFiction.authored).toBe(true);
-    // ...but the FORMAT is the HARD pin: it is ALWAYS the drawn library format, never model-overridable.
-    expect(withFiction.format, "the format is never overridable by authored fiction").toBe(pinnedFormat);
+    // THE P1 GUARD: the active comp's pinned presentation is UNCHANGED — the late fiction never re-skins it.
+    const after = competitionPresentation(s)!;
+    expect(after.premise, "the pinned premise must not flip to the late authored premise").toBe(floorPremise);
+    expect(after.name, "the pinned name must not flip mid-comp").toBe(floorName);
+    expect(after.authored, "the frozen source stays 'theme' despite the late fiction").toBe(false);
+    // The FORMAT is the HARD pin: always the drawn library format, never model-overridable.
+    expect(after.format, "the format is never overridable by authored fiction").toBe(pinnedFormat);
 
-    // The authored premise is IMMUTABLE until crown — a second author attempt is REJECTED (already-authored),
-    // the analogue of the winner-rename rejection, so later rounds can never render a different premise.
+    // The stored fiction is still IMMUTABLE — a second author attempt is REJECTED (already-authored).
     const second = validateCompetitionFiction(s, { ...authored, premise: "yet another premise" });
     expect(second.ok).toBe(false);
     if (!second.ok) expect(second.reason).toBe("already-authored");
-    expect(competitionPresentation(s)!.premise, "the pinned premise stands").toBe("a wholly different, model-authored premise");
+  });
+
+  it("fiction PRESENT at draw stays the source (frozen authored) — the authored premise IS the pin, format still the library format", () => {
+    const { s } = resolvedStagedHoh(5);
+    const c = s.competition!;
+    const libraryFormat = competitionPresentation(s)!.format;
+
+    // Author fiction, then model a comp whose fiction predated the save (a reload): the source freeze
+    // captured it as authored. This exercises the reviewer's "if fiction was present at draw, it stays
+    // the source" branch — the frozen decision is honored consistently for the comp's whole duration.
+    const v = validateCompetitionFiction(s, {
+      comp: c.comp, week: s.week, theme: "A Draw-Time Theme", premise: "the premise pinned at draw",
+      eliminations: c.dropOrder!.map((id) => ({ id, fiction: `${id} goes out` })),
+    });
+    expect(v.ok).toBe(true);
+    if (v.ok) s.competitionFiction = v.fiction;
+    c.themeAuthored = true; // frozen 'authored' (fiction was present when the comp staged)
+
+    const pin = competitionPresentation(s)!;
+    expect(pin.authored, "a draw-time-authored comp reports the authored source").toBe(true);
+    expect(pin.premise, "the authored premise IS the pinned presentation").toBe("the premise pinned at draw");
+    expect(pin.name).toBe("A Draw-Time Theme");
+    expect(pin.format, "the format is still the drawn library format").toBe(libraryFormat);
   });
 
   it("no pin before a def is drawn (the HOH comp before it stages), and off a comp beat", () => {
@@ -233,5 +264,54 @@ describe("L-F4 (#1743) — adapter-level themed pin: whereabouts().houseEvent.co
     expect(pin.format.length).toBeGreaterThan(0);
     expect(pin.premise.length).toBeGreaterThan(0);
     expect(/"(physical|mental|social|trust|affinity|threat|scores|temperature)"/i.test(seen[0]!)).toBe(false);
+  });
+
+  it("a LATE #1400 fiction write-back (after rounds began) does NOT re-skin the active comp's whereabouts pin", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("lf4-late-fiction");
+    sb.session.createCharacter({ playerName: "The Player", seed: 31 });
+    sb.session.setCompThemesEnabled(true);     // the seeded theme is the frozen source at draw
+    sb.session.setGenCompetitionsEnabled(true); // #1400 authoring is ON — the model dresses the decided roll
+    const s = sb.session;
+
+    // Advance into the first STAGED competition and capture the frozen (pre-fiction) pin.
+    let pinned: string | null = null;
+    for (let i = 0; i < 400 && pinned === null; i++) {
+      pinned = compPinString(sb);
+      if (pinned !== null) break;
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+    }
+    expect(pinned, "the drive must reach a staged competition").not.toBeNull();
+
+    // The FE authors matching fiction AFTER staging began (the #1400 flow — the model always dresses a
+    // decided result). Build it from the engine's own fixed drop order so it validates + is stored.
+    const view = s.competitionStagingView();
+    expect(view, "gen-competitions ON ⇒ the staging view is available once the roll resolves").not.toBeNull();
+    const accepted = s.recordCompetitionFiction({
+      comp: view!.comp, week: view!.week,
+      theme: "A LATE Model Theme", premise: "a late model-authored premise that must NOT re-skin this comp",
+      eliminations: view!.dropOrder.map((r) => ({ id: r.id, fiction: `${r.name} bows out` })),
+    });
+    expect(accepted.accepted, "the drop-order-matched fiction validates + stores (its per-drop lines ride comp-elimination)").toBe(true);
+
+    // THE P1 GUARD: the active comp's whereabouts pin is UNCHANGED by the late fiction, and stays
+    // byte-identical across every remaining round.
+    const seen: string[] = [pinned!];
+    const afterFiction = compPinString(sb);
+    if (afterFiction !== null) seen.push(afterFiction);
+    for (let i = 0; i < 40; i++) {
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+      const next = compPinString(sb);
+      if (next === null) break;
+      seen.push(next);
+    }
+    expect(seen.length, "the comp spanned multiple beats around the late write-back").toBeGreaterThanOrEqual(2);
+    expect(new Set(seen).size, "the late fiction must not change the active comp's pinned presentation").toBe(1);
+    // And the pin is the frozen SEEDED THEME, not the late authored theme.
+    expect(seen[0]!).not.toContain("a late model-authored premise");
   });
 });
