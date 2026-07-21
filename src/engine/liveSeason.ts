@@ -292,6 +292,18 @@ export interface CompetitionProgress {
    * the outcome is decided.
    */
   dropOrder?: EntityId[];
+  /**
+   * L-F4 (#1743) — the theme's live-varying INPUTS, FROZEN at draw/stage time. The 0125 seeded-theme
+   * skin the adapter lays over the library floor is a pure function of (gameSeed, phase, week, cycle);
+   * `week` is stable across a comp, but the twist `cycle` (0, or 1 while a double-eviction twist is
+   * "running") can flip MID-comp, which would silently re-skin an in-progress competition round to round
+   * (the L-F4 finding's twist-phase variant). Freezing both here pins the resolved name/premise for the
+   * comp's whole duration — the adapter reads these instead of the live `week`/`twist`. Absent on a legacy
+   * save (or when themes are off) ⇒ the adapter falls back to live resolution (back-compat, byte-identical
+   * when the twist never changes). Seed-NEUTRAL projection inputs — no rng, no fold. Vault-free.
+   */
+  themeWeek?: number;
+  themeCycle?: number;
 }
 
 /**
@@ -763,8 +775,23 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     recordDraw(s, "hoh", def); // committed for the week — the next hoh draw avoids it (0042)
     s.vetoComp = undefined;
     s.competition = beginStaged("hoh-competition", def.type, field, result);
+    freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
+}
+
+/**
+ * L-F4 (#1743) — freeze the 0125 theme's live-varying inputs (week + twist cycle) at DRAW/STAGE time,
+ * onto the just-created staged-comp state. The adapter's `themedScaffold` reads these frozen inputs for
+ * an in-progress comp instead of the live `week`/`twist`, so the surfaced name/premise stays byte-
+ * identical across every round even if the twist flips to "running" mid-comp (a double-eviction night).
+ * Presentation-only: pure projection inputs — no rng, no fold, byte-identical to before when the twist
+ * never changes (the common case) and off entirely when themes are off.
+ */
+function freezeCompTheme(s: LiveSeasonState): void {
+  if (!s.competition) return;
+  s.competition.themeWeek = s.week;
+  s.competition.themeCycle = s.twist?.phase === "running" ? 1 : 0;
 }
 
 /**
@@ -784,6 +811,7 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     recordDraw(s, "veto", def); // committed for the week — the next veto draw avoids it (0042)
     // `s.compIntent` (round 1's approach) carries into advanceCompetition as round 1's expression.
     s.competition = beginStaged("veto-competition", def.type, field, result);
+    freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
 }

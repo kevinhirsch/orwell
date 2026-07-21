@@ -8,6 +8,9 @@ import {
   newLiveSeason, advance, applyDecision, validateCompetitionFiction, competitionPresentation,
   type LiveSeasonState, type SeasonCtx, type CompetitionPresentation,
 } from "../../src/engine/liveSeason";
+import { GameSessionRegistry } from "../../src/composition/registry";
+import type { UserSandbox } from "../../src/composition/registry";
+import type { AdvanceView, GameSession } from "../../src/ports/GameSession";
 
 /**
  * L-F4 (#1743) — the comp presentation (format + premise) is PINNED across a competition's rounds.
@@ -150,5 +153,85 @@ describe("L-F4 (#1743) — the comp format/premise is pinned across a competitio
     advance(s, h.ctx, rng);
     expect(s.pending?.kind, "the HOH comp-round is pending").toBe("comp-round");
     expect(competitionPresentation(s), "no format/premise exists before the HOH comp stages").toBeNull();
+  });
+});
+
+// --- Adapter-level pin (0125 theme ENABLED) — the real-play path + the P2 twist-mutation guard ---------
+
+/** Resolve any pending legally (compete every comp round, first legal option everywhere) — roles only. */
+function resolveLegally(s: Pick<GameSession, "submitDecision">, p: NonNullable<AdvanceView["pending"]>): void {
+  if (p.kind === "nominations") s.submitDecision({ kind: "nominations", choice: [p.options[0]!.id, p.options[1]!.id] });
+  else if (p.kind === "veto-decision") s.submitDecision({ kind: "veto-decision", use: false });
+  else if (p.kind === "replacement") s.submitDecision({ kind: "replacement", replacement: p.options[0]!.id });
+  else if (p.kind === "comp-round") s.submitDecision({ kind: "comp-round", intent: "compete" });
+  else if (p.kind === "comp-intent") s.submitDecision({ kind: "comp-intent", intent: "compete" });
+  else if (p.kind === "houseguests-choice") s.submitDecision({ kind: "houseguests-choice", vote: p.options[0]!.id });
+  else if (p.kind === "goodbye-message") s.submitDecision({ kind: "goodbye-message", vote: p.options[0]!.id });
+  else s.submitDecision({ kind: p.kind, vote: p.options[0]!.id } as never);
+}
+
+function newThemedGame(user: string, seed: number): UserSandbox {
+  const reg = new GameSessionRegistry();
+  const sb = reg.sandboxFor(user);
+  sb.session.createCharacter({ playerName: "The Player", seed });
+  sb.session.setCompThemesEnabled(true); // the real-play default — the seeded skin over the 0042 floor
+  return sb;
+}
+
+/** The whereabouts comp pin as a stable string, or null when there is no live comp house-event. */
+function compPinString(sb: UserSandbox): string | null {
+  const he = sb.session.whereabouts()?.houseEvent;
+  if (!he || (he.kind !== "hoh-competition" && he.kind !== "veto-competition") || !he.comp) return null;
+  return JSON.stringify(he.comp); // {name, format, premise}
+}
+
+describe("L-F4 (#1743) — adapter-level themed pin: whereabouts().houseEvent.comp is stable across a comp", () => {
+  it("with the theme layer ENABLED, name+format+premise are byte-identical every comp beat — even as the twist flips mid-comp", () => {
+    const sb = newThemedGame("lf4-adapter", 31);
+    const s = sb.session;
+
+    // Advance into the first STAGED competition (the comp pin appears once the roll stages).
+    let staged: string | null = null;
+    for (let i = 0; i < 400 && staged === null; i++) {
+      staged = compPinString(sb);
+      if (staged !== null) break;
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+    }
+    expect(staged, "the drive must reach a staged competition with a comp pin").not.toBeNull();
+
+    // Collect the pin across EVERY beat of this one comp. Between beats, MUTATE the live twist phase
+    // (0->"running", cycle 0->1) — a change that WOULD re-skin the comp if the theme read live state.
+    // The pin is frozen at draw, so it must stay byte-identical. The bogus twist is restored before each
+    // advance so the seeded drive is never perturbed (presentation-only).
+    const seen: string[] = [staged!];
+    for (let i = 0; i < 40; i++) {
+      const live = (s as unknown as { live: { twist?: unknown } }).live;
+      const savedTwist = live.twist;
+      live.twist = { kind: "double-eviction", phase: "running" }; // flip cycle 0->1 at READ time only
+      const underFlip = compPinString(sb);
+      live.twist = savedTwist; // restore — the engine advance must never see the bogus twist
+      if (underFlip !== null) seen.push(underFlip); // the read under the flipped twist must match
+
+      const a = s.advanceGame();
+      if (a.pending) resolveLegally(s, a.pending);
+      if (a.finished) break;
+      const next = compPinString(sb);
+      if (next === null) break; // the comp has crowned — we captured its whole run
+      seen.push(next);
+    }
+
+    // The comp genuinely spanned multiple beats (a turn-TO-turn flip needs at least two).
+    expect(seen.length, "the staged comp must surface across multiple beats").toBeGreaterThanOrEqual(2);
+    // THE LITMUS: one theme name + format + premise for the whole competition, never re-skinned.
+    expect(new Set(seen).size, "the themed comp pin must be byte-identical across every round + twist flip").toBe(1);
+
+    // Sanity: the pin is a real themed presentation (non-empty name/format/premise), Vault-free.
+    const pin = JSON.parse(seen[0]!) as { name: string; format: string; premise: string };
+    expect(pin.name.length).toBeGreaterThan(0);
+    expect(pin.format.length).toBeGreaterThan(0);
+    expect(pin.premise.length).toBeGreaterThan(0);
+    expect(/"(physical|mental|social|trust|affinity|threat|scores|temperature)"/i.test(seen[0]!)).toBe(false);
   });
 });
