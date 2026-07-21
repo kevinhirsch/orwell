@@ -508,7 +508,7 @@ def test_prewarm_runs_genesis_before_identity_and_authoring():
             return 0
 
     class _Authoring:
-        def kickoff_authoring(self, cast, user, then=None, on_authored=None):
+        def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None, seed=None):
             order.append("authoring")
             if then:
                 then()

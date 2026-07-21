@@ -50,9 +50,14 @@ def test_l28b_prompt_grounds_the_hidden_life_in_the_specific_character():
     for facet in ("pastry chef", "villain", "34", "Detroit, MI", "deadpan and dry"):
         assert facet in user, facet
 
-    # (c) STILL no player coupling — the grounding change must not reintroduce a protagonist.
+    # (c) STILL no player coupling — the grounding change must not reintroduce a protagonist. T0-6
+    # added `taken`/`hand` (the FacetLedger steering) — legitimate, Vault-free, player-independent
+    # params — so the gate now asserts NO "player"-shaped parameter exists, rather than pinning the
+    # exact param list closed.
     import inspect
-    assert list(inspect.signature(A.build_authoring_messages).parameters) == ["npc"]
+    params = list(inspect.signature(A.build_authoring_messages).parameters)
+    assert params[0] == "npc"
+    assert not any("player" in p.lower() for p in params), params
     assert "player" not in user.lower() or "no protagonist" in user.lower()
 
 
@@ -86,8 +91,11 @@ def test_l28b_prompt_carries_no_player_coupling_and_no_protagonist():
     This is the permanent gate against player-centric NPC storyline authoring."""
     import inspect
     # The function signature itself no longer accepts a player name (player-independent by construction).
+    # T0-6 added `taken`/`hand` (the cast-wide FacetLedger steering — Vault-free, player-independent);
+    # the gate is that NO parameter is player-shaped, not that the param list is frozen shut.
     params = list(inspect.signature(A.build_authoring_messages).parameters)
-    assert params == ["npc"], params
+    assert params[0] == "npc", params
+    assert not any("player" in p.lower() for p in params), params
 
     # A distinctive player name could only appear in the messages if it were threaded in — it is not.
     player_name = "Zzqx The Player"

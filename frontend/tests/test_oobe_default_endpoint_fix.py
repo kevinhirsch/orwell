@@ -607,7 +607,7 @@ def test_run_authoring_dispatches_on_the_owner_box_state_not_a_silent_noop(
     ca = importlib.import_module("src.orwell_cast_authoring")
     dispatched = {}
 
-    async def fake_author_cast(cast, llm_fn, write_fn, on_authored=None, user=None):
+    async def fake_author_cast(cast, llm_fn, write_fn, on_authored=None, user=None, seed=None):
         dispatched["cast"] = cast
         dispatched["llm_fn"] = llm_fn
         return len(cast)
@@ -637,7 +637,7 @@ def test_prewarm_cast_kicks_deep_authoring_on_the_warm(monkeypatch, run):
 
     kicked = {}
 
-    def kickoff_authoring(cast, owner, then=None, on_authored=None, write=None):
+    def kickoff_authoring(cast, owner, then=None, on_authored=None, write=None, seed=None):
         kicked["cast"] = cast
         kicked["owner"] = owner
         if then:
