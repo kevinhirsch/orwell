@@ -215,7 +215,7 @@ import {
   firstCeremonyBeatResolved,
   requestSelfEviction as requestSelfEvict, cancelSelfEviction as cancelSelfEvict, applySelfEviction, playerHasLeft,
   advanceClock, advanceClockPerConversation, advanceClockPerScene, resetSceneClock, playerTurnIn, playerRestDeficit, npcRestDeficit, isInertBeat,
-  competitionStagingData, validateCompetitionFiction,
+  competitionStagingData, validateCompetitionFiction, competitionPresentation,
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone, type ExitStance,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
@@ -4166,6 +4166,11 @@ export class GameSessionAdapter implements GameSession {
             };
           })()
         : {};
+      // L-F4 (#1743): pin the drawn comp's presentation (name + format + premise) onto the house event so
+      // EVERY comp-beat turn's ground truth carries ONE consistent format across the comp's rounds. Only
+      // for a competition, and only once its def is drawn (the HOH comp before it stages carries none).
+      const compPin = (ev.kind === "hoh-competition" || ev.kind === "veto-competition")
+        ? this.pinnedCompView() : undefined;
       return {
         room,
         present: others.map(named),       // the whole house is gathered for the event
@@ -4173,7 +4178,7 @@ export class GameSessionAdapter implements GameSession {
         turnsHere: this.presenceTenure?.get(me) ?? 0,
         companions: others.map((id) => ({ ...named(id), turnsHere: 0 })),
         tracked: [],
-        houseEvent: { kind: ev.kind, ...compSplit },
+        houseEvent: { kind: ev.kind, ...compSplit, ...(compPin ? { comp: compPin } : {}) },
       };
     }
     // ADR 0006: as the night thins, houseguests who have turned in are no longer "around" — the house
@@ -6847,15 +6852,52 @@ export class GameSessionAdapter implements GameSession {
    * when the layer is on. The theme is a pure PROJECTION (chosen on a dedicated hash, never the beat rng),
    * so a theme never moves the winner; off (or pre-seed) ⇒ the bare 0042 library name/premise (byte-identical).
    */
-  private themedScaffold(def: CompetitionDef): { name: string; theme?: string; narrative: { premise: string; beats: string[]; winReads: string } } {
+  private themedScaffold(
+    def: CompetitionDef, frozen?: { week: number; cycle: number },
+  ): { name: string; theme?: string; narrative: { premise: string; beats: string[]; winReads: string } } {
     if (!this.compThemesEnabled || this.gameSeed === null) {
       return { name: def.name, narrative: { premise: def.narrative.premise, beats: [...def.narrative.beats], winReads: def.narrative.winReads } };
     }
-    // A double-eviction night reruns a same-phase comp in the SAME week; mark the compressed second cycle
-    // (twist "running") so it draws a distinct skin from the first crown rather than repeating it.
-    const cycle = this.live?.twist?.phase === "running" ? 1 : 0;
-    const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, this.week, cycle));
+    // L-F4 (#1743): for an IN-PROGRESS staged comp the theme inputs are FROZEN at draw (week + cycle),
+    // so the skin can't flip round to round if the live week/twist changes mid-comp. Absent (pre-stage /
+    // legacy save) ⇒ live resolution. A double-eviction night reruns a same-phase comp in the SAME week;
+    // the frozen `cycle` (twist "running" ⇒ 1) still draws a distinct skin from the first crown.
+    const week = frozen?.week ?? this.week;
+    const cycle = frozen ? frozen.cycle : (this.live?.twist?.phase === "running" ? 1 : 0);
+    const t = applyTheme(def, themeForWeek(this.gameSeed, def.phase, week, cycle));
     return { name: t.name, theme: t.theme, narrative: t.narrative };
+  }
+
+  /** L-F4 (#1743): the FROZEN theme inputs for the in-progress staged comp (pinned at draw), or undefined
+   *  when none is staged / a legacy save lacks them ⇒ the caller falls back to live theme resolution. */
+  private frozenCompTheme(): { week: number; cycle: number } | undefined {
+    const c = this.live?.competition;
+    return c && c.themeWeek !== undefined && c.themeCycle !== undefined
+      ? { week: c.themeWeek, cycle: c.themeCycle } : undefined;
+  }
+
+  /**
+   * L-F4 (#1743) — the PINNED comp presentation surfaced on EVERY comp-beat turn's whereabouts (name +
+   * format + premise), resolved with the SAME precedence `runCompetition` uses (model-authored #1400
+   * fiction > 0125 seeded theme > 0042 library floor), so a comp's format/premise stays CONSISTENT across
+   * its first reveal and every staged elimination round — the narrator can never re-author "what kind of
+   * comp this is" turn to turn. The FORMAT is ALWAYS the drawn `def.format` (the HARD pin — never model-
+   * overridable). `undefined` before a def is drawn (the HOH comp before it stages) and off a comp beat.
+   * PURE — `competitionPresentation` + `themedScaffold` consume no rng, so `whereabouts` stays a purely
+   * observational, calibration-identical read. Vault-free (public flavor only — never a score/lean/number).
+   */
+  private pinnedCompView(): { name: string; format: string; premise: string } | undefined {
+    if (!this.live) return undefined;
+    const pin = competitionPresentation(this.live);
+    if (!pin) return undefined;
+    // #1400 fiction, once pinned, wins outright (a fresh restart re-grounds the narrator in the authored
+    // staging) — exactly `runCompetition`'s precedence; otherwise dress the library floor in this week's
+    // seeded theme. The FORMAT never comes from either skin — it is always the drawn library `def.format`.
+    if (pin.authored) return { name: pin.name, format: pin.format, premise: pin.premise };
+    // L-F4 (#1743): read the theme from the FROZEN inputs pinned at draw, so the name/premise is byte-
+    // identical across every round of the comp even if the live week/twist phase changes mid-comp.
+    const skin = this.themedScaffold(pin.def, this.frozenCompTheme());
+    return { name: skin.name, format: pin.format, premise: skin.narrative.premise };
   }
 
   /**
@@ -10425,12 +10467,19 @@ export class GameSessionAdapter implements GameSession {
         // context (a restart) re-grounds the narrator in the authored staging instead of the library
         // floor. PRESENTATION ONLY — the winner/format are unchanged; the per-drop fiction rides the
         // comp-elimination beats, so the preview `beats` stay the generic library scaffold (no spoiler).
+        // L-F4 (#1743): the presentation SOURCE (authored fiction vs. seeded theme) is decided by the
+        // FROZEN pin, NOT the live fiction — so a late first-fiction write-back can never re-skin the
+        // active comp's name/premise (and this preview matches whereabouts().houseEvent.comp round to
+        // round). `competitionPresentation` also LAZY-FREEZES a legacy in-progress comp on this first read.
+        const pres = competitionPresentation(this.live); // non-null for a staged comp; null for a pre-stage preview
         const f = this.live.competitionFiction;
-        const authored = f && f.comp === peek.beat && f.week === this.week ? f : undefined;
+        const authored = pres?.authored ? f : undefined; // pres.authored already honors the frozen source
         // 0125: the seeded theme is the deterministic floor's skin; #1400's model-authored fiction still
         // overrides it (a fresh restart re-grounds the narrator in the authored staging). Precedence:
         // model fiction > seeded theme > bare 0042 library.
-        const skin = this.themedScaffold(peek.def);
+        // For an in-progress staged comp read the theme from its FROZEN inputs (pinned at draw, or lazy-
+        // frozen just above for a legacy save), so it stays byte-identical round to round.
+        const skin = this.themedScaffold(peek.def, this.frozenCompTheme());
         return {
           started: true, type: peek.type, week: this.week, phase: this.phase,
           winner: this.named(peek.winner),
