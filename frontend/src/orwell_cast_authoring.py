@@ -64,7 +64,14 @@ _SYSTEM = (
     '"distinguishingMark", "ageLook", "style" } — short phrases; this single facet is what BOTH '
     "the portrait and the narration read, so make it concrete and distinctive. The look must COHERE "
     "with the houseguest's heritage/ethnicity in the skeleton (skin tone, hair, features that fit that "
-    "background) — never a generic default; vary it widely across the cast,\n"
+    "background) — never a generic default; vary it widely across the cast. When the skeleton shows a "
+    "seeded physicalCharacteristics block, treat it as the LOOK BRIEF to sharpen — enrich each axis in "
+    "your own words but keep it the SAME person. THE INK BUDGET IS FIXED: if the brief's "
+    "distinguishingMark carries no tattoo, this houseguest has NO visible tattoos anywhere (not in the "
+    "mark, the style, or the biography) — only a small minority of a real cast is visibly inked, and "
+    "the casting office already decided who. A distinguishingMark is usually minor or absent: a scar, "
+    "a birthmark, freckles, glasses, jewelry, a gap-toothed grin — or plain \"none notable\"; never "
+    "default to a tattoo,\n"
     '  "voice": the houseguest\'s IDIOLECT — how THIS person talks, all season: { "register", '
     '"rhythm", "energy", "directness", "humor", "stressTell", "signature", "lexicon", "catchphrases" }. '
     'The first six are SHORT dial phrases (e.g. register "folksy", rhythm "rambling", humor "dry", '
@@ -738,9 +745,13 @@ def build_authoring_messages(npc: dict) -> list[dict]:
     # concierge/bar, mortgage/teacher mismatches). Without the pin the model reliably drifts pronouns in the
     # hidden prose; with it the whole dossier coheres at the SOURCE (the engine's game-start coherence gate
     # is still the airtight belt). `genderPresentation` is a PUBLIC, Vault-free HouseguestCard facet.
+    # 2026-07-21 prompt audit: thread the SEEDED `physicalCharacteristics` in as the LOOK BRIEF — the
+    # engine deals the cast-wide capped look spread (incl. the visible-ink budget), and without it the
+    # model invents the whole look from its prior (the "full sleeve of tattoos ×4" index case). The
+    # model sharpens the brief; the ink budget is fixed (and the engine's write-back backstop holds it).
     skeleton = {
         k: npc.get(k)
-        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity", "genderPresentation", "voice")
+        for k in ("name", "age", "vocation", "hometown", "archetype", "demeanor", "presentation", "appearance", "ethnicity", "genderPresentation", "voice", "physicalCharacteristics")
         if npc.get(k) is not None
     }
     gp = npc.get("genderPresentation")

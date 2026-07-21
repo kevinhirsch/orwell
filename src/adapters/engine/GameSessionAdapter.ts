@@ -2372,7 +2372,18 @@ export class GameSessionAdapter implements GameSession {
     const occupationChanged = target.character.vocation !== priorVocation;
     if (req.biography !== undefined) target.character.biography = req.biography;
     if (req.physicalCharacteristics !== undefined) {
+      // 2026-07-21 prompt audit — the INK-BUDGET backstop (same precedent as the skinTone re-ground
+      // below): the engine deals the cast-wide visible-ink budget through the seeded distinguishing-mark
+      // spread (deepProfile `dealCastPhysicalSpread`), but the authoring LLM's tattoo prior reliably
+      // overwrites it ("full sleeve of … tattoos" on 4+ houseguests in one live bundle). The budget is
+      // an ENGINE guarantee: an authored mark that INTRODUCES ink where the seeded deal granted none is
+      // refused for that one field — the seeded mark stands; every other authored facet folds freely.
+      const priorMark = target.character.physicalCharacteristics?.distinguishingMark ?? "";
+      const authoredMark = req.physicalCharacteristics.distinguishingMark ?? "";
+      const INK_RE = /tattoo|inked/i;
+      const inkIntroduced = INK_RE.test(authoredMark) && priorMark.length > 0 && !INK_RE.test(priorMark);
       target.character.physicalCharacteristics = req.physicalCharacteristics;
+      if (inkIntroduced) target.character.physicalCharacteristics.distinguishingMark = priorMark;
       // 0063 RE-GROUND (the "olive-skin collapse" fix, 2026-06-23): the FE authoring LLM re-authors the
       // WHOLE physicalCharacteristics block — including skinTone — but it is NOT given the houseguest's
       // guaranteed heritage, so it reliably defaults skinTone to a generic "olive" and silently discards

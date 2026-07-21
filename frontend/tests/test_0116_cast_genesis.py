@@ -99,7 +99,8 @@ def test_per_slot_directives_match_the_engine_byte_for_byte():
         "expressiveness": "loud and impossible to ignore",
         "emotionalRegister": "hot-reactive — quick to laugh, cry, or blow up",
         "selfAwareness": "insecure, quietly underrates themselves",
-        "socialGravity": "a natural center of attention"}
+        "socialGravity": "a natural center of attention",
+        "ink": False, "lookFeature": "no single notable mark — a plain, clean look"}
     assert slots[4] == {
         "role": "flirt", "roleNote": "charming and touchy, plays the social-romantic angle",
         "archetype": "flirt", "physical": False, "ageLo": 27, "ageHi": 33,
@@ -107,8 +108,46 @@ def test_per_slot_directives_match_the_engine_byte_for_byte():
         "amplified": False, "energy": "steady and even-keeled", "register": "clipped and economical",
         "expressiveness": "reserved and hard to read", "emotionalRegister": "cold and hard to rattle",
         "selfAwareness": "insecure, quietly underrates themselves",
-        "socialGravity": "a magnetic main-character who fills the room"}
+        "socialGravity": "a magnetic main-character who fills the room",
+        "ink": False, "lookFeature": "a chipped front tooth"}
     assert G.assign_genesis_slots(7, 15) == G.assign_genesis_slots(7, 15)  # deterministic
+
+
+def test_look_lane_deals_a_small_inked_minority_with_features_for_the_rest():
+    # 2026-07-21 prompt audit (the cast-uniformity index case): a seeded 2-4 slots per cast carry the
+    # visible-ink grant; every other slot is explicitly no-ink and carries a suggested feature.
+    for seed in (108108, 0, 5, 7, 42, 999, 2147483647):
+        slots = G.assign_genesis_slots(seed, 15)
+        ink = sum(1 for s in slots if s["ink"])
+        assert 2 <= ink <= 4, (seed, ink)
+        for s in slots:
+            if s["ink"]:
+                assert s["lookFeature"] == ""
+            else:
+                assert s["lookFeature"], s
+
+
+def test_look_line_renders_into_the_casting_card():
+    slots = G.assign_genesis_slots(108108, 15)
+    inked = next(s for s in slots if s["ink"])
+    plain = next(s for s in slots if not s["ink"])
+    assert "visible tattoos ARE part of their look" in G.render_slot_directive("npc:9", inked)
+    plain_line = G.render_slot_directive("npc:2", plain)
+    assert "NO visible tattoos" in plain_line and plain["lookFeature"] in plain_line
+
+
+def test_prompt_injects_used_facet_ledgers():
+    # 2026-07-21 (the "San Diego ×2" defect): the hometown/vocation ledgers thread between waves like
+    # the name ledger, so per-NPC calls stop landing on the model's default picks.
+    brief = G.generate_season_brief(108108)
+    msgs = G.build_genesis_messages(_ROSTER, brief, None, None, None,
+                                    {"hometowns": ["San Diego, CA"], "vocations": ["barista"]})
+    user = msgs[1]["content"]
+    assert "Hometowns ALREADY used" in user and "San Diego, CA" in user
+    assert "Vocations ALREADY used" in user and "barista" in user
+    # back-compatible: omitted ⇒ absent.
+    plain = G.build_genesis_messages(_ROSTER, brief)[1]["content"]
+    assert "Hometowns ALREADY used" not in plain and "Vocations ALREADY used" not in plain
 
 
 def test_casting_plan_respects_quota_and_extremes():

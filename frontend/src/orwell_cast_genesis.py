@@ -246,6 +246,29 @@ GENESIS_SOCIAL_GRAVITY_LOUD = (
 GENESIS_AMPLIFIED_MIN = 4
 GENESIS_AMPLIFIED_SPAN = 2  # 4 or 5 amplified per cast (owner: guarantee 3-4+ loud)
 
+# The seeded LOOK LANE (2026-07-21 prompt audit — the cast-uniformity index case). Mirror of
+# GENESIS_INK_MIN / GENESIS_INK_SPAN / GENESIS_LOOK_FEATURES: a seeded 2-4 slots per cast are the
+# visibly-tattooed contingent; every other slot is explicitly no-visible-ink and carries a suggested
+# distinguishing feature from this wide pool (scars/freckles/glasses/jewelry/teeth/nothing-notable),
+# so the model's tattoo prior can never uniformize the cast. Steering only, never a validator.
+GENESIS_INK_MIN = 2
+GENESIS_INK_SPAN = 2  # 2-4 visibly-tattooed slots per cast
+GENESIS_LOOK_FEATURES = (
+    "wire-rimmed glasses",
+    "a faint scar with a story behind it",
+    "freckles",
+    "a gap-toothed grin",
+    "a birthmark",
+    "deep dimples",
+    "a chipped front tooth",
+    "a distinctive piece of everyday jewelry",
+    "laugh lines",
+    "a beauty mark",
+    "no single notable mark — a plain, clean look",
+    "no single notable mark — ordinary and unremarkable up close",
+    "no single notable mark — the kind of face that blends into a crowd photo",
+)
+
 # The seeded AGE curve (owner casting-craft upgrade) — mirror of GENESIS_AGE_BANDS: [lo, hi, count].
 GENESIS_AGE_BANDS = ((21, 26, 4), (27, 33, 5), (34, 45, 4), (46, 60, 2))
 
@@ -427,6 +450,17 @@ def assign_genesis_slots(seed: int, count: int) -> list[dict]:
     _seeded_shuffle(accent_pool, c_rng)
     accent_cursor = 0
 
+    # 3.5. LOOK LANE (2026-07-21 prompt audit) — a seeded 2-4 slots carry the cast's visible ink; every
+    # other slot is explicitly no-visible-ink with a suggested feature from a shuffled wide pool. Its
+    # OWN dedicated side-stream (`:genesis:looks`) — byte-identical to the engine's deal.
+    l_rng = _Mulberry32(_hash_seed(f"{seed}:genesis:looks"))
+    ink_count = max(0, min(count, GENESIS_INK_MIN + l_rng.int(GENESIS_INK_SPAN + 1)))
+    inked = ([True] * ink_count) + ([False] * (count - ink_count))
+    _seeded_shuffle(inked, l_rng)
+    feature_pool = list(GENESIS_LOOK_FEATURES)
+    _seeded_shuffle(feature_pool, l_rng)
+    feature_cursor = 0
+
     # 4. AXES — six delivery dials; a seeded 4–5 "amplified" slots draw ONLY from the loud ends.
     x_rng = _Mulberry32(_hash_seed(f"{seed}:genesis:axes"))
     amplified_count = max(0, min(count, GENESIS_AMPLIFIED_MIN + x_rng.int(GENESIS_AMPLIFIED_SPAN + 1)))
@@ -460,7 +494,11 @@ def assign_genesis_slots(seed: int, count: int) -> list[dict]:
             "emotionalRegister": pick(GENESIS_EMOTIONAL_REGISTER_AXIS, GENESIS_EMOTIONAL_REGISTER_LOUD, amp),
             "selfAwareness": GENESIS_SELF_AWARENESS_AXIS[x_rng.int(len(GENESIS_SELF_AWARENESS_AXIS))],
             "socialGravity": pick(GENESIS_SOCIAL_GRAVITY_AXIS, GENESIS_SOCIAL_GRAVITY_LOUD, amp),
+            "ink": inked[i],
+            "lookFeature": "" if inked[i] else feature_pool[feature_cursor % len(feature_pool)],
         })
+        if not inked[i]:
+            feature_cursor += 1
     return out
 
 
@@ -472,11 +510,15 @@ def render_slot_directive(hid: str, d: dict) -> str:
             "vocation).") if d.get("physical") else ""
     big = (" BIG PERSONALITY — write them genuinely loud/reactive/unfiltered; do NOT let the accent tone "
            "them down.") if d.get("amplified") else ""
+    look = ("look: visible tattoos ARE part of their look (one of the cast's few inked houseguests — "
+            "make the ink specific and personal)") if d.get("ink") else (
+        f"look: NO visible tattoos; distinguishing feature, if any: {d.get('lookFeature')}")
     return (f"{hid} — cast as: {d.get('role')} ({d.get('roleNote')}); archetype tag: {d.get('archetype')}; "
             f"age ~{d.get('ageLo')}-{d.get('ageHi')} (name from that birth era); {accent}; "
             f"energy: {d.get('energy')}; register: {d.get('register')}; "
             f"expressiveness: {d.get('expressiveness')}; reactivity: {d.get('emotionalRegister')}; "
-            f"self-awareness: {d.get('selfAwareness')}; social-gravity: {d.get('socialGravity')}."
+            f"self-awareness: {d.get('selfAwareness')}; social-gravity: {d.get('socialGravity')}; "
+            f"{look}."
             + phys + big)
 
 
@@ -534,6 +576,13 @@ _SYSTEM = (
     "says PHYSICAL COMPETITOR, give a high physical stat + an athletic / first-responder / military / "
     "performer vocation. If it says BIG PERSONALITY, do NOT let the accent or anything else tone them "
     "down. The cast should span the WHOLE range, never cluster in a polite reserved middle.\n"
+    "  * LOOK: the card's ink budget is FIXED. 'visible tattoos ARE part of their look' means this is "
+    "one of the cast's FEW inked houseguests — make the ink specific and personal (what, where, why). "
+    "'NO visible tattoos' means exactly that: no sleeve, no forearm script, no neck/hand ink anywhere in "
+    "their appearance, biography, or secrets — a real cast has only a small tattooed minority, so NEVER "
+    "invent ink the card did not grant. Where the card suggests a distinguishing feature (glasses, a "
+    "scar, freckles, a birthmark, jewelry — or nothing notable), work THAT into the look instead; plenty "
+    "of real faces have no single notable mark at all.\n"
     "\"npcs\": an array, ONE object PER houseguest id given below (keep the SAME ids), each with:\n"
     '  "id": the exact houseguest id from the roster below (echo it verbatim).\n'
     '  "name": a normal, real, everyday FIRST and LAST name (EXACTLY two words) that a modern American '
@@ -555,12 +604,16 @@ _SYSTEM = (
     "substitute a different one).\n"
     '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter") — honor a PHYSICAL COMPETITOR '
     "card with an athletic/first-responder/military/performer job; favor castable, story-rich jobs over "
-    "generic desk work.\n"
-    '  "hometown": a US hometown (city, state) that fits the season\'s regional flavor.\n'
+    "generic desk work, and NEVER a job already listed as taken by an earlier houseguest.\n"
+    '  "hometown": a US hometown (city, state) that fits the season\'s regional flavor. Every houseguest '
+    "comes from a DIFFERENT city — never reuse a hometown listed as taken, and never default to the same "
+    "famous metro: suburbs, small cities, and towns are exactly as castable as big cities (a real cast "
+    "comes from Chula Vista, Waco, and Kenosha as often as from Chicago or San Diego).\n"
     '  "demeanor": a short phrase for how they carry themselves (e.g. "warm but guarded").\n'
     '  "background": a short phrase of life context.\n'
     '  "biography": a 2-3 sentence presentable backstory (their life outside the house).\n'
-    '  "appearance": a short concrete phrase describing their look (consistent with their pronouns).\n'
+    '  "appearance": a short concrete phrase describing their look (consistent with their pronouns AND '
+    "with the casting card's look line — the ink budget and any suggested feature are fixed inputs).\n"
     '  "age": an integer age inside the casting card\'s age band.\n'
     '  "stats": { "physical", "mental", "social" } — three numbers, EACH between '
     f"{_STAT_MIN} and {_STAT_MAX}, whose TOTAL lands roughly between {_TOTAL_LO} and {_TOTAL_HI}. "
@@ -601,7 +654,8 @@ _STRICT_RETRY = (
 def build_genesis_messages(roster: list, brief: dict,
                            violation_feedback: Optional[str] = None,
                            directives: Optional[dict] = None,
-                           used_names: Optional[list] = None) -> list[dict]:
+                           used_names: Optional[list] = None,
+                           used_facets: Optional[dict] = None) -> list[dict]:
     """The producer prompt for the WHOLE cast (or, in the live per-NPC path, one houseguest). Seeds the
     model with the season BRIEF (player-independent steering), the roster IDS, and — when supplied — each
     id's seeded CASTING CARD (role / age / accent / delivery axes: the cross-cast constraints dealt up
@@ -626,6 +680,21 @@ def build_genesis_messages(roster: list, brief: dict,
             "Names ALREADY taken by earlier houseguests in THIS cast — do NOT reuse any of these first "
             "names OR surnames (every houseguest needs a distinct given name and surname): "
             + ", ".join(taken) + ".")
+    # 2026-07-21 prompt audit (the "San Diego ×2" defect): thread the ALREADY-USED hometowns/vocations
+    # forward between waves exactly like the name ledger, so per-NPC calls stop landing on the model's
+    # default picks. The engine's cross-cast dedupe backstop still catches any within-wave collision.
+    if isinstance(used_facets, dict):
+        towns = [str(t).strip() for t in (used_facets.get("hometowns") or []) if str(t).strip()]
+        if towns:
+            lines.append(
+                "Hometowns ALREADY used in THIS cast — every houseguest comes from a DIFFERENT city, so "
+                "pick another real place entirely (a different city, not the same city re-spelled): "
+                + ", ".join(towns) + ".")
+        jobs = [str(v).strip() for v in (used_facets.get("vocations") or []) if str(v).strip()]
+        if jobs:
+            lines.append(
+                "Vocations ALREADY used in THIS cast — do NOT repeat any of these jobs: "
+                + ", ".join(jobs) + ".")
     if directives:
         cards = [render_slot_directive(hid, directives[hid]) for hid in ids if hid in directives]
         if cards:
@@ -976,13 +1045,16 @@ async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, val
     used_surname: set = set()
     used_full: set = set()
     used_display: list = []  # F3: the running name ledger, threaded forward between waves
+    used_towns: list = []    # 2026-07-21: the running hometown ledger (same wave-frozen threading)
+    used_jobs: list = []     # 2026-07-21: the running vocation ledger
     tied: set = set()
     any_ok = False
 
-    async def _author_one(entry: dict, ledger_snapshot: list) -> Optional[dict]:
+    async def _author_one(entry: dict, ledger_snapshot: list, facets_snapshot: dict) -> Optional[dict]:
         """Author ONE houseguest (its own single-id call), retried alone once on a miss. Best-effort."""
         one_ids = {str(entry.get("id"))}
-        messages = build_genesis_messages([entry], brief, feedback, directives, ledger_snapshot)
+        messages = build_genesis_messages([entry], brief, feedback, directives, ledger_snapshot,
+                                          facets_snapshot)
         try:
             text = await llm_fn(messages)
         except Exception as e:
@@ -1003,12 +1075,20 @@ async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, val
         # The ledger is FROZEN for the whole wave (concurrent calls can't see each other's names); the
         # seeded pre-assignment + the engine dedupe backstop cover any within-wave collision.
         ledger_snapshot = list(used_display)
-        results = await asyncio.gather(*[_author_one(e, ledger_snapshot) for e in wave])
+        facets_snapshot = {"hometowns": list(used_towns), "vocations": list(used_jobs)}
+        results = await asyncio.gather(*[_author_one(e, ledger_snapshot, facets_snapshot) for e in wave])
         for prop in results:
             if not prop:
                 continue
             any_ok = True
             for npc in prop.get("npcs") or []:
+                # 2026-07-21: feed the facet ledgers forward (the engine backstop dedupes regardless).
+                town = npc.get("hometown")
+                if isinstance(town, str) and town.strip():
+                    used_towns.append(town.strip())
+                job = npc.get("vocation")
+                if isinstance(job, str) and job.strip():
+                    used_jobs.append(job.strip())
                 name = npc.get("name")
                 if isinstance(name, str) and name.strip():
                     toks = name.strip().lower().split()

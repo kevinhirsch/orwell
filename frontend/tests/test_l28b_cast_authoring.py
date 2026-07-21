@@ -432,3 +432,35 @@ def test_1395_catchphrases_are_a_bonus_never_a_gate():
     # A non-list catchphrases value is ignored the same way (core voice still folds).
     prof3 = A.parse_authored_profile(json.dumps(dict(_FULL, voice=dict(_VOICE, catchphrases="we move"))), "npc:7")
     assert "catchphrases" not in prof3["voice"]
+
+
+# ── 2026-07-21 prompt audit — the LOOK BRIEF + fixed ink budget (the tattoo-uniformity index case) ──
+
+def test_2026_07_21_seeded_physical_characteristics_thread_into_the_skeleton_as_the_look_brief():
+    """The engine deals the cast-wide capped look spread (incl. the visible-ink budget); the authoring
+    prompt must SEE it (the brief to sharpen) instead of inventing the whole look from the model's
+    tattoo prior (the 'full sleeve of tattoos x4' live-bundle defect)."""
+    phys = {"heightBuild": "stocky and powerful", "skinTone": "warm tan complexion",
+            "hair": "a close-cropped fade", "facialFeatures": "a square jaw",
+            "distinguishingMark": "a faint scar above one eyebrow",
+            "ageLook": "settled, thirties", "style": "sturdy workwear"}
+    msgs = A.build_authoring_messages({"id": "npc:1", "name": "Dana Reyes", "vocation": "welder",
+                                       "physicalCharacteristics": phys})
+    user = msgs[1]["content"]
+    assert "a faint scar above one eyebrow" in user  # the seeded mark reaches the model as the brief
+    # absent facet => no fabricated key (back-compatible skeleton assembly)
+    plain = A.build_authoring_messages({"id": "npc:2", "vocation": "welder"})[1]["content"]
+    assert "physicalCharacteristics" not in plain
+
+
+def test_2026_07_21_system_prompt_fixes_the_ink_budget_and_widens_the_mark_menu():
+    """The system prompt must state the ink budget is FIXED (no tattoo in the brief => none authored)
+    and steer the distinguishing mark toward the realistic wide menu (scar/birthmark/glasses/none) —
+    never a default tattoo."""
+    system = A.build_authoring_messages({"id": "npc:1", "vocation": "welder"})[0]["content"]
+    low = system.lower()
+    assert "ink budget is fixed" in low
+    assert "no visible tattoos" in low
+    assert "never" in low and "default to a tattoo" in low
+    for menu_word in ("scar", "birthmark", "glasses", "none notable"):
+        assert menu_word in low, menu_word

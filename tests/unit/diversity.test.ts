@@ -192,6 +192,49 @@ describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the
   });
 });
 
+describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (the tattoo-uniformity fix)", () => {
+  it("an authored mark that INTRODUCES ink where the seeded deal granted none is refused; other facets fold", () => {
+    const { sb } = liveGame("ink-budget", 5);
+    // Find a houseguest whose SEEDED mark carries no ink (the cast-wide deal guarantees most don't).
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !/tattoo|inked/i.test(h.physicalCharacteristics.distinguishingMark))!;
+    const seededMark = card.physicalCharacteristics!.distinguishingMark;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      physicalCharacteristics: {
+        heightBuild: "tall and lean", skinTone: "warm tan complexion", hair: "short dark hair",
+        facialFeatures: "a square jaw", distinguishingMark: "a full sleeve of intricate tattoos",
+        ageLook: "fresh-faced, late-twenties look", style: "sporty and laid-back",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The ink the seeded deal never granted was refused — the seeded mark stands.
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe(seededMark);
+    // Every other authored facet still landed.
+    expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
+  });
+  it("an authored ink mark is KEPT when the seeded deal already granted ink (sharpening, not inventing)", () => {
+    const { sb } = liveGame("ink-keep", 5);
+    const inked = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && /tattoo/i.test(h.physicalCharacteristics.distinguishingMark));
+    if (!inked) return; // this seed dealt an all-plain cast — nothing to sharpen (the budget is small)
+    const res = sb.session.recordCastProfile({
+      houseguestId: inked.id,
+      physicalCharacteristics: {
+        heightBuild: "stocky and powerful", skinTone: "warm tan complexion", hair: "a close-cropped fade",
+        facialFeatures: "an open friendly face", distinguishingMark: "a forearm tattoo of a compass rose",
+        ageLook: "settled, thirties presence", style: "streetwear and bold sneakers",
+      },
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === inked.id)!;
+    expect(after.physicalCharacteristics!.distinguishingMark).toBe("a forearm tattoo of a compass rose");
+  });
+});
+
 describe("0063 — ethnicity grounds the physical facet (text + portrait agree)", () => {
   it("each houseguest's physicalCharacteristics.skinTone equals their ethnicity-grounded cue", () => {
     const { sb } = liveGame("div-ground", 5);
