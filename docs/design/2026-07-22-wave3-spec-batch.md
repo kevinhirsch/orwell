@@ -731,7 +731,7 @@ it. The shareable moment is choosing NOT to know.
 **Binding constraints applied.** No direct fit among the three named constraints; the load-bearing
 guarantee is the season-door singularity (one sanctioned restart path) plus non-degradation.
 
-**Flag & reversibility.**
+**Flag & reversibility (T9).**
 - Flag: `ORWELL_COLD_CASES` (default OFF).
 - Off ⇒ byte-identical: the retrospective always reveals (today's behavior); no carry-over object is
   written.
@@ -786,7 +786,7 @@ like it's been paying attention across seasons, and the retrospective shows you 
 guarantee is the Q5 boundary itself — engagement-derived content may inform WORDING, never SELECTION or
 ROUTING.
 
-**Flag & reversibility.**
+**Flag & reversibility (T9).**
 - Flag: `ORWELL_SHOWRUNNER_MEMORY` (default OFF; distinct from the already-approved `ORWELL_SHOWRUNNER`
   step-1 flag and from the permanently-off `SHOWRUNNER_REWEIGHT` knob).
 - Off ⇒ byte-identical: no engagement profile is computed or carried; the showrunner behaves exactly as
