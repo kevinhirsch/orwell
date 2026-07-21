@@ -2385,10 +2385,16 @@ export class GameSessionAdapter implements GameSession {
       // per-field fallback the skinTone re-ground uses); every clean authored facet folds freely. A
       // seeded facet that already granted ink anywhere leaves the authored look untouched (sharpening,
       // not inventing).
-      // Word-bounded ink lexicon (CodeRabbit on #1768): `\btattoo` covers tattoo/tattoos/tattooed;
-      // `\bink(ed)?\b` covers the real model phrasings "forearm ink" / "inked" WITHOUT the unbounded
-      // substring false-positives ("blinked", "kinked") that would wrongly hold a clean authored field.
-      const INK_RE = /\btattoo|\bink(?:ed)?\b/i;
+      // Word-bounded ink lexicon (CodeRabbit + Greptile on #1768): `\btattoo` covers
+      // tattoo/tattoos/tattooed; `\bink(ed)?\b` covers "forearm ink" / "inked" WITHOUT the unbounded
+      // substring false-positives ("blinked") that would wrongly hold a clean authored field. The
+      // EUPHEMISM tail closes the Greptile bypass class — the live bundle's defects were literally
+      // "full sleeve of …" phrasings that carry neither "tattoo" nor "ink": "blackwork" and "body
+      // art" are unambiguous ink terms (unconditional), and "full/half sleeve(s)" counts as ink
+      // EXCEPT when a clothing noun follows (a "half-sleeve tee" in the style field is a shirt, not
+      // ink — the negative lookahead excludes tee/shirt/top/blouse/sweater/kurta). Kept IDENTICAL to
+      // the test suite's INK_LEXICON (tests/unit/diversity.test.ts) — one lexicon, two pinned sites.
+      const INK_RE = /\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i;
       const RENDERED_FACET_FIELDS = [
         "heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style",
       ] as const;

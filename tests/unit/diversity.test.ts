@@ -200,9 +200,11 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
   // registry-built production object graph with a started game. (`tests/support/sandbox.ts`'s
   // `buildSandbox` is the Vault-sentinel factory and exposes no GameSession surface, so it cannot
   // drive recordCastProfile/getPortraitPrompt — adrFixture is the canonical fit here.)
-  // The ink lexicon — kept in lockstep with the adapter's INK_RE: word-bounded so "forearm ink" /
-  // "inked" classify as ink while "blinked"-style substrings can never false-positive.
-  const INK_LEXICON = /\btattoo|\bink(?:ed)?\b/i;
+  // The ink lexicon — kept IDENTICAL to the adapter's INK_RE: word-bounded so "forearm ink" /
+  // "inked" classify as ink while "blinked"-style substrings can never false-positive, plus the
+  // euphemism tail (Greptile #1768): "blackwork" / "body art" unconditionally, and "full/half
+  // sleeve(s)" EXCEPT when a clothing noun follows (a "half-sleeve tee" is a shirt, not ink).
+  const INK_LEXICON = /\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i;
   const facetHasInk = (pc: PhysicalCharacteristics): boolean =>
     Object.values(pc).some((v) => INK_LEXICON.test(String(v ?? "")));
 
@@ -216,6 +218,15 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     expect(facetHasInk({ ...base, style: "visible forearm ink" })).toBe(true);
     expect(facetHasInk({ ...base, distinguishingMark: "an inked half-sleeve" })).toBe(true);
     expect(facetHasInk({ ...base, distinguishingMark: "a full sleeve of tattoos" })).toBe(true);
+    // EUPHEMISMS (Greptile #1768): the live bundle's defects were literally "full sleeve of …"
+    // phrasings carrying neither "tattoo" nor "ink" — they must classify as ink.
+    expect(facetHasInk({ ...base, distinguishingMark: "a full sleeve of botanical blackwork" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "traditional body art across the shoulder" })).toBe(true);
+    expect(facetHasInk({ ...base, style: "fine-line blackwork on both forearms" })).toBe(true);
+    expect(facetHasInk({ ...base, distinguishingMark: "a half-sleeve of geometric linework" })).toBe(true);
+    // CLOTHING sleeves are NOT ink (option B lookahead): a half-sleeve tee is a shirt.
+    expect(facetHasInk({ ...base, style: "a breezy half-sleeve tee and shorts" })).toBe(false);
+    expect(facetHasInk({ ...base, style: "rolled full-sleeve shirts and chinos" })).toBe(false);
     // Substring false-positives must NOT classify (the false-hold CodeRabbit flagged).
     expect(facetHasInk({ ...base, facialFeatures: "eyes that look like they just blinked awake" })).toBe(false);
     expect(facetHasInk(base)).toBe(false);

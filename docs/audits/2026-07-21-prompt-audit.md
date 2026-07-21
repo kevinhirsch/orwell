@@ -206,6 +206,17 @@ overwritten by "full sleeve of … tattoos" ×4 (the live bundle).
 Gates: `tests/unit/diversity.test.ts` ("the engine owns the visible-ink budget") +
 `frontend/tests/test_l28b_cast_authoring.py` (look-brief threading + ink-budget prompt pins).
 
+**The ink lexicon (final #1768 form).** Word-bounded + euphemism-aware, identical at both pinned
+sites (engine `INK_RE` in `recordCastProfile`, test `INK_LEXICON` in `diversity.test.ts`):
+`/\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i`
+— "blackwork"/"body art" are unconditional ink terms; "full/half sleeve(s)" counts as ink EXCEPT
+when a clothing noun follows (option B of the Greptile euphemism finding — the live bundle's
+defects were literally "full sleeve of …" phrasings carrying neither "tattoo" nor "ink", while
+"half-sleeve tee" is a shirt). Empirically validated against all 150 live-generated profiles/NPCs
+from this audit's A/B runs: 0 legitimate fields newly held, every clothing-sleeve phrase
+("blazer sleeves", "sleeveless vintage tees", "short sleeves") correctly spared, and every real
+ink phrasing (incl. "forearms sleeved in monochrome charcoal ink") correctly classified.
+
 **Known edge behaviors (reviewed + accepted, final #1768 pass):**
 - **Negated ink phrasing.** The authoring prompt itself instructs "NO visible tattoos anywhere",
   so a compliant model may echo the negation into a field ("a stud earring, no visible tattoos").
