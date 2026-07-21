@@ -337,6 +337,18 @@ const _MACHINERY_ASIDE_RE = new RegExp(
   + '|\\bgod[\\s-]?mode\\b|\\bthe vault\\b|\\bproducer\'?s? vault\\b'
   + '|\\badmin(?:istrator)?[\\s-]+(?:panel|surface|console|mode|controls?|tools?)\\b'
   + '|\\bdeveloper (?:controls?|mode|console|tools?)\\b'
+  // #1740 (F7 audit) — these subject-agnostic machinery phrasings have been in the Python-side
+  // _GAME_LEAK_SENTENCE_RE (src/agent_loop.py) all along but were MISSING here, so a leak using
+  // any of them sailed straight through the RENDER-LAYER scrub untouched — the actual wall (the
+  // momentPrompts "NEVER NAME THE MACHINERY" ban is framing, not enforcement; this scrub is the
+  // wall). No first-person subject is required for any of these — closed-set UI/board-machinery
+  // nouns never occur in in-character BB narration no matter who the "speaker" is.
+  + '|\\bcomp-intent\\b|\\bpending (?:decision|binding)\\b|\\bbinding (?:choice|decision)\\b'
+  + '|\\b(?:decision|choice) (?:card|cards|button|buttons)\\b|\\btool call\\b|\\bjumped ahead\\b|\\bnarratively\\b'
+  + '|\\brecord (?:this|the|that) (?:interaction|scene)\\b'
+  // third-person player reference — momentPrompts requires "you", never "the player"/"the user"
+  // (parity with the Python pattern's own trailing alternation).
+  + '|\\bthe (?:player|user)\\b(?:,?\\s+\\w+,)?\\s+(?:has|is|was|will|\'ll|wants|said|finished|just|now|needs|should)\\b'
   // #989 (+ #1369 review) — the AMBIGUOUS operator verbs over-fired on legitimate narration:
   // bare "log/note" ate "Let me log that.", bare "check" ate "Let me check on the others.",
   // bare "run" ate "Let me run to the door.". Those four are machinery only when followed by an
@@ -357,6 +369,18 @@ const _MACHINERY_ASIDE_RE = new RegExp(
     + '(?:call|advance|record|resolve|use|pull|fetch|present|place|'
     + 'walk through|re-?read|re-?check|reconsider'
     + '|run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
+    + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
+    + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
+      + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
+  // #1740 (F7 audit) — reasoning-off GLM-4.7 narrated its own tool-planning in the PRESENT tense
+  // with no modal at all ("I check the game state now", not "I'll check…"), which the two "i"
+  // branches above never catch (both require a leading modal). This is a JS-only widening (the
+  // Python-side scrub has the same gap, but this render layer is THE wall — see the comment at
+  // the top of this block) restricted to the four ALREADY object-noun-gated ambiguous verbs, so
+  // it inherits their exact false-positive protection ("I check on the others." / "I run to the
+  // door." still survive — no engine object follows) rather than bare-matching every verb.
+  + '|\\bi\\s+(?:now\\s+|first\\s+|then\\s+|also\\s+|just\\s+)?'
+    + '(?:run(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|competition|comp|command|tool|check|numbers|state)s?\\b)'
     + '|check(?=\\s+(?:th(?:e|is|at)\\s+)?(?:game|state|engine|roster|board|status|pending|interaction|event|beat|decision|vote)s?\\b)'
     + '|(?:log|note)(?=\\s+(?:down\\s+)?(?:th(?:e|is|at)\\s+)?'
       + '(?:interaction|event|scene|beat|consequence|decision|vote|state|move)s?\\b))\\b'
@@ -383,7 +407,17 @@ export function scrubMachineryAsides(text) {
   // Split keeping the sentence/line delimiter with each part so kept prose is
   // byte-identical. A leading quote means the sentence is NPC speech, not an
   // operator aside — protect it (mirrors redactRawIds' quoted-dialogue guard).
-  const parts = String(text).split(/(?<=[.!?\n])/);
+  //
+  // #1740 (F7 audit) — the trailing `(?![.!?])` keeps a RUN of terminal punctuation ("...", "?!",
+  // "!!!") glued to the sentence it closes instead of splitting after every individual character.
+  // Without it, an ellipsis-separated leak like "I call `getGameState`... `whereabouts`..." split
+  // into a machinery fragment PLUS several bare "." fragments; the bare dots matched no machinery
+  // pattern, so they survived the filter and the player saw a literal "......" trail where the
+  // dropped tool names used to be — itself a broken, telling artifact. Gluing the whole punctuation
+  // run to its sentence means the ENTIRE unit (words + trailing "...") drops together, leaving no
+  // debris. A legitimate dramatic-pause ellipsis is unaffected either way (nothing in it is dropped,
+  // so it rejoins byte-identically regardless of how many pieces it was split into).
+  const parts = String(text).split(/(?<=[.!?\n])(?![.!?])/);
   const kept = parts.filter((part) => {
     const trimmed = part.trim();
     if (!trimmed) return true;
