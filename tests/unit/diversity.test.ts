@@ -307,6 +307,60 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     const after = sb.session.getGameState().house.find((h) => h.id === id)!;
     expect(after.physicalCharacteristics!.distinguishingMark).toBe("a forearm tattoo of a compass rose");
   });
+
+  it("T0-6: a BIOGRAPHY that introduces ink on a no-ink slot is dropped whole (the generic facetDiff " +
+     "validator's gap-fix — the old inline guard only ever scanned physicalCharacteristics fields)", () => {
+    const { sb } = adrFixture("ink-bio-bypass", 5);
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !facetHasInk(h.physicalCharacteristics))!;
+    const seededBio = card.biography;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      biography: "Grew up skating and getting a full sleeve of tattoos before culinary school.",
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    // The bio smuggled ink text the skeleton never granted — the whole field is dropped, seeded floor stands.
+    expect(after.biography).toBe(seededBio);
+    expect(res.publicFields).not.toContain("biography");
+  });
+
+  it("T0-6: a clean biography on a no-ink slot still folds normally (the generic guard never holds coherent prose)", () => {
+    const { sb } = adrFixture("ink-bio-clean", 5);
+    const card = sb.session.getGameState().house
+      .find((h) => h.status === "active" && h.physicalCharacteristics
+        && !facetHasInk(h.physicalCharacteristics))!;
+    const res = sb.session.recordCastProfile({
+      houseguestId: card.id,
+      biography: "Grew up skating and cooking before culinary school opened new doors.",
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === card.id)!;
+    expect(after.biography).toBe("Grew up skating and cooking before culinary school opened new doors.");
+    expect(res.publicFields).toContain("biography");
+  });
+
+  it("T0-6: a biography IS free to reference ink when the seeded deal already granted it (sharpening, not inventing)", () => {
+    let found: { sb: ReturnType<typeof adrFixture>["sb"]; id: string } | undefined;
+    for (const seed of [5, 1, 2, 3, 4, 6, 7, 8, 9, 10]) {
+      const { sb } = adrFixture(`ink-bio-keep-${seed}`, seed);
+      const inked = sb.session.getGameState().house
+        .find((h) => h.status === "active" && h.physicalCharacteristics
+          && /\btattoo/i.test(h.physicalCharacteristics.distinguishingMark));
+      if (inked) { found = { sb, id: inked.id }; break; }
+    }
+    expect(found, "the fixed seed sweep must surface an ink-granted card").toBeDefined();
+    const { sb, id } = found!;
+    const res = sb.session.recordCastProfile({
+      houseguestId: id,
+      biography: "Every tattoo on their arms tells a story from a different city on tour.",
+    });
+    expect(res.accepted).toBe(true);
+    const after = sb.session.getGameState().house.find((h) => h.id === id)!;
+    expect(after.biography).toBe("Every tattoo on their arms tells a story from a different city on tour.");
+    expect(res.publicFields).toContain("biography");
+  });
 });
 
 describe("0063 — ethnicity grounds the physical facet (text + portrait agree)", () => {

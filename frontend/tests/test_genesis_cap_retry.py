@@ -383,7 +383,7 @@ def test_slow_background_authoring_never_blocks_a_concurrent_turn(monkeypatch):
     started = asyncio.Event()
     finished = {"authoring": False}
 
-    async def fake_run_authoring(cast, owner, on_authored=None, write=None):
+    async def fake_run_authoring(cast, owner, on_authored=None, write=None, seed=None):
         started.set()
         await hold.wait()
         finished["authoring"] = True

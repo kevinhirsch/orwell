@@ -46,7 +46,7 @@ class _FakeAuthoring:
         self._on_authored = None
         self._auto = auto_finish
 
-    def kickoff_authoring(self, cast, user, then=None, on_authored=None):
+    def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None, seed=None):
         self.cast = cast
         self.calls += 1
         self._then = then

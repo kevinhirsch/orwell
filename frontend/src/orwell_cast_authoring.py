@@ -726,11 +726,66 @@ def secret_vocation_conflicts(profile: dict, npc: dict) -> list:
     return [k for k in _HIDDEN_KEYS if k in (profile or {})]
 
 
-def build_authoring_messages(npc: dict) -> list[dict]:
+# ── T0-6: the FE half of the closed-facet ADOPT-OR-REGENERATE merge ────────────────────────────
+#
+# The skeleton's closed facets are DEALT (the seeded FacetLedger + the engine's cast-wide spread) —
+# an authored deep profile must ADOPT them or be REGENERATED, never grafted: a biography written for
+# a tattooed sleeve must not commit beside a de-inked facet (and vice versa). This is the authoring-
+# time half; the engine's generic closed-facet-diff validator at the recordCastProfile boundary
+# (src/engine/facetDiff.ts) is the airtight backstop, with the old per-facet INK_RE patch demoted to
+# an alarmed monitor behind it (T9: demote → observe → delete-never).
+#
+# The ink lexicon mirrors the engine's INK_RE (facetDiff.ts) — one lexicon, pinned sites.
+_INK_RE = re.compile(
+    r"\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b"
+    r"|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)",
+    re.I)
+#: The CLOSED facet dimensions the transactional merge validates (ADR 0005: closed facets only —
+#: open prose is never normalized). Table-driven so a future closed facet is one row, not a new guard.
+_CLOSED_FACET_DIMENSIONS = (("visible-ink", _INK_RE),)
+
+_FACET_RETRY = (
+    "Your profile contradicts this houseguest's FIXED casting facets ({dims}): the committed skeleton "
+    "facets are a dealt, immutable budget — e.g. a houseguest whose skeleton carries no visible "
+    "tattoos has none, anywhere (not in the look, the style, or the biography). Rewrite the COMPLETE "
+    "JSON object now with the physicalCharacteristics and biography consistent with the skeleton's "
+    "facets exactly as given. JSON only."
+)
+
+
+def facet_hand_conflicts(profile: dict, npc: dict) -> list:
+    """The closed-facet dimensions the authored profile INTRODUCES against the committed skeleton
+    facet (the dealt hand): for each closed dimension absent from the skeleton's
+    ``physicalCharacteristics``, flag it when the authored facet block OR biography introduces it.
+    Returns dimension names ([] when coherent / no skeleton facet to validate against). Vault-free."""
+    skel = (npc or {}).get("physicalCharacteristics")
+    if not isinstance(skel, dict) or not skel:
+        return []
+    out = []
+    authored_pc = (profile or {}).get("physicalCharacteristics")
+    bio = str((profile or {}).get("biography") or "")
+    for dim, rx in _CLOSED_FACET_DIMENSIONS:
+        if any(rx.search(str(v or "")) for v in skel.values()):
+            continue  # the skeleton GRANTED this dimension — the author may sharpen it freely
+        authored_has = isinstance(authored_pc, dict) \
+            and any(rx.search(str(v or "")) for v in authored_pc.values())
+        if authored_has or rx.search(bio):
+            out.append(dim)
+    return out
+
+
+def build_authoring_messages(npc: dict, taken: Optional[dict] = None,
+                             hand: Optional[dict] = None) -> list[dict]:
     """The producer prompt for ONE houseguest. Seeds the LLM with the houseguest's PUBLIC skeleton
     (name + whatever public facets the engine already exposes) and NOTHING about the player — the
     NPC's storyline is authored as if the player does not exist (anti-sycophancy, mandate #3).
-    Returns chat messages for the utility model."""
+    Returns chat messages for the utility model.
+
+    T0-6 (the ONE Casting Bible): ``hand`` is this NPC's dealt FacetLedger hand (voice tic / build /
+    hair / complexion steering) and ``taken`` is the cast-wide taken-list (``{"vocations": [...],
+    "hometowns": [...]}`` — the SIBLINGS' committed facets), both injected so a deep-authoring call
+    can neither drift this houseguest off their dealt ground nor converge onto a sibling's. Both
+    optional (absent ⇒ byte-identical legacy prompt)."""
     name = str(npc.get("name") or "this houseguest")
     # Include `ethnicity` (the engine-guaranteed heritage, 0063) so the authored look COHERES with it —
     # without it the model invents complexion/features unmoored from the seeded identity and reliably
@@ -777,13 +832,39 @@ def build_authoring_messages(npc: dict) -> list[dict]:
         f"different gender, or a different life-stage/age."
         if immutable else ""
     )
+    # T0-6: the dealt hand (fixed steering) + the cast-wide taken-list (the siblings' committed
+    # facets) — a per-NPC call cannot see the rest of the cast, so the ledger IS its shared bible.
+    hand_rule = ""
+    if isinstance(hand, dict):
+        try:
+            from src.orwell_facet_ledger import render_hand
+            rendered = render_hand(hand)
+            if rendered:
+                hand_rule = (f"\nDEALT FACETS (the casting office's bible for {name} — honor them; "
+                             f"the committed skeleton above already reflects this deal): {rendered}.")
+        except Exception:  # pragma: no cover - defensive: the ledger never breaks the prompt
+            hand_rule = ""
+    taken_rule = ""
+    if isinstance(taken, dict):
+        jobs = [str(v).strip() for v in (taken.get("vocations") or []) if str(v).strip()]
+        towns = [str(t).strip() for t in (taken.get("hometowns") or []) if str(t).strip()]
+        parts = []
+        if jobs:
+            parts.append(f"occupations already cast: {', '.join(jobs)}")
+        if towns:
+            parts.append(f"hometowns already cast: {', '.join(towns)}")
+        if parts:
+            taken_rule = ("\nCAST-WIDE TAKEN LIST (the other houseguests occupy this ground — do NOT "
+                          "duplicate it or drift this houseguest toward it): " + "; ".join(parts) + ".")
     user = (
         f"Houseguest to flesh out: {name}.\n"
         f"Public skeleton (build FROM this, never contradict it): {json.dumps(skeleton, ensure_ascii=False)}\n"
         f"Ground {name}'s secrets, true goals, and weakness in THIS skeleton — their specific occupation, "
         f"archetype, age, and backstory — so the hidden life reads like THIS exact person and no one else."
         f"{immutable_rule}"
-        f"{pronoun_rule}\n"
+        f"{pronoun_rule}"
+        f"{hand_rule}"
+        f"{taken_rule}\n"
         f"Write {name}'s secret bible as JSON now — their own independent life, no protagonist."
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
@@ -1023,7 +1104,9 @@ WriteFn = Callable[[dict], Awaitable[dict]]
 async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                       on_authored: Optional[Callable[[str], None]] = None,
                       *, concurrency: int = _AUTHOR_CONCURRENCY,
-                      user: Optional[str] = None) -> int:
+                      user: Optional[str] = None,
+                      seed: Optional[int] = None,
+                      hands: Optional[dict] = None) -> int:
     """For each NPC in `cast`: build the producer prompt → `llm_fn` → parse → `write_fn`
     (recordCastProfile). Best-effort PER houseguest: one failure never aborts the rest (the seeded
     floor stays authoritative for any NPC that couldn't be authored). Returns how many were written.
@@ -1041,6 +1124,17 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     write-back (per-NPC portrait gating, #7). It is best-effort: a callback raising never aborts
     authoring. It is never fired for an NPC that wasn't authored / was refused.
 
+    T0-6 — the ONE Casting Bible: `seed` (the season seed, when known — always known on the live
+    kickoff paths) mints this cast's FacetLedger via the SAME slot alignment `orwell_cast_genesis`
+    used (`assign_genesis_slots` is pure, so re-deriving it here — rather than threading genesis's own
+    minted hands forward — keeps this call independent of whether genesis actually ran first), keyed
+    by houseguest id. `hands` (a `{houseguestId: hand}` mapping) lets a caller inject a pre-minted
+    ledger directly (tests; a lane that already minted one) — when both are given, `hands` wins. Every
+    per-NPC prompt then carries ITS dealt hand + the cast-wide TAKEN-LIST (the siblings' actually
+    COMMITTED vocations/hometowns, read straight off `cast` — no ledger needed for that half). A ledger
+    mint failure is fail-soft: the legacy plain prompt stands (steering only; the engine's structural
+    envelope is what actually binds).
+
     #1057 — ROBUSTNESS to the live concurrent-burst failure (the live-verify authored only 3/15):
       • the LLM call retries on an EMPTY or TRUNCATED visible body (provider truncation under the burst),
         not just on the #1002 "full body, no JSON" prose case;
@@ -1051,6 +1145,35 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     All three stay fail-soft: after the bounded retries the call simply lands on the seeded floor.
     """
     sem = asyncio.Semaphore(max(1, int(concurrency)))
+    # T0-6 — mint (or accept a pre-minted) cast-wide FacetLedger BEFORE any LLM call, keyed by
+    # houseguest id. `npc_ids` mirrors genesis's own `roster_ids` filter (a truthy id, player excluded)
+    # so `len(npc_ids)` matches the count genesis minted against, which is what makes the independent
+    # re-derivation byte-identical to genesis's original deal.
+    npc_ids = [str(n.get("id")) for n in (cast or [])
+              if isinstance(n, dict) and n.get("id") and n.get("id") != "player"]
+    hand_by_id: dict = dict(hands) if isinstance(hands, dict) else {}
+    if not hand_by_id and seed is not None and npc_ids:
+        try:
+            from src.orwell_cast_genesis import assign_genesis_slots
+            from src.orwell_facet_ledger import mint_facet_ledger
+            slots = assign_genesis_slots(seed, len(npc_ids))
+            physical = [bool(s.get("physical")) for s in slots]
+            ledger = mint_facet_ledger(seed, len(npc_ids), physical)
+            if len(ledger) == len(npc_ids):
+                hand_by_id = {hid: ledger[i] for i, hid in enumerate(npc_ids)}
+        except Exception as e:  # pragma: no cover - defensive: a ledger hiccup never breaks authoring
+            logger.warning(f"[cast-authoring] facet-ledger mint failed (plain prompts stand): {e}")
+
+    def _taken_for(hid: str) -> dict:
+        """The cast-wide taken-list for one houseguest: the OTHER houseguests' actually-COMMITTED
+        vocation/hometown (read straight off the roster — genesis already settled these; a per-NPC
+        deep-authoring call can't see its siblings otherwise)."""
+        return {
+            "vocations": [n.get("vocation") for n in (cast or [])
+                         if isinstance(n, dict) and str(n.get("id")) != hid and n.get("vocation")],
+            "hometowns": [n.get("hometown") for n in (cast or [])
+                         if isinstance(n, dict) and str(n.get("id")) != hid and n.get("hometown")],
+        }
     # #1057: SERIALIZE the engine write-back. The per-NPC recordCastProfile write-backs collide on the
     # orchestrator integrity checkpoint when they run concurrently (the live-verify's 3 `degradation`
     # refusals dropped good profiles). A single-flight lock funnels every write-back through one at a time
@@ -1070,6 +1193,7 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
     coherence_stripped = 0  # F2 (#1660): NPCs whose authored dossier PROSE contradicted the pinned identity
     identity_pinned = 0     # F1 (#1660): NPCs whose authored STRUCTURED field crosswired the committed roster
     secret_pinned = 0       # F5 (#1660): NPCs whose hidden threads were dropped (authored around a crosswired job)
+    facet_stripped = 0      # T0-6: NPCs whose biography was dropped after a failed dealt-facet regenerate
     ukey = _safe_user(user)  # M1-10: the give-up ledger scope
 
     async def _call_with_retries(npc: dict, hid: str):
@@ -1090,7 +1214,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         call failure, not a misroute) and None only when every attempt returned. So the caller records
         `reasoning-misroute` only for a genuine successful-but-empty completion, and a provider-call
         failure class for the exception path."""
-        messages = build_authoring_messages(npc)
+        # T0-6: every lane's prompt gets its NPC's dealt hand + the cast-wide taken-list.
+        messages = build_authoring_messages(npc, taken=_taken_for(hid), hand=hand_by_id.get(hid))
         _spend_attempt(ukey, hid)  # M1-10: every real provider call spends from the season budget
         call_error = None  # RC6 S6c: the message of the last provider EXCEPTION (None ⇒ every call returned)
         try:
@@ -1201,7 +1326,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
 
     async def _author_one(npc: dict) -> int:
         nonlocal floor_no_json, floor_empty, floor_truncated, floor_degradation, floor_below, \
-            floor_gaveup, floor_call_failed, coherence_stripped, identity_pinned, secret_pinned
+            floor_gaveup, floor_call_failed, coherence_stripped, identity_pinned, secret_pinned, \
+            facet_stripped
         hid = npc.get("id")
         if not hid or hid == "player":
             return 0
@@ -1339,6 +1465,55 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
                 if len(profile) <= 1:
                     floor_below += 1
                     return 0
+            # T0-6 — the TRANSACTIONAL adopt-or-regenerate guard for the dealt CLOSED facets (visible-ink
+            # today; table-driven for whatever else joins `_CLOSED_FACET_DIMENSIONS`). The engine's
+            # generic closed-facet-diff validator (`src/engine/facetDiff.ts`) is the airtight backstop at
+            # the `recordCastProfile` boundary — it reverts a conflicting `physicalCharacteristics` field
+            # per-field regardless of what happens here — but a contradicting BIOGRAPHY is a whole
+            # paragraph the engine can only drop wholesale, which risks a GRAFT (the corrected facet block
+            # standing beside prose that still describes the un-granted mark). So the FE gets ONE
+            # regenerate attempt with corrective feedback first: adopt the dealt hand cleanly if the model
+            # can, or drop the biography here (never commit the graft) if it can't.
+            facet_conflicts = facet_hand_conflicts(profile, npc)
+            if facet_conflicts:
+                logger.info(
+                    f"[cast-authoring] authored dossier for {hid} contradicts a dealt closed facet "
+                    f"({', '.join(facet_conflicts)}) — regenerating once (adopt-or-regenerate, never graft)")
+                _spend_attempt(ukey, hid)
+                retried_profile = None
+                try:
+                    retry_messages = build_authoring_messages(npc, taken=_taken_for(hid), hand=hand_by_id.get(hid))
+                    retry_text = await llm_fn(retry_messages + [
+                        {"role": "user", "content": _FACET_RETRY.format(dims=", ".join(facet_conflicts))}])
+                    retried_profile = parse_authored_profile(retry_text or "", hid)
+                except Exception as e:
+                    logger.warning(f"[cast-authoring] facet-conflict regenerate call failed for {hid}: {e}")
+                if retried_profile is not None and not facet_hand_conflicts(retried_profile, npc):
+                    profile = retried_profile  # the regenerate ADOPTED the dealt hand cleanly
+                elif "biography" in profile:
+                    # Regeneration didn't land cleanly (or the call itself failed) — ADOPT the skeleton
+                    # rather than commit a graft: drop the biography (the one field the engine's per-facet
+                    # floor guard can't repair piecemeal). `physicalCharacteristics` stays IN the profile —
+                    # the engine's generic closed-facet-diff validator reverts it per-field at the
+                    # recordCastProfile boundary, so a clean facet field never gets lost alongside it.
+                    profile.pop("biography", None)
+                    facet_stripped += 1
+                    logger.warning(
+                        f"[cast-authoring] dropped {hid}'s biography after a failed dealt-facet regenerate "
+                        f"({', '.join(facet_conflicts)}) — closed-facet-conflict")
+                    try:
+                        from src import log_rings
+                        log_rings.record_soft_failure(
+                            "cast-authoring:closed-facet-conflict",
+                            f"authored biography for {hid} contradicted a dealt closed facet "
+                            f"({', '.join(facet_conflicts)}) and a regenerate could not clear it — dropped "
+                            "the biography so the dealt skeleton stands",
+                            corrected="dealt-closed-facet", user=user, houseguest=hid)
+                    except Exception:  # pragma: no cover - the health record must never break authoring
+                        pass
+                if len(profile) <= 1:
+                    floor_below += 1
+                    return 0
             # #1057: the write-back is SERIALIZED + degradation-retried (it must not run concurrently
             # against the orchestrator integrity checkpoint).
             res = await _write_with_retries(profile, hid)
@@ -1373,7 +1548,8 @@ async def author_cast(cast: list[dict], llm_fn: LlmFn, write_fn: WriteFn,
         f"{floor_gaveup} given-up, {floor_call_failed} call-failed; "
         f"{coherence_stripped} identity-incoherent prose-strip(s), "
         f"{identity_pinned} roster-contradiction field-strip(s), "
-        f"{secret_pinned} crosswired-vocation secret-strip(s))")
+        f"{secret_pinned} crosswired-vocation secret-strip(s), "
+        f"{facet_stripped} closed-facet-conflict biography-strip(s))")
     # STRICT enrichment policy (owner directive 2026-07-11): any houseguest left on the deterministic
     # floor after the bounded retry ladder is a LOUD failure — an ERROR + an admin-visible ledger
     # entry (the #1313 house-entry gate is what blocks the flow itself). Under `soft` the tally above
@@ -1773,7 +1949,8 @@ def _recover_from_reasoning_channel(reasoning: str, owner: Optional[str]) -> Opt
 
 async def run_authoring(cast: list[dict], owner: Optional[str],
                         on_authored: Optional[Callable[[str], None]] = None,
-                        write: Optional[WriteFn] = None) -> int:
+                        write: Optional[WriteFn] = None,
+                        seed: Optional[int] = None) -> int:
     """Resolve the live deps and author the cast. Silent no-op (returns 0) if no model resolves.
     No player identity is threaded in — NPC storylines are authored player-independent.
     `on_authored(houseguest_id)` fires per successful write-back (per-NPC portrait gating, #7).
@@ -1782,6 +1959,10 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     The 0065 advance-warm passes a sink that routes through `pre_seed_next_season(profile=…)` so the
     authored profile lands on the NEXT-season HOLDING store — NEVER the live cast (mid-season,
     `record_cast_profile` would author the running house, the wrong cast).
+
+    `seed` (T0-6) — the season seed, when known — mints the cast-wide FacetLedger `author_cast` threads
+    into every per-NPC prompt (dealt hand + taken-list). Absent ⇒ authoring still runs, just without the
+    ledger steering (the legacy plain prompt; the engine's structural envelope still binds regardless).
 
     Routing (owner directive 2026-07-11): the calls resolve through `resolve_authoring_llm_fn` —
     narration-model-first at the runtime `cast_authoring_temperature`, explicit utility fallback.
@@ -1810,7 +1991,7 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
     # Only the DEFAULT sink mutates the LIVE cast; a `write` override targets the next-season
     # holding store (which deliberately does not touch the live board), so don't push for it.
     is_live_write = write is None
-    written = await author_cast(cast, llm_fn, write or _write, on_authored, user=owner)
+    written = await author_cast(cast, llm_fn, write or _write, on_authored, user=owner, seed=seed)
     # #617: enrichment landed on the live game — push a server-side "game-updated" so open pages
     # reconcile now instead of waiting for the next poll. Best-effort/fail-soft.
     if written and is_live_write:
@@ -1825,7 +2006,8 @@ async def run_authoring(cast: list[dict], owner: Optional[str],
 def kickoff_authoring(cast: list[dict], owner: Optional[str],
                       then: Optional[Callable[[], None]] = None,
                       on_authored: Optional[Callable[[str], None]] = None,
-                      write: Optional[WriteFn] = None) -> None:
+                      write: Optional[WriteFn] = None,
+                      seed: Optional[int] = None) -> None:
     """Fire-and-forget: author the cast in the background BEFORE portraits (the authored physical
     facet feeds the portrait prompt — pipeline order), then call `then` (e.g. the portrait kickoff)
     REGARDLESS of authoring success, so the picture still generates from the seeded facets if the
@@ -1835,10 +2017,13 @@ def kickoff_authoring(cast: list[dict], owner: Optional[str],
     `on_authored(houseguest_id)` — when supplied — fires after EACH NPC's successful write-back so a
     consumer can gate that one houseguest's portrait the moment it is authored (#7). `then` still
     fires once at the very end (whole-cast done), success or failure, so a whole-cast fallback /
-    gate-release can never hang."""
+    gate-release can never hang.
+
+    `seed` (T0-6) — thread the season seed through when known, so `author_cast` can mint the
+    cast-wide FacetLedger. Absent ⇒ authoring runs without ledger steering (byte-identical to before)."""
     async def _runner():
         try:
-            await run_authoring(cast, owner, on_authored, write)
+            await run_authoring(cast, owner, on_authored, write, seed=seed)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"[cast-authoring] background run failed: {e}")
         finally:

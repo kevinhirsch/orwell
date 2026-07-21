@@ -261,7 +261,9 @@ async def prewarm_cast(user: Optional[str] = None, *, engine=None, authoring=Non
 
     # Author the cast in the background; ALWAYS release the gates when done (the seeded floor is still a
     # complete cast), so the gated portrait warm proceeds even if a houseguest couldn't be authored.
-    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored)
+    # T0-6: thread the season `seed` so the FacetLedger mints — this is the EARLIEST kickoff (fired at
+    # casting-interview open), so it is also where the ledger's dealt hands first reach a prompt.
+    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored, seed=seed)
     return {"warmed": True, "count": len(st.prompts)}
 
 
@@ -331,7 +333,8 @@ async def warm_next_season(user: Optional[str] = None, *, engine=None, authoring
     async def _write_next_season(profile: dict) -> dict:
         return await engine.pre_seed_next_season(profile=profile, user=user)
 
-    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored, write=_write_next_season)
+    authoring.kickoff_authoring(cast, user, then=_on_done, on_authored=_on_authored,
+                                write=_write_next_season, seed=seed)
     return {"warmed": True, "count": len(st.prompts)}
 
 

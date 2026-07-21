@@ -235,7 +235,7 @@ def test_prewarm_seeds_identity_before_authoring():
             return 1  # applied ⇒ prewarm re-fetches the roster
 
     class _FakeAuthoring:
-        def kickoff_authoring(self, cast, user, then=None, on_authored=None):
+        def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None, seed=None):
             order.append("author")
             if on_authored:
                 for npc in (cast or []):
@@ -269,7 +269,7 @@ def test_prewarm_identity_failure_never_blocks_authoring():
             raise RuntimeError("identity model down")
 
     class _FakeAuthoring:
-        def kickoff_authoring(self, cast, user, then=None, on_authored=None):
+        def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None, seed=None):
             seen.append("author")
             if then:
                 then()
