@@ -37,7 +37,19 @@ SMOKE_DATA_DIR="$(mktemp -d /tmp/orwell-smoke-data-XXXXXX)"
 # the one true end-to-end gate actually exercises the shipped runtime (a regression reachable only
 # when a living-house layer is active would otherwise stay invisible). Matches orwell-install.sh's
 # write_config(); every layer is calibration-neutral-when-off and heavy-sim'd ON.
-SHIPPED_FLAGS=(ORWELL_CAMPAIGNS=1 ORWELL_COMP_INTENT=1 ORWELL_TRAJECTORIES=1 ORWELL_TRIGGERS=1 ORWELL_SECRET_PACING=1 ORWELL_JURY_HOUSE=1 ORWELL_SEEDED_TIE_SURFACING=1 ORWELL_STRATEGIC_CADENCE=1 ORWELL_SCHEME_TARGETS=1 ORWELL_CONFESSIONAL_DEPTH=1 ORWELL_DEAL_DEPTH=1 ORWELL_NPC_DEAL_OFFERS=1 ORWELL_SOUL_DEPTH=1 ORWELL_COMP_MECHANICS_PLUS=1 ORWELL_COMP_MIXED=1)
+#
+# TUN-10 (deploy-parity, docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md): this
+# used to be a hand-typed copy of the flag list that silently DRIFTED from the real deploy — it
+# never picked up ORWELL_MYTH_MAKING / ORWELL_VOTE_DEDUCTION when those flags were added, so this
+# gate stopped exercising the actually-shipped config without anyone noticing (the exact class of
+# bug CLAUDE.md's "reconcile hardening" section warns about). Single-sourced from
+# deploy/orwell-env-defaults.sh — the SAME (KEY, DEFAULT) list orwell-install.sh writes and
+# orwell-update.sh backfills — so this can never drift again; add a flag there and it's picked up
+# here automatically. ORWELL_EMBEDDINGS / ORWELL_EMBED_CACHE are deliberately EXCLUDED: the
+# intentional-fallback leg below and the separate fastembed warm-up leg (search "A12") each control
+# those two independently and must stay that way.
+. "$ROOT/deploy/orwell-env-defaults.sh"
+mapfile -t SHIPPED_FLAGS < <(orwell_optin_env_defaults "$SMOKE_DATA_DIR" | grep -Ev '^ORWELL_EMBED(DINGS|_CACHE)=')
 
 start_engine() { # optional $1 = a shared token to enforce (B67/B71)
   env ORWELL_ENGINE_PORT="$PORT" ORWELL_DATA_DIR="$SMOKE_DATA_DIR" "${SHIPPED_FLAGS[@]}" ${1:+ORWELL_ENGINE_TOKEN="$1"} node dist/main.js >/tmp/orwell-smoke-engine.log 2>&1 &
