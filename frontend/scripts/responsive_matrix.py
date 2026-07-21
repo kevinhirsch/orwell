@@ -107,9 +107,12 @@ XFAIL = {
     # (#893) and the sweep sometimes reads getBoundingClientRect mid-settle-transform, measuring
     # ~43.6px (printed rounded as "44x44"). Seen on two unrelated PRs the same night while passing
     # minutes earlier. Real fix (tracked in #1822): measure at animation quiescence (disable
-    # transitions for the sweep or await getAnimations() drain), then REMOVE this entry so the
-    # touch family ratchets back to a hard assertion.
-    "#1822-rail-rearrange-settle": "touch: 'Rearrange gadgets'",
+    # transitions for the sweep or await getAnimations() drain), then REMOVE these entries so the
+    # touch family ratchets back to a hard assertion. Scoped to the OBSERVED tiny-320 sub-passes
+    # (a genuine sub-44 regression on any other viewport must still hard-fail); if the settle race
+    # surfaces on another tiny-320 sub-pass, add that one — never widen past tiny-320.
+    "#1822-rail-rearrange-settle-retro": "tiny-320+retro touch: 'Rearrange gadgets'",
+    "#1822-rail-rearrange-settle-endgame": "tiny-320+endgame-card touch: 'Rearrange gadgets'",
 }
 
 passes, failures, xfails, xpasses = [], [], [], []
