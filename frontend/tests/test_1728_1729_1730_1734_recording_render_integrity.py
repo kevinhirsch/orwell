@@ -8,7 +8,9 @@ fold, so they land together (splitting would self-conflict):
     while a new one is appended (T3). This file pins the id-keyed truncate resolution
     (`SessionManager.keep_count_before_message`) that makes the supersede exact regardless of
     whether the DOM and the DB row count agree — plus the cancel-path source pin (no more
-    `inject_messages` on an empty cancelled turn).
+    `inject_messages` on an empty cancelled turn) — and the defer-fold-to-settle consequence half
+    (B2): the hidden-layer fold for a regenerated take must never double-apply nor survive as a
+    phantom for content the render log no longer contains.
 
   #1729 (B1) — `_auto_record_scene` must reject non-diegetic content (an OOC vent, a stream-drop
     machinery fragment) BEFORE folding it into the hidden layer as an "(overheard)" event. (The
@@ -458,6 +460,15 @@ def test_regenerate_throws_before_removing_dom_rows_on_truncate_failure():
 # never reach the engine, and the surviving take's fold must land exactly once (idempotent under
 # retry). See `src/fold_ledger.py` for the full design (incl. the T9-doctrine retract fallback,
 # documented but NOT built) and `src/agent_loop.py::_settle_pending_fold`.
+#
+# Two tiers of tests below:
+#   (a) LEDGER-MECHANICS tests via `_drive_staged` — no real DB rows, entries stay UNANCHORED
+#       (`row_anchor=None`). This exercises stage/settle/idempotency/re-queue/bound behavior, and
+#       (via the fail-safe) the "an unanchored entry is always discarded on truncate" path.
+#   (b) ANCHOR-PRECISE tests via a real `SessionManager` + persisted rows, mirroring production's
+#       stage → (persist →) `attach_row_anchor` → (truncate →) `discard_pending_fold` sequence —
+#       these are what actually prove the PR #1825 second-Greptile-P1 fix (an older-row truncate
+#       must discard every LATER anchored fold too, not just the newest).
 # ─────────────────────────────────────────────────────────────────────────────
 
 from src import fold_ledger as fl
@@ -472,7 +483,10 @@ def _drive_staged(monkeypatch, extraction_json, owner="owner", session_id="sess-
                    narration="They schemed in the backyard for a while.", whereabouts=None):
     """Like `_drive` above, but with `session_id` supplied — the fold STAGES instead of
     committing (the live per-turn belt call sites always pass `session_id`; only the decoupled
-    0081 faithfulness retro-adopt path calls with `session_id=None`, exercised separately)."""
+    0081 faithfulness retro-adopt path calls with `session_id=None`, exercised separately).
+
+    Deliberately does NOT attach a row anchor — see the section docstring's tier (a). Tests that
+    need anchor-precise discard semantics use the DB-backed helpers below instead."""
     captured = {"llm_called": False, "record_called": False}
 
     async def fake_llm(*a, **k):
@@ -533,19 +547,21 @@ def test_settle_with_nothing_staged_is_a_no_op():
     assert settled is False
 
 
-def test_regenerate_discards_the_staged_fold_before_settle_ever_runs(monkeypatch):
-    """The F5/F6 repro, end to end at the ledger layer: take A stages a fold, "Try again" discards
-    it (mirroring `routes/history_routes.py::truncate_session`'s unconditional discard), take B
-    stages its OWN fold, and the next turn's settle commits ONLY take B — never both, and never
-    take A's (possibly distorted, per F6) content."""
+def test_regenerate_discards_an_unanchored_staged_fold_via_the_failsafe(monkeypatch):
+    """Tier (a): a fold staged but never anchored (the attach step hadn't run — an unavoidable,
+    narrow race window at STAGE time) is discarded on ANY truncate, regardless of `keep_count` —
+    the fail-safe (`fold_ledger`'s "deliberately asymmetric" rule). This is a REAL, legitimate
+    path (not just a test artifact): see `test_missing_anchor_entry_is_discarded_...` below for
+    the DB-backed variant that also proves the warning log fires."""
     ok_a, cap_a = _drive_staged(
         monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"take A content (discarded)"}')
     assert ok_a is True
     assert fl.has_pending_fold("owner", "sess-1") is True
 
-    # "Try again" truncates the row that produced take A's fold.
-    discarded = fl.discard_pending_fold("owner", "sess-1")
-    assert discarded is True
+    # "Try again" truncates the row that produced take A's fold — the entry is unanchored, so the
+    # fail-safe discards it regardless of the keep_count value.
+    discarded = fl.discard_pending_fold("owner", "sess-1", keep_count=0)
+    assert discarded == 1
     assert fl.has_pending_fold("owner", "sess-1") is False
 
     ok_b, cap_b = _drive_staged(
@@ -595,11 +611,11 @@ def test_settle_failure_re_queues_the_entry_instead_of_losing_it(monkeypatch):
     assert fl.pending_fold_count("owner", "sess-1") == 1
 
 
-# ── PR #1825 (Greptile P1) — the queue redesign: a single overwriting slot let a transient
+# ── PR #1825 (Greptile P1 #1) — the queue redesign: a single overwriting slot let a transient
 # settle-failure re-stage the PRIOR turn's still-unsettled fold, and a NEW turn reaching
 # `_auto_record_scene` right after would silently CLOBBER it (mandate #4 evaporation). Fixed by
 # making the pending store a bounded FIFO queue: stage appends, settle drains oldest-first and
-# stops (never skips) on a failure, and truncate discards only the tail. ─────────────────────────
+# stops (never skips) on a failure. ─────────────────────────────────────────────────────────────
 
 def test_settle_failure_then_a_new_turn_stage_settles_both_in_order(monkeypatch):
     """The exact T-Rex repro: turn 1's settle hits a transient error (re-queued), turn 2 also
@@ -649,49 +665,6 @@ def test_settle_failure_then_a_new_turn_stage_settles_both_in_order(monkeypatch)
     assert fl.has_pending_fold("owner", "sess-1") is False
 
 
-def test_truncate_after_a_requeue_discards_only_the_newest_entry(monkeypatch):
-    """A truncate can only ever supersede the session's LATEST turn. If an OLDER fold is sitting
-    re-queued (from a prior transient settle failure) when a NEWER take gets regenerated, the
-    truncate/discard must remove ONLY the newest (tail) entry — the older, already-accepted fold
-    must survive and still settle."""
-    ok1, _cap1 = _drive_staged(
-        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"older, already-accepted turn"}')
-    assert ok1 is True
-
-    async def boom(*a, **k):
-        raise RuntimeError("network blip")
-
-    from src import orwell_engine as oe
-    monkeypatch.setattr(oe, "record_interaction", boom)
-    _run(al._settle_pending_fold("owner", "sess-1"))  # fails, re-queues the older entry
-    assert fl.pending_fold_count("owner", "sess-1") == 1
-
-    ok2, _cap2 = _drive_staged(
-        monkeypatch, '{"withIds":["npc:3"],"kind":"strategy","content":"newer take (being regenerated)"}')
-    assert ok2 is True
-    assert fl.pending_fold_count("owner", "sess-1") == 2
-
-    # "Try again" on the NEWER take — the truncate route discards only its (tail) fold.
-    discarded = fl.discard_pending_fold("owner", "sess-1")
-    assert discarded is True
-    assert fl.pending_fold_count("owner", "sess-1") == 1
-    assert fl._PENDING[("owner", "sess-1")][0]["content"] == "older, already-accepted turn", (
-        "the older, already-accepted fold must survive a truncate targeting a NEWER take"
-    )
-
-    applied = []
-
-    async def fake_record(content, with_ids=None, kind=None, consequence=None,
-                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
-        applied.append(content)
-        return {"recorded": True, "beatSeq": 9}
-
-    monkeypatch.setattr(oe, "record_interaction", fake_record)
-    settled = _run(al._settle_pending_fold("owner", "sess-1"))
-    assert settled is True
-    assert applied == ["older, already-accepted turn"]
-
-
 def test_pending_queue_bound_drops_the_oldest_entry_with_a_warning(caplog):
     """A pathological repeated-settle-failure loop must not grow the queue without limit — past
     `_MAX_QUEUE_LEN` the OLDEST entry is dropped (a real, bounded loss) with a warning log."""
@@ -728,20 +701,182 @@ def test_two_sessions_stage_independently():
                           consequence=None, felt_minutes=None, idempotency_key="k2")
     assert fl.has_pending_fold("owner", "sess-1") is True
     assert fl.has_pending_fold("owner", "sess-2") is True
-    assert fl.discard_pending_fold("owner", "sess-1") is True
+    assert fl.discard_pending_fold("owner", "sess-1", keep_count=0) == 1
     assert fl.has_pending_fold("owner", "sess-1") is False
     assert fl.has_pending_fold("owner", "sess-2") is True, "discarding one session must not touch another"
 
 
-def test_discard_returns_false_when_nothing_was_staged():
-    assert fl.discard_pending_fold("owner", "sess-empty") is False
+def test_discard_returns_zero_when_nothing_was_staged():
+    assert fl.discard_pending_fold("owner", "sess-empty", keep_count=0) == 0
+
+
+# ── PR #1825 (Greptile P1 #2, the mirror-image bug) — a truncate targeting an OLDER assistant
+# row removes that row AND every later row (a truncate is never a single-row operation), but a
+# tail-only discard left a LATER take's queued fold sitting in the ledger — it would settle later
+# as a PHANTOM hidden-layer fold for content the render log no longer contains, reintroducing the
+# exact F5 corruption this feature exists to prevent (T-Rex-confirmed). Fixed by anchoring every
+# staged entry to the real, persisted row it belongs to (`attach_row_anchor`, called from
+# `routes/chat_routes.py` right after the route persists that turn's reply) and discarding by
+# ANCHOR, not queue position: `discard_pending_fold` now removes every entry whose anchor sits at
+# or past the truncate's `keep_count` cutoff. ───────────────────────────────────────────────────
+
+def _stage_and_persist_turn(monkeypatch, sm, sid, owner, extraction_json, user_text, assistant_text):
+    """Mirrors the real production sequence for ONE turn: `_auto_record_scene` stages (mid-
+    generation, before the row exists) → the route persists the user+assistant row pair → the
+    route attaches the real row's anchor to whatever was just staged (`attach_row_anchor`).
+    Returns the persisted assistant row's id."""
+    ok, cap = _drive_staged(monkeypatch, extraction_json, owner=owner, session_id=sid,
+                            last_user=user_text, narration=assistant_text)
+    assert ok is True
+    sm.add_message(sid, ChatMessage("user", user_text, metadata={}))
+    sm.add_message(sid, ChatMessage("assistant", assistant_text, metadata={}))
+    ai_row_id = _seq_ordered_ids(sid)[-1]
+    attached = fl.attach_row_anchor(owner, sid, ai_row_id)
+    assert attached is True, "attach_row_anchor must anchor the tail entry this turn just staged"
+    return ai_row_id
+
+
+def test_truncate_from_an_older_row_discards_every_later_anchored_fold(monkeypatch):
+    """The T-Rex repro, exactly as reported: two queued folds (an older, re-queued-after-failure
+    fold + a newer one), truncate from the OLDER row → BOTH discarded, nothing settles."""
+    sm = SessionManager()
+    sid = "b2-trex-repro"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    older_row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"bonding","content":"older turn (re-queued)"}',
+        "u1", "older turn narration")
+    newer_row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner", '{"withIds":["npc:3"],"kind":"strategy","content":"newer turn"}',
+        "u2", "newer turn narration")
+    assert fl.pending_fold_count("owner", sid) == 2
+
+    # "Try again"/edit on the OLDER turn — this truncate wipes the older row AND the newer one.
+    keep_count = sm.keep_count_before_message(sid, older_row_id)
+    discarded = fl.discard_pending_fold("owner", sid, keep_count)
+    assert discarded == 2, "a truncate from an OLDER row must discard EVERY later anchored fold too"
+    assert fl.has_pending_fold("owner", sid) is False
+
+
+def test_truncate_from_the_newest_row_only_leaves_the_older_fold_to_settle(monkeypatch):
+    """The mirror-image check: truncating from the NEWEST row only must discard ONLY that fold —
+    the older, already-anchored fold survives and still settles normally."""
+    sm = SessionManager()
+    sid = "b2-newest-only"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    older_row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"bonding","content":"older content (kept)"}',
+        "u1", "older turn narration")
+    newer_row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"strategy","content":"newer content (regenerated away)"}',
+        "u2", "newer turn narration")
+    assert fl.pending_fold_count("owner", sid) == 2
+
+    keep_count = sm.keep_count_before_message(sid, newer_row_id)
+    discarded = fl.discard_pending_fold("owner", sid, keep_count)
+    assert discarded == 1
+    assert fl.pending_fold_count("owner", sid) == 1
+    assert fl._PENDING[("owner", sid)][0]["content"] == "older content (kept)"
+
+    applied = []
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        applied.append(content)
+        return {"recorded": True, "beatSeq": 9}
+
+    from src import orwell_engine as oe
+    from routes import chat_helpers
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 1
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    settled = _run(al._settle_pending_fold("owner", sid))
+    assert settled is True
+    assert applied == ["older content (kept)"], (
+        "the older, already-accepted fold must survive a truncate targeting a NEWER take, and "
+        "actually settle"
+    )
+
+
+def test_missing_anchor_entry_is_discarded_on_truncate_with_a_warning(monkeypatch, caplog):
+    """A staged fold whose anchor never got attached (the narrow stage-time race, or a caller that
+    forgot the attach step) is discarded on ANY truncate, regardless of `keep_count` — the
+    fail-safe. This is the DB-backed variant of
+    `test_regenerate_discards_an_unanchored_staged_fold_via_the_failsafe`, additionally proving
+    the warning log fires."""
+    sm = SessionManager()
+    sid = "b2-missing-anchor"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+    sm.add_message(sid, ChatMessage("user", "u1", metadata={}))
+    sm.add_message(sid, ChatMessage("assistant", "a1", metadata={}))
+
+    ok, _cap = _drive_staged(
+        monkeypatch, '{"withIds":["npc:3"],"kind":"bonding","content":"x"}',
+        session_id=sid, last_user="u1", narration="a1")
+    assert ok is True
+    assert fl._PENDING[("owner", sid)][0]["row_anchor"] is None, (
+        "this test deliberately never calls attach_row_anchor"
+    )
+
+    import logging
+    caplog.set_level(logging.WARNING, logger="src.fold_ledger")
+    keep_count = 999  # even a cutoff that wouldn't otherwise discard anything must still discard this
+    discarded = fl.discard_pending_fold("owner", sid, keep_count)
+    assert discarded == 1
+    assert fl.has_pending_fold("owner", sid) is False
+    assert any("missing/unresolved row anchor" in r.message for r in caplog.records), (
+        "discarding a never-anchored entry must be logged — it is a real (if bounded) fold loss"
+    )
+
+
+def test_settle_drops_an_anchored_entry_whose_row_no_longer_exists(monkeypatch):
+    """Settle's own last-line belt (item 4): a non-truncate deletion path (edit-message /
+    delete-messages / merge-last-assistant) can remove a row WITHOUT ever calling
+    `discard_pending_fold`. Settle must still refuse to fold it — dropped, never applied, never
+    re-queued (there's nothing to retry)."""
+    sm = SessionManager()
+    sid = "b2-vanished-row"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner", '{"withIds":["npc:3"],"kind":"bonding","content":"x"}',
+        "u1", "a1")
+    assert fl._PENDING[("owner", sid)][0]["row_anchor"] is not None
+
+    # A non-truncate path removes the row WITHOUT going through discard_pending_fold at all.
+    kc = sm.keep_count_before_message(sid, row_id)
+    assert sm.truncate_messages(sid, kc) is True
+    assert fl.has_pending_fold("owner", sid) is True, "the ledger entry itself is untouched by this"
+
+    async def boom(*a, **k):
+        raise AssertionError("must never settle a fold whose anchored row no longer exists")
+
+    from src import orwell_engine as oe
+    from routes import chat_helpers
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 1
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    settled = _run(al._settle_pending_fold("owner", sid))
+    assert settled is False
+    assert fl.has_pending_fold("owner", sid) is False, "the vanished-row entry must be DROPPED, not requeued"
+
+
+def test_settle_still_applies_an_unanchored_entry_normally():
+    """The flip side of the truncate fail-safe: settle treats a MISSING anchor as "no evidence
+    either way" and proceeds normally — unlike truncate, settle isn't reacting to an active delete
+    event. (Covered functionally by `test_settle_commits_the_staged_fold_exactly_once` above,
+    which never attaches an anchor either; this test pins the specific
+    `entry_exists_at_settle(..., None)` contract directly.)"""
+    assert fl.entry_exists_at_settle("any-session", None) is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# #1728 (B2) — the truncate route's discard wiring: any truncate on a session discards the NEWEST
-# staged fold (the tail — see `test_truncate_after_a_requeue_discards_only_the_newest_entry` above
-# for why only the tail), and the settle-at-turn-start call sits at the top of the turn (before ANY
-# narration is generated) — both source-pinned so a future refactor can't silently reorder them.
+# #1728 (B2) — the wiring source pins: the truncate route discards by anchor, the agent-mode
+# persist path attaches the anchor, and the settle-at-turn-start call sits at the top of the turn
+# (before ANY narration is generated) — all source-pinned so a future refactor can't silently
+# reorder or drop them.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _read_history_routes_py():
@@ -752,13 +887,36 @@ def _read_history_routes_py():
         return f.read()
 
 
-def test_truncate_route_discards_a_staged_fold():
+def test_truncate_route_discards_staged_folds_by_anchor():
     src = _read_history_routes_py()
     fn = src[src.index("async def truncate_session("):]
     fn = fn[:fn.index("\n    @router.post(\"/api/session/{session_id}/message\")")]
     assert "fold_ledger" in fn and "discard_pending_fold" in fn, (
-        "truncate must discard a staged fold (#1728 B2) — a superseded take's fold must never "
+        "truncate must discard staged folds (#1728 B2) — a superseded take's fold must never "
         "reach the engine"
+    )
+    assert "discard_pending_fold(effective_user(request), session_id, keep_count)" in fn, (
+        "discard_pending_fold must be called WITH keep_count (#1825 fix #2) — a call with only "
+        "(owner, session_id) silently reverts to the tail-only discard the second Greptile P1 "
+        "closed"
+    )
+
+
+def _read_chat_routes_py():
+    import os
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "routes", "chat_routes.py")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def test_chat_routes_attaches_the_row_anchor_after_persisting():
+    src = _read_chat_routes_py()
+    assert "fold_ledger" in src and "attach_row_anchor" in src, (
+        "the agent-mode persist path must attach the real row anchor to any fold staged this "
+        "turn (#1728 B2, PR #1825 fix #2) — without it, discard_pending_fold can never tell an "
+        "older surviving turn's fold from a superseded one, and truncate falls back to "
+        "discarding every unanchored entry (a mandate-#4 regression, not a phantom-fold one)"
     )
 
 
@@ -777,4 +935,13 @@ def test_settle_pending_fold_is_called_before_the_round_loop_starts():
     round_loop_at = src.index("for round_num in range(1, max_rounds + 1):", impl_at)
     assert settle_call_at < round_loop_at, (
         "the deferred fold must settle BEFORE the new turn generates anything — never mid-stream"
+    )
+
+
+def test_settle_pending_fold_checks_row_existence_before_applying():
+    src = _read_agent_loop_py()
+    fn = src[src.index("async def _settle_pending_fold("):]
+    fn = fn[:fn.index("\n# ── Whereabouts cohesion")]
+    assert "entry_exists_at_settle" in fn, (
+        "settle must check the anchored row still exists before applying (#1825 fix #2, item 4)"
     )

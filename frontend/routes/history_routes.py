@@ -158,19 +158,21 @@ def setup_history_routes(session_manager) -> APIRouter:
             else:
                 keep_count = body.get("keep_count", 0)
             result = session_manager.truncate_messages(session_id, keep_count)
-            # #1728 (B2) — the supersede-cancel half of defer-fold-to-settle: a truncate ALWAYS
-            # cuts this session's tail (from some point forward to the end), and a staged pending
-            # fold (`fold_ledger`, `_auto_record_scene` in `src/agent_loop.py`) only ever exists
-            # for the session's MOST RECENT turn — the next turn's own settle
-            # (`_settle_pending_fold`) always drains any earlier one first. So the row that
-            # produced a staged fold, if any, is necessarily inside every truncate's discarded
-            # range; discard it unconditionally so a superseded take's fold can never reach the
-            # engine (kills the F5/F6 double/distorted-fold bug). Best-effort: never fails the
-            # truncate itself.
+            # #1728 (B2) — the supersede-cancel half of defer-fold-to-settle: a truncate removes
+            # every row at seq-order position >= `keep_count`. Any staged pending fold
+            # (`fold_ledger`, `_auto_record_scene` in `src/agent_loop.py`) whose row lives in that
+            # removed range must be discarded, or it settles later as a PHANTOM hidden-layer fold
+            # for content the render log no longer contains — NOT just the newest entry: a
+            # truncate that targets an OLDER row (an edit/resend) removes that row AND every later
+            # one, so an older-row truncate can wipe out a later take's row too (PR #1825's second
+            # Greptile P1, T-Rex-confirmed). `discard_pending_fold` discards every entry ANCHORED
+            # at or past `keep_count` (fail-safe: a still-unanchored entry is discarded too — see
+            # `fold_ledger`'s module docstring); an older, already-accepted turn's re-queued fold
+            # (anchored below `keep_count`) survives. Best-effort: never fails the truncate itself.
             try:
                 from src.auth_helpers import effective_user
                 from src import fold_ledger as _fl
-                _fl.discard_pending_fold(effective_user(request), session_id)
+                _fl.discard_pending_fold(effective_user(request), session_id, keep_count)
             except Exception as _fold_e:
                 logger.warning(f"Discarding staged fold on truncate failed {session_id}: {_fold_e}")
             return {"status": "ok", "kept": keep_count, "truncated": result}

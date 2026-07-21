@@ -2577,9 +2577,16 @@ async def _settle_pending_fold(owner, session_id) -> bool:
     Fail-open for the NEW turn (a settle hiccup never blocks it from starting) but never silently
     loses a fold (mandate #4): a transient failure RE-QUEUES the identical entry at the FRONT for
     the next settle opportunity and STOPS draining — a later (newer) entry must never settle ahead
-    of an older one still stuck retrying, or the ledger's order (and truncate's "only the tail"
-    assumption) would be violated. Returns True iff at least one fold was actually applied this
-    call."""
+    of an older one still stuck retrying, or the ledger's ordering (which
+    `fold_ledger.discard_pending_fold`'s anchor-based truncate discard depends on) would be
+    violated. Returns True iff at least one fold was actually applied this call.
+
+    **Settle's own last-line belt (PR #1825 fix #2, item 4):** before applying an entry, verify its
+    anchored row still exists (`fold_ledger.entry_exists_at_settle`) — cheap defense-in-depth
+    against a non-truncate deletion path (`edit-message`/`delete-messages`/`merge-last-assistant`)
+    that bypassed the truncate route's `discard_pending_fold` call entirely. A vanished-row entry
+    is DROPPED (never re-queued — there is nothing to retry) and draining continues to the next
+    entry."""
     from src import fold_ledger as _fl
     from src import orwell_engine as _oe
     settled_any = False
@@ -2587,6 +2594,13 @@ async def _settle_pending_fold(owner, session_id) -> bool:
         entry = _fl.pop_oldest_pending_fold(owner, session_id)
         if entry is None:
             break
+        if not _fl.entry_exists_at_settle(session_id, entry.get("row_anchor")):
+            logger.warning(
+                f"[orwell] settle: dropping a staged fold whose anchored row no longer exists "
+                f"(kind={entry['kind']}, with={entry['with_ids']}) — a non-truncate deletion path "
+                f"removed it; the content is gone from the render log so the fold must not land as "
+                f"a phantom user={owner}")
+            continue  # nothing to retry — keep draining the rest of the queue
         try:
             result = await _backfill_with_cas(
                 owner, _oe.record_interaction, entry["content"],

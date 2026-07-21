@@ -1924,6 +1924,19 @@ def setup_chat_routes(
                                     phase=("casting" if (ctx.framed and not ctx.game_active) else None),
                                     game_moment=_game_moment,
                                 )
+                                if _saved_id and ctx.game_active:
+                                    # #1728 (B2, PR #1825 fix #2): the SAME row id `dataset.dbId`
+                                    # (#1751) stamps client-side also anchors any fold THIS turn
+                                    # staged (`_auto_record_scene` via `fold_ledger`) to its real,
+                                    # now-persisted row — a no-op if nothing was staged this turn,
+                                    # or if the tail already belongs to an older, re-queued turn.
+                                    try:
+                                        from src import fold_ledger as _fl
+                                        _fl.attach_row_anchor(ctx.user, session, _saved_id)
+                                    except Exception as _anchor_e:
+                                        logger.warning(
+                                            f"Fold-ledger row-anchor attach failed session={session}: "
+                                            f"{_anchor_e}")
                                 if _saved_id:
                                     # ADR 0012 §2.2/§3.3: server-minted timestamp (see the chat-mode
                                     # save above) so all windows render the identical time string.

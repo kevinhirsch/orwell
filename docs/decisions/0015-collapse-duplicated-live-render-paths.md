@@ -278,11 +278,10 @@ short-lived FE bookkeeping — max depth 8, oldest-drop-with-a-warning past that
   next turn** for that same session (`agent_loop._settle_pending_fold`, called before the new
   turn's round loop begins — never mid-stream), which **drains the whole queue oldest-first** —
   reaching a new turn is the proof the OLDEST staged take(s) were accepted, not regenerated.
-- A **regenerate discards only the TAIL (most-recently-staged) entry** as part of the truncate it
-  already performs (`routes/history_routes.py::truncate_session` calls
-  `fold_ledger.discard_pending_fold`) — provably correct because a truncate can only ever
-  supersede the session's LATEST turn, and any older, still-queued entries belong to already-
-  accepted turns that must survive.
+- A **regenerate discards every entry ANCHORED to a row the truncate is removing** as part of the
+  truncate it already performs (`routes/history_routes.py::truncate_session` calls
+  `fold_ledger.discard_pending_fold(owner, session_id, keep_count)`) — see "Anchored, not just
+  queued" below for why this is anchor-based rather than tail-only.
 - **Idempotency (AC):** each entry's idempotency key is minted once, at stage time, and carried
   unchanged to its settle-time engine call (0065 Part B) — the engine dedups a repeated key, so a
   retried settle can never double-apply. A settle that fails on a transient error (not a stale-beat
@@ -291,16 +290,51 @@ short-lived FE bookkeeping — max depth 8, oldest-drop-with-a-warning past that
   of an older one still retrying — rather than dropping anything (mandate #4 — a validated fold
   must never silently evaporate).
 
-**Queue, not a single overwriting slot (PR #1825 Greptile P1 fix, post-merge).** The first cut of
-this design used a single-slot "stage always overwrites" store. Greptile (confirmed by a T-Rex
+**Queue, not a single overwriting slot (PR #1825 Greptile P1 fix #1, post-merge).** The first cut
+of this design used a single-slot "stage always overwrites" store. Greptile (confirmed by a T-Rex
 repro) found a real evaporation hole in it: a transient settle failure re-stages the prior turn's
 still-valid fold for retry, and if the NEW turn (which the settle deliberately let proceed —
 fail-open) also reaches `_auto_record_scene`, a plain overwrite silently clobbers the
 still-unsettled prior entry — exactly the mandate-#4 violation the module promised couldn't
 happen. The fix is the FIFO queue described above: stage always appends, settle always drains
-oldest-first and stops (rather than skips) on a failure, and truncate discards only the tail —
-so an older re-queued entry can never be lost to a newer one, and a newer take's fold can never be
-discarded by a truncate that targets an older one it doesn't touch.
+oldest-first and stops (rather than skips) on a failure.
+
+**Anchored, not just queued (PR #1825 Greptile P1 fix #2 — the mirror-image bug, also T-Rex-
+confirmed).** The queue fix's first version discarded only the TAIL (most-recently-staged) entry
+on a truncate. That is wrong whenever `truncate_from_id` targets an OLDER assistant row: a
+truncate is NEVER a single-row operation — it always removes that row AND every row after it — so
+an older-row truncate (an edit/resend of an earlier turn) can wipe out a LATER take's row too, but
+a tail-only discard left that later take's queued fold sitting in the ledger. It would settle
+later as a PHANTOM hidden-layer fold for content the render log no longer contains — reintroducing
+the exact F5 corruption this whole feature exists to prevent. The fix anchors every staged entry
+to the real, persisted row it belongs to:
+
+- `frontend/src/fold_ledger.py`'s `attach_row_anchor` is called once per turn, from
+  `routes/chat_routes.py`, right after the route persists that turn's assistant reply and gets
+  back its real DB id — the SAME `dataset.dbId` seam #1751 already stamps client-side. It anchors
+  the tail entry with the row's 0-indexed `seq`-order POSITION (the exact unit
+  `SessionManager.keep_count_before_message` already produces for the truncate route) — but ONLY
+  if the tail is still unanchored, so an older, re-queued turn's entry is never relabeled with a
+  newer turn's row.
+- `discard_pending_fold(owner, session, keep_count)` now discards every entry whose `row_anchor >=
+  keep_count` — the full set of rows the truncate is about to remove — not just the newest.
+  Entries anchored below `keep_count` (an older, already-accepted turn's re-queued fold) survive.
+- **Fail-safe, deliberately asymmetric:** an entry whose anchor is still `None` (the narrow gap
+  between staging — mid-generation, before the row exists — and the persist-time attach) is ALWAYS
+  discarded on a truncate, regardless of `keep_count`. A lost validated fold is a bounded
+  mandate-#4 sadness; a phantom fold surviving into the hidden layer is the corruption this whole
+  feature exists to prevent, and the two risks are not symmetric — uncertainty always resolves
+  toward "never fold."
+- **Settle's own last-line belt (`entry_exists_at_settle`, item 4)** is the intentional mirror:
+  before applying an entry, verify a row still exists at its anchored position (a cheap COUNT
+  query) — defense-in-depth against a non-truncate deletion path (`edit-message`/
+  `delete-messages`/`merge-last-assistant`) that bypassed `discard_pending_fold` entirely. A
+  vanished-row entry is dropped (warned, never re-queued — nothing to retry). A MISSING anchor at
+  settle time, unlike at truncate time, is treated as "no evidence either way" and settles
+  normally — settle isn't reacting to an active delete event, so there is no matching urgency to
+  assume the worst, and discarding every never-anchored entry on principle would silently regress
+  ordinary turns (the attach step runs synchronously within the same request that staged the
+  fold, so by the time the NEXT turn's settle runs, a real anchor is expected to already be there).
 
 **The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
 issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
@@ -323,14 +357,20 @@ applied/guaranteed-to-apply correction, never a bare attempt) both stay green un
 
 **Tests:** `frontend/tests/test_1728_1729_1730_1734_recording_render_integrity.py` — the D1 id-
 keyed-truncate + cancel-discard source pins (already landed with PR #1751) plus the B2 section
-added here: stage-not-commit, settle-drains-and-commits, the regenerate/discard/one-surviving-fold
-repro (the F5/F6 case end to end), idempotency-key reuse, re-queue-on-transient-failure, the
-`session_id=None` (0081 faithfulness retro-adopt) immediate-commit fallback, cross-session
-isolation, and two source pins (the truncate route's discard call; settle sitting before the round
-loop starts) — plus the PR #1825 queue-redesign cases: a settle failure followed by a new-turn
-stage settles BOTH folds in order on the next successful settle (each with its own idempotency
-key), a truncate after a re-queue discards only the newest entry while the re-queued older fold
-still settles, and the bound drops the oldest entry with a warning log past `_MAX_QUEUE_LEN`.
+added here, in two tiers: (a) ledger-mechanics tests via a stubbed `_auto_record_scene` driver
+(stage-not-commit, settle-drains-and-commits, idempotency-key reuse, re-queue-on-transient-
+failure, the `session_id=None` 0081 faithfulness-retro-adopt immediate-commit fallback,
+cross-session isolation, the `_MAX_QUEUE_LEN` bound dropping the oldest entry with a warning, and
+the PR #1825 fix-#1 case — a settle failure followed by a new-turn stage settles BOTH folds in
+order on the next successful settle, each with its own idempotency key); (b) anchor-precise tests
+via a real `SessionManager` + persisted rows mirroring the production stage→persist→attach→
+truncate sequence, proving PR #1825 fix #2 — the T-Rex repro (truncating an OLDER row discards
+BOTH its own and a later take's queued fold), the mirror check (truncating the NEWEST row only
+leaves an older re-queued fold to survive and settle), a missing-anchor entry discarded on
+truncate with a warning, and settle's own last-line belt dropping (never re-queuing) an anchored
+entry whose row was removed by a non-truncate path — plus source pins for the truncate route's
+anchor-aware discard call, the chat-routes persist-time attach wiring, settle sitting before the
+round loop starts, and settle's row-existence check.
 
 ## Traceability
 
