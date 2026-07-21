@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from typing import Awaitable, Callable, Optional
 
 try:  # the structured logger if present; a no-op stand-in keeps this importable in isolation
@@ -783,12 +782,11 @@ def _clean_str(v, max_len: int = 500) -> Optional[str]:
 # gender-agnostic reason. A rejected value is DROPPED (never persisted) — the field then falls to the
 # engine's deterministic floor (`generateDemeanors` / the seeded appearance pool), matching the
 # existing fail-soft "no model ⇒ floor stands" pattern.
-_GENESIS_NON_LATIN_SCRIPT_RE = re.compile(
-    r"[一-鿿぀-ヿㇰ-ㇿ가-힯Ѐ-ӿ؀-ۿ֐-׿]"
-)
-_GENESIS_GENDERED_ROLE_RE = re.compile(
-    r"\b(fatherly|paternal|motherly|maternal|gentlemanly|ladylike|girlish)\b", re.I
-)
+#
+# The script-garble + gendered-descriptor vocabulary is CANONICAL in `orwell_cast_authoring` (the F2
+# lint owns it); imported here rather than re-declared, mirroring the sibling dynamic-import pattern
+# (`orwell_cast_identity._resolve_llm_fn` importing `orwell_cast_authoring._resolve_llm_fn`) — no
+# module-level import cycle (cast_authoring only imports cast_genesis lazily inside one function body).
 # The self-referential prose fields this lint scans — genesis's OWN framing for both is a NEUTRAL
 # carriage/look phrase ("warm but guarded"), so a gendered relational-role term never belongs in either.
 _GENESIS_GARBLE_FIELDS = ("demeanor", "appearance")
@@ -798,10 +796,17 @@ def _is_garbled_or_gendered(text: str) -> bool:
     """True iff `text` carries non-Latin-script garble OR a gendered relational-role term ("fatherly",
     "maternal") — content that is never appropriate in a neutral genesis carriage/appearance phrase,
     and unsafe to pin-check here since `genderPresentation` isn't decided until the LATER 0063 identity
-    call. Vault-free, pure regex."""
+    call. Vault-free. Defers to `orwell_cast_authoring`'s canonical detectors; a defensive import
+    failure fails OPEN (never blocks genesis parsing over a lint-plumbing fault)."""
     if not text:
         return False
-    return bool(_GENESIS_NON_LATIN_SCRIPT_RE.search(text)) or bool(_GENESIS_GENDERED_ROLE_RE.search(text))
+    try:
+        from src.orwell_cast_authoring import _FEM_DESCRIPTOR_RE, _MASC_DESCRIPTOR_RE, _has_script_garble
+    except Exception:  # pragma: no cover - defensive: a dedup import must never break genesis parsing
+        return False
+    if _has_script_garble(text):
+        return True
+    return bool(_MASC_DESCRIPTOR_RE.search(text)) or bool(_FEM_DESCRIPTOR_RE.search(text))
 
 
 def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
@@ -848,8 +853,8 @@ def parse_genesis_proposal(text: str, valid_ids: set) -> dict:
                 # floor instead (matching the fail-soft "no model ⇒ floor stands" contract).
                 if cleaned and k in _GENESIS_GARBLE_FIELDS and _is_garbled_or_gendered(cleaned):
                     logger.warning(
-                        f"[cast-genesis] garbled/gendered {k} for {hid or '(unbound slot)'} "
-                        f"({cleaned!r}) — dropping so the deterministic floor stands")
+                        f"[cast-genesis] garbled/gendered {k} for {hid or '(unbound slot)'} — "
+                        "dropping so the deterministic floor stands")
                     continue
                 if cleaned:
                     one[k] = cleaned
