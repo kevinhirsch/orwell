@@ -51,8 +51,11 @@ mechanisms, and it is important not to conflate them: **narration** is monolithi
 Wall is enforced at exactly **one** player-facing prose seam; **cognition** fans out to N calls, so
 its security is *not* "one seam" — it is that each of the N calls is **individually
 knowledge-scoped** (gated on engine presence, ADR 0019), **emits structured data, never
-player-facing prose**, and is covered by **aggregate leak testing across the N requests** (the
-union of all N cognition calls must leak nothing outside each NPC's legitimate knowledge). Together
+player-facing prose**, and is covered by **aggregate leak testing that retains the (NPC, input)
+association** — every token in each call is asserted allowed for *that* call's NPC, and, separately,
+producer-only / Vault tokens are asserted to appear in **no** call. (A raw union across the N calls
+is *not* the test: the union legitimately contains one NPC's knowledge that is out of scope for
+another.) Together
 that is still strictly *more* Vault-secure than Sonder, whose N per-character *writing* agents each
 add a fresh player-facing prose seam; Orwell adds no prose seam beyond the one narrator.
 
@@ -155,9 +158,13 @@ gated mode, not a new authority model**: it keeps all of arm B's authority split
 to S1 under pressure. The cost engineering that makes "every NPC every turn" viable — the spec's
 real work — is specced in **feature 0132**; its five cost controls are:
 
-1. **Concurrency + cheap tier.** All N per-NPC cognition calls run the utility model
-   (Qwen-flash class), fired **in parallel**, fail-soft over the deterministic floor (a
-   timeout/garbage ⇒ that NPC runs the floor this turn; the turn never blocks).
+1. **Bounded concurrency + cheap tier.** The N per-NPC cognition calls run the utility model
+   (Qwen-flash class), dispatched under an **explicit in-flight concurrency cap** (a semaphore /
+   admission bound over the awake set, never an unbounded fan-out), with each call's **per-turn
+   token/latency budget reserved *before* dispatch**. Admitted calls run concurrently, fail-soft
+   over the deterministic floor (a timeout/garbage ⇒ that NPC runs the floor this turn; the turn
+   never blocks); any call that **cannot be admitted** within the cap/budget routes straight to the
+   deterministic floor / salience-gated degradation (0131-S1) **without blocking the turn**.
 2. **Present/awake-set bound.** "Every NPC" in practice = the **awake set** (feature 0066 — the
    sleep economy shrinks the active cast late-night). NPCs off-screen asleep tick deterministically.
 3. **Delta-driven prompts.** Each call is fed only a `beatSeq` `stateDelta` ("what changed for you
@@ -181,9 +188,12 @@ One voice trades away the potential for N sharper-but-seamed voices. Recover dis
 **inside the single completion**, with **content-neutral** mechanisms (they shape *how* a line
 reads, never *what* the NPC knows/wants/achieves):
 
-1. **Per-NPC voice fingerprints in the terminal constraints block.** Bake each character's cadence,
-   register, verbal tics, and do/don't-say rules into the structured constraints that ride the
-   prompt (ties to the A4/#1735 terminal HARD-CONSTRAINTS block).
+1. **Per-NPC voice fingerprints in the terminal constraints block.** Bake each character's
+   **surface-form** properties **only** — cadence, register, verbal tics, diction — into the
+   structured constraints that ride the prompt (ties to the A4/#1735 terminal HARD-CONSTRAINTS
+   block). A voice fingerprint is **content-neutral by construction**: it may **never** carry
+   do/don't-*say* content rules that add, suppress, or gate facts, intentions, or disclosures (those
+   belong to the knowledge-scoping layer, not the voice layer).
 2. **Cast `voiceSignature` cues.** The cast `CHARACTER` already carries authored voice descriptors
    (#1733, **coherence-gated** so no garbled fingerprints reach the prompt); fold them into the
    constraints / scene preamble as an explicit per-NPC signal.
@@ -194,6 +204,11 @@ reads, never *what* the NPC knows/wants/achieves):
    A rejects. The boundary is worth spec'ing precisely so a future implementer doesn't cross it by
    accident.
 
+Every voice constraint — a fingerprint, a `voiceSignature` cue, or a micro-pass — is subject to a
+**semantic-equivalence check** that **rejects** any constraint whose application changes a line's
+knowledge, intent, or outcome (surface form may differ; meaning may not). This is the build-time
+enforcement of invariant 6's content-neutrality.
+
 Distinctiveness is **measurable without reintroducing seams** — see the attribution test in
 Testability.
 
@@ -202,7 +217,9 @@ Testability.
 Arms A–D are one rule at two layers, each **secured differently**. **Cognition fans out** (many
 cheap, scoped, data-only calls, each authoring open-set shape) so the house feels alive and
 independent — its security is per-call knowledge-scoping (invariant 3) + data-only outputs
-(invariant 5) + aggregate leak testing across the N calls, **not** a single seam. **Narration
+(invariant 5) + aggregate leak testing that keeps each call bound to its NPC (every token allowed
+for that call's NPC; producer-only / Vault tokens in no call — never a raw cross-call union),
+**not** a single seam. **Narration
 funnels** (one fluent voice) so the prose stays coherent and the Vault Wall on player-facing text
 stays enforceable **at one prose seam**. **Neither arm ever moves closed-set authority to the
 model** — outcomes, state, knowledge, and persistence remain engine-owned and seeded, at gated
@@ -246,38 +263,60 @@ still pass the existing sentinels; that is exactly why the new gates are require
    modeled on the ADR 0019 per-NPC sentinel — **(a) a per-call knowledge-scope test:** plant a token
    into a scene witnessed only by NPC B, assert it is absent from A's scoped call input, and a
    producer-only token is globally absent from every call's input; **(b) an aggregate-leak test
-   across the parallel fan-out:** the **union** of all N cognition-call inputs on a turn leaks
-   nothing outside each NPC's legitimate knowledge. The existing narrator-seam sentinels do not
+   across the parallel fan-out that retains the (NPC, input) association:** for each of the N calls,
+   assert every token in that call's input is allowed for *that* call's NPC; and, **separately**,
+   assert producer-only / Vault tokens appear in **no** call. (A raw union of all N inputs is *not*
+   the assertion — the union legitimately contains NPC-B-only knowledge that is out of scope for NPC
+   A.) The existing narrator-seam sentinels do not
    exercise the cognition-call inputs, so these gates are new. N parallel calls must not re-open the
    leak N times.
 4. **Soul-anchored.** Each call *continues* the persisted character (stable public persona, "people
    make sense," 0041); it never re-rolls the character. Outcomes fold back via `evolveFromBeat`.
    *Proof:* `CHARACTER` byte-stable across a cognition beat; the authored read persists to soul, not
    chat.
-5. **Funnel-narration (one prose seam). (NEW gate — build with the feature.)** Cognition calls emit
+5. **Funnel-narration (one prose seam) + per-NPC confidentiality at the funnel. (NEW gate — build
+   with the feature.)** Cognition calls emit
    **structured data/intent only, never prose**; exactly one completion writes every NPC's words
    (including S3's NPC-specific lines, produced by the sole narrator from S3's structured data).
-   *Proof:* a **new funnel-only test** asserting no per-NPC prose is emitted by any cognition call
-   (their outputs validate against the structured-data schema, contain no narration) and that the
-   scene's player-facing text comes from a single narration completion. The existing Vault-Wall
+   **The narrator's permitted aggregate input is bounded by an explicit redaction boundary:** a
+   cognition residual scoped to one NPC (S1 intent, S2 divergent memory, S3 residual data) is
+   excluded/redacted from any *other* NPC's dialogue and from player-visible narration — the ADR 0019
+   per-NPC knowledge wall applied **at the funnel**, so consolidating N scoped residuals into one
+   completion does not let NPC B's private knowledge bleed into NPC A's line or the player's text.
+   *Proof:* a **new funnel-only test** asserting (i) no per-NPC prose is emitted by any cognition call
+   (their outputs validate against the structured-data schema, contain no narration), (ii) the
+   scene's player-facing text comes from a single narration completion, **and (iii) a token private
+   to NPC B (scoped only into B's cognition residual) cannot appear in NPC A's line or in any
+   player-visible text.** The existing Vault-Wall
    structural sentinels (dependency-cruiser: no outward module imports `VaultStore`;
    `liveSentinel.property.test.ts`; `test_knowledge_wall.py`) remain the wall on that **one**
-   narration seam — but they do not by themselves prove the cognition calls stay prose-free, hence
-   the new gate.
+   narration seam — but they do not by themselves prove the cognition calls stay prose-free **or that
+   scoped residuals stay confined to their NPC at the funnel**, hence the new gate.
 6. **Voice content-neutrality.** A distinctiveness mechanism may shape *how* a line reads, never
-   *what* the NPC knows/wants/achieves. *Proof:* if a rewrite changes a line's knowledge, intent, or
-   outcome, it fails; the Vault/knowledge sentinels are untouched by voice-sharpening.
+   *what* the NPC knows/wants/achieves — every voice constraint is content-neutral by construction
+   (surface form only: cadence, register, tics, diction), never a do/don't-say content rule.
+   *Proof:* a **semantic-equivalence check** rejects any voice constraint (fingerprint,
+   `voiceSignature` cue, or micro-pass) whose application changes a line's knowledge, intent, or
+   outcome — surface form may differ, meaning may not; the Vault/knowledge sentinels are untouched by
+   voice-sharpening.
 7. **Voice distinctiveness (measurable — reproducible protocol). (NEW gate — build with the
    feature.)** "Above chance" is only a gate if the protocol is fixed. Define it so repeated runs and
    the A/B flag modes are comparable:
-   - **Corpus:** a fixed sample of **N = 200 unlabeled lines** drawn from **M = 8 distinct NPCs**
-     over **K = 10 scenes** (seed-fixed so the same corpus regenerates).
+   - **Corpus:** a fixed, **balanced** sample of **L = 200 unlabeled lines** — **equal lines per
+     NPC** (25 lines each across **M = 8 distinct NPCs** = 200) spanning **K = 10 scenes** (seed-fixed
+     so the same corpus regenerates). *(`L` names the line count so it does not collide with the "N
+     NPCs" fan-out symbol used elsewhere in this ADR; the per-NPC balance keeps the 1/M chance
+     baseline exact.)*
    - **Chance baseline:** random guessing among the M candidates = **1/M = 12.5%** attribution.
    - **Attributor:** a held-out reader panel *or* a trained classifier scores each unlabeled line →
      one of the M NPCs.
    - **Acceptance threshold:** mean attribution accuracy **≥ 40%** (a **≥ 27.5-point** absolute
-     improvement over the 12.5% baseline), significant at **p < 0.05** (binomial vs. chance; report
-     the 95% CI).
+     improvement over the 12.5% baseline), significant at **p < 0.05** by a **cluster-aware** test
+     that accounts for lines being grouped by NPC **and** by scene (they are **not** independent
+     draws — a plain binomial understates the variance). Use a clustered/hierarchical estimator
+     (e.g., a cluster-robust / mixed-effects model with NPC and scene as grouping factors, or a
+     cluster/block bootstrap resampling whole scenes) and report its **cluster-corrected 95% CI** —
+     never a plain binomial CI.
    - **Coherence/seam rubric (fixed, scored 1–5):** register consistency, absence of felt
      interruptions/topic-jumps, and pronoun/tense stability across a scene; **acceptance = mean ≥ 4.0
      with no scene below 3.** A distinctiveness gain that drops the coherence score **fails** (that
@@ -300,8 +339,9 @@ scoped per-NPC cognition calls, the parallel fan-out, the budget-fallback, and f
 so each new arm ships with its **own** acceptance gate: **(a)** a per-call knowledge-scope test (no
 NPC receives out-of-scope Vault knowledge, invariant 3a), **(b)** an aggregate-leak test across the
 parallel fan-out (invariant 3b), **(c)** a cognition-response-cannot-cross-into-closed-set-authority
-test (invariant 1), and **(d)** a funnel-only test (no per-NPC prose emitted; one narrator writes,
-invariant 5). Presenting the existing sentinels as sufficient proof for the new arms would be a gap;
+test (invariant 1), and **(d)** a funnel-only + per-NPC-confidentiality test (no per-NPC prose
+emitted; one narrator writes; and NPC B's scoped residual cannot surface in NPC A's line or in
+player-visible text, invariant 5). Presenting the existing sentinels as sufficient proof for the new arms would be a gap;
 the new gates close it.
 
 ## Consequences

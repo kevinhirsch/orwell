@@ -46,9 +46,13 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
 - **Full-fidelity mode: every active houseguest's cognition re-simulated live, each turn.**
   - **Awake-set bound:** "every NPC" in practice = the awake set (0066 sleep economy shrinks the
     active cast late-night). No re-simulating NPCs who are off-screen asleep.
-  - **Parallel cheap-tier calls:** all N per-NPC calls fire in parallel (e.g., utility model,
-    Qwen-flash class), fail-soft over the deterministic floor (timeout or garbage ⇒ that NPC runs
-    the floor this turn; turn never blocks).
+  - **Bounded-parallel cheap-tier calls:** the N per-NPC calls fire concurrently **under an explicit
+    in-flight concurrency cap** (a semaphore / admission bound over the awake set, never an unbounded
+    fan-out), with each call's **per-turn token/latency budget reserved before dispatch**; utility
+    model (Qwen-flash class), fail-soft over the deterministic floor (timeout or garbage ⇒ that NPC
+    runs the floor this turn; turn never blocks). Any NPC that cannot be admitted within the
+    cap/budget routes to the deterministic floor / salience-gated degradation (0131-S1) without
+    blocking the turn.
   - **Delta-driven prompts:** each NPC call fed only a `stateDelta` (feature 0065: "what changed for
     you since your last sim"), not the full context. Keeps per-call tokens tiny (O(1) to O(N) instead
     of O(N²)).
@@ -113,8 +117,10 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
     - Validate output (JSON schema; fail if malformed).
     - Fold into resolved outcome as a weighted input (same as 0131-S1).
     - Persist result in soul state (cache for repeated scenes within the lull, like 0131-S1).
-  - Fire all N calls **in parallel** (e.g., via `Promise.all`); timeout after T ms; any timeout
-    becomes deterministic floor for that NPC.
+  - Fire the admitted calls **concurrently under a bounded in-flight cap** (a semaphore / admission
+    bound over the awake set with each call's budget reserved before dispatch — **not** an unbounded
+    `Promise.all` over all N); timeout after T ms; any timeout, or any NPC not admitted within the
+    cap/budget, becomes the deterministic floor for that NPC (turn never blocks).
 
 - **Budget guard + graceful degradation.**
   - Maintain a per-session cost ledger: running total of tokens + latency.
@@ -142,7 +148,9 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
   per-turn:
     compute awake set (0066 sleep economy) → estimate cost
     if cost > budget: degrade to salience-gated (0131-S1, top K by salience)
-    else: fire all N awake-set per-NPC intent calls in parallel
+    else: fire awake-set per-NPC intent calls under a bounded in-flight concurrency cap
+          (semaphore over the awake set; each call's budget reserved before dispatch;
+           unadmitted NPCs → deterministic floor, turn never blocks)
     
   per-NPC call (parallel, cheap-tier, delta-fed):
     input: character + soul + relationships + divergent memories + stateDelta (0065)
@@ -223,8 +231,10 @@ feel (richer/more-independent play) vs. cost (tokens/latency).
   set.
 - `src/engine/liveSeason.ts` — integrate per-NPC intent calls: fetch soul + stateDelta, call
   cheap-tier model in parallel, validate, fold into resolver.
-- **Parallel call infrastructure:** wire a concurrency pool (e.g., `Promise.all` with timeout
-  guard); fail-soft on timeout/malformed JSON.
+- **Bounded-parallel call infrastructure:** wire a concurrency pool with an **explicit in-flight cap
+  (semaphore / admission bound over the awake set)** and **per-call budget reserved before dispatch**
+  — not an unbounded `Promise.all` over all N — with a timeout guard; unadmitted NPCs and
+  timeout/malformed JSON fail-soft to the deterministic floor.
 - **Cost ledger:** maintain per-session running totals of tokens, latency, graceful-degrade events,
   belt-fire successes. Write to game state or telemetry log per beat.
 - **Graceful degrade logic:** when `(tokens_this_turn + projected_N_calls) > BUDGET_MAX`, set

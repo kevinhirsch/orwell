@@ -82,7 +82,11 @@ deliver this:
       bounded). **Cognition with no edge implication still reaches the resolver as intent** (it is
       NOT forced into the edge-only descriptor, so valid `want/attempt/read` is never silently
       discarded as a generic `kind` fold or a no-op). `recordInteraction`'s `consequence` descriptor
-      (#355) is reused ONLY as that output-fold shape, never as the authoring shape.
+      (#355) is reused ONLY as that output-fold shape, never as the authoring shape. Making this split
+      concrete in the port layer — introducing the `AuthoredCognition` input type and making
+      `ConsequenceDescriptor` **engine-output-only** on `EngineCommands.ts`
+      (`src/ports/EngineCommands.ts` / `EngineCommandsAdapter.ts`) — is part of **building** feature
+      0131, not this design record.
     - *(b) Knowledge-scoped:* each per-NPC call is gated on **engine** presence (`A2` / #1726),
       not narrated — only what the engine says they know reaches the call.
     - *(c) Soul-anchored:* the call *continues* the persisted character (no re-roll; stable
