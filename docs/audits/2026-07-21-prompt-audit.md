@@ -206,6 +206,24 @@ overwritten by "full sleeve of … tattoos" ×4 (the live bundle).
 Gates: `tests/unit/diversity.test.ts` ("the engine owns the visible-ink budget") +
 `frontend/tests/test_l28b_cast_authoring.py` (look-brief threading + ink-budget prompt pins).
 
+**Known edge behaviors (reviewed + accepted, final #1768 pass):**
+- **Negated ink phrasing.** The authoring prompt itself instructs "NO visible tattoos anywhere",
+  so a compliant model may echo the negation into a field ("a stud earring, no visible tattoos").
+  `INK_RE` matches the word and refuses that field to the seeded floor — a fail-safe, semantically
+  equivalent outcome (the floor value is the non-ink mark, e.g. "none notable"). Deliberate: the
+  guard errs toward the seeded budget, never past it.
+- **The tattoo-artist vocation.** The vocation corpus includes "tattoo artist"
+  (`src/engine/data/vocations.ts`; sector list in `deepProfile.ts` ~495), and nothing prevents
+  genesis dealing that vocation to a NO-ink look slot — the guard will strip authored ink from
+  their LOOK, yielding an un-inked tattoo artist. Rare, plausible in reality, accepted; revisit
+  only if it surfaces in play.
+- **FE lexicon parity (verified, final pass).** The FE performs NO ink-lexicon text matching —
+  its only ink code is the seeded boolean look-lane deal (`orwell_cast_genesis.assign_genesis_slots`);
+  the textual ink-budget enforcement lives solely in the engine's word-bounded `INK_RE`
+  (`GameSessionAdapter.recordCastProfile`), mirrored exactly by the test-side `INK_LEXICON` in
+  `tests/unit/diversity.test.ts`. One lexicon, two pinned sites, no divergence to drift.
+
+
 **A/B (live `z-ai/glm-4.7`, temp 1.0; 30 real floor-cast skeletons per arm — 2 seeds × 15;
 harness `scratchpad/audit/ab_authoring2.py`):**
 

@@ -12,6 +12,7 @@ import {
 } from "../../src/engine/diversityConstants";
 import { buildPortraitPrompt } from "../../src/engine/portraitPrompts";
 import type { PhysicalCharacteristics } from "../../src/domain/physicalCharacteristics";
+import { adrFixture } from "../support/adr0003";
 import { nameGenderOf } from "../../src/engine/data/nameGender";
 
 /**
@@ -194,6 +195,11 @@ describe("0063 — the engine owns skinTone: FE authoring can't collapse it (the
 });
 
 describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (the tattoo-uniformity fix)", () => {
+  // Canonical-factory convention (CLAUDE.md testing rules): these tests build their game through the
+  // support-factory family, not manual wiring — `adrFixture` (tests/support/adr0003.ts), the
+  // registry-built production object graph with a started game. (`tests/support/sandbox.ts`'s
+  // `buildSandbox` is the Vault-sentinel factory and exposes no GameSession surface, so it cannot
+  // drive recordCastProfile/getPortraitPrompt — adrFixture is the canonical fit here.)
   // The ink lexicon — kept in lockstep with the adapter's INK_RE: word-bounded so "forearm ink" /
   // "inked" classify as ink while "blinked"-style substrings can never false-positive.
   const INK_LEXICON = /\btattoo|\bink(?:ed)?\b/i;
@@ -216,7 +222,7 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
   });
 
   it("an authored mark that INTRODUCES ink where the seeded deal granted none is refused; other facets fold", () => {
-    const { sb } = liveGame("ink-budget", 5);
+    const { sb } = adrFixture("ink-budget", 5);
     // Find a houseguest whose SEEDED facet carries no ink ANYWHERE (the cast-wide deal guarantees most don't).
     const card = sb.session.getGameState().house
       .find((h) => h.status === "active" && h.physicalCharacteristics
@@ -238,7 +244,7 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     expect(after.physicalCharacteristics!.hair).toBe("short dark hair");
   });
   it("Greptile P1 (#1768): a clean mark + a tattooed STYLE on a no-ink slot cannot smuggle ink into any portrait-rendered field", () => {
-    const { sb } = liveGame("ink-style-bypass", 5);
+    const { sb } = adrFixture("ink-style-bypass", 5);
     const card = sb.session.getGameState().house
       .find((h) => h.status === "active" && h.physicalCharacteristics
         && !facetHasInk(h.physicalCharacteristics))!;
@@ -268,9 +274,9 @@ describe("2026-07-21 prompt audit — the engine owns the visible-ink budget (th
     // Deterministic fixture hunt: the mark deal grants ~1-2 tattoo marks per cast on average, so a
     // small fixed seed sweep is GUARANTEED to surface an inked card — and we ASSERT it does, so this
     // test can never silently pass while testing nothing (the CodeRabbit vacuity finding).
-    let found: { sb: ReturnType<typeof liveGame>["sb"]; id: string } | undefined;
+    let found: { sb: ReturnType<typeof adrFixture>["sb"]; id: string } | undefined;
     for (const seed of [5, 1, 2, 3, 4, 6, 7, 8, 9, 10]) {
-      const { sb } = liveGame(`ink-keep-${seed}`, seed);
+      const { sb } = adrFixture(`ink-keep-${seed}`, seed);
       const inked = sb.session.getGameState().house
         .find((h) => h.status === "active" && h.physicalCharacteristics
           && /\btattoo/i.test(h.physicalCharacteristics.distinguishingMark));
