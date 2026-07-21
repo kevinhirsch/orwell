@@ -4621,6 +4621,19 @@ async def do_end_of_session_summary(content: str, owner: Optional[str] = None) -
         return {"error": f"engine unreachable: {e}", "exit_code": 1}
 
 
+# #1713 — the top-level WALL-CLOCK BACKSTOP on the inline pre-finalize genesis kick below. Each
+# per-NPC authoring stream is now individually bounded (`orwell_cast_authoring._bounded_stream`), but
+# genesis runs up to 15 of those in bounded-concurrency waves with its own bounded re-roll — this is a
+# second, structural belt so the createCharacter→premiere turn can NEVER hang anywhere near the
+# multi-minute range even in a worst-case multi-retry pileup under contention (the diagnosed root
+# cause of issue #1713: the FE was observed idle-waiting on this exact inline call, well before the
+# engine's own createCharacter was ever invoked). `run_genesis` shields its inner task from the
+# awaiter's cancellation, so a timeout here releases THIS turn onto the deterministic floor (byte-
+# identical to any other genesis failure) while the grind keeps running in the background — idempotent,
+# and a later kick simply awaits it or finds it already committed.
+_GENESIS_WALL_CLOCK_BACKSTOP_S = 90.0
+
+
 async def do_create_character(
     content: str, owner: Optional[str] = None,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
@@ -4719,7 +4732,12 @@ async def do_create_character(
         from src import orwell_cast_genesis as _genesis_kick
         _warm = await orwell_engine.pre_seed_cast(seed=args.get("seed"), user=owner)
         if isinstance(_warm, dict) and _warm.get("warmed") and _warm.get("house"):
-            await _genesis_kick.run_genesis(_warm.get("house") or [], _warm.get("seed"), owner)
+            # #1713: bounded by _GENESIS_WALL_CLOCK_BACKSTOP_S (see comment above) — never let this
+            # inline grind hold the player's turn anywhere near the old multi-minute worst case.
+            await asyncio.wait_for(
+                _genesis_kick.run_genesis(_warm.get("house") or [], _warm.get("seed"), owner),
+                timeout=_GENESIS_WALL_CLOCK_BACKSTOP_S,
+            )
     except Exception as e:
         logger.warning("[cast-genesis] pre-finalize genesis kick failed open for %s: %s", owner, e)
     # 0116 — the model-authored cast-genesis LOUD PRE-FINALIZE GATE (§4 / #1313 precedent). Genesis
