@@ -149,13 +149,28 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       // the soul/Vault/event layers, never the knowledge layer). The excision is TIGHT (header + its
       // indented continuation lines only), so any leak OUTSIDE the block — including an NPC's knowledge
       // surfacing in the roster/whereabouts prose, or on any non-prompt tool — is still caught.
-      const excisePresentKnowledgeBlock = (prompt: string): string => {
+      const excisePresentKnowledgeBlock = (prompt: string, marker: string): string => {
         const lines = prompt.split("\n");
-        const start = lines.findIndex((l) => l.startsWith("- WHAT EACH HOUSEGUEST IN THE ROOM LEGITIMATELY KNOWS"));
+        const start = lines.findIndex((l) => l.startsWith(marker));
         if (start < 0) return prompt;
         let end = start + 1;
         while (end < lines.length && /^\s/.test(lines[end]!)) end++;
         return [...lines.slice(0, start), ...lines.slice(end)].join("\n");
+      };
+      // #1735 (A4): `getMomentPrompt` now also carries a SEPARATE `hardConstraints` field — the terminal
+      // block meant to ride as the caller's own last message. It restates the SAME sanctioned per-
+      // present-NPC knowledge (never a new source), under its own "KNOWLEDGE SCOPE" header, so it needs
+      // the identical excision before the sentinel scan (the `npcknow` sentinel legitimately rides it,
+      // exactly as it rides the `systemPrompt` block above and `npcVoice(npc:2)`).
+      const scrubMomentPrompt = (result: Record<string, unknown>): Record<string, unknown> => {
+        const out: Record<string, unknown> = { ...result };
+        if (typeof out.systemPrompt === "string") {
+          out.systemPrompt = excisePresentKnowledgeBlock(out.systemPrompt, "- WHAT EACH HOUSEGUEST IN THE ROOM LEGITIMATELY KNOWS");
+        }
+        if (typeof out.hardConstraints === "string") {
+          out.hardConstraints = excisePresentKnowledgeBlock(out.hardConstraints, "- KNOWLEDGE SCOPE");
+        }
+        return out;
       };
       // ADR 0019 Layer 3 — `knowledgeScopeManifest` is FE-guard support: it deliberately hands the
       // front-end the "who-legitimately-knows-what" manifest (bounded facts + their holder names) so the
@@ -170,9 +185,10 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       const sweep = async (server: McpServer, name: string): Promise<void> => {
         swept.add(name);
         const result = await server.callTool(name, args(name, seed));
-        // getMomentPrompt's systemPrompt carries the sanctioned per-present-NPC knowledge block; excise it.
-        const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object" && "systemPrompt" in result)
-          ? { ...(result as Record<string, unknown>), systemPrompt: excisePresentKnowledgeBlock(String((result as { systemPrompt: unknown }).systemPrompt)) }
+        // getMomentPrompt's systemPrompt + hardConstraints both carry the sanctioned per-present-NPC
+        // knowledge block; excise both before the sentinel scan.
+        const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object")
+          ? scrubMomentPrompt(result as Record<string, unknown>)
           : result;
         const blob = JSON.stringify(scrubbed);
         for (const s of sentinelsFor(name)) expect(blob.includes(s), `seed ${seed}: tool ${name} leaked ${s}`).toBe(false);
@@ -236,9 +252,10 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
         let payload: string;
         try {
           const result = await server.callTool(name, args(name, seed));
-          // ADR 0019 Layer 2: excise the sanctioned per-present-NPC knowledge block from getMomentPrompt.
-          const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object" && "systemPrompt" in result)
-            ? { ...(result as Record<string, unknown>), systemPrompt: excisePresentKnowledgeBlock(String((result as { systemPrompt: unknown }).systemPrompt)) }
+          // ADR 0019 Layer 2 / #1735: excise the sanctioned per-present-NPC knowledge block from both
+          // getMomentPrompt fields.
+          const scrubbed = (name === "getMomentPrompt" && result && typeof result === "object")
+            ? scrubMomentPrompt(result as Record<string, unknown>)
             : result;
           payload = JSON.stringify(scrubbed);
         } catch (err) {
@@ -253,5 +270,102 @@ describe("B42 — the sentinel canary bites the live game (production path)", ()
       const allNames = [...toolsFor("player"), ...toolsFor("admin/God Mode")].map((t) => t.name);
       for (const name of allNames) expect(swept.has(name), `tool ${name} was never swept`).toBe(true);
     }
+  });
+});
+
+/**
+ * #1727 (A1, P0) — the source-confirmed live carrier: `renderGameContext`'s player line used to emit
+ * `view.player.archetype`/`strategyStyle` RAW, labelled "public persona" — but those fields resolve to
+ * `persona.archetype`/`persona.strategyStyle`, the player's SEALED casting self-description (their own
+ * words, including the hidden strategic layer), when the interview recorded one. Measured live (GLM-4.7,
+ * reasoning-off): NPCs voiced the sealed profession back 4/8 runs. This sentinel proves the fix holds —
+ * a distinctive, sealed persona string never enters `getMomentPrompt`'s `systemPrompt` OR the new
+ * `hardConstraints` block, on the FIRST turn or any later one.
+ */
+describe("#1727 (A1) — the sealed casting persona never enters the narration prompt", () => {
+  it("a distinctive personaArchetype/personaStrategyStyle never appears in getMomentPrompt, any turn", async () => {
+    const reg = new GameSessionRegistry();
+    const user = "u-1727";
+    const player = reg.resolver()("player", user) as McpServer;
+    const SENTINEL_ARCHETYPE = "SENTINEL-1727-camp-counselor-network-of-spies";
+    const SENTINEL_STRATEGY = "SENTINEL-1727-deeply-strategic-underneath-the-surface";
+    await player.callTool("createCharacter", {
+      playerName: "The Player",
+      seed: 111,
+      personaArchetype: SENTINEL_ARCHETYPE,
+      personaStrategyStyle: SENTINEL_STRATEGY,
+    });
+
+    const sweepPrompt = async (): Promise<void> => {
+      const mp = (await player.callTool("getMomentPrompt", {})) as { systemPrompt: string; hardConstraints?: string };
+      expect(mp.systemPrompt.includes(SENTINEL_ARCHETYPE), "systemPrompt leaked the sealed persona archetype").toBe(false);
+      expect(mp.systemPrompt.includes(SENTINEL_STRATEGY), "systemPrompt leaked the sealed persona strategy").toBe(false);
+      if (mp.hardConstraints) {
+        expect(mp.hardConstraints.includes(SENTINEL_ARCHETYPE), "hardConstraints leaked the sealed persona archetype").toBe(false);
+        expect(mp.hardConstraints.includes(SENTINEL_STRATEGY), "hardConstraints leaked the sealed persona strategy").toBe(false);
+      }
+    };
+
+    await sweepPrompt(); // the premiere turn — the highest-traffic turn in the audit's tape
+    // A handful of further live turns — the pre-fix carrier rode EVERY moment prompt, not just finalize.
+    for (let i = 0; i < 8; i++) {
+      await player.callTool("advanceGame", {});
+      await sweepPrompt();
+    }
+  });
+});
+
+/**
+ * #1735 (A4) / #1732 (A3) — the terminal HARD-CONSTRAINTS block is a SEPARATE, additive field
+ * (`MomentPromptView.hardConstraints`) the caller appends as its own last message. This structurally
+ * proves it actually carries what the issues specify: scene occupancy, a present-NPC pronoun lock, and
+ * the per-present-NPC knowledge scope — not just that it exists.
+ */
+describe("#1735 (A4) / #1732 (A3) — the terminal HARD-CONSTRAINTS block carries its three pins", () => {
+  it("carries occupancy, a pronoun lock, and knowledge scope for a present houseguest", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("u-1735");
+    sb.session.createCharacter({ playerName: "The Player", seed: 212 });
+    sb.session.advanceGame(); // close the premiere champagne circle → ordinary free-roam whereabouts
+
+    let presentId: string | null = null;
+    for (let i = 0; i < 12 && !presentId; i++) {
+      const wa = sb.session.whereabouts();
+      if (wa && wa.present.length) { presentId = wa.present[0]!.id; break; }
+      const dest = wa?.nearby.find((n) => n.present.length)?.room ?? wa?.nearby[0]?.room;
+      if (!dest) break;
+      sb.session.movePlayer(dest);
+    }
+    expect(presentId, "the scene must have a present houseguest to exercise the pins").not.toBeNull();
+
+    const npcRow = sb.session.snapshot().house!.npcs.find((n) => n.id === presentId)!;
+    sb.engine.knowledge.seedBelief(npcRow.id, { content: "SENTINEL_1735_KNOWLEDGE_SCOPE", factId: "hc:1735" }, "witnessed");
+
+    const mp = sb.session.getMomentPrompt({});
+    expect(mp.hardConstraints, "a live turn with a present houseguest must carry a terminal block").toBeDefined();
+    const hc = mp.hardConstraints!;
+    expect(hc.startsWith("HARD CONSTRAINTS")).toBe(true);
+
+    // Occupancy pin (#1735 item 1): the present houseguest is named, imperatively, as who's with the
+    // player, and the block forbids placing anyone else.
+    expect(hc).toContain(npcRow.name);
+    expect(/do NOT[\s\S]*place[\s\S]*voice[\s\S]*any other houseguest/i.test(hc)).toBe(true);
+
+    // Knowledge scope (#1735 item 1): the freshly-planted fact rides the terminal block too.
+    expect(hc).toContain("KNOWLEDGE SCOPE");
+    expect(hc).toContain("SENTINEL_1735_KNOWLEDGE_SCOPE");
+
+    // Pronoun lock (#1732): asserted when the present NPC carries a genderPresentation facet (the
+    // diversity floor guarantees one on a fresh deterministic-floor cast).
+    if (npcRow.character.genderPresentation) {
+      expect(hc).toContain(`PRONOUN LOCK: ${npcRow.name} uses`);
+    }
+  });
+
+  it("is absent pre-game (no game started yet)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("u-1735-pre");
+    const mp = sb.session.getMomentPrompt({});
+    expect(mp.hardConstraints).toBeUndefined();
   });
 });

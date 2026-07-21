@@ -195,7 +195,7 @@ import {
   type Trajectory, type FoldSignal,
 } from "../../engine/trajectory";
 import { TRAJECTORY_CONSTANTS } from "../../engine/trajectoryConstants";
-import { buildSystemPrompt, momentForPhase, requiredLeverForPhase, renderStoryFacts, renderSurfacedFacts } from "../../engine/momentPrompts";
+import { buildSystemPrompt, momentForPhase, requiredLeverForPhase, renderStoryFacts, renderSurfacedFacts, renderHardConstraints } from "../../engine/momentPrompts";
 import {
   producerForSeed, renderProducerVoice, mergeProducer, validateProducerProfile,
   type Producer, type ProducerProfileOverlay,
@@ -9972,12 +9972,18 @@ export class GameSessionAdapter implements GameSession {
     const pk = this.presentKnowledgeForPrompt();
     const view = pk.length ? { ...baseView, presentKnowledge: pk } : baseView;
     const moment = req.moment ?? view.moment;
+    // #1735 (A4) — the terminal HARD-CONSTRAINTS block, a SEPARATE field from `systemPrompt` so the
+    // caller (the front-end) can append it as the LAST message before generation instead of folding it
+    // into the leading system-prompt stack (the measured "lost in the middle" region). Absent when
+    // there is nothing to pin (pre-game / no live whereabouts this turn) ⇒ byte-identical response.
+    const hardConstraints = renderHardConstraints(view);
     return {
       moment,
       systemPrompt: buildSystemPrompt(
         moment, view, this.storyFacts(moment), this.worldContext(moment), this.producerVoice(moment),
         this.freshSurfacedFacts(),
       ),
+      ...(hardConstraints ? { hardConstraints } : {}),
       // The producer's public name — the byline the FE renders as the chat sender (producer-persona
       // feature). Vault-free: `producer()` is public voice flavor only.
       producerName: this.producer().name,

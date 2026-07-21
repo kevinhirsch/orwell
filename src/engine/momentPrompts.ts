@@ -1406,7 +1406,19 @@ export function renderGameContext(view: GameStateView): string {
     // Genuinely OPTIONAL (a human may decline to answer): absent ⇒ this clause is simply omitted, unlike
     // the NPC roster line (which always carries an explicit "unconfirmed" fallback — the player's silence
     // is a legitimate choice, not a data gap to flag).
-    `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)} — public persona: ${view.player.archetype}, ${view.player.strategyStyle} player.` +
+    // #1727 (A1, P0) — REDACTED (was: "— public persona: ${archetype}, ${strategyStyle} player."):
+    // `view.player.archetype`/`strategyStyle` resolve to `persona.archetype`/`persona.strategyStyle` when
+    // present — the player's SEALED casting self-description, in their OWN words, straight off the
+    // interview (including its hidden strategic layer: "deeply strategic underneath … a network of
+    // spies"). Unlike the NPC roster lines just above (:1180/:1197), this clause did NOT route through
+    // `neutralizeForPrompt` or get demoted to a fenced private cue — it was emitted RAW, labelled "public
+    // persona", into every moment prompt (not just finalize). Measured live (GLM-4.7, reasoning-off): NPCs
+    // voiced the sealed profession back 4/8 runs. ADR 0003 "remove, don't add" — there is no house-
+    // observed substitute yet this early (the house forms its OWN read of the player from watching them
+    // play, exactly as the player forms their own read of every NPC), so the clause is DROPPED, not
+    // replaced. Only the publicly-observable name + the player's own recorded pronouns/presentation
+    // (never orientation) remain.
+    `- You are playing as: ${view.player.name}${ceremonyMark(view.player.id)}.` +
       (view.player.genderPresentation
         ? ` They present as ${genderPresentationPhrase(view.player.genderPresentation)} (use ${pronounsFor(view.player.genderPresentation)}) — never infer their gender/pronouns from their name.`
         : ""),
@@ -1468,6 +1480,71 @@ export function renderGameContext(view: GameStateView): string {
     "  established; this roster is the single source of truth for who each person IS:",
     roster,
   ].join("\n");
+}
+
+/**
+ * #1735 (A4) / #1732 (A3) — the terminal HARD-CONSTRAINTS block: a short, IMPERATIVE restatement of
+ * this turn's binding pins, meant for the CALLER to append as the very LAST message before generation
+ * (nearest generation — the one region a reasoning-off mid-tier model reliably obeys). Measured live A/B
+ * on `z-ai/glm-4.7` (Novita-pinned, reasoning OFF, temp 0.9): a terminal occupancy pin roughly HALVED the
+ * location-drift rate (5/6 → 3/6 — the structural pre-emission location guard stays the real enforcement;
+ * this only reduces how often it has to fire) and a terminal pronoun lock drove misgendering to 0/6 (from
+ * 1/5 with only the buried inline roster pin).
+ *
+ * Deliberately SEPARATE from `systemPrompt` (never woven into `buildSystemPrompt`): the ~81 KB system
+ * prompt sits BEFORE the transcript — the low-attention "lost in the middle" region once the transcript
+ * grows long — so THIS string is meant to ride terminally instead, as its own final message.
+ *
+ * Carries ONLY the turn's binding pins, stated imperatively (never declaratively):
+ *  - scene occupancy — who is actually present; do not place or voice anyone else;
+ *  - present-NPC PRONOUN LOCKS (#1732) — the highest-leverage subset (present NPCs are the ones actually
+ *    being voiced this turn), sourced from the SAME `genderPresentation` facet the roster clause and the
+ *    portrait prompt read;
+ *  - per-present-NPC KNOWLEDGE SCOPE — the SAME Vault-free `presentKnowledge` set already woven into
+ *    `systemPrompt` (ADR 0019 Layer 2), restated tight and terminal — never a new source of truth.
+ *
+ * `undefined` when there is nothing to pin (pre-game, or the player has no live whereabouts this turn) —
+ * the caller then appends nothing, so a pre-game / seeded-spine turn is unaffected.
+ */
+export function renderHardConstraints(view: GameStateView): string | undefined {
+  if (!view.started || !view.player) return undefined;
+  const wa = view.whereabouts ?? null;
+  if (!wa) return undefined;
+  const lines: string[] = [
+    "HARD CONSTRAINTS — binding for THIS turn. These override anything stated earlier in this prompt or",
+    "implied by the transcript above; obey them exactly:",
+  ];
+  lines.push(
+    wa.present.length
+      ? `- The ONLY people with the player right now are: ${wa.present.map((p) => p.name).join(", ")}. Do NOT ` +
+        "place, voice, or bring in any other houseguest this scene — everyone else is elsewhere in the " +
+        "house and cannot appear."
+      : "- The player is ALONE right now. Do NOT place or voice any houseguest in this scene.",
+  );
+  const houseById = new Map(view.house.map((h) => [h.id, h] as const));
+  for (const p of wa.present) {
+    const h = houseById.get(p.id);
+    if (h?.genderPresentation) {
+      lines.push(
+        `- PRONOUN LOCK: ${p.name} uses ${pronounsFor(h.genderPresentation)}. Use these exactly, every ` +
+          "time — never they/them, never guessed from the name.",
+      );
+    }
+  }
+  const pk = view.presentKnowledge ?? [];
+  if (pk.length) {
+    lines.push(
+      "- KNOWLEDGE SCOPE (voice each houseguest below ONLY from their own line — never another's, and " +
+        "never a fact nobody here holds):",
+    );
+    for (const e of pk) {
+      const bits: string[] = [];
+      if (e.knows.length) bits.push(`knows: ${e.knows.map((k) => neutralizeForPrompt(k)).join("; ")}`);
+      if (e.suspects.length) bits.push(`suspects (a hunch): ${e.suspects.map((s) => neutralizeForPrompt(s)).join("; ")}`);
+      if (bits.length) lines.push(`    · ${neutralizeForPrompt(e.name)} — ${bits.join("; ")}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 /**
