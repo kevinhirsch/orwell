@@ -863,6 +863,71 @@ def test_settle_drops_an_anchored_entry_whose_row_no_longer_exists(monkeypatch):
     assert fl.has_pending_fold("owner", sid) is False, "the vanished-row entry must be DROPPED, not requeued"
 
 
+# ── PR #1825 (Greptile P1 #3) — POSITIONAL anchors are unstable under deletion. The fix #2 first
+# cut anchored to a `seq`-order POSITION captured once; deleting an EARLIER row shifts every LATER
+# row's true position left, but the stored position doesn't move — so a stale `position < count`
+# check can read "still there" for a row that is actually gone (a 3-row session, an entry anchored
+# at position 1, the row at position 0 deleted → count drops to 2, and `1 < 2` stays true even
+# though a DIFFERENT row now sits at position 1). `core/database.py`'s `ChatMessage.id` is a
+# `String` UUID (`core/session_manager.py`: `str(uuid.uuid4())` everywhere it's minted) — NOT an
+# autoincrement integer — so raw id comparison can't encode order either; the fix removes
+# positional arithmetic from the anchor ENTIRELY: `row_anchor` is the row's own immutable id,
+# checked by a plain SELECT-by-id at settle time (`entry_exists_at_settle`) and resolved fresh via
+# a real `seq` query only at truncate time (`discard_pending_fold`, against the CURRENT row set,
+# never a cached one). ─────────────────────────────────────────────────────────────────────────
+
+def test_settle_drops_the_entry_when_the_anchored_row_is_deleted_and_later_rows_shift(monkeypatch):
+    """The exact Greptile P1 #3 repro: 3 rows, a fold anchored to the MIDDLE row (position 1).
+    That row is deleted via a non-truncate path, leaving the row before AND the row after intact
+    — the row after it shifts from position 2 down into position 1. A stale POSITION-based
+    existence check would be fooled here (anchor=1, count drops 3->2, `1 < 2` still true) into
+    settling the fold against whatever row now occupies position 1 — a DIFFERENT row than the one
+    this fold was ever about. The id-based check has no such hole: it SELECTs the deleted row's
+    OWN id and finds nothing, regardless of what shifted around it."""
+    sm = SessionManager()
+    sid = "b2-middle-row-shift"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    sm.add_message(sid, ChatMessage("user", "row0 (position 0, kept)", metadata={}))
+    sm.add_message(sid, ChatMessage("assistant", "row1 (position 1, will be deleted)", metadata={}))
+    sm.add_message(sid, ChatMessage("assistant", "row2 (position 2, shifts to position 1)", metadata={}))
+    ids = _seq_ordered_ids(sid)
+    assert len(ids) == 3
+    middle_row_id = ids[1]
+
+    fl.stage_pending_fold("owner", sid, content="a scene tied to row1", with_ids=["npc:3"],
+                          kind="bonding", consequence=None, felt_minutes=None,
+                          idempotency_key="k-middle")
+    attached = fl.attach_row_anchor("owner", sid, middle_row_id)
+    assert attached is True
+    assert fl._PENDING[("owner", sid)][0]["row_anchor"] == middle_row_id, (
+        "the anchor must be the row's own id, not a derived position"
+    )
+
+    # A non-truncate path deletes ONLY the middle row — row0 and row2 remain, row2 shifts down.
+    db_session = db.SessionLocal()
+    try:
+        db_session.query(db.ChatMessage).filter(db.ChatMessage.id == middle_row_id).delete()
+        db_session.commit()
+    finally:
+        db_session.close()
+    remaining_ids = _seq_ordered_ids(sid)
+    assert remaining_ids == [ids[0], ids[2]], "row0 and row2 must survive; row2 shifts to position 1"
+
+    async def boom(*a, **k):
+        raise AssertionError(
+            "must never settle a fold whose anchored row was deleted, even though a later row "
+            "shifted into its old position")
+
+    from src import orwell_engine as oe
+    from routes import chat_helpers
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 1
+    monkeypatch.setattr(oe, "record_interaction", boom)
+    settled = _run(al._settle_pending_fold("owner", sid))
+    assert settled is False
+    assert fl.has_pending_fold("owner", sid) is False, "the deleted-row entry must be DROPPED, not requeued"
+
+
 def test_settle_still_applies_an_unanchored_entry_normally():
     """The flip side of the truncate fail-safe: settle treats a MISSING anchor as "no evidence
     either way" and proceeds normally — unlike truncate, settle isn't reacting to an active delete

@@ -312,29 +312,61 @@ to the real, persisted row it belongs to:
 - `frontend/src/fold_ledger.py`'s `attach_row_anchor` is called once per turn, from
   `routes/chat_routes.py`, right after the route persists that turn's assistant reply and gets
   back its real DB id — the SAME `dataset.dbId` seam #1751 already stamps client-side. It anchors
-  the tail entry with the row's 0-indexed `seq`-order POSITION (the exact unit
-  `SessionManager.keep_count_before_message` already produces for the truncate route) — but ONLY
-  if the tail is still unanchored, so an older, re-queued turn's entry is never relabeled with a
-  newer turn's row.
-- `discard_pending_fold(owner, session, keep_count)` now discards every entry whose `row_anchor >=
-  keep_count` — the full set of rows the truncate is about to remove — not just the newest.
-  Entries anchored below `keep_count` (an older, already-accepted turn's re-queued fold) survive.
+  the tail entry with the row's raw DB id — but ONLY if the tail is still unanchored, so an older,
+  re-queued turn's entry is never relabeled with a newer turn's row.
+- `discard_pending_fold(owner, session, keep_count)` resolves every anchored entry's CURRENT
+  `seq`-order position in ONE fresh query, run at the exact moment of the truncate against the
+  CURRENT row set, and discards every entry whose row no longer resolves at all OR whose resolved
+  position is `>= keep_count` — the full set of rows the truncate is about to remove — not just
+  the newest. Entries resolving below `keep_count` (an older, already-accepted turn's re-queued
+  fold) survive.
 - **Fail-safe, deliberately asymmetric:** an entry whose anchor is still `None` (the narrow gap
-  between staging — mid-generation, before the row exists — and the persist-time attach) is ALWAYS
-  discarded on a truncate, regardless of `keep_count`. A lost validated fold is a bounded
-  mandate-#4 sadness; a phantom fold surviving into the hidden layer is the corruption this whole
-  feature exists to prevent, and the two risks are not symmetric — uncertainty always resolves
-  toward "never fold."
-- **Settle's own last-line belt (`entry_exists_at_settle`, item 4)** is the intentional mirror:
-  before applying an entry, verify a row still exists at its anchored position (a cheap COUNT
-  query) — defense-in-depth against a non-truncate deletion path (`edit-message`/
-  `delete-messages`/`merge-last-assistant`) that bypassed `discard_pending_fold` entirely. A
-  vanished-row entry is dropped (warned, never re-queued — nothing to retry). A MISSING anchor at
-  settle time, unlike at truncate time, is treated as "no evidence either way" and settles
-  normally — settle isn't reacting to an active delete event, so there is no matching urgency to
-  assume the worst, and discarding every never-anchored entry on principle would silently regress
-  ordinary turns (the attach step runs synchronously within the same request that staged the
-  fold, so by the time the NEXT turn's settle runs, a real anchor is expected to already be there).
+  between staging — mid-generation, before the row exists — and the persist-time attach), OR whose
+  anchored row id no longer resolves to any row at all, is ALWAYS discarded on a truncate,
+  regardless of `keep_count`. A lost validated fold is a bounded mandate-#4 sadness; a phantom fold
+  surviving into the hidden layer is the corruption this whole feature exists to prevent, and the
+  two risks are not symmetric — uncertainty always resolves toward "never fold."
+- **Settle's own last-line belt (`entry_exists_at_settle`, item 4)** is the intentional mirror: a
+  plain SELECT-by-id — the row either exists or it doesn't, no positional arithmetic anywhere —
+  defense-in-depth against a non-truncate deletion path (`edit-message`/`delete-messages`/
+  `merge-last-assistant`) that bypassed `discard_pending_fold` entirely. A vanished-row entry is
+  dropped (warned, never re-queued — nothing to retry). A MISSING anchor at settle time, unlike at
+  truncate time, is treated as "no evidence either way" and settles normally — settle isn't
+  reacting to an active delete event, so there is no matching urgency to assume the worst, and
+  discarding every never-anchored entry on principle would silently regress ordinary turns (the
+  attach step runs synchronously within the same request that staged the fold, so by the time the
+  NEXT turn's settle runs, a real anchor is expected to already be there).
+
+**The anchor is the row's IMMUTABLE DB id, never a derived position (PR #1825 Greptile P1 fix #3
+— the SAME class of bug recurring one layer down, also T-Rex-confirmed).** Fix #2's first cut
+anchored to the row's `seq`-order POSITION, captured once at attach time, and settle's existence
+check compared it against a live row COUNT. Positions are unstable under deletion: delete an
+EARLIER row via a non-truncate path and every LATER row's true position shifts left by one, but an
+entry's stored position does not — so `position < current_count` can go on reading "still there"
+for a row that is now gone (a 3-row session, an entry anchored at position 1, the row at position
+0 deleted → count drops to 2, and `1 < 2` stays true even though a DIFFERENT row — the one that
+shifted down — now occupies position 1). The fix removes positional arithmetic from the anchor
+entirely:
+
+- **`row_anchor` is now the row's own DB id string**, stored verbatim by `attach_row_anchor` (no
+  DB round trip needed at attach time — the id was just handed back by the very call that created
+  the row) and never converted to a position that could later go stale.
+- **`entry_exists_at_settle` is a plain SELECT-by-id** — existence is a yes/no fact about a
+  specific immutable row, immune to anything shifting around it.
+- **`discard_pending_fold` resolves positions FRESH, every call**, against the row set as it
+  stands at that exact instant (the same read `keep_count` itself came from, so the two can never
+  desync) — never a cached/stale position from an earlier point in time.
+
+**Id-ordering verification (required before trusting ANY id-based comparison).**
+`core/database.py`'s `ChatMessage.id` is declared `Column(String, primary_key=True, index=True)`
+("String to support UUIDs" per its own comment), and every place a row id is minted
+(`core/session_manager.py`, several call sites) does so via `str(uuid.uuid4())` — a random UUID4,
+**not** an autoincrement integer. Raw id comparison therefore encodes **no** session order
+whatsoever; this is exactly why `discard_pending_fold` never compares ids directly and instead
+resolves each anchored id's CURRENT position through the authoritative `seq` column (the same
+column `SessionManager.keep_count_before_message` orders by) in a fresh query at truncate time,
+while `entry_exists_at_settle` only ever needs a yes/no existence check (order-independent by
+construction) and so is safe with the raw id as-is.
 
 **The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
 issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
@@ -370,7 +402,10 @@ leaves an older re-queued fold to survive and settle), a missing-anchor entry di
 truncate with a warning, and settle's own last-line belt dropping (never re-queuing) an anchored
 entry whose row was removed by a non-truncate path — plus source pins for the truncate route's
 anchor-aware discard call, the chat-routes persist-time attach wiring, settle sitting before the
-round loop starts, and settle's row-existence check.
+round loop starts, and settle's row-existence check — plus the PR #1825 fix-#3 case: 3 rows, a
+fold anchored to the MIDDLE row, that row deleted via a non-truncate path while the row before and
+after it survive (the row after shifts down a position) — settle drops the entry via the id-based
+existence check rather than being fooled by the shifted position, and nothing folds.
 
 ## Traceability
 
