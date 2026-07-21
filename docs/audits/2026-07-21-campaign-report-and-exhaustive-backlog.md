@@ -1226,3 +1226,66 @@ may the engine EVER originate a beat between player turns (bounded in-session ac
 turn-only status quo)? A live owner question the 2026-07-21 session never asked — queue for the
 next decision round · 0097/0098/0103 wiring · D5 blindside autopsy · Q6 payoff balance · D3 Genius Back-Room ·
 TUN-2 time/sleep Phase-2 · TUN-4 Proxmox smoke (owner-run) · TUN-5 Postgres tier.
+
+### Issue map (created 2026-07-21)
+
+Every backlog item named above as needing a fresh GitHub issue now has one, each carrying a
+DoR/AC/DoD contract (copied near-verbatim from Part B where a contract existed; drafted from the
+round-2 slate's idea record + §6 binding constraints otherwise). Items already tracked at #1728,
+#1729, #1734, #1713, #1644, #1599, #1413 stay canonical there and were not re-created.
+
+**Wave 1**
+- T0-2 (beats terminate themselves) → #1777
+- T0-3 (engine outcome chyrons) → #1778
+- Q2 (flag flips: `ORWELL_GOSSIP_DRIFT` / `ORWELL_SECRET_BARTER` / `ORWELL_SHOWRUNNER`) → #1779
+- T0-7 (Wave-1 exit playtest) → #1781
+
+**Wave 2**
+- T1-1 (Act→Commit→Voice) → #1782
+- T1-2 (nightly probe canary) → #1783
+- T1-3 (Show Bible) → #1784
+- T1-4 (Honest Delivery Lite) → #1785
+- D7 (full-WebSocket consolidation, ADR 0017/0018 revision) → #1786
+- Q7 (pacing-budget spec) → #1787
+
+**Wave 2.5 (quick wins)**
+- C1 (Wipeout Reel) → #1788
+- B1 (Telephone-Game Payoffs) → #1789
+- E2 (Traitors' Fury + bearing) → #1790
+- F1 (Your Legend Precedes You) → #1791
+- OQ4 (The Producer Read) → #1792
+- OQ4 (The Player Dossier) → #1793
+
+**Wave 3**
+- T1-5 (Footage Pool) → #1794
+- D1 (Ballot Arithmetic) → #1795
+- A1 (Fifteen Pairs of Eyes) → #1796
+- C2 (Odd-Couple B-Plots) → #1797
+- E1 (eviction-night exit package) → #1798
+- C3 (seeded partial pan) → #1799
+- A2 (Booth Has Receipts) → #1800
+- C4 (Running Bit Ledger) → #1801
+- D2 (Publicity-Priced Promises) → #1802
+- B2 (Walls Repeat You) → #1803
+- B3 (Barium Meal) → #1804
+- C5 (Cabin-Fever Ceremonies) → #1805
+- F2/F4 (Cold Cases + production memory without step 2) → #1806
+
+**Wave 4**
+- T1-6 (Editorial Organ) → #1807
+
+**Wave 5**
+- T1-7 (Player Agency Band) → #1808
+- T1-8 (autopsy decision point, PARKED-D5) → #1809
+- Presence/location parity remainder (BL-007/013/033) → #1810
+- ADR 0019 Layers 2-3 → #1811
+
+**Tuning/infra**
+- TUN-3 (token-economy #2+#4) → #1812
+- TUN-6 (live two-window re-run pin) → #1813
+- TUN-8 (R-roadmap remainder — R1 tail, R3, R6, R7; R2 stays at #1413) → #1814
+- TUN-9 (Seedream portrait follow-on) → #1815
+- TUN-4 (Proxmox smoke, Parked, owner-run) → #1816
+- TUN-5 (Postgres tier, Parked) → #1817
+- TUN-7 (0097/0098/0103 wiring, Parked, PO-gated) → #1818
+- Q6 (payoff-balance spec-both-options, Parked, PO-gated) → #1819
