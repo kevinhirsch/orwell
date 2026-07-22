@@ -437,4 +437,153 @@ matrix was live-probed and is valid; the findings are the axes it doesn't cover.
 
 ---
 
+### Lane: vault — Vault-Wall adversarial audit (7 findings; **1 P0, 5 P1**)
+
+*Lane cleared as safe: orchestrator fault ring, sandboxHealth, sync ledger/belt telemetry,
+chyron ballot anonymization (E12), retrospective terminal gate, producerVault quarantine,
+0112 TraceRecord. The findings below are the paths that did NOT hold.*
+
+#### R-VLT-1 · **P0** · The standard "Vault-free" debug bundle + admin LLM/engine I/O log rings expose hidden-layer content without the producerVault unseal gate
+
+- **Evidence:** `frontend/src/llm_trace.py:342-358` (`record_llm_call` stores FULL request
+  messages + response + reasoning; on by default per `admin_health_routes.py:1949`) ·
+  `llm_core.py:2568-2583` (narration chokepoint records the full game system prompt) ·
+  `GameSessionAdapter.ts:10377-10391` + `momentPrompts.ts:1374-1391` (that prompt carries
+  per-present-NPC hidden knows/suspects — ADR-0019 Layer 2) ·
+  `orwell_cast_authoring.py:52-94` (0058 "secret bible" completions — secrets/trueGoals/
+  weakness — recorded to the same trace) · `admin_health_routes.py:759-800,1067,1216-1218`
+  (the `llmIo` section ships in the STANDARD bundle whose meta self-describes "vault-free
+  export") · `:1896-1915` (admin log viewer serves the same rings behind `require_admin`
+  only, which short-circuits under `AUTH_ENABLED=false`) · `orwell_engine.py:282-295` +
+  `log_rings.py:105-125` (`record_io` copies args+result of EVERY player-channel tool —
+  npcVoice knows/suspects, skeleton content, manifests — into the admin-readable io ring).
+- **Impact:** an operator downloading the standard bundle — designed to be casually
+  shared — or opening the status-page log viewer reads NPC secrets, scheme targets, and
+  hidden knowledge without touching the sanctioned unseal. An effective third Vault door,
+  violating mandate #2 ("admin is walled from the Vault too").
+- **Fix direction:** seal prompt/completion content for game call classes by default
+  (metrics + redacted content; full content only behind `require_vault_reveal`, exactly
+  like producerVault); strip result payloads from `record_io` for hidden-content tools.
+  Adversarial test: standard bundle + every admin log source contains no NPC-secret
+  string from a seeded game.
+
+**DoR** — [ ] enumerate the sealed call-class list (narration, cast-authoring, off-screen
+voicing, zeitgeist) and the hidden-content tool list for `record_io`.
+**AC** — [ ] standard bundle + `?source=llmio|io` log streams contain no Vault-derived
+string from a seeded game (adversarial fixture proves it); [ ] full content readable ONLY
+behind the explicit unseal affordance.
+**DoD** — [ ] AC met; the adversarial test is a permanent gate; FE suite green.
+
+#### R-VLT-2 · P1 · Game-build "Production notes" accordion shows the model's reasoning to the player — but since ADR-0019 Layer 2 the model RECEIVES secret state; the ruling's safety premise is falsified
+
+- **Evidence:** `chat.js:2254-2283` (the 2026-06-20 ruling comment: "the model receives no
+  secret state so showing it is safe") vs `GameSessionAdapter.ts:10386-10391` +
+  `momentPrompts.ts:1374-1391` (every narration prompt now carries presentKnowledge);
+  knowledge/presence walls guard only the reply (`agent_loop.py:4732-4763`);
+  `roundReasoningText` renders unscrubbed (`chat.js:1746,2285-2309`).
+- **Impact:** one click in normal play can show the player hidden NPC knowledge and the
+  wall's own mechanics. (T0-5/F3 cover reasoning in the BUBBLE; T0-4 pushes reasoning
+  INTO this accordion — concentrating the exposure.)
+- **Fix direction:** game build defaults hide-thinking ON (reasoning = explicit operator
+  opt-in), or route accordion content through the knowledge/presence walls; update the
+  stale premise comment; FE test pins it.
+
+**DoR** — [ ] owner call: hide-by-default vs wall-screened accordion.
+**AC** — [ ] game-build reasoning is hidden or wall-screened; premise comment updated.
+**DoD** — [ ] AC met; FE test green; FE suite green.
+
+#### R-VLT-3 · P1 · Gateway turns bypass the knowledge wall, presence wall, and the untagged inline-planning scrub — while receiving the same secret-bearing prompt
+
+- **Evidence:** `gateway/handler.py:117-133` (builds from `getMomentPrompt` incl.
+  presentKnowledge), `:77-80` (only outbound filter is `scrub_for_platform`) ·
+  `gateway/scrub.py:24-33` (tag-based regex only — cannot match GLM's untagged inline
+  planning, the F3 class) · zero gateway calls to `screen_knowledge_wall` /
+  `screen_presence_wall` (they live only in `agent_loop.py:4732-4763,6905,7073`) ·
+  `handler.py:176-182` relies on prompt wording — the pattern CLAUDE.md bans.
+- **Impact:** every multi-platform turn runs with ADR-0019 enforcement reduced to Layer 1
+  + prompt wording; sealed-content recitals and inline debugger monologues are
+  deliverable verbatim to Telegram.
+- **Fix direction:** run gateway replies through both walls (owner-keyed,
+  transport-agnostic) + port the inline-planning scrub into `scrub_for_platform`; test: a
+  reply staging a non-holder reciting a sealed fact is dropped.
+
+**DoR** — [ ] confirm wall APIs are callable from the gateway context (no request-scoped
+deps). **AC** — [ ] gateway replies pass through knowledge + presence walls + the
+inline-planning scrub; the staged-recital test drops. **DoD** — [ ] AC met; gateway
+tests green; FE suite green.
+
+#### R-VLT-4 · P1 · `getOffscreenSceneSkeletons` returns hidden off-screen event content on the player channel — later content enrichments silently widened the "participants and nature only" projection
+
+- **Evidence:** `registry.ts:76` (description: "public participant ids, room, and nature
+  only") vs `GameSessionAdapter.ts:10656-10673` (`templateContent = textureOverrides ??
+  ev.content` — raw hidden content) which now carries: B50 hidden-element reveal detail
+  (`offscreen.ts:408`), the PV1 player-subject clause built from the hidden NPC→player
+  edge (`offscreen.ts:119-128,424` — "sizes up <player> as a threat they need gone"), and
+  the #1767 scheme-target clause (`offscreen.ts:158-162,438`; ON in deploy). The boundary
+  test only asserts no raw float (`offscreenTextureBoundary.test.ts:59-66`).
+- **Impact:** a player-channel tool hands out who is scheming against whom and an NPC's
+  private read of the player, with no pathway — and the io ring copies it every tick.
+- **Fix direction:** skeleton read returns the base slug (or nature+participants only);
+  move the clause-bearing brief to an engine-internal voicer seam; harden the boundary
+  test to seed PV1/B50/scheme-target scenes and assert no clause leaks; reconcile the
+  registry/port docs.
+
+**DoR** — [ ] decide slug-only vs nature+participants shape. **AC** — [ ] player-channel
+skeleton read contains no player-read/target/hidden-element clause (seeded adversarial
+test); docs match implementation. **DoD** — [ ] AC met; engine gates green.
+
+#### R-VLT-5 · P1 · `knowledgeScopeManifest` ships the living house's secret-fact manifest (content + who-knows-what) over the ordinary player channel — producerVault-lite without the unseal
+
+- **Evidence:** `registry.ts:40` (player channel, in `toolsFor`; `INFRA_LEVERS:199-202`
+  only hides it from the model's manifest) · `GameSessionAdapter.ts:2210-2255` (for EVERY
+  living holder, every distinctive fact incl. NPC-only secrets, humanized content +
+  holder names) · fetched per turn (`chat_helpers.py:3016-3019`) and copied into the
+  admin io ring (`orwell_engine.py:282-295`). Contrast producerVault's quarantine:
+  out-of-band, never in `toolsFor`, explicit unseal.
+- **Impact:** any caller with the player token can dump a live who-knows-what manifest of
+  the house's secret layer; the io-ring copy makes it a persistent admin spoiler feed.
+- **Fix direction:** move the manifest (and the widened `sealedFromHouse` read)
+  out-of-band like producerVault (server-internal fetch not in `toolsFor`); exempt its
+  payload from `record_io` content capture; test: the player channel's advertised tools
+  can never return a fact whose knownTo excludes the player.
+
+**DoR** — [ ] pick the out-of-band transport (internal route vs registry side-channel).
+**AC** — [ ] the manifest is unreachable via the advertised player tool list; Layer-3
+still functions; io ring holds name+timing only. **DoD** — [ ] AC met; adversarial test
+permanent; engine + FE gates green.
+
+#### R-VLT-6 · P1 · `npcVoice` hidden knows/suspects stream to the player's browser (SSE `tool_output`) and persist in chat metadata — suppression is a client-side rendering convention
+
+- **Evidence:** `tool_implementations.py:5442-5445` (returns full NpcVoiceView incl.
+  knows/suspects) · `agent_loop.py:9098` (every tool result emitted as a `tool_output`
+  SSE event, `output[:2000]`) + `:9156-9162` (persisted into message `tool_events`,
+  returned by resume/history APIs) · only suppression: `orwellToolBeats.js:114-116`
+  (silent-beat RENDERING set) · metadata rides into the bundle's chatStore section.
+- **Impact:** per-NPC hidden knowledge is delivered to the player's client on every
+  npcVoice call and persists in their session data — DevTools or any client bug spoils
+  the season; enforcement "by presentation" is the banned anti-pattern.
+- **Fix direction:** server-side, for game-build silent-class engine reads emit a marker
+  `tool_output` (name + ok only) and persist `tool_events` without the payload; FE test
+  asserts stream + metadata contain no knows/suspects content.
+
+**DoR** — [ ] enumerate the silent-class tool list server-side. **AC** — [ ] SSE stream
+and persisted metadata for an npcVoice turn carry no hidden content; model behavior
+unchanged. **DoD** — [ ] AC met; FE test permanent; FE suite green.
+
+#### R-VLT-7 · P2 · The knowledge-wall guard fails open silently: a manifest fetch failure leaves the wall empty for the TTL window with only debug-level logging
+
+- **Evidence:** `chat_helpers.py:3010-3019` (per-source failures → `logger.debug`),
+  `:3030-3033` (total failure → `facts=[]` cached for the TTL → wall returns text
+  verbatim), `:3161-3163`; no `record_soft_failure`/RED event on any path (contrast the
+  #1599 convention); the failsoft allowlist grandfather (`failsoft_allowlist.yaml:125-131`)
+  predates the wall.
+- **Fix direction:** RED-eligible `record_soft_failure('knowledge-wall:manifest-fetch-failed')`
+  + WARNING; hold last-known-good facts past the TTL instead of caching empty; test pins
+  both.
+
+**DoR** — [ ] none. **AC** — [ ] a fetch failure preserves prior facts and reaches the
+RED rollup. **DoD** — [ ] AC met; FE suite green.
+
+---
+
 *(Further lanes land below as they complete.)*
