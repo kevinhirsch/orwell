@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
@@ -164,10 +164,20 @@ describe("0094 confront — deterministic and calibration-safe", () => {
   });
 
   it("confront is a brand-new player-only lever — never invoked by the seeded calibration spine", () => {
-    // Structural: `confront` has no env gate and no wiring into `campaignTick`/`advanceGame`/the vote or
-    // competition resolvers — it is reachable ONLY via the player MCP channel, exactly like `confide`.
-    // The heavy-sims UAT/juryReach/gradient harnesses never call arbitrary player tools, so this lever
-    // cannot perturb the seeded spine; nothing further to assert here beyond the boundary test above.
-    expect(true).toBe(true);
+    GameSessionAdapter.setGossipConsequenceEnabled(null); // default OFF for spine
+    const { sb } = startedGame("spine-neutral", 1);
+    const npcId = sb.session.snapshot().house!.npcs[0]!.id;
+    // Seed some beliefs so confront could potentially fire
+    seedBelief(sb, npcId, "fact:sp1", 3, 0.3);
+    seedBelief(sb, npcId, "fact:sp2", 0, 1);
+    // Spy on the confront method
+    const spy = vi.spyOn(sb.session, "confront");
+    // Run multiple advanceGame calls to exercise the calibration spine (vote, competition, off-screen ticks)
+    for (let i = 0; i < 10; i++) {
+      sb.session.advanceGame();
+    }
+    // confront should NEVER have been called by the seeded spine
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
