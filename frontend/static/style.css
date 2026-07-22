@@ -21747,18 +21747,6 @@ body.theme-frosted .ow-btn-xl {
   border-radius: var(--ow-radius-pill, 9999px);  /* extra-large → capsule */
 }
 
-/* ── EXPLICIT TINT-PROMINENCE helpers (WWDC25 310 tintProminence) ────────────────
-   The four 310 levels as composable modifiers (the variants above already map onto
-   them; these let a consumer set prominence orthogonally). Tint rides OVER the glass
-   — never an opaque plate, never an accent on the label. */
-body.theme-frosted .ow-btn-prominence-none    { background: transparent; border-color: transparent; box-shadow: none; }
-body.theme-frosted .ow-btn-prominence-secondary {
-  background: var(--ow-btn-tint-secondary, color-mix(in srgb, #16191f 10%, transparent));
-  border-color: color-mix(in srgb, #16191f 18%, transparent);
-}
-body.theme-frosted .ow-btn-prominence-primary {
-  background:
-    radial-gradient(120% 120% at 30% -10%, var(--ow-btn-tint-primary, rgba(255,255,255,0.22)), transparent 60%),
     var(--ow-btn-tint-primary, rgba(255,255,255,0.18));
   border-color: rgba(255,255,255,0.34);
 }
