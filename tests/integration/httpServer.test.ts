@@ -87,6 +87,58 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     }
   });
 
+  it("bootFlags reports the correct POLARITY for every newly-added flag, not just its key presence (G9 review)", async () => {
+    // G9's whole point: a wrong DEFAULT here misreports production. Presence-only assertions (the
+    // previous test) can't catch a flipped `===`/`!==`, so drive /health with the actual env var set,
+    // one case at a time, and restore it afterward.
+    async function flagsWith(envVar: string, value: string | undefined): Promise<Record<string, unknown>> {
+      const prior = process.env[envVar];
+      try {
+        if (value === undefined) delete process.env[envVar];
+        else process.env[envVar] = value;
+        const res = await fetch(`${base}/health`);
+        const body = (await res.json()) as Record<string, unknown>;
+        return body["flags"] as Record<string, unknown>;
+      } finally {
+        if (prior === undefined) delete process.env[envVar];
+        else process.env[envVar] = prior;
+      }
+    }
+
+    // The 9 deploy-on flags: strict `=== "1"` (default OFF). Pin unset/"0" ⇒ false, "1" ⇒ true, and
+    // "true"/"on" ⇒ false (these are strict "1"-only, unlike seededTieSurfacing/timeOfDay's loose parse).
+    const strictOneOnlyFlags = [
+      "ORWELL_STRATEGIC_CADENCE", "ORWELL_SCHEME_TARGETS", "ORWELL_CONFESSIONAL_DEPTH",
+      "ORWELL_NPC_DEAL_OFFERS", "ORWELL_SOUL_DEPTH", "ORWELL_COMP_MECHANICS_PLUS",
+      "ORWELL_COMP_MIXED", "ORWELL_GOSSIP_DRIFT", "ORWELL_SECRET_BARTER",
+    ];
+    for (const envVar of strictOneOnlyFlags) {
+      const key = camelKeyFor(envVar);
+      expect((await flagsWith(envVar, undefined))[key], `${key} unset ⇒ false`).toBe(false);
+      expect((await flagsWith(envVar, "0"))[key], `${key} "0" ⇒ false`).toBe(false);
+      expect((await flagsWith(envVar, "1"))[key], `${key} "1" ⇒ true`).toBe(true);
+      expect((await flagsWith(envVar, "true"))[key], `${key} "true" ⇒ false (strict "1"-only)`).toBe(false);
+      expect((await flagsWith(envVar, "on"))[key], `${key} "on" ⇒ false (strict "1"-only)`).toBe(false);
+    }
+
+    // The 0066 Phase-2 sleep trio: perConversationClock/socialFatigue are `!== "0"` (default ON),
+    // multiNightFatigue is `=== "1"` (default OFF, the one flag in the trio that stayed opt-in).
+    for (const [envVar, key] of [
+      ["ORWELL_TIME_PER_CONVERSATION", "perConversationClock"],
+      ["ORWELL_SOCIAL_FATIGUE", "socialFatigue"],
+    ] as const) {
+      expect((await flagsWith(envVar, undefined))[key], `${key} unset ⇒ true (default ON)`).toBe(true);
+      expect((await flagsWith(envVar, "0"))[key], `${key} "0" ⇒ false`).toBe(false);
+      expect((await flagsWith(envVar, "1"))[key], `${key} "1" ⇒ true`).toBe(true);
+    }
+    expect(
+      (await flagsWith("ORWELL_MULTI_NIGHT_FATIGUE", undefined))["multiNightFatigue"],
+      "multiNightFatigue unset ⇒ false (default OFF)",
+    ).toBe(false);
+    expect((await flagsWith("ORWELL_MULTI_NIGHT_FATIGUE", "0"))["multiNightFatigue"], "multiNightFatigue \"0\" ⇒ false").toBe(false);
+    expect((await flagsWith("ORWELL_MULTI_NIGHT_FATIGUE", "1"))["multiNightFatigue"], "multiNightFatigue \"1\" ⇒ true").toBe(true);
+  });
+
   it("records a failed tool call in the /health ring — tool name + error class + timing, never args (G1)", async () => {
     const sentinel = "RING-SENTINEL-the-payload-that-must-not-leak";
     const res = await fetch(`${base}/player/call`, {
