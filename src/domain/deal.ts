@@ -7,7 +7,7 @@ import type { EntityId } from "./ids";
  * binding action (a nomination, replacement, veto, or eviction vote) can break. The ENGINE —
  * never the narrator — decides kept/broken by evaluating the action against the condition
  * (anti-sycophancy, priority #3). This module is pure data + predicates: no I/O, no relationship
- * math, no Vault — it only answers "does this action implicate / honor / break this deal?".
+ * math, no Vault — it only answers "does this action honor / break this deal?".
  */
 
 /**
@@ -156,16 +156,6 @@ function positiveVerdict(deal: Deal, action: BindingAction): "kept" | "broken" |
     return (action.saved ?? []).includes(deal.condition.protect) ? "kept" : "broken";
   }
   return null;
-}
-
-/** Does this action involve a party of the deal taking an adverse swing whose target is a party? */
-export function actionImplicates(deal: Deal, action: BindingAction): boolean {
-  if (deal.status !== "open") return false;
-  if (isPositiveObligation(deal.kind)) return positiveVerdict(deal, action) !== null;
-  if (!ADVERSE.has(action.kind)) return false;
-  const isParty = deal.parties.includes(action.actor);
-  const hitsParty = action.targets.some((t) => deal.parties.includes(t) && t !== action.actor);
-  return isParty && hitsParty;
 }
 
 /**
