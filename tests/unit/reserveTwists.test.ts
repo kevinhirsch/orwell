@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { loadReserveTwists, maybeFireTwist, firedTwists, isDramaticBeat, RESERVE_POOL } from "../../src/engine/reserveTwists";
 import { selectableReplacements, evictionVoters } from "../../src/domain/eligibility";
 import type { WeekState } from "../../src/domain/eligibility";
@@ -52,5 +53,30 @@ describe("0025 — reserve twists (Vault-sealed, engine-timed)", () => {
     const outcome = playSeason({ seed: 5, houseguests: roster });
     expect(outcome.jury).toHaveLength(9);
     expect(outcome.finalTwo).toHaveLength(2);
+  });
+
+  // G20 — isDramaticBeat previously had exactly one call site (this test file's post-hoc sanity
+  // check) and NO production consumer; `loadReserveTwists` re-derived the same beat range with
+  // hand-rolled arithmetic, with nothing structurally tying the two together. This proves the
+  // predicate is now load-bearing production code, not dead: `loadReserveTwists`'s function body
+  // must actually call `isDramaticBeat` to guard its own arithmetic (the BE-14 same-file-guard
+  // pattern), not just declare it.
+  it("G20: loadReserveTwists structurally ties its arithmetic to isDramaticBeat (not a dead export)", () => {
+    const src = readFileSync(new URL("../../src/engine/reserveTwists.ts", import.meta.url), "utf8");
+    const start = src.indexOf("export function loadReserveTwists(");
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("\nexport function maybeFireTwist(", start);
+    expect(end).toBeGreaterThan(start);
+    const body = src.slice(start, end);
+    expect(body).toContain("isDramaticBeat(");
+  });
+
+  it("G20: every produced fireAtBeat satisfies isDramaticBeat across totalBeats variants", () => {
+    for (const totalBeats of [10, 14, 20]) {
+      for (let seed = 1; seed <= 25; seed++) {
+        const reserve = loadReserveTwists(2, new SeededRandom(seed), totalBeats);
+        for (const t of reserve) expect(isDramaticBeat(t.fireAtBeat, totalBeats)).toBe(true);
+      }
+    }
   });
 });
