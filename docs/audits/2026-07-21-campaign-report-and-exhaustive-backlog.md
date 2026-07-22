@@ -594,7 +594,7 @@ work items, and carry neither.
 - [ ] This backlog doc's T7 ruling table gets a follow-up decision row ("D5-followup") recording
   whichever way it resolves.
 
-### T2 — Open GitHub issues (all 7; canonical in the tracker)
+### T2 — GitHub issues as of the 2026-07-21 audit (7 then-open; closures annotated in place — the tracker is canonical for live state)
 
 | Issue | Title (compressed) | Sev | Relationship to the portfolio |
 |---|---|---|---|
@@ -1158,7 +1158,7 @@ verify bot claims against code personally.
 Every open item from every tier + both moonshot rounds + the session rulings, in ONE wave structure.
 (Contracts: each named item's DoR/AC/DoD is in Part B above or its tracker issue.)
 
-### Wave 0 — IN FLIGHT NOW (all four items landed 2026-07-22)
+### Wave 0 — ✅ LANDED (all four items merged 2026-07-22)
 | Item | Vehicle |
 |---|---|
 | Casting mandate (FacetLedger, 15-wide, prewarm-during-interview, entry gate; owner-clarified: ≤10s = the user-facing wait at the house door, authoring covers under the interview) | ✅ LANDED — **PR #1780** (+ **PR #1776** for the #1713 premiere-block half); closes the casting mandate |
