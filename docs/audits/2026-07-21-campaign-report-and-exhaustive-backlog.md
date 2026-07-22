@@ -19,7 +19,10 @@ overseer session's task ledger.
 
 ### A.1 Where main stands
 
-`main @ 68d2264d`. Seventeen PRs merged this cycle, all squash-merged on green required gates:
+`main @ 68d2264d` *(audit-time snapshot, 2026-07-21 — the table below is that cycle's merge list.
+As of the 2026-07-22 reconcile, main is @ `c760a130` with the #1771–#1829 + #1825 overnight batch
+merged on top; `HANDOFF.md` §1 is the current snapshot.)*. Seventeen PRs merged this cycle, all
+squash-merged on green required gates:
 
 | PR | What landed |
 |---|---|
@@ -98,7 +101,12 @@ work items, and carry neither.
 | T0-6 | **One Casting Bible (FacetLedger)** — cast-wide seeded stratified budgets for vocation family / region / marks / build / hair / voice tics / name phonology minted before any LLM call; every lane gets its dealt hand + taken-list; transactional adopt-or-regenerate merge (never graft); one generic facet-diff validator at `recordCastProfile` replacing per-facet regexes; delete the un-ledgered "first-responder" steering line. Starts from `main` (#1768 merged). | P3; F6; breakage map D | M | — (pairs with GH-1734) |
 | T0-7 | **Wave-1 exit playtest** — a live playtest week 1 with zero phantom outcomes, zero silent retcons, zero livelocks, no reasoning text in visible bubbles. | Wave-1 exit criterion | S | T0-1..T0-6 |
 
-#### T0-1 — DoR / AC / DoD
+> **Checklist convention for ✅ LANDED sections:** the DoR/AC/DoD boxes below are retained
+> UNCHECKED as the item's static contract (verification evidence lives in the merging PR's
+> body/tests, not re-ticked here) — per demote-never-delete, contracts are never rewritten
+> post-landing. A ⚠️ line on a heading marks any sub-scope that did NOT land.
+
+#### T0-1 — DoR / AC / DoD — ✅ LANDED (PR #1774, 2026-07-22)
 
 **DoR**
 - [ ] The 17-turn eviction-reveal livelock (playtest F2) is the pinned repro; the exact comparator sites
@@ -125,7 +133,7 @@ work items, and carry neither.
 - [ ] `docs/design/undercall-seam-structural.md` updated to note the comparator fix and that it
   restores the falsified single-tab invariant.
 
-#### T0-2 — DoR / AC / DoD
+#### T0-2 — DoR / AC / DoD — ✅ LANDED (PR #1824, 2026-07-22; the `beatsTerminateThemselves` nominations-flake root cause hit during this item's own test suite was fixed separately in PR #1827, 2026-07-22)
 
 **DoR**
 - [ ] The transaction boundary for auto-advance is chosen (the same commit that resolves a beat's
@@ -152,7 +160,7 @@ work items, and carry neither.
 - [ ] `docs/design/undercall-seam-structural.md`'s belt inventory updated to reflect the new
   auto-advance transaction and the belts' demoted (watchdog) status.
 
-#### T0-3 — DoR / AC / DoD
+#### T0-3 — DoR / AC / DoD — 🚧 IN FLIGHT (PR #1830, `claude/...` worktree; owes the veto-rail P2 fix push — speculative "use the veto" color must survive, only assertive outcomes drop)
 
 **DoR**
 - [ ] Q1 (the scoped ADR 0003 amendment — closed-set ceremony outcomes as engine chyrons, model
@@ -191,7 +199,7 @@ work items, and carry neither.
   both FE languages) stay documented in T9 as designated fallbacks and are built only if T0-3 flakes
   or is later reopened — not built speculatively now.
 
-#### T0-4 — DoR / AC / DoD
+#### T0-4 — DoR / AC / DoD — ✅ TELEMETRY/PROBE ARM LANDED (PR #1821, 2026-07-22, together with TUN-10; the settings race it introduced was fixed in PR #1828). ⚠️ The ENFORCEMENT arm — live `require_parameters`/`provider.only` request pinning, role-split routing, red-capability auto-downgrade — REMAINS OPEN per capability_probe.py's own scope note; it ships separately (Wave 2, rides the D3 pinning ruling).
 
 **DoR**
 - [ ] Q3 (provider posture) is ruled: **APPROVED** (D3, 2026-07-21) — pinning plus a direct z.ai
@@ -227,7 +235,7 @@ work items, and carry neither.
   even once pinning is stable.
 - [ ] Note: the standing nightly probe canary is out of scope here — see T1-2.
 
-#### T0-5 — DoR / AC / DoD
+#### T0-5 — DoR / AC / DoD — ✅ LANDED (PR #1774, 2026-07-22)
 
 **DoR**
 - [ ] Playtest F3 is the pinned repro (`reasoning_chars=0`, planning monologue and raw engine-field
@@ -252,7 +260,7 @@ work items, and carry neither.
   live and tested even after T0-4's pinning restores the separated reasoning channel; a later PR that
   removes or bypasses it without an explicit owner sign-off is a regression, not a cleanup.
 
-#### T0-6 — DoR / AC / DoD
+#### T0-6 — DoR / AC / DoD — ✅ LANDED (PR #1780, 2026-07-22, "the One Casting Bible" — seeded FacetLedger, 15-wide genesis, entry-gate seed threading; with PR #1776's #1713 premiere-block bound, this closes the casting mandate)
 
 **DoR**
 - [ ] The `FacetLedger` schema is decided: stratified-sampled, cast-wide budgets (with jitter + rare-
@@ -594,14 +602,14 @@ work items, and carry neither.
 - [ ] This backlog doc's T7 ruling table gets a follow-up decision row ("D5-followup") recording
   whichever way it resolves.
 
-### T2 — Open GitHub issues (all 7; canonical in the tracker)
+### T2 — GitHub issues as of the 2026-07-21 audit (7 then-open; closures annotated in place — the tracker is canonical for live state)
 
 | Issue | Title (compressed) | Sev | Relationship to the portfolio |
 |---|---|---|---|
-| #1728 | [B2/D1] Regeneration double-folds the hidden layer — supersede-by-id + retract/defer the superseded fold | P1 | The D1 single render log is the same substrate T1-4 and R2 (#1413) build on; the fold-deferral half is engine-adjacent and independent. **Not** absorbed — build per its own spec, coordinate the render log with T1-4. |
-| #1729 | [B1/D2] OOC vents & stream-glitch text recorded as "(overheard, clearly)" world events — recorder gate + resumable stream | P1 | The D2 resumable stream rides #1728's render log; the B1 recorder content-gate is standalone and should land early (it is a Vault-hygiene bug: machinery text sits in the Vault as gossip-diffusable material). |
+| #1728 | [B2/D1] Regeneration double-folds the hidden layer — supersede-by-id + retract/defer the superseded fold | P1 | The D1 single render log is the same substrate T1-4 and R2 (#1413) build on; the fold-deferral half is engine-adjacent and independent. **Not** absorbed — build per its own spec, coordinate the render log with T1-4. **✅ LANDED (PR #1825, 2026-07-22 — "defer-fold-to-settle"; survived six review-finding cycles: FIFO queue, row-id anchors, single-custody, truncate-gated discard).** |
+| #1729 | [B1/D2] OOC vents & stream-glitch text recorded as "(overheard, clearly)" world events — recorder gate + resumable stream | P1 | The D2 resumable stream rides #1728's render log; the B1 recorder content-gate is standalone and should land early (it is a Vault-hygiene bug: machinery text sits in the Vault as gossip-diffusable material). **B1 recorder-gate sub-item ✅ LANDED (PR #1774, 2026-07-22, "recorder RED events"). D2 resumable-stream sub-item — KEEP OPEN (rides Wave 2 on the #1728 render log).** |
 | #1734 | [B4] Scene-extraction `withIds` format drifts — normalize + validate at the boundary | P3 | Pairs naturally with T0-6's generic facet-diff validator (same boundary-validation pattern); can land with the B3 batch or T0-6. |
-| #1713 | Casting-finalize turn hangs FE→engine ~300s under CI load (champagne-premiere #1711 regression) | P2 | The three replay-gate jobs it redded are **gone** (#1765), so its CI symptom is moot — but the diagnosis stands: a ~300s hard block on `createCharacter`→premiere under contention is **potentially production-relevant** (a real player on a busy server would hit the FE→engine timeout). Keep open; re-scope to the behavioral fix (Step-2 of the issue) and drop the replay-diagnostic step. |
+| #1713 | Casting-finalize turn hangs FE→engine ~300s under CI load (champagne-premiere #1711 regression) | P2 | The three replay-gate jobs it redded are **gone** (#1765), so its CI symptom is moot — but the diagnosis stands: a ~300s hard block on `createCharacter`→premiere under contention is **potentially production-relevant** (a real player on a busy server would hit the FE→engine timeout). **CLOSED (owner, 2026-07-21) — the re-scoped behavioral fix ✅ LANDED (PR #1776, 2026-07-22: 30s bounded stream + 90s backstop + engine response-budget watchdog); the replay-diagnostic step is moot post-#1765. Nothing remains open.** |
 | #1644 | TEXT STANDARDIZATION umbrella — every text on standard kit ink tokens + a CI gate | Owner mandate | Standalone FE track; subsumes HANDOFF's "#738 Liquid-Glass real fix" residual (same class). Audit → gate → fix waves. |
 | #1599 | GOVERNING RULING: no silent fail-soft — RED even when auto-corrected; allowlist mechanism | Owner ruling | Cross-cutting; feature 0112 (in progress) is its observability substrate. Note the tension to resolve at build time: the moonshot's P4/P8 lanes are *specified* fail-soft — those sites need owner-allowlist entries with reasons, per this ruling's own mechanism. |
 | #1413 | refactor(R2): collapse duplicated live-vs-reload chat render paths (ADR 0015) | post-launch | Same family as #1728-D1/T1-4; sequence after the render log exists so it collapses *onto* it rather than beside it. |
@@ -609,10 +617,10 @@ work items, and carry neither.
 **Contracts.** Each of the seven issues above already carries a full DoR/AC/DoD in the tracker (see
 #1728/#1729/#1734 for the established shape); this doc does not duplicate them.
 
-- #1728 — Contract: see issue #1728 (DoR/AC/DoD in tracker).
-- #1729 — Contract: see issue #1729 (DoR/AC/DoD in tracker).
+- #1728 — Contract: see issue #1728 (DoR/AC/DoD in tracker). ✅ LANDED (PR #1825, 2026-07-22).
+- #1729 — Contract: see issue #1729 (DoR/AC/DoD in tracker). B1 ✅ LANDED (PR #1774, 2026-07-22); D2 KEEP OPEN.
 - #1734 — Contract: see issue #1734 (DoR/AC/DoD in tracker).
-- #1713 — Contract: see issue #1713 (DoR/AC/DoD in tracker).
+- #1713 — Contract: see issue #1713 (DoR/AC/DoD in tracker). ✅ LANDED (PR #1776, 2026-07-22).
 - #1644 — Contract: see issue #1644 (DoR/AC/DoD in tracker).
 - #1599 — Contract: see issue #1599 (DoR/AC/DoD in tracker).
 - #1413 — Contract: see issue #1413 (DoR/AC/DoD in tracker).
@@ -727,7 +735,7 @@ where the actual acceptance bar lives).*
 - [ ] Ships opportunistically — batched into whichever PR next touches either test file or the
   0131/0132 specs, not a dedicated PR.
 
-#### RES-5 — DoR / AC / DoD
+#### RES-5 — DoR / AC / DoD — 🚧 IN FLIGHT (branch `claude/flake-eradication`: creationFreeze wall-clock, f4-order browser race, this RES-5 a11y-matrix item, CI npm-retry hardening). A related-but-distinct `fe-responsive`/matrix flake — the tiny-320 tap-target settle timing not measuring at motion quiescence (issue #1822) — was found and fixed separately: ✅ LANDED (PR #1823, 2026-07-22, "matrix sweeps measure at motion quiescence").
 
 **DoR**
 - [ ] #1644's gate-redesign plan reaches the `a11y-matrix` job's timeout/retry handling.
@@ -774,7 +782,7 @@ each task (it names the T0/T1/T4 item(s) that absorb it, or states its own stand
 | TUN-7 | Frozen specs 0097/0098/0103 (owner-parked "not planned", preserved, reopenable) · in-progress specs 0111 (Day-1 experience) + 0112 (LLM-call observability — also #1599's substrate). |
 | TUN-8 | REFACTOR-ROADMAP open items: R1 remainder (structured stale-beat body, auto-derived gamechanged set — R1c is DONE #1756) · R2 = #1413 · R3 chat.js decomposition · R6 failure-mode UX · R7 polish bundle. R2/R3/R6 all intersect the T1-4/#1728 render-log family — sequence them onto it. |
 | TUN-9 | ADR 0016 Seedream-portrait follow-on (separate, not-yet-built lever). |
-| TUN-10 | Enrichment-flag deploy-parity for dev/playtest rigs — set the deploy's flag envs (`ORWELL_CAMPAIGNS`, `ORWELL_TRAJECTORIES`, `ORWELL_STRATEGIC_CADENCE`, `ORWELL_SCHEME_TARGETS`, `ORWELL_CONFESSIONAL_DEPTH`, `ORWELL_NPC_DEAL_OFFERS`; `ORWELL_DEAL_DEPTH` stays off pending its live-loop reconciliation) in the dev runner/playtest driver so playtests exercise the un-impoverished society. **Never flip code defaults** (calibration neutrality). |
+| TUN-10 | Enrichment-flag deploy-parity for dev/playtest rigs — set the deploy's flag envs (`ORWELL_CAMPAIGNS`, `ORWELL_TRAJECTORIES`, `ORWELL_STRATEGIC_CADENCE`, `ORWELL_SCHEME_TARGETS`, `ORWELL_CONFESSIONAL_DEPTH`, `ORWELL_NPC_DEAL_OFFERS`; `ORWELL_DEAL_DEPTH` stays off pending its live-loop reconciliation) in the dev runner/playtest driver so playtests exercise the un-impoverished society. **Never flip code defaults** (calibration neutrality). — ✅ LANDED (PR #1821, 2026-07-22) |
 
 #### TUN-1 — DoR / AC / DoD
 
@@ -997,7 +1005,7 @@ each task (it names the T0/T1/T4 item(s) that absorb it, or states its own stand
 - [ ] ADR 0016 amended with the Seedream lever's shipped status; CLAUDE.md's "not-yet-built" language
   for the Seedream follow-on updated to built.
 
-#### TUN-10 — DoR / AC / DoD
+#### TUN-10 — DoR / AC / DoD — ✅ LANDED (PR #1821, 2026-07-22, together with T0-4)
 
 **DoR**
 - [ ] D6 is ruled: **CONFIRMED** — deploy-parity flags on dev/playtest rigs, env-level only
@@ -1137,13 +1145,13 @@ verify bot claims against code personally.
 
 ## Sequencing summary (the short version)
 
-0. **FIRST (owner order 2026-07-21): the casting mandate** — FacetLedger + 15-wide genesis + early kickoff + strict entry gate + the #1713 premiere-block fix, targeting <10s finalize-to-house with full depth pre-authored. In flight; the rest of Wave 1 dispatches after it merges.
-1. **Then (no owner decision needed):** T0-1 comparator fix · T0-2 beats-terminate-themselves
-   (server-side, no UI change — needs no ADR 0003 ruling) · T0-5 reasoning scrub · T0-4 probe
-   (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity. (T0-6 + #1734 are inside step 0, not here.)
-2. **On D1 (Q1):** T0-3 chyrons — the remaining heart of Wave 1 — then the T0-7 exit playtest.
-3. **Wave 2+:** T1-1 (belt demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log) → T1-5 (on
-   D4) → T1-6 → T1-7 → T1-8 (on D5).
+0. **✅ LANDED (2026-07-22): the casting mandate** — FacetLedger + 15-wide genesis + early kickoff + strict entry gate (#1780) + the #1713 premiere-block fix (#1776); the ≤10s bar is the user-facing loading delay at the house door, with deep-seeding under the interview's cover.
+1. **✅ LANDED (2026-07-22):** T0-1 comparator fix · T0-2 beats-terminate-themselves · T0-5
+   reasoning scrub · T0-4 probe (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity
+   (PRs #1774/#1824/#1821). (T0-6 was inside step 0, also landed; #1734 stays open — tracked in the T2 table, pairs with the T0-6 facet-diff validator pattern.)
+2. **🚧 IN FLIGHT (D1 ruled):** T0-3 chyrons — PR #1830 — then the T0-7 exit playtest (blocked on T0-3).
+3. **Wave 2+:** T1-1 (belt DEMOTION per the T9 ruling — never demolition) → T1-2 (on D2) → T1-3/T1-4 (the #1728 *fold-integrity* half landed in #1825/#1751; the shared render-log substrate + the #1729-D2 stream half still ride Wave 2 — #1413 stays blocked on that substrate) → T1-5 (on
+   D4, now gated only on the attention ledger) → T1-6 → T1-7 → T1-8 (on D5).
 4. **Continuously:** #1644 text standardization · #1599 fail-soft audit (with 0112) · T4/T6
    opportunistic batches.
 5. **Always (the T9 doctrine):** demote → observe → delete. No superseded guard/belt/scrub is
@@ -1158,31 +1166,33 @@ verify bot claims against code personally.
 Every open item from every tier + both moonshot rounds + the session rulings, in ONE wave structure.
 (Contracts: each named item's DoR/AC/DoD is in Part B above or its tracker issue.)
 
-### Wave 0 — IN FLIGHT NOW
+### Wave 0 — ✅ LANDED (all four items merged 2026-07-22)
 | Item | Vehicle |
 |---|---|
-| Casting mandate (FacetLedger, 15-wide, prewarm-during-interview, entry gate; owner-clarified: ≤10s = the user-facing wait at the house door, authoring covers under the interview) | agent → `claude/casting-ledger-fast` |
-| #1713 premiere ~300s block bound | agent → `claude/1713-premiere-block-fix` |
-| T0-1 comparator + T0-5 scrub + #1729-B1 RED events | **PR #1774** |
-| T0-4 capability probe + attempt telemetry + TUN-10 rig parity | agent → `claude/t0-probe-rig-parity` |
+| Casting mandate (FacetLedger, 15-wide, prewarm-during-interview, entry gate; owner-clarified: ≤10s = the user-facing wait at the house door, authoring covers under the interview) | ✅ LANDED — **PR #1780** (+ **PR #1776** for the #1713 premiere-block half); closes the casting mandate |
+| #1713 premiere ~300s block bound | ✅ LANDED — **PR #1776** |
+| T0-1 comparator + T0-5 scrub + #1729-B1 RED events | ✅ LANDED — **PR #1774** |
+| T0-4 capability probe + attempt telemetry + TUN-10 rig parity | ✅ LANDED — **PR #1821** |
 
-### Wave 0.5 — RECORDING INTEGRITY, PULLED FORWARD (owner ruling OQ3, 2026-07-21)
+### Wave 0.5 — RECORDING INTEGRITY, PULLED FORWARD (owner ruling OQ3, 2026-07-21) — ✅ LANDED
 **#1728 fold-integrity half** (defer-fold-to-settle + supersede-by-id — every "Try again" double-folds
-the hidden layer TODAY) ships immediately after Wave 0; the D2 stream-resume half stays in Wave 2 on
-the shared render log.
+the hidden layer TODAY) shipped as **PR #1825, 2026-07-22**, immediately after Wave 0; the D2
+stream-resume half stays in Wave 2 on the shared render log (still open).
 
 ### Wave 1 — GROUND TRUTH ON AIR (remainder; all decision-gates cleared)
-T0-2 beats-terminate-themselves (dispatches when #1713's branch lands — same file) · T0-3 engine
-chyrons (D1 ✅) · the Q2 flag flips (`ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`,
-`ORWELL_SHOWRUNNER` observe-only) · T0-7 exit playtest (zero phantoms / retcons / livelocks /
-reasoning leaks).
+T0-2 beats-terminate-themselves (✅ LANDED, PR #1824, 2026-07-22; its nominations-flake test-flake
+root cause fixed separately in PR #1827) · T0-3 engine chyrons (D1 ✅ ruled; build 🚧 IN FLIGHT, PR
+#1830) · the Q2 flag flips (`ORWELL_GOSSIP_DRIFT`, `ORWELL_SECRET_BARTER`, `ORWELL_SHOWRUNNER`
+observe-only) (✅ LANDED, PR #1826, 2026-07-22) · T0-7 exit playtest (zero phantoms / retcons /
+livelocks / reasoning leaks) — still open, blocked on T0-3.
 
 ### Wave 2 — THE PIPELINE + RECORDING INTEGRITY
 T1-1 Act→Commit→Voice (belts DEMOTE per class, RED-on-fire) · T1-2 nightly canary (D2 ✅) ·
 T1-3 show bible · T1-4 honest delivery **+ #1728 render-log/fold-integrity + #1729-D2 resumable
 stream** (same substrate; the P1 recording-integrity pair rides here — also closes session task #20
 FE-freeze evidence) · **D7 full-WebSocket consolidation** (ADR 0017/0018 revision rides the
-implementation) · Q7 pacing-budget spec (commissioned — resolves PO-1).
+implementation) · Q7 pacing-budget spec (commissioned — resolves PO-1) — ✅ spec LANDED (PR #1829,
+2026-07-22; the spec deliverable itself, not the T1-1..T1-4/D7 build items above, which remain open).
 
 ### Wave 2.5 — ROUND-2 QUICK WINS (owner ruling OQ2: start after Wave 1 lands, run ALONGSIDE Wave 2)
 C1 Wipeout Reel (9.0) · B1 Telephone-Game Payoffs (needs the drift flag from Wave 1) · E2
@@ -1235,9 +1245,9 @@ round-2 slate's idea record + §6 binding constraints otherwise). Items already 
 #1729, #1734, #1713, #1644, #1599, #1413 stay canonical there and were not re-created.
 
 **Wave 1**
-- T0-2 (beats terminate themselves) → #1777
-- T0-3 (engine outcome chyrons) → #1778
-- Q2 (flag flips: `ORWELL_GOSSIP_DRIFT` / `ORWELL_SECRET_BARTER` / `ORWELL_SHOWRUNNER`) → #1779
+- T0-2 (beats terminate themselves) → #1777 — ✅ LANDED (PR #1824, 2026-07-22)
+- T0-3 (engine outcome chyrons) → #1778 — 🚧 IN FLIGHT (PR #1830)
+- Q2 (flag flips: `ORWELL_GOSSIP_DRIFT` / `ORWELL_SECRET_BARTER` / `ORWELL_SHOWRUNNER`) → #1779 — ✅ LANDED (PR #1826, 2026-07-22)
 - T0-7 (Wave-1 exit playtest) → #1781
 
 **Wave 2**
@@ -1246,30 +1256,30 @@ round-2 slate's idea record + §6 binding constraints otherwise). Items already 
 - T1-3 (Show Bible) → #1784
 - T1-4 (Honest Delivery Lite) → #1785
 - D7 (full-WebSocket consolidation, ADR 0017/0018 revision) → #1786
-- Q7 (pacing-budget spec) → #1787
+- Q7 (pacing-budget spec) → #1787 — ✅ spec LANDED (PR #1829, 2026-07-22; the build items it specs remain open)
 
 **Wave 2.5 (quick wins)**
-- C1 (Wipeout Reel) → #1788
-- B1 (Telephone-Game Payoffs) → #1789
-- E2 (Traitors' Fury + bearing) → #1790
-- F1 (Your Legend Precedes You) → #1791
-- OQ4 (The Producer Read) → #1792
-- OQ4 (The Player Dossier) → #1793
+- C1 (Wipeout Reel) → #1788 — 🚧 IN FLIGHT (PR #1831; owes the P1 fix push — history must record only AIRED reel moments, the pre-crown batch leaked)
+- B1 (Telephone-Game Payoffs) → #1789 — 🚧 IN FLIGHT (branch `claude/b1-direct-build`)
+- E2 (Traitors' Fury + bearing) → #1790 — 🚧 IN FLIGHT (branch `claude/e2-direct-build`)
+- F1 (Your Legend Precedes You) → #1791 — 🚧 IN FLIGHT (branch `claude/f1-direct-build`)
+- OQ4 (The Producer Read) → #1792 — 🚧 IN FLIGHT (branch `claude/producer-read-dossier`)
+- OQ4 (The Player Dossier) → #1793 — 🚧 IN FLIGHT (branch `claude/producer-read-dossier`)
 
 **Wave 3**
 - T1-5 (Footage Pool) → #1794
 - D1 (Ballot Arithmetic) → #1795
-- A1 (Fifteen Pairs of Eyes) → #1796
+- A1 (Fifteen Pairs of Eyes) → #1796 — 🚧 IN FLIGHT (branch `claude/attention-ledger`; implementation complete, BDD + push owed — gates D4 footage pool)
 - C2 (Odd-Couple B-Plots) → #1797
 - E1 (eviction-night exit package) → #1798
 - C3 (seeded partial pan) → #1799
 - A2 (Booth Has Receipts) → #1800
 - C4 (Running Bit Ledger) → #1801
-- D2 (Publicity-Priced Promises) → #1802
+- D2 (Publicity-Priced Promises) → #1802 — 🚧 IN FLIGHT (branch `claude/d2-canary`)
 - B2 (Walls Repeat You) → #1803
 - B3 (Barium Meal) → #1804
 - C5 (Cabin-Fever Ceremonies) → #1805
-- F2/F4 (Cold Cases + production memory without step 2) → #1806
+- F2/F4 (Cold Cases + production memory without step 2) → #1806 — 🚧 IN FLIGHT (branch `claude/q3-cross-season`, the cross-season carry-in build)
 
 **Wave 4**
 - T1-6 (Editorial Organ) → #1807
