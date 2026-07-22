@@ -94,6 +94,18 @@ export function loadReserveTwists(count: number, rng: RandomnessSource, totalBea
     const kind = IMPLEMENTED_POOL[rng.int(IMPLEMENTED_POOL.length)]!;
     // A dramatic mid-season beat (never the premiere, never the finale week).
     const fireAtBeat = 2 + rng.int(Math.max(1, totalBeats - 3));
+    // G20 — same-file structural tie (the BE-14 pattern): this arithmetic must never drift outside
+    // the range `isDramaticBeat` names as valid. Production's range is (and must stay) a strict
+    // subset of the predicate's, so this never fires today — it's a fail-loud guard against the
+    // exact duplication-drift bug class this file has been bitten by before (BE-3/BE-14/ENDGAME-16/
+    // ENDGAME-7), and it gives `isDramaticBeat` a real production call site instead of only the
+    // test-only sanity check it previously had. Deliberately does NOT change the seeded draw shape
+    // (still one `rng.int()` call per loaded slot) — no calibration impact.
+    if (!isDramaticBeat(fireAtBeat, totalBeats)) {
+      throw new Error(
+        `reserveTwists: loadReserveTwists computed fireAtBeat=${fireAtBeat} (totalBeats=${totalBeats}) outside isDramaticBeat's range — reconcile the two in src/engine/reserveTwists.ts`,
+      );
+    }
     out.push({ kind, fireAtBeat });
   }
   return out;
