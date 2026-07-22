@@ -664,14 +664,19 @@ const SECRET_BARTER_ENABLED_DEFAULT = process.env.ORWELL_SECRET_BARTER === "1";
 const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
 
 /**
- * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
- * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
- * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
- * when off"). All three only mean anything while the master clock is running (`ORWELL_TIME_OF_DAY`); each
- * gates ON TOP of it, and when its own flag is off its effect is the identity (scale 1 / meter 0 / no extra
- * advance) ⇒ every seeded gate (juryReach/gradient/UAT) is BYTE-IDENTICAL. None adds a draw to ANY rng —
- * the social-fatigue + multi-night terms are pure functions of already-decided state (no side-stream
- * needed; the main competition/vote/jury stream is never re-phased). A test flips each per-session.
+ * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated flag
+ * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), independently toggleable so
+ * calibration neutrality is provable for EACH in isolation (the brief: "each behind its own flag,
+ * byte-identical when off"). **Polarity is NOT uniform across the trio** — items 1–2 default ON
+ * (opt-out via `=0`, per the 2026-07-12 owner ruling that a real playtest needs them live) while item 3
+ * stays default OFF (opt-in via `=1`); see each item's own annotation below for the authoritative polarity
+ * — don't infer it from this summary alone. All three only mean anything while the master clock is
+ * running (`ORWELL_TIME_OF_DAY`); each gates ON TOP of it, and when its own flag is off its effect is the
+ * identity (scale 1 / meter 0 / no extra advance) ⇒ every seeded gate (juryReach/gradient/UAT) is
+ * BYTE-IDENTICAL regardless of any of the three (the calibration/UAT harness leaves `ORWELL_TIME_OF_DAY`
+ * off). None adds a draw to ANY rng — the social-fatigue + multi-night terms are pure functions of
+ * already-decided state (no side-stream needed; the main competition/vote/jury stream is never
+ * re-phased). A test flips each per-session.
  *
  *  1. `ORWELL_TIME_PER_CONVERSATION` — the per-conversation clock advance (the day's finite scheming time,
  *     felt turn-by-turn). Pacing-only; never rushes an engaged scene (clamps at late-night, never wraps).
@@ -680,9 +685,11 @@ const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
  *     "fast-forward" playtest bug. It rides the MASTER clock (`timeOfDayEnabled`), so the seeded sims (which
  *     leave `ORWELL_TIME_OF_DAY` off) never advance it ⇒ byte-identical calibration regardless of this flag.
  *  2. `ORWELL_SOCIAL_FATIGUE` — a tired houseguest sways the house LESS next day + a conflict drains them
- *     to an earlier bedtime (social, not just comps).
+ *     to an earlier bedtime (social, not just comps). **Default ON** (set `=0` to disable) — see the
+ *     per-flag comment above its const below.
  *  3. `ORWELL_MULTI_NIGHT_FATIGUE` — the compounding multi-night fatigue meter (consecutive late nights
- *     stack a deeper deficit; rested nights recover).
+ *     stack a deeper deficit; rested nights recover). **Default OFF** (set `=1` to enable) — the one
+ *     flag in the trio that stayed opt-in.
  */
 // Default ON — a real playtest runs the master clock (the FE flips `time_of_day_enabled` on at boot), and
 // with per-conversation advance OFF the day had no in-fiction time between ceremonies (the fast-forward

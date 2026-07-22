@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
 import { GameSessionRegistry } from "../../src/composition/registry";
 import { Orchestrator } from "../../src/composition/orchestrator";
@@ -178,5 +179,55 @@ describe("0066 Phase-2 Ext 1 — the pure advance is gated, non-vacuous, and nev
     advanceClock(beatState);
     expect(beatState.timeOfDay, "the per-beat clock wraps the night to the 8am wake").toBe("morning");
     expect(beatState.nightDepth, "back at the wake hour").toBe(WAKE_HOUR);
+  });
+});
+
+// ── G16 (#1850) — the 0066 Phase-2 flag-trio doc block must state its polarity truthfully ──────────────
+
+describe("G16 (#1850) — the 0066 Phase-2 flag-trio doc block doesn't self-contradict on default polarity", () => {
+  const SRC_PATH = "src/adapters/engine/GameSessionAdapter.ts";
+
+  /** Ground truth pulled straight from the `_ENABLED_DEFAULT` assignment expression, never from prose. */
+  function actualDefaultOn(envName: string, src: string): boolean {
+    if (new RegExp(`process\\.env\\.${envName} !== "0"`).test(src)) return true; // opt-out ⇒ default ON
+    if (new RegExp(`process\\.env\\.${envName} === "1"`).test(src)) return false; // opt-in ⇒ default OFF
+    throw new Error(`could not find a recognizable default expression for ${envName} in ${SRC_PATH}`);
+  }
+
+  it("the block-level summary agrees with the per-item annotations, which agree with the actual code default for each flag", () => {
+    const src = readFileSync(SRC_PATH, "utf8");
+    const blockMatch = src.match(/\/\*\*\n \* 0066 Phase-2 \(#1125\)[\s\S]*?\n \*\//);
+    expect(blockMatch, "the 0066 Phase-2 doc block must exist above the three flag consts").toBeTruthy();
+    const block = blockMatch![0];
+
+    const listStart = block.indexOf("1. `ORWELL_TIME_PER_CONVERSATION`");
+    expect(listStart, "the numbered per-flag list must exist inside the block").toBeGreaterThan(-1);
+    const summary = block.slice(0, listStart);
+    const list = block.slice(listStart);
+
+    const flags = [
+      "ORWELL_TIME_PER_CONVERSATION",
+      "ORWELL_SOCIAL_FATIGUE",
+      "ORWELL_MULTI_NIGHT_FATIGUE",
+    ] as const;
+    const defaults = flags.map((env) => actualDefaultOn(env, src));
+
+    // Per-item annotation truth: each item's own "**Default ON/OFF**" tag must agree with the code —
+    // this is what a reader who reads past the header actually sees, and it must never lie either.
+    flags.forEach((env, i) => {
+      const itemMatch = list.match(new RegExp("`" + env + "`[\\s\\S]{0,400}?\\*\\*Default (ON|OFF)\\*\\*"));
+      expect(itemMatch, `the ${env} item must carry a **Default ON/OFF** annotation`).toBeTruthy();
+      expect(itemMatch![1] === "ON", `${env}'s per-item annotation must match its actual code default`).toBe(defaults[i]);
+    });
+
+    // The G16 gap itself: the block-level SUMMARY (the part a skimming reader sees first) must not
+    // blanket the trio as uniformly opt-in/default-OFF when the ground truth is mixed (two default ON,
+    // one default OFF) — that was the exact self-contradiction the audit caught (summary said "opt-in
+    // flag ... default OFF" for "each", while item 1's own annotation said "Default ON" a few lines later).
+    const mixedPolarity = new Set(defaults).size > 1;
+    expect(mixedPolarity, "sanity: this regression only makes sense while the trio's defaults are mixed").toBe(true);
+    const summaryClaimsUniformOptIn = /each\b[\s\S]{0,120}\bopt-in\b/i.test(summary);
+    expect(summaryClaimsUniformOptIn, "the summary must not describe the whole trio as opt-in when two of three default ON").toBe(false);
+    expect(/\bnot uniform\b|\bmixed\b/i.test(summary), "a mixed-default trio's summary must call out that polarity differs per item, not assert one uniform default").toBe(true);
   });
 });
