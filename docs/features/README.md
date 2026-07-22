@@ -297,10 +297,9 @@ on every PR rather than by manual `run_mirror_gate.sh`.
 Several substantial FE workstreams land as their own GitHub-issue tracks rather than numbered
 `docs/features/` specs. Recorded here so the status index isn't the only place they're visible.
 
-- **WebSocket Phase-1 transport — landed DORMANT (ADR 0017 / 0018; spec
+- **WebSocket Phase-1 transport — landed (ADR 0017 / 0018; spec
   `docs/design/websocket-phase1-protocol.md` + test plan).** The full Phase-1 stack merged behind the
-  **`ORWELL_WS_TRANSPORT`** flag (**default OFF** in Phase 1 — the route/handshake are inert until a
-  client negotiates the socket): per-device layout LWW storage (#1283), client transport + chat splice
+  **`ORWELL_WS_TRANSPORT`** flag (**default ON** since 2026-07-10 (#1357)): per-device layout LWW storage (#1283), client transport + chat splice
   + fallback negotiation (#1284), the server route (replay-then-tail over `agent_runs`, #1285),
   per-device layout client wiring (#1286), the decision-card confirm `decision` up-frame (#1287), and
   the server turn producer + layout leg (#1293) — plus the poll-kill batches that stand redundant HUD /
