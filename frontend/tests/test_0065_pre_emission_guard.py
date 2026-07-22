@@ -409,34 +409,50 @@ def test_screen_emits_creative_prose_without_reading_the_board(monkeypatch):
 
 def test_guard_drops_only_the_phantom_sentence_keeps_neighbours(monkeypatch):
     """SENTENCE granularity: a chunk with a creative lead-in, a PHANTOM eviction, and a creative
-    trailer drops ONLY the eviction sentence — the neighbours stream verbatim (delimiters intact)."""
+    trailer drops ONLY the eviction sentence — the neighbours stream verbatim (delimiters intact).
+
+    T0-3 (issue #1778): an eviction claim is now HARD-DROPPED by `_sentence_has_chyron_covered_claim`
+    BEFORE the board-verify (`screen_streamed_outcome`) ever runs — so no re-ground is stashed here
+    (there is nothing to "reconcile next turn": the drop itself is the whole correction now that the
+    engine's `BeatAnnouncement` chyron, not a next-turn nudge, carries the real fact)."""
     chat_helpers._LAST_BEAT_SIG[_USER] = {
         "week": 4, "phase": "eviction", "pending": None, "hoh": "npc:1",
         "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
         "evicted": 2, "finished": False,
     }
-    _board_fakes(monkeypatch, phase="eviction", evicted=2)  # board did NOT move → phantom
+    _board_fakes(monkeypatch, phase="eviction", evicted=2)  # irrelevant now — hard-drop never reads it
     text = ("The house gathers in the living room, tense and quiet. "
             "After the vote, one houseguest is evicted from the house. "
             "Outside, the wind picks up over the empty backyard.")
     out = _run(agent_loop._pre_emission_outcome_guard(text, _USER))
-    assert "is evicted" not in out                          # the phantom sentence is gone
+    assert "is evicted" not in out                          # the claim sentence is gone
     assert "The house gathers in the living room" in out    # creative lead-in kept
     assert "the wind picks up over the empty backyard" in out  # creative trailer kept
-    assert _USER in chat_helpers._DESYNC_REGROUND
+    assert _USER not in chat_helpers._DESYNC_REGROUND  # hard-drop, not a verify-then-correct hold
 
 
-def test_guard_emits_a_real_outcome_unchanged(monkeypatch):
-    """A chunk whose eviction the board DID move on streams byte-for-byte unchanged."""
+def test_guard_hard_drops_an_eviction_claim_even_when_the_board_DID_confirm_it(monkeypatch):
+    """T0-3 (issue #1778) — THE hard-drop-rail regression this pins: a chunk whose eviction the board
+    genuinely DID move on (previously the 'real outcome, emit unchanged' case) is now dropped just the
+    same. `_CLAIM_EVICTED_RE` is one of the 8 weekly-loop kinds an engine `BeatAnnouncement` chyron now
+    carries authoritatively (`chat_helpers._sentence_has_chyron_covered_claim`) — correctness no longer
+    matters (ADR 0003's amendment: 'a claim token in model prose is dropped outright, never rendered,
+    regardless of correctness'). The board-verify path (`screen_streamed_outcome`) is never even
+    reached — proven by making the board read raise, which would otherwise fail this test."""
     chat_helpers._LAST_BEAT_SIG[_USER] = {
         "week": 4, "phase": "eviction", "pending": None, "hoh": "npc:1",
         "noms": ["npc:2", "npc:3"], "vetoHolder": None, "vetoUsed": False,
         "evicted": 2, "finished": False,
     }
-    _board_fakes(monkeypatch, phase="eviction", evicted=3)  # someone really left
+
+    async def boom(user=None):
+        raise AssertionError("a chyron-covered claim must hard-drop WITHOUT ever reading the board")
+    monkeypatch.setattr(orwell_engine, "game_status", boom)
+    monkeypatch.setattr(orwell_engine, "get_game_state", boom)
+
     text = "By a vote of the house, one houseguest is evicted and walks out the front door."
     out = _run(agent_loop._pre_emission_outcome_guard(text, _USER))
-    assert out == text
+    assert out == ""
     assert _USER not in chat_helpers._DESYNC_REGROUND
 
 
@@ -457,17 +473,32 @@ def test_guard_returns_text_unchanged_when_no_closed_set_claim(monkeypatch):
 
 def test_guard_fails_open_without_owner_and_no_baseline(monkeypatch):
     """F16 (#1014): the guard NO LONGER bails on a falsy `owner` (that made it inert single-tenant —
-    `AUTH_ENABLED=false`). With `owner=None`/`""` and NO per-turn baseline stashed, it still fails
-    OPEN — the missing baseline (not the missing owner) means we cannot tell phantom from real, so the
+    `AUTH_ENABLED=false`). With `owner=None`/`""` and NO per-turn baseline stashed, a claim kind NOT
+    yet chyron-covered (the season winner — T0-3 scopes the hard-drop rail to the weekly loop; finale
+    kinds are an explicit follow-up, see `src/engine/beatAnnouncement.ts`) still fails OPEN through the
+    older verify-then-correct path: the missing baseline means we cannot tell phantom from real, so the
     text emits unchanged. The single-tenant SCREENING path (owner=None WITH a session baseline) is
-    pinned in test_1014_guard_owner_none.py."""
+    pinned in test_1014_guard_owner_none.py. The weekly-loop kinds' OWN owner/baseline-independence is
+    pinned separately below (`test_guard_hard_drop_fires_even_without_owner_or_baseline`)."""
     # No canonical session binding → _desync_key falls soft to the raw (None) user, and with no
     # baseline the screen returns True (emit) BEFORE any board read. Either way the text is unchanged.
     monkeypatch.setattr("src.orwell_game_session.get_game_session", lambda user: None)
     chat_helpers._LAST_BEAT_SIG.pop(None, None)
-    text = "After the vote, one houseguest is evicted from the house."
+    text = "Confetti falls — the houseguest is crowned the winner of Big Brother!"
     assert _run(agent_loop._pre_emission_outcome_guard(text, None)) == text
     assert _run(agent_loop._pre_emission_outcome_guard(text, "")) == text
+
+
+def test_guard_hard_drop_fires_even_without_owner_or_baseline(monkeypatch):
+    """T0-3 (issue #1778) — the flip side of the test above: a WEEKLY-LOOP claim kind (chyron-covered)
+    hard-drops UNCONDITIONALLY — it never even checks for an owner or a per-turn baseline, because it
+    never reads the board at all. This is the structural difference from the still-verify-gated kinds
+    (season winner / player expulsion) pinned immediately above."""
+    monkeypatch.setattr("src.orwell_game_session.get_game_session", lambda user: None)
+    chat_helpers._LAST_BEAT_SIG.pop(None, None)
+    text = "After the vote, one houseguest is evicted from the house."
+    assert _run(agent_loop._pre_emission_outcome_guard(text, None)) == ""
+    assert _run(agent_loop._pre_emission_outcome_guard(text, "")) == ""
 
 
 # ── source-pins: the wiring stays where the spine expects it ────────────── #
@@ -485,8 +516,78 @@ def test_agent_loop_runs_pre_emission_guard_in_the_scrub_path():
     assert "await _pre_emission_outcome_guard(" in src
     # It is applied to the leak-scrubbed text (after _scrub_game_leak), preserving granularity.
     assert "screen_streamed_outcome" in _read_chat_helpers()
-    # The blank-turn fall-back: if holding would empty an as-yet-unseen turn, emit the raw clean text.
-    assert "not _emitted_visible" in src
+    # T0-3 (issue #1778): the OLD blank-turn fall-back re-emitted the raw, unguarded `clean` text when
+    # holding would empty an as-yet-unseen turn — precisely the phantom-narration failure mode the guard
+    # exists to close. It is GONE; a turn the guard emptied out now gets the same diegetic cutaway the
+    # scene circuit-breaker uses, never the dropped claim. Pinned behaviorally below
+    # (`test_emit_guarded_scene_never_reemits_the_dropped_claim_on_a_blank_turn`); this is the source-pin
+    # half — the removed fallback's literal source line must never come back.
+    assert "guarded = clean" not in src
+
+
+# ── T0-3 (issue #1778) — the hard-drop rail: a blank-turn NEVER re-emits the dropped claim ──── #
+
+def test_emit_guarded_scene_never_reemits_the_dropped_claim_on_a_blank_turn(monkeypatch):
+    """The regression this whole guard exists to prevent: every sentence of the chunk asserted a
+    closed-set claim the pre-emission guard dropped (simulated by stubbing the guard to return ""),
+    and nothing has streamed yet this turn. The removed fallback used to fall back to the RAW,
+    UNGUARDED `clean` text here — defeating the guard on the exact turn it mattered. T0-3: the engine's
+    BeatAnnouncement chyron is now the sole source of truth for the fact, so the result must be the
+    SAME diegetic cutaway the scene circuit-breaker uses — never the phantom claim, never blank+silent
+    machinery, never a raw error."""
+    async def no_scene_break(user, text):
+        return None
+    monkeypatch.setattr(chat_helpers, "screen_streamed_scene_break", no_scene_break)
+
+    async def guard_drops_everything(text, owner):
+        return ""  # every sentence in `text` was a phantom closed-set claim
+    monkeypatch.setattr(agent_loop, "_pre_emission_outcome_guard", guard_drops_everything)
+
+    phantom = "You won HOH! The whole house erupts in cheers as the confetti falls."
+    out = _run(agent_loop._emit_guarded_scene(
+        phantom, _USER, scene_broken=False, emitted_visible=False, cutaway_emitted=False))
+    assert out.text == agent_loop._SCENE_CUTAWAY_LINE
+    assert "won hoh" not in out.text.lower()
+    assert out.cutaway_emitted is True
+    assert out.scene_broken is False  # the SCENE breaker never fired here — only the sentence guard did
+
+
+def test_emit_guarded_scene_stays_silent_once_a_cutaway_already_fired_this_turn(monkeypatch):
+    """A LATER chunk that also empties out must not emit a SECOND cutaway line (mirrors the scene
+    circuit-breaker's own at-most-once cutaway discipline) — it drops silently, `cutaway_emitted` stays
+    the caller's job to track across chunks."""
+    async def no_scene_break(user, text):
+        return None
+    monkeypatch.setattr(chat_helpers, "screen_streamed_scene_break", no_scene_break)
+
+    async def guard_drops_everything(text, owner):
+        return ""
+    monkeypatch.setattr(agent_loop, "_pre_emission_outcome_guard", guard_drops_everything)
+
+    out = _run(agent_loop._emit_guarded_scene(
+        "Another phantom sentence about winning the veto.",
+        _USER, scene_broken=False, emitted_visible=True, cutaway_emitted=True))
+    assert out.text == ""
+    assert out.scene_broken is False
+
+
+def test_emit_guarded_scene_still_emits_the_surviving_prose_when_the_guard_drops_only_part(monkeypatch):
+    """The hard-drop rail only replaces the fallback for a WHOLLY emptied chunk — a chunk where the
+    guard kept SOME real prose (dropping only the phantom sentence) still streams that surviving text
+    exactly as `_pre_emission_outcome_guard` returned it; no cutaway substitution happens."""
+    async def no_scene_break(user, text):
+        return None
+    monkeypatch.setattr(chat_helpers, "screen_streamed_scene_break", no_scene_break)
+
+    async def guard_keeps_the_real_sentence(text, owner):
+        return "The room settles into an uneasy quiet."
+    monkeypatch.setattr(agent_loop, "_pre_emission_outcome_guard", guard_keeps_the_real_sentence)
+
+    out = _run(agent_loop._emit_guarded_scene(
+        "You won HOH! The room settles into an uneasy quiet.",
+        _USER, scene_broken=False, emitted_visible=False, cutaway_emitted=False))
+    assert out.text == "The room settles into an uneasy quiet."
+    assert out.cutaway_emitted is False
 
 
 def _read_chat_helpers():

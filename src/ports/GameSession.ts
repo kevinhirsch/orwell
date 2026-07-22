@@ -1051,6 +1051,12 @@ export interface StateDeltaView {
   /** The player-visible events appended since the token, in order (empty on full-refresh / no change). */
   events: DeltaEventView[];
   /**
+   * T0-3 — the broadcast chyron(s) committed since the token, in commit order (a reconnecting/second
+   * window's catch-up path; the live path is `AdvanceView.announcements` on the mutating call itself).
+   * Absent/empty on a full refresh or when nothing new committed — same absent-semantics as `events`.
+   */
+  announcements?: BeatAnnouncementView[];
+  /**
    * The ceremony field transitions since the token — only the fields that actually CHANGED appear
    * (so an unchanged field is absent, not echoed). Present only when at least one changed; absent on a
    * full refresh or an empty delta. Vault-free (the same ceremony-level public facts as `board`).
@@ -1075,6 +1081,57 @@ export interface StateDeltaView {
 export interface NamedRef {
   id: EntityId;
   name: string;
+}
+
+/**
+ * T0-3 (issue #1778, D1 2026-07-21 owner ruling — the scoped ADR 0003 amendment): the kinds of
+ * committed CLOSED-SET ceremony fact the engine broadcasts as a `BeatAnnouncementView` instead of
+ * leaving the narration model to report it. Weekly-loop scope (HOH → eviction); finale/twist/
+ * battle-back kinds are a follow-up (see `src/engine/beatAnnouncement.ts`'s doc comment).
+ */
+export type BeatAnnouncementKind =
+  | "hoh-winner"
+  | "nominations"
+  | "veto-winner"
+  | "veto-decision"
+  | "replacement-nominee"
+  | "eviction-ballot"
+  | "eviction-result";
+
+/**
+ * T0-3 — a single Vault-free, engine-authored broadcast fact for a JUST-COMMITTED ceremony beat.
+ * The FE renders each as a diegetic broadcast "chyron" card (extending the shipped decision-card
+ * family, `orwellDecision.js`) instead of trusting the narration model to state the outcome — this
+ * is the structural fix for playtest findings F1 (phantom closed-set narration), F4 (triple
+ * re-narration/silent retcons), and F5 (E12 secret-ballot misattribution): the chyron is the ONLY
+ * source of truth for the fact; the model is demoted to color ("the chat gains a stage, not a
+ * dashboard" — see `docs/decisions/0003-the-conversation-is-the-game.md`'s T0-3 amendment).
+ *
+ * `id` is a STABLE, NEVER-REUSED per-sandbox dedup key (monotonic; survives a restart) so a client
+ * that sees the same announcement twice (a reload, a reconnecting mirror window) renders it exactly
+ * once. `beatSeq` is the 0065 spine counter AS OF the commit that produced this fact — announcements
+ * committed together (e.g. a T0-2 auto-advanced beat chained onto a resolved pending) share one
+ * `beatSeq`, in commit order.
+ */
+export interface BeatAnnouncementView {
+  id: string;
+  kind: BeatAnnouncementKind;
+  week: number;
+  beatSeq: number;
+  /** The Vault-free broadcast prose — deterministic, built ONLY from public ids (never the LLM). */
+  headline: string;
+  /** The houseguest(s) this fact is ABOUT, in the kind-specific fixed order documented on `BeatAnnouncementKind`'s builder (`buildBeatAnnouncements`). For `eviction-ballot`: the anonymized ballot sequence — the nominee each ballot named, in reveal order, NEVER the voter (E12). */
+  subjects: NamedRef[];
+  detail?: {
+    /** Who is RESPONSIBLE for this fact (the nominating/replacing HOH); absent when not applicable. */
+    by?: NamedRef;
+    /** `veto-decision` only: whether the holder played the veto. */
+    used?: boolean;
+    /** `veto-decision` only, when used: who was saved. */
+    saved?: NamedRef;
+    /** `eviction-result` only: the HOH broke a tied vote (never implies an extra "HOH ballot", E12). */
+    tieBroken?: boolean;
+  };
 }
 
 /** A meaningful weekly-loop beat that just resolved (player-witnessed; names, not ids). */
@@ -1231,6 +1288,16 @@ export interface AdvanceView {
    * or nothing closed (a quiet/no-op turn-in) — the narrator voices it only when present, never invents one.
    */
   dailyRecap?: DailyRecapView;
+  /**
+   * T0-3 — the Vault-free broadcast chyron(s) for every committed ceremony fact THIS advance/decision
+   * just produced, in commit order (a T0-2 auto-advanced beat chained onto a resolved pending can
+   * commit two facts in one call — e.g. a veto decision AND its immediately-following replacement
+   * nominee — so this is a list, not a single value). Absent/empty when the beat produced none (an
+   * ordinary/social/premiere beat, or the loop is blocked on a pending). Riding the SAME tool-result
+   * both live windows already mirror (ADR 0008/0012) is what makes F5 two-window parity inherited here
+   * rather than re-derived — no new transport.
+   */
+  announcements?: BeatAnnouncementView[];
 }
 
 /**
