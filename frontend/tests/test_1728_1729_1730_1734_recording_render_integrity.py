@@ -412,11 +412,20 @@ def test_cancelled_bubble_still_renders_local_indicator():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# #1728 (D1/T3) — regenerateFrom must check the truncate response BEFORE mutating the DOM /
-# resubmitting: CodeRabbit/Greptile review fix. fetch() never rejects on an HTTP error status, so
-# an unchecked truncate 404 (a stale/missing truncate_from_id) used to fall through — the client
-# stripped the DOM rows and fired the regenerate ANYWAY, leaving the un-truncated stale DB row
-# behind and reintroducing the "two near-identical rows" bug (T3).
+# #1728 (D1/T3) + G4 (2026-07-22 whole-repo gap audit) — EVERY entry point that supersedes a
+# persisted row (regenerateFrom / editUserMessage / resendUserMessage) must check the truncate
+# response BEFORE mutating the DOM / resubmitting: CodeRabbit/Greptile review fix. fetch() never
+# rejects on an HTTP error status, so an unchecked truncate 404 (a stale/missing truncate_from_id)
+# used to fall through — the client stripped the DOM rows and fired the regenerate/edit/resend
+# ANYWAY, leaving the un-truncated stale DB row behind and reintroducing the "two near-identical
+# rows" bug (T3).
+#
+# G4 found the #1728/#1751 fix had landed on regenerateFrom ONLY — editUserMessage and
+# resendUserMessage still carried the unchecked pre-fix shape (a raw DOM-index `keep_count`, an
+# un-awaited-for-status `fetch`), exposing them to the identical persisted-row-duplication bug.
+# All three now share ONE helper, `_truncateFromMessage` — these tests pin the shared helper's own
+# ok-check/throw AND that all three callers actually route through it (never a re-implemented,
+# possibly-drifted, inline check).
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _read_chat_message_actions_js():
@@ -427,32 +436,88 @@ def _read_chat_message_actions_js():
         return f.read()
 
 
-def _regenerate_from_body():
-    js = _read_chat_message_actions_js()
-    fn = js[js.index("export async function regenerateFrom(aiMsgElement)"):]
+def _function_body(js, signature):
+    """Extract a top-level function's source text starting at `signature`, up to (and including)
+    the first line that is a bare closing brace — i.e. the function's own top-level `}`, since
+    every NESTED block in this file closes on an indented line (`  });`, `    }`, …), never a
+    column-0 `}` alone on its line."""
+    fn = js[js.index(signature):]
     return fn[:fn.index("\n}\n") + 3]
 
 
-def test_regenerate_checks_truncate_response_status():
-    fn = _regenerate_from_body()
-    assert "_truncRes.ok" in fn, (
-        "regenerateFrom must inspect the truncate response's HTTP status — fetch() does not "
+def _truncate_from_message_body():
+    return _function_body(
+        _read_chat_message_actions_js(),
+        "async function _truncateFromMessage(apiBase, sessionId, keepCount, anchorElement)",
+    )
+
+
+def _regenerate_from_body():
+    return _function_body(_read_chat_message_actions_js(),
+                          "export async function regenerateFrom(aiMsgElement)")
+
+
+def _edit_user_message_body():
+    return _function_body(_read_chat_message_actions_js(),
+                          "export async function editUserMessage(userMsgElement)")
+
+
+def _resend_user_message_body():
+    return _function_body(_read_chat_message_actions_js(),
+                          "export async function resendUserMessage(userMsgElement)")
+
+
+def test_shared_truncate_helper_checks_response_status_and_throws():
+    fn = _truncate_from_message_body()
+    assert "res.ok" in fn, (
+        "_truncateFromMessage must inspect the truncate response's HTTP status — fetch() does not "
         "reject on a non-2xx response, so an unchecked 404 silently falls through"
     )
-    assert "throw new Error" in fn, "a failing truncate must throw so the existing catch handles it"
+    assert "throw new Error" in fn, "a failing truncate must throw so every caller's existing catch handles it"
 
 
-def test_regenerate_throws_before_removing_dom_rows_on_truncate_failure():
-    fn = _regenerate_from_body()
-    ok_check_at = fn.index("_truncRes.ok")
-    # Every DOM-mutating / resubmit statement this function performs on the happy path must come
-    # AFTER the status check, so a failed truncate never strips rows or fires the regenerate.
-    for marker in ("allMsgs[i].remove()", "aiMsgElement.remove()", "_handleChatSubmit(null, userText)"):
-        marker_at = fn.index(marker)
-        assert ok_check_at < marker_at, (
-            f"the truncate response status check must run BEFORE `{marker}` — otherwise a stale/"
-            f"missing truncate_from_id (404) leaves the DOM stripped and a duplicate row behind"
+def test_all_three_supersede_entry_points_use_the_shared_id_keyed_helper():
+    """G4: the #1728/#1751 fix must not be able to drift out of lockstep again — pin that
+    regenerateFrom, editUserMessage, AND resendUserMessage all route their truncate through the
+    one shared, already-tested helper, rather than a bespoke (and possibly half-fixed) fetch."""
+    for name, fn in (
+        ("regenerateFrom", _regenerate_from_body()),
+        ("editUserMessage", _edit_user_message_body()),
+        ("resendUserMessage", _resend_user_message_body()),
+    ):
+        assert "_truncateFromMessage(" in fn, (
+            f"{name} must truncate via the shared _truncateFromMessage helper, not a bespoke fetch "
+            "(G4: this is exactly how editUserMessage/resendUserMessage drifted out of lockstep "
+            "with regenerateFrom's #1728/#1751 fix)"
         )
+        # None of the three may hand-roll their own ad-hoc HTTP-status check — that would be the
+        # exact triplication (and drift risk) this fix closes.
+        assert "res.ok" not in fn and "_truncRes.ok" not in fn, (
+            f"{name} must not re-implement the ok-check inline — use the shared helper"
+        )
+
+
+def test_all_three_throw_before_mutating_dom_or_resubmitting():
+    """The shared helper throws BEFORE returning on a failed truncate (proven above); this pins
+    that each caller's DOM-mutating / resubmit statements come strictly AFTER the awaited
+    `_truncateFromMessage(...)` call, so a failed/stale truncate never strips the DOM or fires the
+    edit/resend/regenerate."""
+    cases = (
+        ("regenerateFrom", _regenerate_from_body(),
+         ("allMsgs[i].remove()", "aiMsgElement.remove()", "_handleChatSubmit(null, userText)")),
+        ("editUserMessage", _edit_user_message_body(),
+         ("allMsgs[i].remove()", "_handleChatSubmit(null, newText)")),
+        ("resendUserMessage", _resend_user_message_body(),
+         ("sibling.remove()", "_handleChatSubmit(null, text)")),
+    )
+    for name, fn, markers in cases:
+        call_at = fn.index("_truncateFromMessage(")
+        for marker in markers:
+            marker_at = fn.index(marker)
+            assert call_at < marker_at, (
+                f"{name}: the truncate call must run BEFORE `{marker}` — otherwise a stale/missing "
+                f"truncate_from_id (404) leaves the DOM stripped and a duplicate row behind"
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

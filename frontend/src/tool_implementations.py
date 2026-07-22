@@ -5522,6 +5522,27 @@ async def do_diary_room(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+def _parse_secret_lever(raw) -> Optional[Dict]:
+    """Shape-only parse of a SecretLeverDescriptor ({factId?, bluff?, subject?} — the port's own
+    shape, `src/ports/GameSession.ts`). The FE never INTERPRETS a secret lever — it only validates
+    that the model handed over a well-formed object, then forwards it opaquely; the ENGINE is the
+    single authority on whether a `factId` is actually held, whether a bluff lands, etc. Returns
+    None when `raw` isn't a dict or carries none of the known fields (⇒ caller omits the field
+    entirely, keeping the request byte-identical to a lever-free deal)."""
+    if not isinstance(raw, dict):
+        return None
+    lever: Dict = {}
+    fact_id = raw.get("factId") or raw.get("fact_id")
+    if isinstance(fact_id, str) and fact_id.strip():
+        lever["factId"] = fact_id.strip()
+    if raw.get("bluff"):
+        lever["bluff"] = True
+    subject = raw.get("subject")
+    if isinstance(subject, str) and subject.strip():
+        lever["subject"] = subject.strip()
+    return lever or None
+
+
 async def do_make_deal(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
@@ -5540,8 +5561,13 @@ async def do_make_deal(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": "kind must be one of: " + ", ".join(_kinds), "exit_code": 1}
     if not with_id or not terms:
         return {"error": "with (houseguest id) and terms are required", "exit_code": 1}
+    # 0093/0099 — OPTIONAL leverage/tradedSecret: forwarded opaquely (shape-checked, never
+    # interpreted). Absent ⇒ the call to the engine is unchanged from the pre-0093/0099 shape.
+    leverage = _parse_secret_lever(args.get("leverage"))
+    traded_secret = _parse_secret_lever(args.get("tradedSecret") or args.get("traded_secret"))
     try:
-        res = await orwell_engine.make_deal(with_id, kind, terms, user=owner)
+        res = await orwell_engine.make_deal(with_id, kind, terms, leverage=leverage,
+                                            traded_secret=traded_secret, user=owner)
         return {"output": json.dumps(res, indent=2), "exit_code": 0}
     except Exception as e:
         return {"error": f"engine error: {e}", "exit_code": 1}
