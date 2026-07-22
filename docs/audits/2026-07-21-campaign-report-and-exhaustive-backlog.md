@@ -1150,7 +1150,7 @@ verify bot claims against code personally.
    reasoning scrub · T0-4 probe (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity
    (PRs #1774/#1824/#1821). (T0-6 was inside step 0, also landed; #1734 stays open — tracked in the T2 table, pairs with the T0-6 facet-diff validator pattern.)
 2. **🚧 IN FLIGHT (D1 ruled):** T0-3 chyrons — PR #1830 — then the T0-7 exit playtest (blocked on T0-3).
-3. **Wave 2+:** T1-1 (belt DEMOTION per the T9 ruling — never demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log, landed #1825/#1751) → T1-5 (on
+3. **Wave 2+:** T1-1 (belt DEMOTION per the T9 ruling — never demolition) → T1-2 (on D2) → T1-3/T1-4 (the #1728 *fold-integrity* half landed in #1825/#1751; the shared render-log substrate + the #1729-D2 stream half still ride Wave 2 — #1413 stays blocked on that substrate) → T1-5 (on
    D4, now gated only on the attention ledger) → T1-6 → T1-7 → T1-8 (on D5).
 4. **Continuously:** #1644 text standardization · #1599 fail-soft audit (with 0112) · T4/T6
    opportunistic batches.
