@@ -343,4 +343,98 @@ XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeo
 
 ---
 
+### Lane: responsive — device fidelity, gates & touch (8 findings)
+
+*Lane self-deduped vs RES-1..5, G1–G25, #1822/#1823, #1644. Touch emulation of the
+matrix was live-probed and is valid; the findings are the axes it doesn't cover.*
+
+#### R-RSP-1 · P2 · `responsive_matrix.py`'s xpass/staleness detector is dead code — the XFAIL registry can only grow
+- **Evidence:** `responsive_matrix.py:126,129-139,951-956` (`xpasses` never appended;
+  terminal print unreachable-in-effect) vs the sibling `a11y_matrix.py:186,230-237`
+  implementing the same contract correctly. Four live `#1418-*` waivers (:97-103) are
+  tracked nowhere else.
+- **Impact:** stale waivers are undetectable; viewport-agnostic needles silently absorb
+  future unrelated regressions of the same line shape.
+- **Fix:** port `xfail_hits` bookkeeping; extract ONE shared XFAIL-registry helper both
+  gates consume.
+- **DoR** — [ ] confirm shared-helper altitude. **AC** — [ ] a fixed XFAIL prints the
+  remove-nudge in both gates; [ ] shared helper. **DoD** — [ ] AC met; gates green in CI.
+
+#### R-RSP-2 · P2 · The matrix emulates a viewport, not a device: DPR=1, no `is_mobile`, no landscape phone tier, no keyboard state
+- **Evidence:** `responsive_matrix.py:62-69,820-821`; `a11y_matrix.py:551-553`; live
+  probe: hasTouch-only context → `dpr:1`; width-keyed mobile fork (`orwellSlots.js:43`)
+  means 844×390 landscape renders full desktop layout at 390px height — never rendered by
+  any gate; canvas paths scale by DPR (`theme.js:2811`, `login_bg.js:198`).
+- **Fix:** add an 844×390 coarse tier; `device_scale_factor=3, is_mobile=True` on phone
+  tiers; a CDP visualViewport-shrink sub-pass.
+- **DoR** — [ ] tier list agreed. **AC** — [ ] landscape + DPR3 tiers run; keyboard-shrink
+  sub-pass asserts composer/sheet invariants. **DoD** — [ ] AC met; new XFAILs triaged.
+
+#### R-RSP-3 · P2 · `GAME_SURFACES` registry is manual and already wrong — deals/cast/dossier/headshot unregistered while the in-file comment claims deals/cast are scanned; no ratchet for new windows
+- **Evidence:** `responsive_matrix.py:297-317` vs `orwellDeals.js:21`, `orwellCast.js:326`,
+  `orwellDossier.js:24`, `orwellHeadshot.js:16`; crowding runs with the phone drawer
+  closed (:464,:490,:524); `a11y_matrix.py:380` imports the same registry.
+- **Impact:** sub-floor fonts/overflows in four live gadgets ship green at every viewport;
+  chyron cards (#1830) + wipeout reel (#1831) will land unregistered by default.
+- **Fix:** derive the registry from the DOM (or a unit ratchet diffing it against the
+  window-kit id census); add a drawer-open full-sweep sub-pass.
+- **DoR** — [ ] pick derive-vs-ratchet. **AC** — [ ] all live `orwell-*` surfaces
+  registered or explicitly allowlisted out; ratchet fails on an unregistered new window.
+  **DoD** — [ ] AC met; matrices green/XFAIL-triaged in CI.
+
+#### R-RSP-4 · P2 · Casting flow (headshot studio + choose-character) has zero rendered coverage at any viewport post-golden-decommission
+- **Evidence:** `responsive_matrix.py:167-175` (stage starts past casting);
+  `orwellHeadshot.js:16,545-561`; its own R1 comment (:46-48) records a previously-fixed
+  narrow-tier bug — the class is now unguarded; the 0108/0113 fixture that covered
+  casting visually was decommissioned 2026-07-21.
+- **Impact:** the Day-1 mobile funnel (0111 is in flight) can regress with zero CI signal.
+- **Fix:** fail-soft matrix sub-pass mounting the headshot studio via its own seam at
+  phone tiers (mirror `mount_face_grid_card`'s engine-independent pattern).
+- **DoR** — [ ] seam confirmed. **AC** — [ ] headshot + choose-character measured at
+  320/390/desktop. **DoD** — [ ] AC met; in CI.
+
+#### R-RSP-5 · P3 · Mobile sidebar drawer never opened by any sweep; `CHROME["sidebar"]` dead; docstring over-claims
+- **Evidence:** `responsive_matrix.py:21,309,315-317,350`.
+- **Fix:** one drawer-open sub-pass per coarse tier (reuse `_close_drawer` isolation).
+- **DoR** — [ ] none. **AC** — [ ] drawer-open state swept for overflow/tap/crowding on
+  coarse tiers. **DoD** — [ ] AC met; in CI.
+
+#### R-RSP-6 · P2 · Hover-only folder-delete is an invisible-but-tappable 44px destructive control on touch; folder rename is dblclick-only; the gate is structurally blind to the class
+- **Evidence:** `style.css:1717-1723` (no `hover:none` fallback; contrast the correct
+  pattern at :1411) · `responsive-tokens.css:71-79` (coarse floor inflates it to 44×44) ·
+  `sessions.js:801-843` (tap routes to delete-folder-and-all-sessions confirm; rename
+  dblclick-only) · `responsive_matrix.py:511` (touch sweep drops `opacity===0` elements).
+- **Impact:** undiscoverable, accidentally-hittable destructive affordance on every touch
+  device; folder management near-undiscoverable on touch.
+- **Fix:** mirror the :1411 `hover:none` fallback; surface folder ops in the manage
+  library; teach the gate to FLAG interactive elements that are opacity-0 outside
+  `:hover` instead of skipping them.
+- **DoR** — [ ] decide reveal opacity. **AC** — [ ] folder delete visibly revealed on
+  coarse pointers; a touch-reachable rename path exists; gate flags the class. **DoD** —
+  [ ] AC met; FE suite + matrices green.
+
+#### R-RSP-7 · P3 · `.tap-exempt` waiver is one-sided: the compensating ≥44px `::after` hit region is asserted by nothing
+- **Evidence:** `responsive_matrix.py:508` (wholesale skip) · `orwellWindow.js:303-322`
+  (the compensation) · `models.js:653` (already an uncompensated user).
+- **Fix:** for visible `.tap-exempt` controls assert `::after` ≥ 44px (or a parent
+  hit-provider) instead of skipping.
+- **DoR** — [ ] none. **AC** — [ ] deleting the `::after` rule turns the gate red; the
+  `models.js:653` case is compensated or re-classed. **DoD** — [ ] AC met; in CI.
+
+#### R-RSP-8 · P2 · Keyboard avoidance is half-dead: `--vh` has zero consumers; `--composer-clearance` reads `window.innerHeight` (stale under the iOS soft keyboard) — with the binding decision sheet anchored on it
+- **Evidence:** `chat.js:5457-5463` (sets `--vh`; repo-wide grep: no `var(--vh` consumer) ·
+  `init.js:170-201` (clearance from `innerHeight`, no visualViewport listener) · consumers:
+  `orwellFinale.js:162`, `style.css:2064,5800` · the correct pattern exists in-tree
+  (`orwellSheet.js:64`, `orwellWindow.js:582`). LATENT (iOS-class; Android masks it).
+- **Impact:** iPhone with keyboard open and a binding decision armed: the sheet's Confirm
+  can sit under the keyboard; the fab floats mid-keyboard.
+- **Fix:** drive `_syncComposerClearance` from visualViewport resize/scroll
+  (min(innerHeight, vv.height)); wire `--vh` to a consumer or delete the dead setter;
+  CDP keyboard-shrink sub-pass (pairs with R-RSP-2).
+- **DoR** — [ ] device-verify on iOS (or accept CDP emulation as proxy). **AC** — [ ]
+  clearance token tracks visualViewport; sheet/fab stay above the keyboard under CDP
+  shrink; no dead `--vh` seam. **DoD** — [ ] AC met; FE suite + matrix sub-pass green.
+
+---
+
 *(Further lanes land below as they complete.)*
