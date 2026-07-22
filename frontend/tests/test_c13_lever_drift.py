@@ -203,11 +203,22 @@ def test_gap_block_references_only_callable_levers():
     schemas = _fe_schema_names()
     refs = _referenced_levers(_gap_block())
     assert refs, "extracted no lever references from the gap block — parser or prompt shape changed"
-    missing = sorted(r for r in refs if r not in schemas)
+    # Greptile P2 (#1883): apply the SAME five-place callability bar the main drift test uses
+    # (lines 57-63) — a gap-span lever that has a schema but is missing from ORWELL_GAME_TOOLS,
+    # TOOL_TAGS, or GAME_TOOL_KEEP would still fail the FE contract, so the gap scan must check
+    # all four surfaces, not just _fe_schema_names().
+    missing = sorted(
+        r for r in refs
+        if r not in schemas
+        or r not in tool_schemas.ORWELL_GAME_TOOLS
+        or r not in agent_tools.TOOL_TAGS
+        or r not in agent_tools.GAME_TOOL_KEEP
+    )
     assert not missing, (
         f"a lever referenced between BASE_GAME_MASTER_PROMPT and MOMENT_PROMPTS (e.g. inside "
         f"CASTING_INTERVIEW_PROMPT) is not agent-callable: {missing} — this is exactly the G7 blind "
-        "spot: wire the tool or stop naming it in that span"
+        "spot: wire the tool (schema + ORWELL_GAME_TOOLS + TOOL_TAGS + GAME_TOOL_KEEP + dispatch) "
+        "or stop naming it in that span"
     )
 
 
