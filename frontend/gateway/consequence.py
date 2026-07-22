@@ -194,7 +194,7 @@ async def _extract_via_model(user: str, message_text: str, narration: str, roste
         ]
         raw = await llm_fn(messages)
     except Exception as exc:
-        logger.info("gateway: consequence extraction call failed for user %s: %s", user, exc)
+        logger.warning("gateway: consequence extraction call failed for user %s: %s", user, exc)
         from src import log_rings
         log_rings.record_soft_failure("gateway:extraction-call-failed", exc,
                                       corrected="deterministic-floor", user=user)
@@ -259,8 +259,8 @@ async def fold_gateway_turn(user: str, message_text: str, narration: str, house:
                 present_ids = {p.get("id") for p in (wb.get("present") or [])
                               if isinstance(p, dict) and p.get("id")}
         except Exception as exc:
-            logger.info("gateway: whereabouts read failed for user %s, proceeding without a "
-                       "presence filter: %s", user, exc)
+            logger.warning("gateway: whereabouts read failed for user %s, proceeding without a "
+                          "presence filter: %s", user, exc)
             from src import log_rings
             log_rings.record_soft_failure("gateway:whereabouts-read-failed", exc,
                                           corrected="fail-open-presence-filter", user=user)
