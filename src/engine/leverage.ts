@@ -14,7 +14,7 @@
  * *pumped* to force a yes or flatten a rival. The ceiling is real-but-recoverable, never deterministic.
  */
 import type { RandomnessSource } from "../ports/RandomnessSource";
-import type { HiddenElement, HiddenElementKind } from "./characterFactory";
+import type { HiddenElementKind } from "./characterFactory";
 import type { EdgeSignals } from "./relationshipConstants";
 import { scaleImpact } from "./relationshipConstants";
 import { LEVERAGE, SECRET_TRADE } from "./leverageConstants";
@@ -236,8 +236,3 @@ export function bluffBelieved(trustInSource: number, targetThreatOfSubject: numb
 
 /** The kinds a usable secret can be (a trigger never reaches here — it erupts, it is never learned). */
 export type UsableSecretKind = Exclude<HiddenElementKind, "trigger">;
-
-/** Resolve the public severity of a learned `HiddenElement` (the secret the player holds about a houseguest). */
-export function secretSeverity(secret: Pick<HiddenElement, "kind">): number {
-  return severityOf(secret.kind);
-}
