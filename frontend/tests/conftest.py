@@ -236,3 +236,8 @@ def _join_stray_capability_probe_threads(monkeypatch):
     for t in threads:
         with contextlib.suppress(Exception):
             t.join(timeout=15)
+            if t.is_alive():
+                # A silent join-timeout would reintroduce the exact cross-test race this
+                # fixture exists to prevent — make the miss loud enough to debug.
+                warnings.warn(f"capability-probe thread {t.name!r} did not finish within 15s "
+                              "and outlived its test", RuntimeWarning)
