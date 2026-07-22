@@ -22,6 +22,21 @@ import type { SessionSnapshot } from "../../src/engine/sessionSnapshot";
  * `beatSeq` only bumps through the registry's commit funnel (0065 Part A) — the invariant this suite
  * exists to pin needs that funnel wired up, exactly like a live game.
  *
+ * HERMETICITY (root-caused 2026-07-22, the #1825-engine-lane flake): a "seeded" live game is only
+ * trajectory-deterministic if EVERY rng dimension it touches is pinned — the player's `gameSeed`
+ * (via `createCharacter({ seed })`) pins CEREMONY beats (`GameSessionAdapter.beatRng`), but
+ * `composeRuntime`'s per-turn off-screen tick is seeded PER SANDBOX USER
+ * (`Orchestrator.rngFor`: `hashSeed(\`${orchestratorSeed}:${user}\`)`, by design — two different
+ * users playing the same game-seed must not get identical off-screen scheming). `startedGame` below
+ * previously minted a RANDOM username per call (`Math.random()`), so the off-screen society (which
+ * folds into relationship/emotional state, which weighs INTO competition outcomes) drew a DIFFERENT
+ * stream every run — occasionally shifting week 2's HOH winner and, downstream, whether the PLAYER
+ * ever won HOH within the drive at all ("game finished before reaching a nominations pending",
+ * intermittent, seed-independent — confirmed via a bare Node loop with no vitest involved, and
+ * confirmed NOT caused by cross-test state: it reproduced with every OTHER test in this file
+ * `.skip`'d). Every sandbox user string below is now a FIXED constant — never mint one from
+ * `Math.random()`/`Date.now()`/anything non-deterministic in a trajectory-sensitive test.
+ *
  * HARD rule: roles only — no fixture names asserted.
  */
 
@@ -61,11 +76,17 @@ function driveToPendingKind(
   throw new Error(`never reached a '${kind}' pending within ${maxIterations} iterations`);
 }
 
-/** A fresh started game over a real (in-memory-store) runtime, so `beatSeq` bumps through the
- *  registry's commit funnel exactly like production. */
+/**
+ * A fresh started game over a real (in-memory-store) runtime, so `beatSeq` bumps through the
+ * registry's commit funnel exactly like production. Each call composes a BRAND NEW `composeRuntime`
+ * (its own `GameSessionRegistry`/`Orchestrator` instance, own `Map`s) — so there is zero collision
+ * risk in reusing the SAME fixed username across calls/tests; a fixed string is required for the
+ * off-screen-tick rng to be reproducible (see the file-level hermeticity note above), not merely
+ * convenient. Never derive `user` from `Math.random()`/`Date.now()`/anything non-deterministic.
+ */
 function startedGame(seed: number) {
   const runtime = composeRuntime({ clock: new FakeClock() }); // no saveStore ⇒ in-memory only
-  const user = `t0-2-${seed}-${Math.random().toString(36).slice(2)}`;
+  const user = `t0-2-${seed}`;
   const session = runtime.registry.sandboxFor(user).session;
   session.createCharacter({ playerName: "P", seed });
   return { runtime, user, session };
