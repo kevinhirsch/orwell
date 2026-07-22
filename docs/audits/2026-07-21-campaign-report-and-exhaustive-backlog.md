@@ -1137,13 +1137,13 @@ verify bot claims against code personally.
 
 ## Sequencing summary (the short version)
 
-0. **FIRST (owner order 2026-07-21): the casting mandate** — FacetLedger + 15-wide genesis + early kickoff + strict entry gate + the #1713 premiere-block fix, targeting <10s finalize-to-house with full depth pre-authored. In flight; the rest of Wave 1 dispatches after it merges.
-1. **Then (no owner decision needed):** T0-1 comparator fix · T0-2 beats-terminate-themselves
-   (server-side, no UI change — needs no ADR 0003 ruling) · T0-5 reasoning scrub · T0-4 probe
-   (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity. (T0-6 + #1734 are inside step 0, not here.)
-2. **On D1 (Q1):** T0-3 chyrons — the remaining heart of Wave 1 — then the T0-7 exit playtest.
-3. **Wave 2+:** T1-1 (belt demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log) → T1-5 (on
-   D4) → T1-6 → T1-7 → T1-8 (on D5).
+0. **✅ LANDED (2026-07-22): the casting mandate** — FacetLedger + 15-wide genesis + early kickoff + strict entry gate (#1780) + the #1713 premiere-block fix (#1776); the ≤10s bar is the user-facing loading delay at the house door, with deep-seeding under the interview's cover.
+1. **✅ LANDED (2026-07-22):** T0-1 comparator fix · T0-2 beats-terminate-themselves · T0-5
+   reasoning scrub · T0-4 probe (telemetry arm) · #1729-B1 recorder gate · TUN-10 rig parity
+   (PRs #1774/#1824/#1821). (T0-6 + #1734 were inside step 0, also landed.)
+2. **🚧 IN FLIGHT (D1 ruled):** T0-3 chyrons — PR #1830 — then the T0-7 exit playtest (blocked on T0-3).
+3. **Wave 2+:** T1-1 (belt DEMOTION per the T9 ruling — never demolition) → T1-2 (on D2) → T1-3/T1-4 (+#1728 render log, landed #1825/#1751) → T1-5 (on
+   D4, now gated only on the attention ledger) → T1-6 → T1-7 → T1-8 (on D5).
 4. **Continuously:** #1644 text standardization · #1599 fail-soft audit (with 0112) · T4/T6
    opportunistic batches.
 5. **Always (the T9 doctrine):** demote → observe → delete. No superseded guard/belt/scrub is
