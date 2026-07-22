@@ -679,7 +679,8 @@ const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
 
 /**
  * 0066 Phase-2 (#1125) — the three sleep-economy EXTENSIONS, each behind its OWN dedicated opt-in flag
- * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`), default OFF, so calibration
+ * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`/`ORWELL_JURY_HOUSE`); Ext 1 and Ext 2 default ON
+ * (the per-conversation clock + social fatigue), Ext 3 only default OFF, so calibration
  * neutrality is provable for EACH in isolation (the brief: "each behind its own opt-in flag, byte-identical
  * when off"). All three only mean anything while the master clock is running (`ORWELL_TIME_OF_DAY`); each
  * gates ON TOP of it, and when its own flag is off its effect is the identity (scale 1 / meter 0 / no extra
