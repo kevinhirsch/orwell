@@ -1,6 +1,7 @@
-# 2026-07-22 — Full repo audit, playtest & exhaustive backlog (live campaign)
+# 2026-07-22 — Full repo audit, playtest & exhaustive backlog (campaign closed)
 
-> **Status: LIVE — findings land incrementally as audit lanes complete.** This is the
+> **Status: CLOSED — see the "Campaign closed" note below for exact lane coverage.**
+> This is the
 > 2026-07-22 full-product audit campaign: a 14-lane parallel source audit (BB canon ·
 > social-game structure · prose/prompts · FE copy · HIG · UX flows · IA/wayfinding ·
 > interaction/feedback · engine bugs · FE bugs · consistency/parity · responsive ·
@@ -15,6 +16,15 @@
 > **Contract convention:** each item carries DoR / AC / DoD in the house format
 > (per #1775). Items are filed as GitHub issues as they are confirmed; the issue is
 > canonical for live state, this doc is the campaign index.
+>
+> **Campaign closed 2026-07-22.** 4 of 14 planned lanes returned findings before the
+> campaign was called (parity, a11y, responsive, vault — 28 findings total); the
+> remaining 10 lanes (bb-canon, social-game, prose-prompts, fe-copy, hig, ux-flows,
+> ux-ia, interaction, bugs-engine, bugs-fe) and the live-model playtest pass were not
+> run. Every P0 and P1 finding from the 4 completed lanes is filed as a GitHub issue
+> (#1864–#1871, #1873–#1875, #1877 — see the per-finding sections below for the exact
+> mapping). P2/P3 findings remain tracked in this doc with full DoR/AC/DoD contracts;
+> file them as issues on a future pass if the backlog wants them individually tracked.
 
 ## Method & evidence base
 
@@ -33,26 +43,31 @@
   degrades play · P2 missing guard on a load-bearing invariant / clear defect ·
   P3 polish, debt, improvement.
 
-## Lane status
+## Lane status (campaign closed 2026-07-22)
 
-| Lane | State | Findings (confirmed/total) |
-|---|---|---|
-| parity (consistency/two-window) | ✅ reported · 🔬 verification running | –/7 |
-| a11y | ✅ reported · 🔬 verification running | –/6 |
-| bb-canon | 🔄 running | |
-| social-game | 🔄 running | |
-| prose-prompts | 🔄 running | |
-| fe-copy | 🔄 running | |
-| hig | 🔄 running | |
-| ux-flows | 🔄 running | |
-| ux-ia | 🔄 running | |
-| interaction | 🔄 running | |
-| bugs-engine | 🔄 running | |
-| bugs-fe | 🔄 running | |
-| responsive | 🔄 running | |
-| vault | 🔄 running | |
-| playtest (deterministic UI capture) | ✅ captured (scenes + 14-turn loop, both breakpoints) | evidence for the UI lanes |
-| playtest (live-model roleplay) | ⏳ planned, not yet run | |
+| Lane | State | Findings | Issues filed |
+|---|---|---|---|
+| parity (consistency/two-window) | ✅ complete | 7 (2 P1, 4 P2, 1 P3) | #1864, #1866 |
+| a11y | ✅ complete | 6 (3 P1, 3 P2) | #1873, #1874, #1875, #1876 |
+| responsive | ✅ complete | 8 (5 P2, 3 P3) | #1877 |
+| vault (Vault-Wall adversarial) | ✅ complete | 7 (1 P0, 5 P1, 1 P2) | #1865, #1867–#1871, #1872 |
+| bb-canon | ⏸️ not run | — | — |
+| social-game | ⏸️ not run | — | — |
+| prose-prompts | ⏸️ not run | — | — |
+| fe-copy | ⏸️ not run | — | — |
+| hig | ⏸️ not run | — | — |
+| ux-flows | ⏸️ not run | — | — |
+| ux-ia | ⏸️ not run | — | — |
+| interaction | ⏸️ not run | — | — |
+| bugs-engine | ⏸️ not run | — | — |
+| bugs-fe | ⏸️ not run | — | — |
+| playtest (deterministic UI capture) | ✅ captured — scenes + 14-turn mechanical loop, both breakpoints, `.audit-telemetry/shots/` | evidence for the UI lanes, unconsumed | — |
+| playtest (live-model roleplay) | ⏸️ not run | — | — |
+
+**28 findings total this campaign: 1 P0, 13 P1, 11 P2, 3 P3 — all 14 P0/P1 items filed
+as GitHub issues.** The 10 unrun lanes and the live-model playtest pass are the natural
+next slice of this campaign; the harness, stack-boot script, and dedupe sources are all
+in place for a fast resume.
 
 ---
 
@@ -63,7 +78,7 @@ verdicts and issue numbers are appended as they land.
 
 ### Lane: parity — consistency & two-window/transport parity (7 findings, verification in progress)
 
-#### R-PAR-1 · P1 · `exit-interview` decision kind missing from BOTH transport allowlists — the card renders but can never be confirmed
+#### R-PAR-1 · Issue #1864 · P1 · `exit-interview` decision kind missing from BOTH transport allowlists — the card renders but can never be confirmed
 
 - **Evidence:** `frontend/routes/orwell_routes.py:1509-1516` (`_DECISION_KINDS` lacks
   `exit-interview`) · `frontend/routes/ws_routes.py:65-71` (same) ·
@@ -95,7 +110,7 @@ verdicts and issue numbers are appended as they land.
 - [ ] AC met; fe-unit test drives an exit-interview confirm over both transports.
 - [ ] Full FE pytest suite green.
 
-#### R-PAR-2 · P1 · WS decision relay bypasses the HTTP decision route's load-bearing seams (pending cache, F14 post-goodbye advance, CON-4 stale-beat reconcile, DB1/DB2 debounce)
+#### R-PAR-2 · Issue #1866 · P1 · WS decision relay bypasses the HTTP decision route's load-bearing seams (pending cache, F14 post-goodbye advance, CON-4 stale-beat reconcile, DB1/DB2 debounce)
 
 - **Evidence:** `frontend/routes/ws_routes.py:671-715` (thin `submit_decision` relay) vs
   `frontend/routes/orwell_routes.py:1518-1620` (remember/clear pending at 1584-87, F14
@@ -263,7 +278,7 @@ verdicts and issue numbers are appended as they land.
 XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeout Reel
 (#1831) was explicitly scoped out — it adds no FE surface (narrator-content only).*
 
-#### R-A11Y-1 · P1 · Reasoning/collapsible accordion toggle is keyboard-unreachable with no ARIA state
+#### R-A11Y-1 · Issue #1873 · P1 · Reasoning/collapsible accordion toggle is keyboard-unreachable with no ARIA state
 
 - **Evidence:** `frontend/static/js/markdown.js:588-613,693-704,1743-1762` (bare `<div>`,
   click-only delegated handler) · `style.css:8584-8594` + `css/responsive-tokens.css:70-78`
@@ -280,7 +295,7 @@ XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeo
 **AC** — [ ] toggles are Tab-reachable, Enter/Space-operable, expose `aria-expanded`; [ ] axe pass clean on a transcript with an accordion.
 **DoD** — [ ] AC met; fe-unit/browser test pins keyboard operability; FE suite green.
 
-#### R-A11Y-2 · P1 · BeatAnnouncement chyrons bypass the app's own SR-broadcast pattern — outcome facts silent for screen readers
+#### R-A11Y-2 · Issue #1874 (consolidated with R-A11Y-3) · P1 · BeatAnnouncement chyrons bypass the app's own SR-broadcast pattern — outcome facts silent for screen readers
 
 - **Evidence:** `orwellDecision.js:1231-1253` (`role="status"` appended into
   `#chat-history`, which `index.html:1320-1324` deliberately sets `aria-live="off"`) ·
@@ -301,7 +316,7 @@ announcement (the single ballot-batch policy — see R-A11Y-3), not per-ballot; 
 re-announce on reconcile.
 **DoD** — [ ] AC met; browser test asserts announcer content on a staged chyron mount; FE suite green.
 
-#### R-A11Y-3 · P2 · Staggered eviction-ballot chyron batch floods the live region (~4 announcements/sec)
+#### R-A11Y-3 · Issue #1874 (consolidated with R-A11Y-2) · P2 · Staggered eviction-ballot chyron batch floods the live region (~4 announcements/sec)
 
 - **Evidence:** `orwellDecision.js:1255-1261` (260ms stagger; up to ~13 ballot chyrons per
   reveal, kinds at `:1192,1197`).
@@ -310,7 +325,7 @@ re-announce on reconcile.
 
 **DoR** — [ ] pair with R-A11Y-2's copy decision. **AC** — [ ] the eviction reveal emits exactly ONE coalesced summary announcement (the single agreed ballot-batch policy shared with R-A11Y-2), not a per-ballot stream, while the visual per-card cadence is unchanged. **DoD** — [ ] AC met; covered by the R-A11Y-2 test; FE suite green.
 
-#### R-A11Y-4 · P2 · Chyron kicker computes below AA contrast on light-panel themes
+#### R-A11Y-4 · Issue #1876 (consolidated with R-A11Y-6) · P2 · Chyron kicker computes below AA contrast on light-panel themes
 
 - **Evidence:** `orwellDecision.js` `.ow-chyron-kicker` (~1221-1224: 11.2px non-bold at
   `opacity:.65`) over `theme.js:26-50` tokens → light ≈ 3.11:1, paper ≈ 4.06:1 (< 4.5:1);
@@ -321,7 +336,7 @@ re-announce on reconcile.
 
 **DoR** — [ ] confirm computed ratios by rendered-pixel sample on light + paper. **AC** — [ ] kicker ≥ 4.5:1 on every stock theme. **DoD** — [ ] AC met; the a11y-matrix contrast sweep covers `.ow-chyron` (see R-A11Y-5); FE suite green.
 
-#### R-A11Y-5 · P1 · The standing a11y CI gate never sweeps the chat transcript — chyrons, bubbles, accordion structurally invisible to it
+#### R-A11Y-5 · Issue #1875 · P1 · The standing a11y CI gate never sweeps the chat transcript — chyrons, bubbles, accordion structurally invisible to it
 
 - **Evidence:** `a11y_matrix.py:375-380` (`_CONTRAST_SELECTOR`) +
   `responsive_matrix.py:297-317` (`GAME_SURFACES`/`CROWD_SELECTOR`) — neither lists
@@ -337,7 +352,7 @@ re-announce on reconcile.
 **AC** — [ ] axe + rendered-contrast + crowding sweeps include `#chat-history` with at least one bubble, one accordion, one chyron mounted; new XFAILs filed for anything it immediately catches.
 **DoD** — [ ] AC met; matrices green (or XFAIL-registered) in CI; registry entries reference this item.
 
-#### R-A11Y-6 · P2 · `a11y_matrix.py` has zero keyboard/focus-trap/focus-restore regression coverage
+#### R-A11Y-6 · Issue #1876 (consolidated with R-A11Y-4) · P2 · `a11y_matrix.py` has zero keyboard/focus-trap/focus-restore regression coverage
 
 - **Evidence:** `a11y_matrix.py:522-598` (screenshot + axe + pixel-contrast only; no
   `page.keyboard.press`, no `activeElement` assertions) — while the window kit's mature
@@ -406,7 +421,7 @@ matrix was live-probed and is valid; the findings are the axes it doesn't cover.
 - **DoR** — [ ] none. **AC** — [ ] drawer-open state swept for overflow/tap/crowding on
   coarse tiers. **DoD** — [ ] AC met; in CI.
 
-#### R-RSP-6 · P2 · Hover-only folder-delete is an invisible-but-tappable 44px destructive control on touch; folder rename is dblclick-only; the gate is structurally blind to the class
+#### R-RSP-6 · Issue #1877 · P2 · Hover-only folder-delete is an invisible-but-tappable 44px destructive control on touch; folder rename is dblclick-only; the gate is structurally blind to the class
 - **Evidence:** `style.css:1717-1723` (no `hover:none` fallback; contrast the correct
   pattern at :1411) · `responsive-tokens.css:71-79` (coarse floor inflates it to 44×44) ·
   `sessions.js:801-843` (tap routes to delete-folder-and-all-sessions confirm; rename
@@ -450,7 +465,7 @@ matrix was live-probed and is valid; the findings are the axes it doesn't cover.
 chyron ballot anonymization (E12), retrospective terminal gate, producerVault quarantine,
 0112 TraceRecord. The findings below are the paths that did NOT hold.*
 
-#### R-VLT-1 · **P0** · The standard "Vault-free" debug bundle + admin LLM/engine I/O log rings expose hidden-layer content without the producerVault unseal gate
+#### R-VLT-1 · Issue #1865 · **P0** · The standard "Vault-free" debug bundle + admin LLM/engine I/O log rings expose hidden-layer content without the producerVault unseal gate
 
 - **Evidence:** `frontend/src/llm_trace.py:342-358` (`record_llm_call` stores FULL request
   messages + response + reasoning; on by default per `admin_health_routes.py:1949`) ·
@@ -481,7 +496,7 @@ string from a seeded game (adversarial fixture proves it); [ ] full content read
 behind the explicit unseal affordance.
 **DoD** — [ ] AC met; the adversarial test is a permanent gate; FE suite green.
 
-#### R-VLT-2 · P1 · Game-build "Production notes" accordion shows the model's reasoning to the player — but since ADR-0019 Layer 2 the model RECEIVES secret state; the ruling's safety premise is falsified
+#### R-VLT-2 · Issue #1867 · P1 · Game-build "Production notes" accordion shows the model's reasoning to the player — but since ADR-0019 Layer 2 the model RECEIVES secret state; the ruling's safety premise is falsified
 
 - **Evidence:** `chat.js:2254-2283` (the 2026-06-20 ruling comment: "the model receives no
   secret state so showing it is safe") vs `GameSessionAdapter.ts:10386-10391` +
@@ -499,7 +514,7 @@ behind the explicit unseal affordance.
 **AC** — [ ] game-build reasoning is hidden or wall-screened; premise comment updated.
 **DoD** — [ ] AC met; FE test green; FE suite green.
 
-#### R-VLT-3 · P1 · Gateway turns bypass the knowledge wall, presence wall, and the untagged inline-planning scrub — while receiving the same secret-bearing prompt
+#### R-VLT-3 · Issue #1868 · P1 · Gateway turns bypass the knowledge wall, presence wall, and the untagged inline-planning scrub — while receiving the same secret-bearing prompt
 
 - **Evidence:** `gateway/handler.py:117-133` (builds from `getMomentPrompt` incl.
   presentKnowledge), `:77-80` (only outbound filter is `scrub_for_platform`) ·
@@ -519,7 +534,7 @@ deps). **AC** — [ ] gateway replies pass through knowledge + presence walls + 
 inline-planning scrub; the staged-recital test drops. **DoD** — [ ] AC met; gateway
 tests green; FE suite green.
 
-#### R-VLT-4 · P1 · `getOffscreenSceneSkeletons` returns hidden off-screen event content on the player channel — later content enrichments silently widened the "participants and nature only" projection
+#### R-VLT-4 · Issue #1869 · P1 · `getOffscreenSceneSkeletons` returns hidden off-screen event content on the player channel — later content enrichments silently widened the "participants and nature only" projection
 
 - **Evidence:** `registry.ts:76` (description: "public participant ids, room, and nature
   only") vs `GameSessionAdapter.ts:10656-10673` (`templateContent = textureOverrides ??
@@ -539,7 +554,7 @@ tests green; FE suite green.
 skeleton read contains no player-read/target/hidden-element clause (seeded adversarial
 test); docs match implementation. **DoD** — [ ] AC met; engine gates green.
 
-#### R-VLT-5 · P1 · `knowledgeScopeManifest` ships the living house's secret-fact manifest (content + who-knows-what) over the ordinary player channel — producerVault-lite without the unseal
+#### R-VLT-5 · Issue #1870 · P1 · `knowledgeScopeManifest` ships the living house's secret-fact manifest (content + who-knows-what) over the ordinary player channel — producerVault-lite without the unseal
 
 - **Evidence:** `registry.ts:40` (player channel, in `toolsFor`; `INFRA_LEVERS:199-202`
   only hides it from the model's manifest) · `GameSessionAdapter.ts:2210-2255` (for EVERY
@@ -559,7 +574,7 @@ test); docs match implementation. **DoD** — [ ] AC met; engine gates green.
 still functions; io ring holds name+timing only. **DoD** — [ ] AC met; adversarial test
 permanent; engine + FE gates green.
 
-#### R-VLT-6 · P1 · `npcVoice` hidden knows/suspects stream to the player's browser (SSE `tool_output`) and persist in chat metadata — suppression is a client-side rendering convention
+#### R-VLT-6 · Issue #1871 · P1 · `npcVoice` hidden knows/suspects stream to the player's browser (SSE `tool_output`) and persist in chat metadata — suppression is a client-side rendering convention
 
 - **Evidence:** `tool_implementations.py:5442-5445` (returns full NpcVoiceView incl.
   knows/suspects) · `agent_loop.py:9098` (every tool result emitted as a `tool_output`
@@ -577,7 +592,7 @@ permanent; engine + FE gates green.
 and persisted metadata for an npcVoice turn carry no hidden content; model behavior
 unchanged. **DoD** — [ ] AC met; FE test permanent; FE suite green.
 
-#### R-VLT-7 · P2 · The knowledge-wall guard fails open silently: a manifest fetch failure leaves the wall empty for the TTL window with only debug-level logging
+#### R-VLT-7 · Issue #1872 · P2 · The knowledge-wall guard fails open silently: a manifest fetch failure leaves the wall empty for the TTL window with only debug-level logging
 
 - **Evidence:** `chat_helpers.py:3010-3019` (per-source failures → `logger.debug`),
   `:3030-3033` (total failure → `facts=[]` cached for the TTL → wall returns text
