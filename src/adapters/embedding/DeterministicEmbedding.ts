@@ -8,9 +8,9 @@ const DIM = 256; // wide enough that distinct vocabularies rarely hash-collide
  * (high cosine similarity), so recall is by CONTENT, not recency — a query about
  * "the veto betrayal" retrieves that betrayal, not last night's chat. No model,
  * no network; the same text always yields the same vector. NOTE: this is ALSO the
- * production adapter today — the accepted runtime target (fastembed, local ONNX,
- * version-pinned; ADR docs/decisions/0004) is not yet built, and this remains the
- * sanctioned fallback once it is (ADR 0004 "Implementation status", audit E86).
+ * the test/fallback adapter — the accepted runtime target (fastembed, local ONNX,
+ * version-pinned; ADR docs/decisions/0004) is built (since 2026-06-11, E86a), and
+ * this remains the sanctioned whole-process fallback (ADR 0004).
  */
 export class DeterministicEmbedding implements EmbeddingProvider {
   embed(text: string): number[] {
