@@ -32,6 +32,22 @@ describe("0025 — reserve twists (Vault-sealed, engine-timed)", () => {
     }
   });
 
+  it("fireAtBeat spans the full isDramaticBeat range [2, totalBeats-1] over many seeds, never outside it", () => {
+    const totalBeats = 14;
+    const seen = new Set<number>();
+    for (let seed = 1; seed <= 200; seed++) {
+      const r = loadReserveTwists(3, new SeededRandom(seed), totalBeats);
+      for (const t of r) {
+        seen.add(t.fireAtBeat);
+        expect(isDramaticBeat(t.fireAtBeat, totalBeats)).toBe(true);
+      }
+    }
+    // With 200 seeds and count=3, the RNG should have hit every dramatic beat at least once.
+    for (let beat = 2; beat <= totalBeats - 1; beat++) {
+      expect(seen.has(beat)).toBe(true);
+    }
+  });
+
   it("a fired twist is identifiable at exactly its sealed beat", () => {
     const reserve = [{ kind: "secret-veto" as const, fireAtBeat: 5 }];
     expect(maybeFireTwist(4, reserve)).toBeNull();
