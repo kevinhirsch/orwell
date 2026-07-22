@@ -157,7 +157,44 @@ def setup_history_routes(session_manager) -> APIRouter:
                 keep_count = resolved
             else:
                 keep_count = body.get("keep_count", 0)
+            # #1728 (B2, PR #1825 fix #5) — a negative `keep_count` is malformed input:
+            # `SessionManager.truncate_messages` already refuses it (returns False, deletes
+            # nothing), but the OLD code below called `discard_pending_fold` regardless of that
+            # result — every resolved anchor position trivially satisfies `pos < negative_number`
+            # is false, i.e. every anchor reads as "at or past the cutoff," so the fail-safe +
+            # resolve path emptied the ledger while every render row survived: an accepted turn's
+            # staged hidden consequence was permanently lost on a malformed request (T-Rex-
+            # confirmed). Reject BEFORE touching anything, rather than relying on the ordering fix
+            # below alone — a negative count is never a legitimate truncate to begin with.
+            if not isinstance(keep_count, int) or isinstance(keep_count, bool) or keep_count < 0:
+                raise HTTPException(400, "keep_count must be a non-negative integer")
             result = session_manager.truncate_messages(session_id, keep_count)
+            # #1728 (B2) — the supersede-cancel half of defer-fold-to-settle: a truncate removes
+            # every row at seq-order position >= `keep_count`. Any staged pending fold
+            # (`fold_ledger`, `_auto_record_scene` in `src/agent_loop.py`) whose row lives in that
+            # removed range must be discarded, or it settles later as a PHANTOM hidden-layer fold
+            # for content the render log no longer contains — NOT just the newest entry: a
+            # truncate that targets an OLDER row (an edit/resend) removes that row AND every later
+            # one, so an older-row truncate can wipe out a later take's row too (PR #1825's second
+            # Greptile P1, T-Rex-confirmed). `discard_pending_fold` discards every entry ANCHORED
+            # at or past `keep_count` (fail-safe: a still-unanchored entry is discarded too — see
+            # `fold_ledger`'s module docstring); an older, already-accepted turn's re-queued fold
+            # (anchored below `keep_count`) survives.
+            #
+            # ORDERING GUARANTEE (PR #1825 fix #5) — only discard from the ledger when a truncate
+            # ACTUALLY happened. `truncate_messages` returns False on ANY failure (a malformed
+            # request that slipped past the guard above, an internal DB error, …) WITHOUT deleting
+            # a single row — calling `discard_pending_fold` anyway would discard a staged fold for
+            # content that is still sitting, untouched, in the render log. The ledger discard is a
+            # CONSEQUENCE of a truncate that happened, never of one merely attempted. Best-effort
+            # beyond that: a discard hiccup never fails the truncate response itself.
+            if result:
+                try:
+                    from src.auth_helpers import effective_user
+                    from src import fold_ledger as _fl
+                    _fl.discard_pending_fold(effective_user(request), session_id, keep_count)
+                except Exception as _fold_e:
+                    logger.warning(f"Discarding staged fold on truncate failed {session_id}: {_fold_e}")
             return {"status": "ok", "kept": keep_count, "truncated": result}
         except HTTPException:
             raise
