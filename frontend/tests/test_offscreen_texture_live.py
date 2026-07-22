@@ -232,6 +232,109 @@ def test_kickoff_enrich_schedules_background_task_and_never_raises(monkeypatch):
     assert runs["count"] == 1
 
 
+# ── G5 close-out (BE-103): the 0062 zeitgeist actually reaches the voicing prompt ─────────────────
+
+def test_run_enrich_fetches_zeitgeist_and_colors_the_voicing_prompt(monkeypatch):
+    """docs/features/0062-world-snapshot-zeitgeist.md §5 requires off-screen society/gossip prompts to
+    receive the frozen move-in zeitgeist. Before the G5 fix, `worldSnapshotView` had zero FE callers —
+    this pins that `run_enrich` now calls it and the returned `offscreenPrompt` block reaches the
+    voicing LLM's prompt."""
+    seen_messages: list = []
+
+    async def fake_llm(messages):
+        seen_messages.append(messages)
+        return "The two houseguests traded a wary, low-voiced exchange by the kitchen counter."
+
+    async def fake_resolve(owner):
+        return fake_llm
+
+    skeleton = {
+        "eventId": "offscreen:42",
+        "nature": "gossip",
+        "participants": ["npc:3", "npc:7"],
+        "templateContent": "two houseguests talked off-screen",
+    }
+
+    async def fake_get_skeletons(user=None):
+        return [skeleton]
+
+    async def fake_write(event_id, content, user=None):
+        return {"ok": True}
+
+    view_calls: list = []
+
+    async def fake_world_snapshot_view(user=None):
+        view_calls.append(user)
+        return {
+            "capturedFor": "2026-07-01",
+            "source": "web_search",
+            "slices": {},
+            "offscreenPrompt": "the house moved in with a heat wave dominating the news",
+        }
+
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", fake_resolve)
+    monkeypatch.setattr("src.orwell_engine.get_offscreen_scene_skeletons", fake_get_skeletons)
+    monkeypatch.setattr("src.orwell_engine.record_offscreen_scene_texture", fake_write)
+    monkeypatch.setattr("src.orwell_engine.world_snapshot_view", fake_world_snapshot_view)
+
+    result = _run(T.run_enrich(owner="player-1"))
+
+    assert result == {"voiced": 1, "total": 1}
+    assert view_calls == ["player-1"], "worldSnapshotView must actually be called — not a dead endpoint"
+    assert len(seen_messages) == 1
+    user_msg = seen_messages[0][1]["content"]
+    assert "heat wave dominating the news" in user_msg, \
+        "the zeitgeist block must reach the voicing prompt, not just be fetched and dropped"
+
+
+def test_run_enrich_zeitgeist_fetch_failure_is_fail_soft(monkeypatch):
+    """A worldSnapshotView read failure must never block voicing (0062 §6 — flavor only)."""
+    async def fake_llm(messages):
+        return "A quiet, ambiguous moment between two houseguests."
+
+    async def fake_resolve(owner):
+        return fake_llm
+
+    async def fake_get_skeletons(user=None):
+        return [{"eventId": "offscreen:1", "nature": "bonding",
+                 "participants": ["npc:1", "npc:2"], "templateContent": "t"}]
+
+    writes: list = []
+
+    async def fake_write(event_id, content, user=None):
+        writes.append((event_id, content))
+        return {"ok": True}
+
+    async def boom_world_snapshot_view(user=None):
+        raise RuntimeError("engine unreachable")
+
+    monkeypatch.setattr("src.orwell_cast_authoring._resolve_llm_fn", fake_resolve)
+    monkeypatch.setattr("src.orwell_engine.get_offscreen_scene_skeletons", fake_get_skeletons)
+    monkeypatch.setattr("src.orwell_engine.record_offscreen_scene_texture", fake_write)
+    monkeypatch.setattr("src.orwell_engine.world_snapshot_view", boom_world_snapshot_view)
+
+    result = _run(T.run_enrich(owner="player-1"))
+
+    assert result == {"voiced": 1, "total": 1}
+    assert len(writes) == 1, "a zeitgeist-fetch fault must not block the scene from being voiced"
+
+
+def test_voicing_messages_omits_zeitgeist_section_when_absent():
+    """No snapshot captured ⇒ the prompt is byte-identical to the pre-0062-wiring shape (no
+    zeitgeist section at all), not an empty/awkward block."""
+    msgs = T._voicing_messages("gossip", ["npc:1", "npc:2"], "template text")
+    user = msgs[1]["content"]
+    assert "world they moved in with" not in user
+
+
+def test_voicing_messages_includes_zeitgeist_section_when_present():
+    msgs = T._voicing_messages("gossip", ["npc:1", "npc:2"], "template text",
+                                zeitgeist="a heat wave dominates the news")
+    user = msgs[1]["content"]
+    assert "world they moved in with" in user
+    assert "a heat wave dominates the news" in user
+
+
 def test_kickoff_enrich_dedupes_overlapping_runs(monkeypatch):
     """A second kickoff while one is still in flight for the same user is dropped."""
     started = {"count": 0}

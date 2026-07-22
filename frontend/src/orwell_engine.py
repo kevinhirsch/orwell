@@ -484,6 +484,18 @@ async def record_world_snapshot(snapshot: dict, user: str | None = None) -> dict
     return await _call("recordWorldSnapshot", snapshot, user=user)
 
 
+async def world_snapshot_view(user: str | None = None) -> dict | None:
+    """Feature 0062 (BE-103 close-out, the G5 gap): read the Vault-free projection of the FROZEN
+    move-in zeitgeist ``record_world_snapshot`` captured — ``{ capturedFor, source, slices,
+    offscreenPrompt }``. ``offscreenPrompt`` is the engine's already-rendered, already-Vault-free
+    off-screen-channel block, consumed by ``orwell_offscreen_texture`` so NPC-to-NPC scenes are
+    colored by the SAME shared world the player's own moments are (spec §5). Returns ``None`` pre-game
+    or when no snapshot was ever captured (the §8 fail-soft skip) — public flavor only, never a game
+    input (§6)."""
+    result = await _call("worldSnapshotView", {}, user=user)
+    return result if isinstance(result, dict) else None
+
+
 async def record_producer_profile(overlay: dict, user: str | None = None) -> dict:
     """Issue #1626 (increment 3): write an LLM-AUTHORED, richer OFF-CAMERA PRODUCER persona BACK to the
     engine, which folds it onto the seeded producer as the source of truth. ``overlay`` carries any
