@@ -92,14 +92,8 @@ export function loadReserveTwists(count: number, rng: RandomnessSource, totalBea
     if (rng.next() < 1 - TWIST_LOAD_PROB) continue; // often none, even when enabled
     if (IMPLEMENTED_POOL.length === 0) continue; // nothing implemented yet ⇒ this slot loads nothing
     const kind = IMPLEMENTED_POOL[rng.int(IMPLEMENTED_POOL.length)]!;
-    // Use isDramaticBeat as the single source of truth for which beats are eligible.
-    const candidates: number[] = [];
-    for (let b = 1; b <= totalBeats; b++) {
-      if (isDramaticBeat(b, totalBeats)) candidates.push(b);
-    }
-    const fireAtBeat = candidates.length > 0
-      ? candidates[rng.int(candidates.length)]!
-      : 2; // defensive fallback
+    // A dramatic mid-season beat (never the premiere, never the finale week).
+    const fireAtBeat = 2 + rng.int(Math.max(1, totalBeats - 3));
     out.push({ kind, fireAtBeat });
   }
   return out;
