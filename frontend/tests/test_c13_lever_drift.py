@@ -108,6 +108,20 @@ def _moment_fragments_block() -> str:
     return ts[s:e]
 
 
+def _gap_block() -> str:
+    """G7 (2026-07-22 gap audit): the module-level span BETWEEN the end of BASE_GAME_MASTER_PROMPT
+    and the start of MOMENT_PROMPTS was never scanned by either _base_prose_block() (which stops at
+    BASE_GAME_MASTER_PROMPT's own closing `].join("\\n")`) or _moment_fragments_block() (which starts
+    at `export const MOMENT_PROMPTS`) — so CASTING_INTERVIEW_PROMPT (real, live prompt text sent to
+    the model every casting turn, wired into MOMENT_PROMPTS['character-creation']) sat in a blind spot,
+    along with any other module-level const declared in that gap. This closes the gap generically by
+    scanning the WHOLE span, not just the one const that happened to trigger the finding."""
+    ts = _moment_prompts_ts()
+    s = ts.index('].join("\\n")', ts.index("BASE_GAME_MASTER_PROMPT"))
+    e = ts.index("export const MOMENT_PROMPTS")
+    return ts[s:e]
+
+
 def _referenced_levers(text: str) -> set[str]:
     """camelCase levers the prompt DIRECTS the model to call — imperative `call X`, a function-call
     `X(`, `with/via/using X`, or a parenthetical prose mention `(X)`. camelCase-only (drops English
@@ -150,6 +164,62 @@ def test_prose_referenced_turnIn_is_now_in_scope_and_callable():
     # the bullet-only scan never checked it. Pin that the extended scan now SEES it AND it is callable.
     assert "turnIn" in _referenced_levers(_base_prose_block())
     assert "turnIn" in _fe_schema_names()
+
+
+# --- G7 (2026-07-22 gap audit): the SCANNED-RANGE gap between the base prose and the moment
+# fragments — CASTING_INTERVIEW_PROMPT and any other module-level const in between — must be
+# checked too, not just the two named blocks. -----------------------------------------------
+
+def test_gap_block_contains_casting_interview_prompt():
+    # Sanity: prove the gap scan actually reaches the const the audit named (so this test would have
+    # failed to even exercise the fix if the offsets ever drift out from under CASTING_INTERVIEW_PROMPT).
+    gap = _gap_block()
+    assert "CASTING_INTERVIEW_PROMPT" in gap
+    assert "MOMENT — The casting interview" in gap
+    # ...and prove the actual PROSE (not just the bare identifier — _moment_fragments_block() DOES
+    # contain the `"character-creation": CASTING_INTERVIEW_PROMPT,` object-literal reference, which is
+    # not the lever-bearing text) is NOT already covered by the two pre-existing scanned blocks — i.e.
+    # this really was a blind spot, not a redundant re-scan.
+    assert "MOMENT — The casting interview" not in _base_prose_block()
+    assert "MOMENT — The casting interview" not in _moment_fragments_block()
+
+
+def test_casting_interview_prompt_levers_are_now_scanned_and_callable():
+    # The two levers the audit confirmed ARE named inside CASTING_INTERVIEW_PROMPT (updateCasting,
+    # createCharacter) must now show up under the gap scan AND be agent-callable — pinning that a
+    # renamed/typo'd/removed reference here would be caught even though both already happen to be
+    # covered by the base-prose bullets today.
+    refs = _referenced_levers(_gap_block())
+    assert "updateCasting" in refs
+    assert "createCharacter" in refs
+    schemas = _fe_schema_names()
+    assert "updateCasting" in schemas
+    assert "createCharacter" in schemas
+
+
+def test_gap_block_references_only_callable_levers():
+    # THE drift gate for the gap: any lever referenced in the previously-blind span (whether inside
+    # CASTING_INTERVIEW_PROMPT or a future module-level const declared there) must be agent-callable.
+    schemas = _fe_schema_names()
+    refs = _referenced_levers(_gap_block())
+    assert refs, "extracted no lever references from the gap block — parser or prompt shape changed"
+    # Greptile P2 (#1883): apply the SAME five-place callability bar the main drift test uses
+    # (lines 57-63) — a gap-span lever that has a schema but is missing from ORWELL_GAME_TOOLS,
+    # TOOL_TAGS, or GAME_TOOL_KEEP would still fail the FE contract, so the gap scan must check
+    # all four surfaces, not just _fe_schema_names().
+    missing = sorted(
+        r for r in refs
+        if r not in schemas
+        or r not in tool_schemas.ORWELL_GAME_TOOLS
+        or r not in agent_tools.TOOL_TAGS
+        or r not in agent_tools.GAME_TOOL_KEEP
+    )
+    assert not missing, (
+        f"a lever referenced between BASE_GAME_MASTER_PROMPT and MOMENT_PROMPTS (e.g. inside "
+        f"CASTING_INTERVIEW_PROMPT) is not agent-callable: {missing} — this is exactly the G7 blind "
+        "spot: wire the tool (schema + ORWELL_GAME_TOOLS + TOOL_TAGS + GAME_TOOL_KEEP + dispatch) "
+        "or stop naming it in that span"
+    )
 
 
 def test_fragment_scan_has_teeth_against_a_noncallable_lever():
