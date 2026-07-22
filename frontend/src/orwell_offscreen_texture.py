@@ -201,7 +201,17 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
         try:
             view = await orwell_engine.world_snapshot_view(user=owner)
         except Exception as exc:
-            logger.debug("[offscreen-texture] worldSnapshotView failed: %s", exc)
+            # #1599 loud fail-soft: a genuine worldSnapshotView read fault is a real error on a
+            # risk surface — record it RED-eligible (WARNING) rather than swallow it, matching the
+            # skeletons-read/enrich-run siblings. Flavor-only ⇒ auto-corrected to the un-colored
+            # prompt (byte-identical to pre-wiring); it never blocks voicing.
+            logger.warning("[offscreen-texture] worldSnapshotView failed: %s", exc)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:zeitgeist-read-failed", str(exc),
+                                              corrected="uncolored-prompt", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
             return ""
         if not isinstance(view, dict):
             return ""

@@ -74,7 +74,7 @@ def test_offscreen_texture_run_pushes_on_voiced(monkeypatch):
     monkeypatch.setattr(eng, "record_offscreen_scene_texture", fake_write)
 
     # Force enrich_tick to report a voiced scene without invoking the real voicing logic.
-    async def fake_enrich(get_skeletons, llm_fn, write_back):
+    async def fake_enrich(get_skeletons, llm_fn, write_back, get_zeitgeist_fn=None):
         return {"voiced": 1, "total": 1}
 
     monkeypatch.setattr(tex, "enrich_tick", fake_enrich)
@@ -104,7 +104,7 @@ def test_offscreen_texture_does_not_push_when_nothing_voiced(monkeypatch):
     monkeypatch.setattr(eng, "record_offscreen_scene_texture",
                         lambda *a, **k: _coro({"accepted": False}))
 
-    async def fake_enrich(get_skeletons, llm_fn, write_back):
+    async def fake_enrich(get_skeletons, llm_fn, write_back, get_zeitgeist_fn=None):
         return {"voiced": 0, "total": 0}
 
     monkeypatch.setattr(tex, "enrich_tick", fake_enrich)
