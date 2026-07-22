@@ -98,7 +98,7 @@ def test_do_make_deal_accepts_active_kind_when_flag_on(monkeypatch):
     import json
     oe._ENGINE_FLAGS["dealDepth"] = True
 
-    async def _fake_make_deal(with_id, kind, terms, user=None):
+    async def _fake_make_deal(with_id, kind, terms, leverage=None, traded_secret=None, user=None):
         return {"id": "deal:1", "kind": kind}
 
     monkeypatch.setattr(oe, "make_deal", _fake_make_deal)  # do_make_deal lazy-imports this module

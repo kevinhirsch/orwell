@@ -1527,13 +1527,31 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "makeDeal",
-            "description": "Record a promise the player strikes WITH a houseguest. The engine tracks it as a first-class deal and adjudicates it against later binding actions: keeping it builds trust, breaking it deals a betrayal blow the house and jury remember. Call when a handshake actually happens in the scene.",
+            "description": "Record a promise the player strikes WITH a houseguest. The engine tracks it as a first-class deal and adjudicates it against later binding actions: keeping it builds trust, breaking it deals a betrayal blow the house and jury remember. Call when a handshake actually happens in the scene. Features 0093/0099 — for a STANDING deal sweetened by a secret, add 'leverage' (a secret about the PARTNER, pressed as pressure) or 'tradedSecret' (a secret about a third party, handed over as a chip). Both are optional; the ENGINE owns whether the pressure lands or the recipient bites.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "with": {"type": "string", "description": "The houseguest id the deal is made with (from the roster)."},
                     "kind": {"type": "string", "enum": ["safety", "vote", "final-two", "target-other"], "description": "The deal's nature."},
                     "terms": {"type": "string", "description": "The terms as spoken in the scene, briefly."},
+                    "leverage": {
+                        "type": "object",
+                        "description": "Feature 0093 — OPTIONAL: a secret the player holds ABOUT the deal partner ('with'), pressed to make them more likely to enter/honor the deal ('keep me safe or this gets out'). Provide factId (a secret the player has actually LEARNED about the partner), or {bluff: true, subject} to press a secret the player does NOT actually hold. Omit entirely for an ordinary deal — the ENGINE decides whether the pressure lands, and a wary partner can refuse and resent it.",
+                        "properties": {
+                            "factId": {"type": "string", "description": "The id of a secret the player has actually LEARNED about the deal partner. Omit only for a bluff."},
+                            "bluff": {"type": "boolean", "description": "Set true to press a secret the player does NOT hold (a gamble); then 'subject' is required."},
+                            "subject": {"type": "string", "description": "For a bluff: the houseguest id the invented secret is about (usually the deal partner)."},
+                        },
+                    },
+                    "tradedSecret": {
+                        "type": "object",
+                        "description": "Feature 0099 — OPTIONAL: a secret the player holds about a THIRD party, handed to the deal partner ('with') as consideration sweetening the deal. Provide factId (a secret the player has actually LEARNED about a third party), or {bluff: true, subject} to offer a secret the player does NOT hold. Omit entirely for an ordinary deal — valued to the PARTNER, and the partner learns it via a recorded pathway.",
+                        "properties": {
+                            "factId": {"type": "string", "description": "The id of a secret the player has actually LEARNED about a THIRD party. Omit only for a bluff."},
+                            "bluff": {"type": "boolean", "description": "Set true to offer a secret the player does NOT hold; then 'subject' is required."},
+                            "subject": {"type": "string", "description": "For a bluff: the houseguest id the invented secret is about."},
+                        },
+                    },
                 },
                 "required": ["with", "kind", "terms"],
             },
