@@ -1722,6 +1722,21 @@ body.bg-pattern-perlin-flow {
     }
     .session-folder-header:hover .folder-delete-btn { opacity: 0.5; }
     .folder-delete-btn:hover { opacity: 1 !important; color: var(--color-error); }
+    .folder-rename-btn {
+      background: none; border: none; color: var(--fg); opacity: 0;
+      cursor: pointer; font-size: 0.85em; padding: 0 2px; line-height: 1;
+      min-height: 0; height: auto;
+      transition: opacity 0.08s, color 0.08s;
+    }
+    .session-folder-header:hover .folder-rename-btn { opacity: 0.5; }
+    .folder-rename-btn:hover { opacity: 1 !important; }
+
+    @media (hover: none) {
+      .session-folder-header .folder-delete-btn { opacity: 0.35; }
+      .session-folder-header .folder-delete-btn:active { opacity: 1; color: var(--color-error); }
+      .session-folder-header .folder-rename-btn { opacity: 0.35; }
+      .session-folder-header .folder-rename-btn:active { opacity: 1; }
+    }
     .session-folder-content { padding-left: 4px; }
     .session-folder-content .list-item { border-bottom: 1px solid color-mix(in srgb, var(--fg) 7%, transparent); }
     .session-folder-content .list-item:last-child { border-bottom: none; }
