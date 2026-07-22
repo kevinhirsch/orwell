@@ -23,13 +23,15 @@
 > canonical for live state, this doc is the campaign index.
 >
 > **Campaign closed 2026-07-22.** 4 of 14 planned lanes returned findings before the
-> campaign was called (parity, a11y, responsive, vault — 28 findings total); the
-> remaining 10 lanes (bb-canon, social-game, prose-prompts, fe-copy, hig, ux-flows,
-> ux-ia, interaction, bugs-engine, bugs-fe) and the live-model playtest pass were not
-> run. Every P0 and P1 finding from the 4 completed lanes is filed as a GitHub issue
-> (#1864–#1871, #1873–#1875, #1877 — see the per-finding sections below for the exact
-> mapping). P2/P3 findings remain tracked in this doc with full DoR/AC/DoD contracts;
-> file them as issues on a future pass if the backlog wants them individually tracked.
+> campaign was called (parity, a11y, responsive, vault — 28 findings total: 1 P0, 10 P1,
+> 14 P2, 3 P3); the remaining 10 lanes (bb-canon, social-game, prose-prompts, fe-copy,
+> hig, ux-flows, ux-ia, interaction, bugs-engine, bugs-fe) and the live-model playtest
+> pass were not run. Every P0 and P1 finding (11 of 28) from the 4 completed lanes is
+> filed as a GitHub issue (#1864–#1871, #1873–#1875 — see the per-finding sections below
+> for the exact mapping). Several P2 findings are also filed (#1872, #1876–#1879) as a
+> bonus given remaining budget; the rest remain tracked in this doc with full DoR/AC/DoD
+> contracts — file them as issues on a future pass if the backlog wants them individually
+> tracked.
 
 ## Method & evidence base
 
@@ -56,7 +58,7 @@
 |---|---|---|---|
 | parity (consistency/two-window) | ✅ complete | 7 (2 P1, 4 P2, 1 P3) | #1864, #1866 |
 | a11y | ✅ complete | 6 (3 P1, 3 P2) | #1873, #1874, #1875, #1876 |
-| responsive | ✅ complete | 8 (5 P2, 3 P3) | #1877 |
+| responsive | ✅ complete | 8 (6 P2, 2 P3) | #1877 |
 | vault (Vault-Wall adversarial) | ✅ complete | 7 (1 P0, 5 P1, 1 P2) | #1865, #1867–#1871, #1872 |
 | bb-canon | ⏸️ not run | — | — |
 | social-game | ⏸️ not run | — | — |
@@ -68,13 +70,13 @@
 | interaction | ⏸️ not run | — | — |
 | bugs-engine | ⏸️ not run | — | — |
 | bugs-fe | ⏸️ not run | — | — |
-| playtest (deterministic UI capture) | ✅ captured — scenes + 14-turn mechanical loop, both breakpoints, `.audit-telemetry/shots/` | evidence for the UI lanes, unconsumed | — |
+| playtest (deterministic UI capture) | ✅ captured — scenes + 14-turn mechanical loop, both breakpoints. **Local-only:** `.audit-telemetry/` is gitignored by design (per the harness playbook, §1) and was not committed; the screenshots do not exist in this PR's checkout | evidence for the UI lanes, unconsumed | — |
 | playtest (live-model roleplay) | ⏸️ not run | — | — |
 
-**28 findings total this campaign: 1 P0, 13 P1, 11 P2, 3 P3 — all 14 P0/P1 items filed
-as GitHub issues.** The 10 unrun lanes and the live-model playtest pass are the natural
-next slice of this campaign; the harness, stack-boot script, and dedupe sources are all
-in place for a fast resume.
+**28 findings total this campaign: 1 P0, 10 P1, 14 P2, 3 P3 — all 11 P0/P1 items, plus 5
+P2 items, filed as GitHub issues (#1864–#1879).** The 10 unrun lanes and the live-model
+playtest pass are the natural next slice of this campaign; the harness, stack-boot
+script, and dedupe sources are all in place for a fast resume.
 
 ---
 
@@ -151,7 +153,7 @@ inline on each finding heading.
 - [ ] AC met; fe-unit tests drive goodbye + stale-beat + refusal-storm over the WS path.
 - [ ] Full FE pytest suite green; mirror-toolturn CI legs green.
 
-#### R-PAR-3 · P2 · WS-only pre-flight beatSeq CAS on chat turns silently discards the player's typed message
+#### R-PAR-3 · Issue #1878 · P2 · WS-only pre-flight beatSeq CAS on chat turns silently discards the player's typed message
 
 - **Evidence:** `frontend/routes/ws_routes.py:655-656` · `frontend/static/js/orwellWs.js:568-581` ·
   `frontend/static/js/chat.js:1640-1655` (catch: bubble removed, outbox released, no
@@ -176,7 +178,7 @@ inline on each finding heading.
 - [ ] AC met; fe-unit test drives `sendTurn` into stale-beat and asserts text survival;
   FE suite green; protocol doc updated if the CAS is removed for free-text turns.
 
-#### R-PAR-4 · P2 · Gateway turns are invisible to web surfaces (no session row, no game-updated publish, memoryless narration) — and WS mode deleted the poll floor that would mask it
+#### R-PAR-4 · Issue #1879 · P2 · Gateway turns are invisible to web surfaces (no session row, no game-updated publish, memoryless narration) — and WS mode deleted the poll floor that would mask it
 
 - **Evidence:** `frontend/gateway/handler.py:157` (fold lands — G1 fixed) but zero
   `session_events`/`publish_game_updated` calls in `frontend/gateway/**` ·
