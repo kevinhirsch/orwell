@@ -248,3 +248,76 @@ def test_scripted_ceremony_sequence_has_zero_closed_set_outcome_tokens_in_surviv
     # The hard-drop rail never stashes a re-ground (there is nothing to reconcile — the chyron IS
     # the record); confirms none of the six turns fell through to the older verify-then-correct path.
     assert _USER not in chat_helpers._DESYNC_REGROUND
+
+
+# ── Greptile P2 (PR #1830): the veto-use rail must not hard-drop open-set SPECULATIVE color ──── #
+
+_SPEC_USER = "u-t0-3-veto-speculative"
+
+
+def test_speculative_veto_use_color_survives_the_hard_drop_rail(monkeypatch):
+    """`_CLAIM_VETO_USE_RE`'s FIRST cut matched bare 'use' too, so speculative/planning open-set
+    texture ADR 0005 protects ('Priya wonders whether to use the veto on herself', 'if he uses the
+    veto, the whole week flips') was swept into the unconditional hard-drop right alongside a genuine
+    assertive claim — the exact expressive-collapse failure mode the split-authority ADR exists to
+    forbid (this is the model's remaining COLOR job). None of these are outcome assertions; all must
+    stream verbatim, byte-for-byte, through the SAME `_pre_emission_outcome_guard` the live stream
+    uses — no board read, no stashed re-ground."""
+    chat_helpers._LAST_BEAT_SIG.pop(_SPEC_USER, None)
+    chat_helpers._DESYNC_REGROUND.pop(_SPEC_USER, None)
+
+    async def boom(user=None, **kw):
+        raise AssertionError("speculative veto-use color must never even reach a board read")
+    monkeypatch.setattr(orwell_engine, "game_status", boom)
+    monkeypatch.setattr(orwell_engine, "get_game_state", boom)
+
+    speculative = [
+        "Priya wonders whether to use the veto on herself.",
+        "if he uses the veto, the whole week flips.",
+        "She is debating whether to use the veto on Marcus.",
+        "He is planning to use the veto on himself.",
+        "She keeps thinking about using the veto all afternoon.",
+        "Will you use the veto on her?",
+        "I might use the veto on you, depending on how tonight goes.",
+    ]
+    for narration in speculative:
+        out = _run(agent_loop._pre_emission_outcome_guard(narration, _SPEC_USER))
+        assert out == narration, f"open-set speculative color was hard-dropped: {narration!r} -> {out!r}"
+    assert _SPEC_USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_assertive_veto_use_claims_still_hard_drop(monkeypatch):
+    """The flip side of the test above, pinned in the SAME file so the two can never silently drift
+    apart: a genuinely ASSERTIVE (declarative, committed-tense) veto-use claim still hard-drops —
+    tightening the regex against speculative color must not have quietly reopened the original T0-3
+    gap (the whole reason `_CLAIM_VETO_USE_RE` exists)."""
+    chat_helpers._LAST_BEAT_SIG.pop(_SPEC_USER, None)
+    chat_helpers._DESYNC_REGROUND.pop(_SPEC_USER, None)
+
+    async def boom(user=None, **kw):
+        raise AssertionError("an assertive weekly-loop claim must hard-drop WITHOUT ever reading the board")
+    monkeypatch.setattr(orwell_engine, "game_status", boom)
+    monkeypatch.setattr(orwell_engine, "get_game_state", boom)
+
+    assertive = [
+        "Priya uses the veto on herself.",
+        "Priya has used the veto on herself.",
+        "Marcus does not use the veto.",
+        "The veto goes unused this week.",
+    ]
+    for narration in assertive:
+        out = _run(agent_loop._pre_emission_outcome_guard(narration, _SPEC_USER))
+        assert out.strip() == "", f"an assertive veto-use claim survived the rail: {narration!r} -> {out!r}"
+    assert _SPEC_USER not in chat_helpers._DESYNC_REGROUND
+
+
+def test_veto_use_speculative_regex_source_pin():
+    """Source-pin: the speculative-clause exclusion is wired into BOTH consumers of
+    `_CLAIM_VETO_USE_RE` — the hard-drop gate (`_sentence_has_chyron_covered_claim`) and the
+    verify-then-correct branch (`_narration_claims_outcome`'s veto-use case) — so a future edit to
+    either can't silently drop the guard from just one side."""
+    src = _read("routes", "chat_helpers.py")
+    assert "_veto_use_claim_is_speculative" in src
+    assert "_VETO_USE_SPECULATIVE_RE" in src
+    # Both consumers call the exclusion function (not just define it).
+    assert src.count("_veto_use_claim_is_speculative(text)") >= 2

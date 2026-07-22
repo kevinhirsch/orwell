@@ -1895,19 +1895,37 @@ _CLAIM_VETO_WINNER_RE = re.compile(
     re.IGNORECASE,
 )
 # T0-3 (issue #1778) — the 11th `_CLAIM_*_RE`: the veto USE DECISION itself ("uses the veto on X",
-# "does not use the veto", "the veto goes unused/unplayed", "pulls X off the block"/"saves X with
-# the veto") — distinct from `_CLAIM_VETO_WINNER_RE` (who WON the competition). A live scripted-
-# ceremony pass (the T0-3 FE gate) surfaced this exact gap: "Priya uses the veto on herself" matched
-# NONE of the original ten patterns, so the decision narrated ahead of/instead of the engine's
+# "does not use the veto", "the veto goes unused/unplayed", "pulled X off the block with the veto"/
+# "saved X with the veto") — distinct from `_CLAIM_VETO_WINNER_RE` (who WON the competition). A live
+# scripted-ceremony pass (the T0-3 FE gate) surfaced this exact gap: "Priya uses the veto on herself"
+# matched NONE of the original ten patterns, so the decision narrated ahead of/instead of the engine's
 # `veto-decision` `BeatAnnouncement` chyron sailed through unchecked. Paired with `vetoUsed` in
 # `_narration_claims_outcome` for the (unchanged) verify-then-correct path, and — like the other
 # weekly-loop kinds — HARD-DROPPED unconditionally via `_sentence_has_chyron_covered_claim` below.
+#
+# Greptile P2 (PR #1830): the FIRST cut used `uses?` (matching bare "use" too), which swept up
+# open-set SPECULATIVE/PLANNING color ADR 0005 protects — "Priya wonders whether to use the veto on
+# herself", "if he uses the veto, the whole week flips" are legitimate texture, not a closed-set
+# outcome claim, and the hard-drop rail must never touch them. Two fixes, together:
+#   (1) the regex itself now matches ONLY assertive/committed verb forms — "uses"/"used"/"has used"
+#       (never bare "use", the infinitive/modal form: "to use", "might use", "will use", "should
+#       use") — mirroring the committed-tense discipline `_CLAIM_NEW_HOH_RE` ("wins"/"won", never
+#       bare "win") and `_CLAIM_PLAYER_EXPULSION_RE` already use;
+#   (2) `_veto_use_claim_is_speculative` (below) additionally stands down when the match's OWN
+#       clause is governed by a modal/conditional/interrogative lead-in — "uses" is present-tense
+#       and can appear inside a live conditional ("if he uses the veto…") where tense discipline
+#       alone can't disambiguate it from declarative narration ("Priya uses the veto on herself").
+#       Mirrors `_expulsion_claim_is_conditional`'s clause-scoped approach, widened with the modal
+#       words this exact pattern surfaced (wonders/debating/planning to/thinking about/will you —
+#       not already in the shared `_CONDITIONAL_LEAD_RE` set).
 _CLAIM_VETO_USE_RE = re.compile(
-    r"\buses? (?:the )?(?:power of veto|veto|pov)(?:\s+on\b|\b)|"
+    r"\buses (?:the )?(?:power of veto|veto|pov)(?:\s+on\b|\b)|"
+    r"\b(?:has |had )?used (?:the )?(?:power of veto|veto|pov)\b|"
     r"\bdoes(?:n'?t| not) use (?:the )?(?:power of veto|veto|pov)\b|"
-    r"\b(?:the )?(?:power of veto|veto|pov)\s+(?:goes|remains)\s+(?:unused|unplayed)\b|"
-    r"\bpulls?\s+(?:\w+\s+){0,2}?off\s+the\s+block\b|"
-    r"\bsaves?\s+(?:\w+\s+){0,2}?with\s+the\s+veto\b",
+    r"\bdid(?:n'?t| not) use (?:the )?(?:power of veto|veto|pov)\b|"
+    r"\b(?:the )?(?:power of veto|veto|pov)\s+(?:goes|remains|went)\s+(?:unused|unplayed)\b|"
+    r"\bpulled\s+(?:\w+\s+){0,2}?off\s+the\s+block\s+with\s+the\s+veto\b|"
+    r"\bsaved\s+(?:\w+\s+){0,2}?with\s+the\s+veto\b",
     re.IGNORECASE,
 )
 # #1659 R2 — a committed PLAYER REMOVAL / EXPULSION narrated at the player ("you're being removed from
@@ -1968,6 +1986,34 @@ def _expulsion_claim_is_conditional(text: str) -> bool:
         return False
     clause = re.split(r"[.!?;\n]", text[:m.start()])[-1]
     return bool(_CONDITIONAL_LEAD_RE.search(clause))
+
+
+# T0-3 / Greptile P2 (PR #1830) — `_CONDITIONAL_LEAD_RE` widened with the modal/speculative words
+# that specifically surfaced on the veto-use pattern ("wonders whether to use…", "debating whether
+# to use…", "planning to use…", "thinking about using…", "will you use…") — NOT folded into the
+# shared regex above (it stays scoped to what the expulsion guard needed) so this is additive, not a
+# behavior change for the player-expulsion path.
+_VETO_USE_SPECULATIVE_RE = re.compile(
+    r"\b(?:if|unless|whether|suppose|imagine|assuming|in\s+case|what\s+if|were\s+you|"
+    r"should|could|would|might|may|wonders?|debat(?:e|es|ing)|"
+    r"plan(?:s|ning)?\s+(?:on|to)|think(?:s|ing)?\s+about|will\s+you)\b",
+    re.IGNORECASE,
+)
+
+
+def _veto_use_claim_is_speculative(text: str) -> bool:
+    """True when the matched veto-USE claim's OWN clause (cut at the last sentence/clause boundary
+    before the match) is governed by a modal/conditional/interrogative lead-in — legitimate open-set
+    color/speculation (ADR 0005 — "Priya wonders whether to use the veto on herself", "if he uses the
+    veto, the whole week flips"), not a closed-set outcome assertion. The hard-drop rail (and the
+    verify-then-correct branch) must both stand down. Mirrors `_expulsion_claim_is_conditional`'s
+    clause-scoped approach; a conditional elsewhere in a multi-sentence draft is irrelevant (only the
+    claim's own clause governs it)."""
+    m = _CLAIM_VETO_USE_RE.search(text)
+    if not m:
+        return False
+    clause = re.split(r"[.!?;\n]", text[:m.start()])[-1]
+    return bool(_VETO_USE_SPECULATIVE_RE.search(clause))
 # Phases where a numeric "N to M" reads as a FINALE jury tally (vs. a mid-season eviction count,
 # which we don't police here — the eviction claim does that).
 _FINALE_PHASES = ("finale", "final", "jury-vote", "jury_vote", "juryvote")
@@ -2281,8 +2327,10 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
     #      "does not use the veto"), but `vetoUsed` never moved this turn — no decision committed.
     #      Distinct from (6) above (who WON the competition, not what the holder DID with it).
     #      Scoped to the veto-ceremony phase; a plan/speculation elsewhere ("I might use the veto on
-    #      you") is never policed.
+    #      you", "Priya wonders whether to use the veto on herself") is never policed — Greptile P2
+    #      (PR #1830) — `_veto_use_claim_is_speculative` stands this branch down for that open-set color.
     if not desync and (_CLAIM_VETO_USE_RE.search(text)
+          and not _veto_use_claim_is_speculative(text)
           and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
           and after.get("vetoUsed") == before.get("vetoUsed")):
         desync = "the VETO USE DECISION (whether the veto was played)"
@@ -3198,7 +3246,17 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
 def _sentence_has_chyron_covered_claim(text: str) -> bool:
     """Does `text` assert one of the WEEKLY-LOOP outcome kinds a `BeatAnnouncement` chyron now carries
     authoritatively? True here means: HARD-DROP this sentence outright (see the module comment above)
-    — never verify it against the board, never emit it, regardless of correctness."""
+    — never verify it against the board, never emit it, regardless of correctness.
+
+    Greptile P2 (PR #1830): the veto-use pattern is additionally gated on
+    `not _veto_use_claim_is_speculative(text)` — a modal/conditional/interrogative veto-use mention
+    ("Priya wonders whether to use the veto on herself", "if he uses the veto, the whole week flips")
+    is legitimate open-set color (ADR 0005), not a closed-set outcome claim, and must survive the
+    hard-drop rail untouched. The other 8 patterns don't need this: their committed-tense-only
+    construction (wins/won, is/was evicted, nominates — never a bare infinitive/modal form) already
+    excludes the equivalent speculative phrasing for those kinds without a separate clause scan; only
+    veto-use's present-tense "uses" is ambiguous enough (it is grammatically identical in a live
+    conditional and a declarative narration) to need one."""
     if not text or not text.strip():
         return False
     return bool(
@@ -3210,7 +3268,7 @@ def _sentence_has_chyron_covered_claim(text: str) -> bool:
         or _CLAIM_EVICT_RESULT_RE.search(text)
         or _CLAIM_NOMINATED_RE.search(text)
         or _CLAIM_VETO_WINNER_RE.search(text)
-        or _CLAIM_VETO_USE_RE.search(text)  # T0-3: the veto USE decision (distinct from who WON it)
+        or (_CLAIM_VETO_USE_RE.search(text) and not _veto_use_claim_is_speculative(text))
     )
 
 
