@@ -38,15 +38,23 @@ function baseSnap(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
 }
 
 describe("PERSIST-8 — sessionCoreCounts (the newer monotonic per-season counters)", () => {
-  const fields: Array<keyof SessionCoreCounts> = [
-    "campaignTickCount", "playerCampaignMoveCount", "juryHouseTickCount", "eruptionCount", "triggerTickCount",
-    "pacingTickCount", "confideLieCount", "secretExposeCount", "secretTradeCount",
-    "secretPlayerBluffCount", "playerTieSurfaceCount", "tieScheduleTickCount", "surfacedThreadCount",
-    "tieExposureCount", "tieRevealTickCount",
-    "legendTickCount", "legendCount", "legendLastActTick",
-    "secretBarterTickCount", "secretBarterCount",
-    "showrunnerReweightCount", // 0101/#1401 Phase-2 (#1455) — the reweight-fired monotonic count
-  ];
+  // Derived, not hand-maintained: `SessionCoreCounts` has NO optional fields, so `sessionCoreCounts()`
+  // is TS-enforced to populate every one of them — `Object.keys` on any of its outputs is therefore
+  // structurally guaranteed to equal the full `keyof SessionCoreCounts` set. A new monotonic field added
+  // to the interface without a matching extractor line fails typecheck before this test even runs; a new
+  // field added to BOTH but never actually incremented (or reset mid-season) in `GameSessionAdapter` is
+  // still caught here because it's automatically included in the per-field growth/thinning loop below —
+  // no hand-maintained literal to forget updating (the prior version of this test hardcoded a field list
+  // that had already drifted, silently missing `showrunnerNoteCount`).
+  const fields = Object.keys(sessionCoreCounts(baseSnap())) as Array<keyof SessionCoreCounts>;
+
+  it("derives a non-empty field set that includes every documented counter", () => {
+    // A loose sanity net on the derivation itself (not the source of truth — the loop below is).
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields).toContain("showrunnerNoteCount");
+    expect(fields).toContain("presenceTickCount");
+    expect(fields).toContain("lastConfessionalSweepDay");
+  });
 
   for (const field of fields) {
     it(`${field}: growth passes, thinning is caught`, () => {

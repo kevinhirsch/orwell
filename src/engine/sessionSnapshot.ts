@@ -750,6 +750,8 @@ export interface SessionCoreCounts {
   secretBarterCount: number;
   showrunnerNoteCount: number;
   showrunnerReweightCount: number;
+  presenceTickCount: number;
+  lastConfessionalSweepDay: number;
 }
 
 /** The newer monotonic per-season counters (0059/0060/0075/0085/0091/0092/0093/0099/0100/0101) — each is
@@ -779,6 +781,8 @@ export function sessionCoreCounts(snap: SessionSnapshot): SessionCoreCounts {
     tieRevealTickCount: snap.tieRevealTickCount ?? 0,
     showrunnerNoteCount: snap.showrunnerNoteCount ?? 0,
     showrunnerReweightCount: snap.showrunnerReweightCount ?? 0,
+    presenceTickCount: snap.presenceTickCount ?? 0,
+    lastConfessionalSweepDay: snap.lastConfessionalSweepDay ?? 0,
   };
 }
 
