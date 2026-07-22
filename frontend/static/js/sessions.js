@@ -819,12 +819,30 @@ function _renderSessionListImpl() {
     });
     header.appendChild(deleteBtn);
 
+    // Rename folder button (touch-accessible — dblclick path kept too)
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'folder-rename-btn';
+    renameBtn.textContent = '\u270e';
+    renameBtn.title = 'Rename folder';
+    renameBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newName = await styledPrompt('Rename folder:', {
+        title: 'Rename folder',
+        defaultValue: folderName,
+        confirmText: 'Rename',
+      });
+      if (!newName || !newName.trim() || newName.trim() === folderName) return;
+      const promises = folders[folderName].map(s => moveToFolder(s.id, newName.trim()));
+      Promise.all(promises).then(() => loadSessions());
+    });
+    header.appendChild(renameBtn);
+
     let _folderTouchMoved = false;
     header.addEventListener('touchstart', () => { _folderTouchMoved = false; }, { passive: true });
     header.addEventListener('touchmove', () => { _folderTouchMoved = true; }, { passive: true });
     header.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn')) return;
+      if (e.target.closest('.folder-drag-handle') || e.target.closest('.folder-delete-btn') || e.target.closest('.folder-rename-btn')) return;
       if (_folderTouchMoved) { _folderTouchMoved = false; return; }
       const state = loadFolderState();
       const isCollapsed = state[folderName] === false;

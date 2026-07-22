@@ -521,6 +521,29 @@ def audit_page(page, vp_name, width, height, coarse, with_game):
             report("fail", f"{vp_name} touch: {s['t']!r} {s['w']:.0f}x{s['h']:.0f}")
         if not small:
             report("pass", f"{vp_name} touch floors")
+
+        # R-RSP-6 (#1877): flag interactive elements that are opacity:0 but painted
+        invisible_tappable = page.evaluate("""
+          [...document.querySelectorAll(
+             'button, [role=button], a[role=button], a.btn, select, .settings-nav-item,'
+             + '.input-icon-btn, .export-dl-btn, .ow-dismiss,'
+             + '.folder-delete-btn, .folder-rename-btn')]
+            .filter(e => {
+               if (e.classList.contains('tap-exempt')) return false;
+               const cs = getComputedStyle(e);
+               if (cs.display === 'none' || cs.visibility === 'hidden' || cs.visibility === 'collapse') return false;
+               if (parseFloat(cs.opacity) !== 0) return false;
+               const r = e.getBoundingClientRect();
+               return r.width > 0 && r.height > 0;
+            })
+            .map(e => { const r = e.getBoundingClientRect();
+                        return { t: (e.innerText || e.ariaLabel || e.id || '?').slice(0, 20), w: r.width, h: r.height }; })
+            .slice(0, 8)
+        """)
+        for s in invisible_tappable:
+            report("fail", f"{vp_name} invisible-tappable: {s['t']!r} {s['w']:.0f}x{s['h']:.0f} (opacity:0 but painted)")
+        if not invisible_tappable:
+            report("pass", f"{vp_name} no invisible-tappable controls")
         _close_drawer(page)  # #651: never leak the opened drawer into the next sub-pass
 
 
