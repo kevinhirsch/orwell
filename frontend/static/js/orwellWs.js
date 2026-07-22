@@ -57,9 +57,9 @@
   var PERTAB_POLL_MS = 200;
   var PERTAB_WAIT_MAX_MS = 30000;
 
-  // `ORWELL_WS_TRANSPORT` (default OFF in Phase 1 — zero-risk default, §6). The
+  // `ORWELL_WS_TRANSPORT` (default ON since 2026-07-10 (#1357, §6)). The
   // server injects it; we read it defensively from either a global or a body
-  // data-attribute. Absent/false ⇒ the client never even attempts the upgrade.
+  // data-attribute. Absent ⇒ the client still attempts the upgrade.
   function _flagOn() {
     try {
       if (window.ORWELL_WS_TRANSPORT === true || window.ORWELL_WS_TRANSPORT === 1 ||

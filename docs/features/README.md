@@ -305,7 +305,7 @@ Several substantial FE workstreams land as their own GitHub-issue tracks rather 
   per-device layout client wiring (#1286), the decision-card confirm `decision` up-frame (#1287), and
   the server turn producer + layout leg (#1293) — plus the poll-kill batches that stand redundant HUD /
   gadget / Memory-Wall polls down under WS (#1290 / #1291 / #1294). **Genuinely OPEN:** the actual
-  turn-on (flipping `ORWELL_WS_TRANSPORT` on + the live two-window verification cadence) is Phase-2 and
+  turn-on (the live two-window verification cadence) is mandatory pre-deploy and
   not done. ADRs 0017/0018 are *Proposed*.
 - **Apple-HIG conformance audit (#694) — substantially shipped.** The audit
   (`docs/audits/2026-07-09-hig-audit.md`, #1273) filed ~12 findings; all but **F-CHROME-1** shipped as

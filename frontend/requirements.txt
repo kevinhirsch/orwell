@@ -8,8 +8,8 @@ uvicorn
 # uvicorn ships no WebSocket implementation by default, so /api/ws/session answers an
 # upgrade with 404 "No supported WebSocket library detected" (WS turn-on gate #1299).
 # Install the `websockets` protocol library explicitly (uvicorn auto-detects it) so the
-# route is upgrade-capable. WS stays DORMANT — the ORWELL_WS_TRANSPORT flag is default
-# OFF — this only makes the transport flippable-by-env without a code change.
+# route is upgrade-capable. WS stays active — the ORWELL_WS_TRANSPORT flag is default
+# ON (since 2026-07-10, #1357) — this only makes the transport flippable-by-env without a code change.
 websockets==16.0
 python-multipart
 python-dotenv

@@ -39,7 +39,7 @@ The player tier ships a **multiplexed WebSocket transport** (ADR
 `docs/design/websocket-phase1-protocol.md`) that re-hosts the live chat stream, the mirror
 resume, and the HUD/presence pushes on **one socket per tab** at `GET /api/ws/session`. It is
 **dormant by default** — the browser only *attempts* the upgrade when the front-end is started
-with `ORWELL_WS_TRANSPORT=1` (add it to `data/.env`, then restart the FE). Unset ⇒ the page is
+with `ORWELL_WS_TRANSPORT=1`. Omit or set to `0` to run the page without WebSocket transport.
 byte-identical and the proven SSE/poll stack carries everything, so turning it on is reversible
 by flipping the flag back.
 

@@ -32,8 +32,7 @@ The ``layout`` channel leg is now WIRED (#1293): it rides the same per-session `
 and its per-device ``patch_layout(user, deviceId, …)`` re-key has merged, so ``_run_layout_channel`` /
 ``_handle_layout`` below are live (per-device LWW, ADR 0017 §5 — geometry is per-device, only game
 state syncs). The route is registered but the client only ATTEMPTS the upgrade when the
-``ORWELL_WS_TRANSPORT`` flag is on — **default off** in Phase 1 (owner-gated rollout), so nothing
-ships to users from this PR alone; flipping it on is the separate turn-on step.
+``ORWELL_WS_TRANSPORT`` flag is on — **default ON** since 2026-07-10 (#1357).
 """
 from __future__ import annotations
 
