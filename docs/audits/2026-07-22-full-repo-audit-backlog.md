@@ -24,9 +24,11 @@
 - **Playtest harness:** the committed harness (`docs/audits/playtest-harness/`) against
   the real stack — engine booted with the deploy-parity opt-in flag set (TUN-10,
   single-sourced from `deploy/orwell-env-defaults.sh`), FE with auth ON, admin account,
-  game build. Deterministic-model capture: scenes at 1440×900 + 375×812, mechanical
-  game-loop with per-turn screenshots. Live-model pass: ADR 0016 deploy pair
-  (narrator `z-ai/glm-4.7`), in-persona roleplay per the harness §4 methodology.
+  game build. **Completed evidence:** deterministic-model capture — login/home/settings/
+  theme scenes + the game windows at 1440×900 and 375×812, plus a 14-turn mechanical
+  game-loop with per-turn screenshots (`.audit-telemetry/shots/`). **Planned (queued):**
+  the live-model in-persona roleplay pass on the ADR 0016 deploy pair
+  (narrator `z-ai/glm-4.7`) per the harness §4 methodology — not yet run.
 - **Severity:** P0 breakage/mandate violation · P1 dead-or-wrong at runtime, or badly
   degrades play · P2 missing guard on a load-bearing invariant / clear defect ·
   P3 polish, debt, improvement.
@@ -49,8 +51,8 @@
 | bugs-fe | 🔄 running | |
 | responsive | 🔄 running | |
 | vault | 🔄 running | |
-| playtest (deterministic UI capture) | 🔄 running | |
-| playtest (live-model roleplay) | ⏳ queued behind capture | |
+| playtest (deterministic UI capture) | ✅ captured (scenes + 14-turn loop, both breakpoints) | evidence for the UI lanes |
+| playtest (live-model roleplay) | ⏳ planned, not yet run | |
 
 ---
 
@@ -116,8 +118,10 @@ verdicts and issue numbers are appended as they land.
 - [ ] The full seam inventory of the HTTP tail is enumerated (pending cache, F14 advance,
   CON-4, debounce) and each classified shared-vs-transport-specific.
 **AC**
-- [ ] A goodbye submitted over WS fires the F14 follow-up advance and `clear_pending`,
-  byte-equivalent to the HTTP path.
+- [ ] A goodbye submitted over WS reaches **semantic parity** with the HTTP path —
+  identical state transitions and equivalent observable behavior, including the F14
+  follow-up advance and `clear_pending` (not byte-equivalence; the transport framing
+  differs by construction).
 - [ ] Stale-beat on WS reconciles silently (CON-4 parity); refusal debounce applies.
 - [ ] `orwellDecision.js:900-903`'s parity claim becomes true (or the comment is fixed).
 **DoD**
@@ -291,7 +295,10 @@ XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeo
   visual card.
 
 **DoR** — [ ] decide announcement copy (kicker + headline vs. full body).
-**AC** — [ ] each chyron (and one coalesced summary for ballot batches, see R-A11Y-3) fires exactly one announcer message; no re-announce on reconcile.
+**AC** — [ ] each single-fact chyron (HOH/noms/veto/replacement/eviction) fires exactly one
+announcer message; a multi-ballot eviction reveal fires ONE coalesced summary
+announcement (the single ballot-batch policy — see R-A11Y-3), not per-ballot; no
+re-announce on reconcile.
 **DoD** — [ ] AC met; browser test asserts announcer content on a staged chyron mount; FE suite green.
 
 #### R-A11Y-3 · P2 · Staggered eviction-ballot chyron batch floods the live region (~4 announcements/sec)
@@ -301,7 +308,7 @@ XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeo
 - **Fix direction:** widen the ballot-batch stagger or emit one coalesced summary
   announcement alongside the per-card visual cadence.
 
-**DoR** — [ ] pair with R-A11Y-2's copy decision. **AC** — [ ] the eviction reveal produces a comprehensible SR sequence (per-ballot at a humane rate, or one summary). **DoD** — [ ] AC met; covered by the R-A11Y-2 test; FE suite green.
+**DoR** — [ ] pair with R-A11Y-2's copy decision. **AC** — [ ] the eviction reveal emits exactly ONE coalesced summary announcement (the single agreed ballot-batch policy shared with R-A11Y-2), not a per-ballot stream, while the visual per-card cadence is unchanged. **DoD** — [ ] AC met; covered by the R-A11Y-2 test; FE suite green.
 
 #### R-A11Y-4 · P2 · Chyron kicker computes below AA contrast on light-panel themes
 
