@@ -78,6 +78,10 @@ import { drawCompetition, competitionById } from "./competitionLibrary";
 import type { CompetitionDef, CompetitionFormat, CompetitionPhase } from "./competitionLibrary";
 import { GEN_COMPETITION_BOUNDS } from "./genCompetitionConstants";
 import {
+  deriveFailureFact, priorWipeoutCount, appendWipeoutHistory,
+  type WipeoutFailureFact, type WipeoutHistoryEntry,
+} from "./wipeoutReel";
+import {
   phaseForHour, bedtimeDepthFor, restDeficitForDepth, emergentBedtimeHour, DAY_START, WAKE_HOUR, DAY_END_HOUR, type TimeOfDay,
 } from "./timeOfDay";
 import { CLOCK, SCENE } from "./sleepConstants";
@@ -292,6 +296,15 @@ export interface CompetitionProgress {
    * the outcome is decided.
    */
   dropOrder?: EntityId[];
+  /**
+   * C1 (#1788, Q8 hybrid greenlight) — the Wipeout Reel: a seeded, archetype-flavored `failureStyle`
+   * fact per DROPPED entrant in `dropOrder` (never the winner), computed ONCE at `beginStaged` from a
+   * stream FORKED after the single up-front outcome-fixing roll — PRESENTATION ONLY, so `dropOrder`/
+   * `winner`/every downstream seeded draw stay byte-identical (`stagedTrajectoryNeutral.test.ts`).
+   * Vault-free by construction (ids + composed strings only). Present only when `ORWELL_WIPEOUT_REEL`
+   * is on; absent ⇒ the pre-feature `comp-elimination` content stands untouched.
+   */
+  failureStyles?: Record<EntityId, WipeoutFailureFact>;
   /**
    * L-F4 (#1743) — the theme's live-varying INPUTS, FROZEN at draw/stage time. The 0125 seeded-theme
    * skin the adapter lays over the library floor is a pure function of (gameSeed, phase, week, cycle);
@@ -567,6 +580,14 @@ export interface LiveSeasonState {
   dailyRecapEventCursor?: number;
   dailyRecapKnowledgeCursor?: number;
   lastDailyRecap?: DailyRecapEntry;
+  /**
+   * C1 (#1788) — the season-spanning, MONOTONIC Wipeout Reel history per houseguest (mandate #4:
+   * appended only, never trimmed or overwritten). Fed by each REVEALED staged-comp drop's failure-style
+   * fact so the SAME houseguest's later wipeouts can call back to earlier ones ("the third time this
+   * season..."). Absent unless `ORWELL_WIPEOUT_REEL` has fired at least once; persisted with the season
+   * (0030), plain JSON (ids + strings only) so save/restore round-trips losslessly.
+   */
+  wipeoutHistory?: Record<EntityId, WipeoutHistoryEntry[]>;
 }
 
 /** 0102 — the non-committal cliffhanger a `DailyRecapEntry` may carry (see `DailyRecapHook` in the port). */
@@ -679,6 +700,21 @@ export interface SeasonCtx {
    * leaves it off.
    */
   mixedComps?: boolean;
+  /**
+   * C1 (#1788, Q8 hybrid-greenlit) — the WIPEOUT REEL layer is live for this turn
+   * (`ORWELL_WIPEOUT_REEL`). Off/absent ⇒ `beginStaged` computes no `failureStyle` fact for any staged-
+   * comp drop ⇒ the `comp-elimination` content is BYTE-IDENTICAL to the pre-feature template/authored-
+   * fiction path (`tests/unit/stagedTrajectoryNeutral.test.ts` covers the OUTCOME axis regardless — this
+   * layer never touches rng, `dropOrder`, or the winner, only presentation).
+   */
+  wipeoutReelEnabled?: boolean;
+  /**
+   * C1 — the houseguest's byte-stable genesis `CHARACTER` archetype (`characterFactory.ts`'s 12-member
+   * enum), read ONLY to pick which failure-style phrase bank a Wipeout Reel drop draws from (a comic
+   * SIGNATURE, per houseguest). Optional: omitted ⇒ every drop draws from the generic pool — still
+   * byte-identical on the outcome axis (presentation only; no rng/fold/dropOrder touched either way).
+   */
+  archetypeOf?: (id: EntityId) => string | undefined;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -786,7 +822,7 @@ function resolveHohBeat(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
     const result = resolveComp(field, def, ctx, rng, s.compIntent ?? "compete");
     recordDraw(s, "hoh", def); // committed for the week — the next hoh draw avoids it (0042)
     s.vetoComp = undefined;
-    s.competition = beginStaged("hoh-competition", def.type, field, result);
+    s.competition = beginStaged(s, ctx, rng, "hoh-competition", def, field, result);
     freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
@@ -844,21 +880,44 @@ function resolveVetoComp(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSour
     const result = resolveComp(field, def, ctx, rng, s.compIntent ?? "compete");
     recordDraw(s, "veto", def); // committed for the week — the next veto draw avoids it (0042)
     // `s.compIntent` (round 1's approach) carries into advanceCompetition as round 1's expression.
-    s.competition = beginStaged("veto-competition", def.type, field, result);
+    s.competition = beginStaged(s, ctx, rng, "veto-competition", def, field, result);
     freezeCompTheme(s); // L-F4 (#1743): pin the theme inputs at draw so the presentation can't flip mid-comp
   }
   return advanceCompetition(s, ctx);
 }
 
-/** Build the staged sub-state from the ALREADY-RESOLVED outcome: winner fixed, drop order derived
- *  PURELY from the roll's scores (zero rng), so the reveals can never perturb anything (PR #395). */
+/**
+ * Build the staged sub-state from the ALREADY-RESOLVED outcome: winner fixed, drop order derived
+ * PURELY from the roll's scores (zero rng), so the reveals can never perturb anything (PR #395).
+ *
+ * C1 (#1788): when `ctx.wipeoutReelEnabled`, ALSO precomputes each dropped entrant's `failureStyle`
+ * fact from a stream FORKED off `rng` right here — AFTER `resolveComp` already fixed the crown/scores,
+ * and BEFORE anything downstream draws from `rng` again. `RandomnessSource.fork` derives its child
+ * purely from the parent's CURRENT internal position + a label — it never calls the parent's `next()`
+ * — so this consumes ZERO draws from `rng` itself; the outcome axis (winner, `dropOrder`, every later
+ * seeded roll) is untouched whether the flag is on or off (`stagedTrajectoryNeutral.test.ts`).
+ */
 function beginStaged(
-  comp: "hoh-competition" | "veto-competition", type: CompetitionType, field: EntityId[], result: CompetitionResult,
+  s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource,
+  comp: "hoh-competition" | "veto-competition", def: CompetitionDef, field: EntityId[], result: CompetitionResult,
 ): CompetitionProgress {
-  return {
-    comp, type, field: [...field], stillIn: [...field], round: 1, eliminated: [],
-    winner: result.winner, dropOrder: eliminationOrder(field, result),
+  const dropOrder = eliminationOrder(field, result);
+  const progress: CompetitionProgress = {
+    comp, type: def.type, field: [...field], stillIn: [...field], round: 1, eliminated: [],
+    winner: result.winner, dropOrder,
   };
+  if (ctx.wipeoutReelEnabled && dropOrder.length > 0) {
+    const wipeoutRng = rng.fork(`wipeout-reel:${comp}:${s.week}`);
+    const facts: Record<EntityId, WipeoutFailureFact> = {};
+    for (const id of dropOrder) {
+      facts[id] = deriveFailureFact(
+        wipeoutRng, ctx.archetypeOf?.(id), ctx.emotionalOf?.(id), def.format,
+        priorWipeoutCount(s.wipeoutHistory?.[id]),
+      );
+    }
+    progress.failureStyles = facts;
+  }
+  return progress;
 }
 
 /**
@@ -976,20 +1035,61 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   }
   c.round += 1;
   if (c.stillIn.length === 1) return crownCompetition(s);
+  // #1400: when the model authored + the engine VALIDATED fiction for THIS comp, tell the drop as the
+  // model's per-round fiction (looked up by the exact dropped ids) instead of the deterministic 0042
+  // template. PRESENTATION ONLY — `droppedThisRound` and its order come straight from the fixed
+  // `dropOrder`, so this can never rename who goes or reorder them (`comp-elimination` is NOT a
+  // TRAJECTORY_BEAT; the winner/order/rng are untouched). Absent/mismatched fiction ⇒ the template.
+  const authored = fictionalDropContent(s, c, droppedThisRound);
+  const template = eliminationContent(droppedThisRound, c.stillIn.length, competitionDefFor(s, c)?.format);
+  // C1 (#1788): append each dropped entrant's failure-style FACT-TO-VOICE after the template — always-on
+  // content (not a callable tool, per the I6 lesson), exactly the same delivery mechanism as the format
+  // verb above. Only when no authored fiction already dressed this round (avoids a templated sentence
+  // clashing with the model's own richer prose for the SAME drop — #1400's precedence rule: authored
+  // fiction is never displaced) and the layer is on.
+  const wipeout = authored ? undefined : wipeoutContentFor(c, droppedThisRound);
+  // C1 (#1788, P1 fixes — PR #1831 review, both leaks): record the reveal into the season-spanning,
+  // monotonic history ONLY when the failure-style text actually RIDES the emitted beat below.
+  // INVARIANT: wipeoutHistory ⊆ AIRED reel moments. Two paths previously violated it:
+  //   (1) the FINAL batch of a comp (narrows `stillIn` to 1) returns via `crownCompetition` above —
+  //       a crown beat, never a `comp-elimination` beat (COMP-13: the crown carries no drop flavor) —
+  //       so its facts never air; recording them is prevented by this append sitting PAST that return;
+  //   (2) an AUTHORED-fiction round (#1400) emits the model's own prose INSTEAD of the reel text
+  //       (`wipeout` is undefined when `authored` is set), so its facts never air either; recording
+  //       them is prevented by gating on `wipeout` — the exact composed text the beat carries.
+  // Either leak let a houseguest's NEXT wipeout wrongly read as a callback ("the second time this
+  // season") to a moment the player never saw. Gating on `wipeout` keeps `priorWipeoutCount` — and the
+  // callback clause — an honest count of what actually aired. Post-roll bookkeeping either way: no rng,
+  // no fold, no effect on `dropOrder`/the winner (`stagedTrajectoryNeutral.test.ts` stays the guard).
+  if (wipeout) {
+    for (const dropped of droppedThisRound) {
+      const fact = c.failureStyles?.[dropped];
+      if (fact) appendWipeoutHistory((s.wipeoutHistory ??= {}), dropped, { week: s.week, comp: c.comp, text: fact.text });
+    }
+  }
   return {
     // A per-round DROP — NOT the crown (which keeps the comp beat key so its consequence still folds).
     // `comp-elimination` falls through every commit side-effect switch (no fold, no soul inflection, no
     // confessional, no rng) — so a reveal is inert to the game state, keeping the trajectory unchanged.
     beat: "comp-elimination",
-    // #1400: when the model authored + the engine VALIDATED fiction for THIS comp, tell the drop as the
-    // model's per-round fiction (looked up by the exact dropped ids) instead of the deterministic 0042
-    // template. PRESENTATION ONLY — `droppedThisRound` and its order come straight from the fixed
-    // `dropOrder`, so this can never rename who goes or reorder them (`comp-elimination` is NOT a
-    // TRAJECTORY_BEAT; the winner/order/rng are untouched). Absent/mismatched fiction ⇒ the template.
-    content: fictionalDropContent(s, c, droppedThisRound)
-      ?? eliminationContent(droppedThisRound, c.stillIn.length, competitionDefFor(s, c)?.format),
+    content: authored ?? (wipeout ? `${template} ${wipeout}` : template),
     participants: [...droppedThisRound, ...c.stillIn],
   };
+}
+
+/**
+ * C1 (#1788) — the composed Wipeout Reel text for THIS round's drops, or `undefined` when the layer is
+ * off (no `failureStyles` computed) or a defensive miss (a dropped id somehow has no precomputed fact —
+ * `beginStaged` covers every `dropOrder` entry when the flag is on, so this is a pure safety net).
+ */
+function wipeoutContentFor(c: CompetitionProgress, droppedThisRound: readonly EntityId[]): string | undefined {
+  if (!c.failureStyles) return undefined;
+  const parts: string[] = [];
+  for (const id of droppedThisRound) {
+    const fact = c.failureStyles[id];
+    if (fact) parts.push(fact.text);
+  }
+  return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 /**

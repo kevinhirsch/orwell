@@ -553,6 +553,20 @@ const COMP_MECHANICS_PLUS_ENABLED_DEFAULT = process.env.ORWELL_COMP_MECHANICS_PL
 const COMP_MIXED_ENABLED_DEFAULT = process.env.ORWELL_COMP_MIXED === "1";
 
 /**
+ * C1 (#1788, Q8 hybrid-greenlit small+reversible build) — whether the WIPEOUT REEL runs by DEFAULT: a
+ * seeded, archetype-flavored `failureStyle` fact-to-voice attached to each pre-rolled staged-comp drop
+ * (`liveSeason.ts`'s `beginStaged`/`advanceCompetition`). OFF unless `ORWELL_WIPEOUT_REEL=1`.
+ * PRESENTATION ONLY, like 0125's theme layer: the failure-style text is drawn from a stream FORKED
+ * (`rng.fork`) AFTER the single up-front `resolveCompetition` roll that fixes the crown + drop order —
+ * it never advances or reads the parent stream, so the OUTCOME axis (winner, `dropOrder`, every
+ * downstream seeded draw) is byte-identical whether this is on or off
+ * (`tests/unit/stagedTrajectoryNeutral.test.ts` is the guard). Off ⇒ `ctx().wipeoutReelEnabled` is
+ * false ⇒ no failure-style fact is computed or appended ⇒ byte-identical to the pre-feature
+ * `comp-elimination` content.
+ */
+const WIPEOUT_REEL_ENABLED_DEFAULT = process.env.ORWELL_WIPEOUT_REEL === "1";
+
+/**
  * 0091 — whether the TRIGGER-ERUPTION layer runs by DEFAULT. OFF unless `ORWELL_TRIGGERS=1`. A DEDICATED
  * flag (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_TRAJECTORIES`) so calibration neutrality is provable in
  * isolation: with it unset, the orchestrator never runs the trigger check ⇒ ZERO draws on any rng ⇒ every
@@ -1016,6 +1030,8 @@ export class GameSessionAdapter implements GameSession {
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
+  /** C1 (#1788) — the Wipeout Reel presentation layer; off ⇒ `comp-elimination` content is untouched. */
+  private wipeoutReelEnabled = WIPEOUT_REEL_ENABLED_DEFAULT;
 
   private confessionalDepthEnabled = CONFESSIONAL_DEPTH_ENABLED_DEFAULT;
   /** 0123 — NPC-initiated deal offers to the player; off ⇒ no offer/pending/fold ever (byte-identical). */
@@ -6853,6 +6869,14 @@ export class GameSessionAdapter implements GameSession {
       // 0127: blend a hybrid comp's secondary aptitude into its outcome — present ONLY when enabled (off in
       // the calibration/golden harness ⇒ absent ⇒ pure single-stat resolution ⇒ byte-identical).
       ...(this.compMixedEnabled ? { mixedComps: true as const } : {}),
+      // C1 (#1788): the Wipeout Reel presentation layer — present ONLY when enabled (off in the
+      // calibration/golden harness ⇒ absent ⇒ no failure-style fact computed ⇒ byte-identical
+      // `comp-elimination` content). `archetypeOf` rides ALONGSIDE it — `beginStaged` only ever reads it
+      // when `wipeoutReelEnabled` is true, so gating both behind the SAME flag keeps the off-state ctx
+      // object itself byte-identical to before this feature existed, not just its downstream effect.
+      ...(this.wipeoutReelEnabled
+        ? { wipeoutReelEnabled: true as const, archetypeOf: (id: EntityId) => this.archetypeReadOf(id) }
+        : {}),
     };
   }
 
@@ -6870,6 +6894,12 @@ export class GameSessionAdapter implements GameSession {
   setCompMixedEnabled(on: boolean): void { this.compMixedEnabled = on; }
   /** 0127 — the resolved on/off state of hybrid competition resolution (for an admin/status read). */
   compMixedEnabledNow(): boolean { return this.compMixedEnabled; }
+
+  /** C1 (#1788) — turn the Wipeout Reel presentation layer on/off. Off by default (byte-identical
+   *  `comp-elimination` content); the deploy/live-demo flip turns it on per the Q8 hybrid ruling. */
+  setWipeoutReelEnabled(on: boolean): void { this.wipeoutReelEnabled = on; }
+  /** C1 (#1788) — the resolved on/off state of the Wipeout Reel layer (for an admin/status read). */
+  wipeoutReelEnabledNow(): boolean { return this.wipeoutReelEnabled; }
 
   /** Turn the live campaign layer on/off (0085 B2). Off by default — the calibration harness leaves it off. */
   setCampaignsEnabled(on: boolean): void { this.campaignsEnabled = on; }
@@ -8021,6 +8051,16 @@ export class GameSessionAdapter implements GameSession {
       ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
       : undefined;
     return hg ? dispositionOf(hg.character.archetype) : "neutral";
+  }
+
+  /** C1 (#1788) — the houseguest's byte-stable genesis `CHARACTER` archetype, or `undefined` for an
+   *  unknown/departed id. Read-only lookup; never mutates, never crosses the wall (the archetype itself
+   *  is already a public genesis facet, not Vault content — see `characterFactory.ts`'s 12-member enum). */
+  private archetypeReadOf(id: EntityId): string | undefined {
+    const hg = this.house
+      ? (this.house.player.id === id ? this.house.player : this.house.npcs.find((n) => n.id === id))
+      : undefined;
+    return hg?.character.archetype;
   }
 
   /** 0124 (part B) — the EFFECTIVE disposition: the static baseline bent by the soul's temperament drift when
