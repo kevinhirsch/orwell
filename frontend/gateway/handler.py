@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Optional
 
+from .consequence import fold_gateway_turn
 from .pairing import get_paired_user
 from .scrub import scrub_for_platform
 
@@ -142,6 +143,22 @@ async def _call_player_turn(user: str, message_text: str) -> str:
     except Exception as exc:
         logger.warning("gateway: narration failed for user %s: %s", user, exc)
         return _ENGINE_ERROR_MSG
+
+    # 2026-07-22 gap-audit G1 fix: fold this turn's hidden-layer consequence (mandate #4 /
+    # feature 0023 — "never ship an action that is narrated but never recorded"). Every prior
+    # gateway turn called ONLY read tools, so no mutating engine call ever fired here and
+    # Orchestrator.commitPlayerTurn's per-turn bounded off-screen tick never ran either (see
+    # src/composition/runtime.ts's registry.setCommit funnel — recordInteraction is the ONLY
+    # mutating call in this path, so it is what wakes the tick). fold_gateway_turn is a
+    # self-contained mirror of the streaming loop's 0055 _auto_record_scene belt — it does NOT
+    # import agent_loop.py — and is fail-soft by construction (never raises); still guarded here
+    # so a future change to it can never turn a consequence-fold hiccup into a lost reply.
+    try:
+        await fold_gateway_turn(user, message_text, reply, (game_state or {}).get("house") or [])
+    except Exception as exc:
+        logger.warning("gateway: consequence fold raised unexpectedly for user %s: %s", user, exc)
+        from src import log_rings
+        log_rings.record_soft_failure("gateway:consequence-fold-raised", exc, user=user)
 
     return reply or _ENGINE_ERROR_MSG
 
