@@ -305,3 +305,82 @@ describe("wipeoutReel — engine flag-on: outcome-neutral, presentation-enriched
     expect(found, "expected at least one seed to produce a repeat wipeout with a callback clause").toBe(true);
   });
 });
+
+describe("wipeoutReel — P1 fix (PR #1831 review): wipeoutHistory ⊆ AIRED reel moments", () => {
+  // THE BUG (T-Rex repro): the FINAL batch of a staged comp — the one that narrows `stillIn` to 1 —
+  // returns via `crownCompetition` (a crown beat, deliberately carrying no drop flavor per COMP-13),
+  // so its precomputed failure-style facts are NEVER VOICED as a `comp-elimination` beat. Appending
+  // them to `wipeoutHistory` anyway made the houseguest's NEXT wipeout wrongly read as a callback
+  // ("the second time this season") to a moment the player never saw. The history must record only
+  // what actually aired.
+
+  it("T-Rex repro: the final pre-crown batch gets NO history entry; aired drops get exactly one", () => {
+    // A 6-strong field ⇒ 5 drops at batch size 1 ⇒ exactly 4 AIRED `comp-elimination` beats; the 5th
+    // (final) drop rides the crown return and never airs. Deterministic given the seed.
+    const h = buildHouse(6, 3);
+    const ctx: SeasonCtx = {
+      player: PLAYER, statsOf: h.statsOf, rel: h.rel(),
+      wipeoutReelEnabled: true, archetypeOf: archetypeFor,
+    };
+    const s: LiveSeasonState = newLiveSeason(h.active);
+    const rng = new SeededRandom(3);
+    const aired: string[] = [];
+    let dropOrder: EntityId[] | undefined;
+    for (let guard = 0; guard < 100; guard++) {
+      let ev: BeatEvent | null = null;
+      if (s.pending && (s.pending.kind === "comp-round" || s.pending.kind === "comp-intent")) {
+        ev = applyDecision(s, { kind: s.pending.kind, intent: "compete" }, ctx, rng);
+      } else if (s.pending) {
+        break; // the first non-comp pending (nominations) — the HOH comp is fully resolved
+      } else {
+        ev = advance(s, ctx, rng);
+      }
+      if (s.competition?.dropOrder) dropOrder = [...s.competition.dropOrder];
+      if (ev?.beat === "comp-elimination") aired.push(ev.content);
+      if (ev?.beat === "hoh-competition") break; // the crown beat — comp complete
+    }
+
+    expect(dropOrder, "the staged comp must have resolved a drop order").toBeDefined();
+    expect(dropOrder).toHaveLength(5);
+    const airedIds = dropOrder!.slice(0, -1); // the four drops that emit a comp-elimination beat
+    const neverAired = dropOrder![dropOrder!.length - 1]!; // the final drop — rides the crown, never airs
+    expect(aired).toHaveLength(airedIds.length);
+
+    // AIRED drops: exactly one history entry each, and the recorded text is verbatim what aired.
+    for (const id of airedIds) {
+      const entries = s.wipeoutHistory?.[id] ?? [];
+      expect(entries, `aired drop ${id} must have exactly one history entry`).toHaveLength(1);
+      expect(
+        aired.some((content) => content.includes(entries[0]!.text)),
+        `history text for ${id} must appear in an aired comp-elimination beat`,
+      ).toBe(true);
+    }
+
+    // THE P1: the never-aired final drop has NO history entry…
+    expect(s.wipeoutHistory?.[neverAired] ?? []).toHaveLength(0);
+    // …so their NEXT wipeout reads as a FIRST (priorWipeoutCount 0 ⇒ no callback clause).
+    expect(priorWipeoutCount(s.wipeoutHistory?.[neverAired])).toBe(0);
+    const next = deriveFailureFact(new SeededRandom(1), archetypeFor(neverAired), undefined, undefined,
+      priorWipeoutCount(s.wipeoutHistory?.[neverAired]));
+    expect(next.text).not.toContain("this season");
+  });
+
+  it("INVARIANT across full seasons: every history entry's text was voiced in an aired comp-elimination beat", () => {
+    for (const seed of [1, 5, 21]) {
+      const h = buildHouse(9, seed);
+      const ctxOn: SeasonCtx = {
+        player: PLAYER, statsOf: h.statsOf, rel: h.rel(),
+        wipeoutReelEnabled: true, archetypeOf: archetypeFor,
+      };
+      const { traj, s } = play(h.active, ctxOn, seed);
+      const entries = Object.values(s.wipeoutHistory ?? {}).flat();
+      expect(entries.length).toBeGreaterThan(0); // aired moments still accumulate (monotonicity holds)
+      for (const entry of entries) {
+        expect(
+          traj.compEliminationContent.some((content) => content.includes(entry.text)),
+          `history entry "${entry.text}" (week ${entry.week}) must trace to an AIRED reel moment`,
+        ).toBe(true);
+      }
+    }
+  });
+});

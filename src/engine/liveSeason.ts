@@ -1032,16 +1032,24 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
     c.stillIn = c.stillIn.filter((id) => id !== dropped);
     c.eliminated.push(dropped);
     droppedThisRound.push(dropped);
-    // C1 (#1788): record the REVEAL into the season-spanning, monotonic history — engine truth that
-    // this houseguest wiped out with this style, independent of which prose voices it THIS round (the
-    // model's own authored fiction may pre-empt the displayed text below; the accumulation still counts,
-    // exactly like `resume`'s "already-broadcast events" bookkeeping). No-op when the layer is off
-    // (`c.failureStyles` absent) ⇒ `s.wipeoutHistory` is never created ⇒ byte-identical off.
-    const fact = c.failureStyles?.[dropped];
-    if (fact) appendWipeoutHistory((s.wipeoutHistory ??= {}), dropped, { week: s.week, comp: c.comp, text: fact.text });
   }
   c.round += 1;
   if (c.stillIn.length === 1) return crownCompetition(s);
+  // C1 (#1788, P1 fix — PR #1831 review): record the REVEAL into the season-spanning, monotonic history
+  // — ONLY here, past the crown-return above. INVARIANT: wipeoutHistory ⊆ AIRED reel moments. The FINAL
+  // batch of a comp (the one that narrows `stillIn` to 1) never reaches this line — it returns via
+  // `crownCompetition` instead, which emits a `hoh-competition`/`veto-competition` crown beat, NOT a
+  // `comp-elimination` beat (COMP-13: the crown deliberately carries no drop flavor) — so that batch's
+  // failure-style fact is NEVER VOICED. Appending it to history anyway (the original bug) let a
+  // houseguest's NEXT wipeout wrongly read as a callback ("the second time this season") to a moment the
+  // player never actually saw. Recording here, only for a batch that is about to emit a real
+  // `comp-elimination` beat below, keeps `priorWipeoutCount` — and therefore the callback clause — an
+  // honest count of what actually aired. Post-roll bookkeeping either way: no rng, no fold, no effect on
+  // `dropOrder`/the winner (`stagedTrajectoryNeutral.test.ts` stays the byte-identity guard).
+  for (const dropped of droppedThisRound) {
+    const fact = c.failureStyles?.[dropped];
+    if (fact) appendWipeoutHistory((s.wipeoutHistory ??= {}), dropped, { week: s.week, comp: c.comp, text: fact.text });
+  }
   // #1400: when the model authored + the engine VALIDATED fiction for THIS comp, tell the drop as the
   // model's per-round fiction (looked up by the exact dropped ids) instead of the deterministic 0042
   // template. PRESENTATION ONLY — `droppedThisRound` and its order come straight from the fixed
