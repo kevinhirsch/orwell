@@ -272,6 +272,78 @@ def test_save_capability_profile_persists_to_disk(tmp_path):
     assert saved["capability_profiles"]["ep-1"]["overallTier"] == "yellow"
 
 
+# ── the scoped-write regression (the lost-update race this PR closes) ──────────────────────────
+#
+# The original save_capability_profile/clear_capability_profile did a FULL-DICT
+# load_settings() -> mutate one key -> save_settings(whole_dict). load_settings() merges
+# DEFAULT_SETTINGS in, and is cached for _CACHE_TTL seconds — so writing that merged dict back
+# would (a) silently PIN every default value (e.g. overseer_debug: "off") into the file as if it
+# had been explicitly saved, and (b) clobber ANY other key a concurrent writer had JUST changed
+# on disk, because the stale/merged in-memory copy wins on write. Both are real production bugs,
+# not just a test-isolation artifact (PR #1821's own capability-probe background thread is one
+# such concurrent writer). The fix re-reads the RAW file fresh under a lock and mutates only
+# `capability_profiles` — this proves it by mutating the unrelated `overseer_debug` key on disk
+# BEHIND the settings module's cache, then checking it survives a save_capability_profile call.
+
+
+def test_save_capability_profile_never_clobbers_a_concurrent_write_to_an_unrelated_key(tmp_path):
+    # Seed the file with an explicit, unrelated setting and warm the settings module's cache by
+    # reading it — this simulates another in-process reader having just loaded the dict.
+    (tmp_path / "settings.json").write_text(_json.dumps({"overseer_debug": "log"}))
+    settings._invalidate_caches()
+    assert settings.get_setting("overseer_debug") == "log"
+    # Now, BEHIND that warm cache, a concurrent writer changes the unrelated key directly on
+    # disk (standing in for another thread's own full-dict settings write racing this one).
+    (tmp_path / "settings.json").write_text(_json.dumps({"overseer_debug": "force"}))
+    # save_capability_profile must re-read FRESH from disk and touch ONLY capability_profiles —
+    # never revert the unrelated key to the stale cached/merged "log" read.
+    cap.save_capability_profile("ep-1", {"overallTier": "green"})
+    saved = _json.loads((tmp_path / "settings.json").read_text())
+    assert saved["overseer_debug"] == "force"  # survived — not reverted by a full-dict write
+    assert saved["capability_profiles"]["ep-1"]["overallTier"] == "green"
+    # And the merge-in-defaults hazard specifically: a key that was NEVER explicitly saved must
+    # still never appear in the raw file just because save_capability_profile ran.
+    assert "time_of_day_enabled" not in saved  # a DEFAULT_SETTINGS key, never explicitly set
+
+
+def test_clear_capability_profile_never_clobbers_a_concurrent_write_to_an_unrelated_key(tmp_path):
+    cap.save_capability_profile("ep-1", {"overallTier": "red"})
+    (tmp_path / "settings.json").write_text(
+        _json.dumps({**_json.loads((tmp_path / "settings.json").read_text()),
+                     "overseer_debug": "log"}))
+    settings._invalidate_caches()
+    assert settings.get_setting("overseer_debug") == "log"  # warms the cache
+    raw = _json.loads((tmp_path / "settings.json").read_text())
+    raw["overseer_debug"] = "force"
+    (tmp_path / "settings.json").write_text(_json.dumps(raw))  # concurrent write, behind cache
+    cap.clear_capability_profile("ep-1")
+    saved = _json.loads((tmp_path / "settings.json").read_text())
+    assert saved["overseer_debug"] == "force"
+    assert "ep-1" not in (saved.get("capability_profiles") or {})
+
+
+def test_save_capability_profile_serializes_concurrent_callers(tmp_path):
+    """Two REAL threads calling save_capability_profile for different endpoints concurrently —
+    both entries must survive (the module-level lock serializes the read-modify-write instead of
+    letting the two race each other's read)."""
+    import threading as _threading
+    barrier = _threading.Barrier(2)
+
+    def _save(ep_id, tier):
+        barrier.wait(timeout=5)
+        cap.save_capability_profile(ep_id, {"overallTier": tier})
+
+    t1 = _threading.Thread(target=_save, args=("ep-a", "green"))
+    t2 = _threading.Thread(target=_save, args=("ep-b", "red"))
+    t1.start()
+    t2.start()
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+    profiles = cap.get_all_capability_profiles()
+    assert profiles.get("ep-a", {}).get("overallTier") == "green"
+    assert profiles.get("ep-b", {}).get("overallTier") == "red"
+
+
 # ── clear_capability_profile (CodeRabbit minor, PR #1821: deletion must drop the profile too) ──
 
 

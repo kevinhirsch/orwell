@@ -18,6 +18,22 @@ import os
 
 import pytest
 
+settings = importlib.import_module("src.settings")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings(tmp_path, monkeypatch):
+    # This module's `overseer_debug_tier()` reads settings-first (an explicitly-saved
+    # `overseer_debug` value) before falling back to the env var — and PR #1821 added
+    # concurrent settings-store WRITES (capability-probe persistence) that race this file's
+    # settings-dependent reads under xdist. Redirect the shared settings store to a per-test
+    # tmp_path, matching the repo's canonical isolation pattern (see
+    # tests/test_t0_4_capability_probe.py).
+    monkeypatch.setattr(settings, "SETTINGS_FILE", str(tmp_path / "settings.json"))
+    settings._invalidate_caches()
+    yield
+    settings._invalidate_caches()
+
 
 @pytest.fixture
 def ovd():
