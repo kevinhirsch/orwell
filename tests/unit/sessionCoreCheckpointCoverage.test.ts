@@ -46,6 +46,8 @@ describe("PERSIST-8 — sessionCoreCounts (the newer monotonic per-season counte
     "legendTickCount", "legendCount", "legendLastActTick",
     "secretBarterTickCount", "secretBarterCount",
     "showrunnerReweightCount", // 0101/#1401 Phase-2 (#1455) — the reweight-fired monotonic count
+    "presenceTickCount",
+    "lastConfessionalSweepDay",
   ];
 
   for (const field of fields) {
