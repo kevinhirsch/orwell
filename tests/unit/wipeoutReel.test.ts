@@ -365,6 +365,68 @@ describe("wipeoutReel — P1 fix (PR #1831 review): wipeoutHistory ⊆ AIRED ree
     expect(next.text).not.toContain("this season");
   });
 
+  it("authored-fiction leak (P1 #2): a #1400-dressed round voices the model's prose, NOT the reel — so it must append NO history", () => {
+    // Same deterministic single-comp driver as the T-Rex repro (6-strong field ⇒ 5 drops, batch size 1
+    // ⇒ 4 aired `comp-elimination` beats). Round 1 airs BEFORE any fiction exists (the write-back can
+    // only author against post-resolution staging data), so it appends its reel entry; then VALIDATED
+    // #1400 fiction is stored for the comp, so rounds 2-4 emit the authored prose INSTEAD of the reel
+    // text — per #1400's precedence rule the fiction is never displaced — and must append NOTHING.
+    const h = buildHouse(6, 3);
+    const ctx: SeasonCtx = {
+      player: PLAYER, statsOf: h.statsOf, rel: h.rel(),
+      wipeoutReelEnabled: true, archetypeOf: archetypeFor,
+    };
+    const s: LiveSeasonState = newLiveSeason(h.active);
+    const rng = new SeededRandom(3);
+    const aired: Array<{ content: string; round: number }> = [];
+    let dropOrder: EntityId[] | undefined;
+    let airedRounds = 0;
+    for (let guard = 0; guard < 100; guard++) {
+      let ev: BeatEvent | null = null;
+      if (s.pending && (s.pending.kind === "comp-round" || s.pending.kind === "comp-intent")) {
+        ev = applyDecision(s, { kind: s.pending.kind, intent: "compete" }, ctx, rng);
+      } else if (s.pending) {
+        break;
+      } else {
+        ev = advance(s, ctx, rng);
+      }
+      if (s.competition?.dropOrder && !dropOrder) {
+        dropOrder = [...s.competition.dropOrder];
+      }
+      if (ev?.beat === "comp-elimination") {
+        airedRounds += 1;
+        aired.push({ content: ev.content, round: airedRounds });
+        if (airedRounds === 1) {
+          // The model's write-back lands after round 1 aired: VALIDATED fiction covering every drop.
+          s.competitionFiction = {
+            comp: "hoh-competition", week: s.week,
+            theme: "an invented gauntlet", premise: "an authored staging premise",
+            eliminations: dropOrder!.map((id) => ({ id, fiction: `authored exit line for ${id}.` })),
+          };
+        }
+      }
+      if (ev?.beat === "hoh-competition") break;
+    }
+
+    expect(dropOrder).toHaveLength(5);
+    expect(aired).toHaveLength(4);
+    // Rounds 2+ voiced the AUTHORED prose, not the reel text.
+    for (const { content, round } of aired) {
+      if (round === 1) continue;
+      expect(content).toContain("authored exit line for");
+    }
+    // Round 1's drop aired its reel text ⇒ exactly one history entry, traceable to the aired beat.
+    const round1Drop = dropOrder![0]!;
+    expect(s.wipeoutHistory?.[round1Drop] ?? []).toHaveLength(1);
+    expect(aired[0]!.content).toContain(s.wipeoutHistory![round1Drop]![0]!.text);
+    // THE P1 #2: every fiction-dressed drop (rounds 2-4) — and the never-aired final drop — has NO
+    // history entry: their failure styles were computed but never voiced.
+    for (const id of dropOrder!.slice(1)) {
+      expect(s.wipeoutHistory?.[id] ?? [], `fiction-dressed/never-aired drop ${id} must have no history`).toHaveLength(0);
+      expect(priorWipeoutCount(s.wipeoutHistory?.[id])).toBe(0);
+    }
+  });
+
   it("INVARIANT across full seasons: every history entry's text was voiced in an aired comp-elimination beat", () => {
     for (const seed of [1, 5, 21]) {
       const h = buildHouse(9, seed);

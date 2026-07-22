@@ -1035,21 +1035,6 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   }
   c.round += 1;
   if (c.stillIn.length === 1) return crownCompetition(s);
-  // C1 (#1788, P1 fix — PR #1831 review): record the REVEAL into the season-spanning, monotonic history
-  // — ONLY here, past the crown-return above. INVARIANT: wipeoutHistory ⊆ AIRED reel moments. The FINAL
-  // batch of a comp (the one that narrows `stillIn` to 1) never reaches this line — it returns via
-  // `crownCompetition` instead, which emits a `hoh-competition`/`veto-competition` crown beat, NOT a
-  // `comp-elimination` beat (COMP-13: the crown deliberately carries no drop flavor) — so that batch's
-  // failure-style fact is NEVER VOICED. Appending it to history anyway (the original bug) let a
-  // houseguest's NEXT wipeout wrongly read as a callback ("the second time this season") to a moment the
-  // player never actually saw. Recording here, only for a batch that is about to emit a real
-  // `comp-elimination` beat below, keeps `priorWipeoutCount` — and therefore the callback clause — an
-  // honest count of what actually aired. Post-roll bookkeeping either way: no rng, no fold, no effect on
-  // `dropOrder`/the winner (`stagedTrajectoryNeutral.test.ts` stays the byte-identity guard).
-  for (const dropped of droppedThisRound) {
-    const fact = c.failureStyles?.[dropped];
-    if (fact) appendWipeoutHistory((s.wipeoutHistory ??= {}), dropped, { week: s.week, comp: c.comp, text: fact.text });
-  }
   // #1400: when the model authored + the engine VALIDATED fiction for THIS comp, tell the drop as the
   // model's per-round fiction (looked up by the exact dropped ids) instead of the deterministic 0042
   // template. PRESENTATION ONLY — `droppedThisRound` and its order come straight from the fixed
@@ -1060,8 +1045,28 @@ function advanceCompetition(s: LiveSeasonState, ctx: SeasonCtx): BeatEvent | nul
   // C1 (#1788): append each dropped entrant's failure-style FACT-TO-VOICE after the template — always-on
   // content (not a callable tool, per the I6 lesson), exactly the same delivery mechanism as the format
   // verb above. Only when no authored fiction already dressed this round (avoids a templated sentence
-  // clashing with the model's own richer prose for the SAME drop) and the layer is on.
+  // clashing with the model's own richer prose for the SAME drop — #1400's precedence rule: authored
+  // fiction is never displaced) and the layer is on.
   const wipeout = authored ? undefined : wipeoutContentFor(c, droppedThisRound);
+  // C1 (#1788, P1 fixes — PR #1831 review, both leaks): record the reveal into the season-spanning,
+  // monotonic history ONLY when the failure-style text actually RIDES the emitted beat below.
+  // INVARIANT: wipeoutHistory ⊆ AIRED reel moments. Two paths previously violated it:
+  //   (1) the FINAL batch of a comp (narrows `stillIn` to 1) returns via `crownCompetition` above —
+  //       a crown beat, never a `comp-elimination` beat (COMP-13: the crown carries no drop flavor) —
+  //       so its facts never air; recording them is prevented by this append sitting PAST that return;
+  //   (2) an AUTHORED-fiction round (#1400) emits the model's own prose INSTEAD of the reel text
+  //       (`wipeout` is undefined when `authored` is set), so its facts never air either; recording
+  //       them is prevented by gating on `wipeout` — the exact composed text the beat carries.
+  // Either leak let a houseguest's NEXT wipeout wrongly read as a callback ("the second time this
+  // season") to a moment the player never saw. Gating on `wipeout` keeps `priorWipeoutCount` — and the
+  // callback clause — an honest count of what actually aired. Post-roll bookkeeping either way: no rng,
+  // no fold, no effect on `dropOrder`/the winner (`stagedTrajectoryNeutral.test.ts` stays the guard).
+  if (wipeout) {
+    for (const dropped of droppedThisRound) {
+      const fact = c.failureStyles?.[dropped];
+      if (fact) appendWipeoutHistory((s.wipeoutHistory ??= {}), dropped, { week: s.week, comp: c.comp, text: fact.text });
+    }
+  }
   return {
     // A per-round DROP — NOT the crown (which keeps the comp beat key so its consequence still folds).
     // `comp-elimination` falls through every commit side-effect switch (no fold, no soul inflection, no
