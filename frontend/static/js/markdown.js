@@ -594,7 +594,7 @@ function createThinkingSection(thinkingContent, index = 0, thinkingTime = null) 
   const label = _inGameBuild() ? 'Production notes' : 'View thinking process';
   return `
     <div class="thinking-section">
-      <div class="thinking-header" data-thinking-id="${id}">
+      <div class="thinking-header" data-thinking-id="${id}" role="button" tabindex="0" aria-expanded="false" aria-controls="${id}">
         <div class="thinking-header-left">
           <span>${label}</span>
         </div>
@@ -695,7 +695,7 @@ export function createCollapsible(contentMarkdown, label = 'details') {
   const safeLabel = escapeHtml(label);
   return `
     <div class="thinking-section">
-      <div class="thinking-header" data-thinking-id="${id}">
+      <div class="thinking-header" data-thinking-id="${id}" role="button" tabindex="0" aria-expanded="false" aria-controls="${id}">
         <div class="thinking-header-left"><span data-label="${safeLabel}">View ${safeLabel}</span></div>
         <div style="display:flex;align-items:center;gap:6px;"><span class="thinking-toggle" id="${id}-toggle"></span></div>
       </div>
@@ -1738,6 +1738,9 @@ function _setThinkingExpanded(content, toggle, header, expanded) {
     const label = label_el.dataset.label || 'thinking process';
     label_el.textContent = expanded ? `Hide ${label}` : `View ${label}`;
   }
+  if (header) {
+    header.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
 }
 
 // Delegated click handler for thinking toggle (CSP-safe, no inline onclick)
@@ -1759,6 +1762,15 @@ document.addEventListener('click', function(e) {
   if (willExpand) set.add(hash);
   else set.delete(hash);
   _saveExpandedSet(set);
+});
+
+// Keyboard handler: Enter/Space on thinking header triggers toggle (R-A11Y-1)
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+  const header = e.target.closest('.thinking-header[data-thinking-id]');
+  if (!header) return;
+  e.preventDefault();
+  header.click();
 });
 
 // Watch the chat history; whenever a thinking section appears, expand it if
