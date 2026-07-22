@@ -158,16 +158,6 @@ function positiveVerdict(deal: Deal, action: BindingAction): "kept" | "broken" |
   return null;
 }
 
-/** Does this action involve a party of the deal taking an adverse swing whose target is a party? */
-export function actionImplicates(deal: Deal, action: BindingAction): boolean {
-  if (deal.status !== "open") return false;
-  if (isPositiveObligation(deal.kind)) return positiveVerdict(deal, action) !== null;
-  if (!ADVERSE.has(action.kind)) return false;
-  const isParty = deal.parties.includes(action.actor);
-  const hitsParty = action.targets.some((t) => deal.parties.includes(t) && t !== action.actor);
-  return isParty && hitsParty;
-}
-
 /**
  * The crux: did this binding action BREAK the deal? True iff a bound promisor moved adversely against
  * the protected party. Decided purely from the action + the condition — never from chat prose.
