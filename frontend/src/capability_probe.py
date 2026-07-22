@@ -323,17 +323,73 @@ def run_capability_probe(base_url: str, api_key: str | None, model: str,
 
 # ── persistence (the FE settings store) ──────────────────────────────────────────────────────
 
+# Guards save_capability_profile / clear_capability_profile against EACH OTHER — see
+# _scoped_capability_profiles_update's docstring for the lost-update race this closes (and the
+# residual it does NOT close).
+_SETTINGS_LOCK = threading.Lock()
+
+
+def _scoped_capability_profiles_update(mutate) -> None:
+    """Read-modify-write ONLY the ``capability_profiles`` settings key, under ``_SETTINGS_LOCK``,
+    and NEVER through ``load_settings()``'s DEFAULT_SETTINGS-merged view.
+
+    Why: the original implementation did ``settings = load_settings(); settings[k] = v;
+    save_settings(settings)`` — a FULL-DICT read-merge-write. Two problems, both real (#1821):
+
+      1. ``load_settings()`` merges every ``DEFAULT_SETTINGS`` key into the returned dict, so
+         writing that whole dict back to disk silently PINS every default value (e.g.
+         ``overseer_debug: 'off'``) as if it had been explicitly saved, even though it never
+         was. ``is_setting_overridden()`` then reports it as user-set, which is wrong and can
+         change behavior for a completely unrelated setting.
+      2. It is a classic lost-update race: probe A reads the whole dict, probe B (or ANY other
+         settings writer) reads the whole dict, A writes, then B writes its own full copy —
+         silently reverting whatever A changed in between, in production as much as in tests
+         (the capability probe runs on an unawaited background thread, so its write can land at
+         an arbitrary moment relative to any other in-flight settings write).
+
+    The fix here: re-open the RAW file fresh on every call (same technique as
+    ``is_setting_overridden`` — never the cached/merged ``load_settings()``), mutate ONLY
+    ``capability_profiles`` in place, and write back exactly that raw dict (never a
+    DEFAULT_SETTINGS merge). ``mutate(raw_dict) -> bool`` mutates in place and returns whether
+    anything changed; a no-op mutate skips the write entirely (preserves the prior
+    no-write-on-noop behavior of ``clear_capability_profile``).
+
+    RESIDUAL (by design, out of scope here): this only protects the probe's OWN two entry
+    points from clobbering each other or a sibling key. A DIFFERENT settings writer elsewhere
+    in the app that still does its own full-dict load-merge-save can still race this function
+    and clobber ``capability_profiles`` if its read happens between our read and our write —
+    the lock only serializes the two capability-probe call sites, not every settings writer in
+    the process. Closing that fully would mean giving ``src.settings`` itself a process-wide
+    scoped-update primitive; no such helper exists yet (grepped — every other writer still does
+    its own load/mutate/save), so this module owns its own narrow fix rather than block on that
+    larger change."""
+    import json
+    from src import settings as _settings_mod
+    with _SETTINGS_LOCK:
+        path = _settings_mod.SETTINGS_FILE
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if not isinstance(raw, dict):
+                raw = {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            raw = {}
+        if mutate(raw):
+            _settings_mod.save_settings(raw)
+
 
 def save_capability_profile(endpoint_id: Any, profile: dict) -> None:
     """Persist one endpoint's CapabilityProfile into the FE settings store. Best-effort: a
-    write failure is logged, never raised (probing must never break endpoint registration)."""
+    write failure is logged, never raised (probing must never break endpoint registration).
+    Does a SCOPED update of ``capability_profiles`` only — see
+    ``_scoped_capability_profiles_update`` for why a full-dict write was a lost-update hazard."""
     try:
-        from src.settings import load_settings, save_settings
-        settings = load_settings()
-        profiles = dict(settings.get("capability_profiles") or {})
-        profiles[str(endpoint_id)] = profile
-        settings["capability_profiles"] = profiles
-        save_settings(settings)
+        def _mutate(raw: dict) -> bool:
+            profiles = dict(raw.get("capability_profiles") or {})
+            profiles[str(endpoint_id)] = profile
+            raw["capability_profiles"] = profiles
+            return True
+        _scoped_capability_profiles_update(_mutate)
     except Exception as e:
         logger.warning("[capability-probe] failed to persist profile for endpoint %s: %s",
                        endpoint_id, e)
@@ -365,15 +421,17 @@ def clear_capability_profile(endpoint_id: Any) -> None:
     `capability-red` alarm on /admin/status for an endpoint that no longer exists, which is
     exactly the kind of un-actionable RED noise #1599 warns against. Best-effort: a missing
     entry or a broken settings read/write is a no-op, never raised (deletion must never fail on
-    this)."""
+    this). Does a SCOPED update of ``capability_profiles`` only — see
+    ``_scoped_capability_profiles_update`` for why a full-dict write was a lost-update hazard."""
     try:
-        from src.settings import load_settings, save_settings
-        settings = load_settings()
-        profiles = dict(settings.get("capability_profiles") or {})
-        if str(endpoint_id) in profiles:
+        def _mutate(raw: dict) -> bool:
+            profiles = dict(raw.get("capability_profiles") or {})
+            if str(endpoint_id) not in profiles:
+                return False
             profiles.pop(str(endpoint_id), None)
-            settings["capability_profiles"] = profiles
-            save_settings(settings)
+            raw["capability_profiles"] = profiles
+            return True
+        _scoped_capability_profiles_update(_mutate)
     except Exception as e:
         logger.warning("[capability-probe] failed to clear profile for endpoint %s: %s",
                        endpoint_id, e)
@@ -389,11 +447,19 @@ def clear_capability_profile(endpoint_id: Any) -> None:
 
 
 def probe_endpoint_background(endpoint_id: Any, base_url: str, api_key: str | None, model: str,
-                              *, user: str | None = None) -> None:
+                              *, user: str | None = None) -> threading.Thread:
     """Fire-and-forget: run the ~10-call probe on a daemon thread, persist the result, and
     emit a #1599 RED-eligible health event for either a run failure OR a detected RED
     capability (a correction/finding is never a silent cloak — it must surface RED even when
-    nothing crashed). Never blocks the caller; never raises."""
+    nothing crashed). Never blocks the caller; never raises.
+
+    Returns the started ``Thread`` — every production caller ignores it (this stays genuinely
+    fire-and-forget on the live request path), but it gives TESTS a real handle to ``.join()``
+    in teardown so a probe kicked by an unmocked ``POST /api/model-endpoints`` in an unrelated
+    test can't outlive that test and land its settings write during a LATER test's window (the
+    exact background-thread race that surfaced the residual flake in
+    tests/test_overseer_debug_telemetry.py — a stray probe thread completing mid-test and
+    writing into whatever settings file happened to be monkeypatched at that instant)."""
 
     def _run() -> None:
         try:
@@ -439,4 +505,6 @@ def probe_endpoint_background(endpoint_id: Any, base_url: str, api_key: str | No
                 # up already surfaced this before the recorder write could fail.
                 pass
 
-    threading.Thread(target=_run, daemon=True, name=f"capability-probe-{endpoint_id}").start()
+    t = threading.Thread(target=_run, daemon=True, name=f"capability-probe-{endpoint_id}")
+    t.start()
+    return t

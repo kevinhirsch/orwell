@@ -198,3 +198,41 @@ def _reset_cast_authoring_ledger() -> None:
     if ep is not None:
         with contextlib.suppress(AttributeError):
             ep._FAILURES.clear()
+
+
+@pytest.fixture(autouse=True)
+def _join_stray_capability_probe_threads(monkeypatch):
+    """T0-4 (#1821): ``capability_probe.probe_endpoint_background`` fires a REAL daemon thread
+    (real network calls, real settings writes) whenever a test POSTs to
+    ``/api/model-endpoints`` without mocking the capability-probe kickoff specifically — most
+    pre-existing model-endpoint tests only mock model DISCOVERY (`_probe_endpoint`), not this
+    newer probe arm, so they trigger a genuine background probe without meaning to. Uncontained,
+    that thread can outlive its owning test and land its settings write during a LATER test's
+    window — the exact background-thread race that produced a residual, non-deterministic
+    full-suite flake in ``tests/test_overseer_debug_telemetry.py`` (a stray probe thread
+    completing mid-test and writing into whatever settings file happened to be monkeypatched at
+    that instant). ``probe_endpoint_background`` now returns its ``Thread`` for exactly this
+    reason; wrap it here so every REAL thread it spawns is joined before the test ends,
+    regardless of which test file triggered it. A test that monkeypatches
+    ``capability_probe.probe_endpoint_background`` itself (the T0-4 test files do, to avoid the
+    real network call) simply overrides this wrapper for its own duration — nothing to join
+    there, so this is a no-op safety net for them."""
+    try:
+        import src.capability_probe as _cap
+    except Exception:
+        yield
+        return
+    threads: list = []
+    _orig = _cap.probe_endpoint_background
+
+    def _tracking(*args, **kwargs):
+        t = _orig(*args, **kwargs)
+        if t is not None:
+            threads.append(t)
+        return t
+
+    monkeypatch.setattr(_cap, "probe_endpoint_background", _tracking)
+    yield
+    for t in threads:
+        with contextlib.suppress(Exception):
+            t.join(timeout=15)
