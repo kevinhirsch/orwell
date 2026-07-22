@@ -108,6 +108,15 @@ def _moment_fragments_block() -> str:
     return ts[s:e]
 
 
+def _casting_interview_block() -> str:
+    """Slice CASTING_INTERVIEW_PROMPT from its const to its closing ].join("\\n") (lines 595-704).
+    This sits BETWEEN _base_prose_block and _moment_fragments_block — never scanned before C13."""
+    ts = _moment_prompts_ts()
+    s = ts.index("const CASTING_INTERVIEW_PROMPT")
+    e = ts.index('].join("\\n")', s)
+    return ts[s:e]
+
+
 def _referenced_levers(text: str) -> set[str]:
     """camelCase levers the prompt DIRECTS the model to call — imperative `call X`, a function-call
     `X(`, `with/via/using X`, or a parenthetical prose mention `(X)`. camelCase-only (drops English
@@ -125,7 +134,7 @@ def _referenced_levers(text: str) -> set[str]:
 
 def test_moment_fragments_reference_only_callable_levers():
     schemas = _fe_schema_names()
-    refs = _referenced_levers(_moment_fragments_block())
+    refs = _referenced_levers(_moment_fragments_block() + "\n" + _casting_interview_block())
     assert refs, "extracted no lever references from the moment fragments — parser or prompt shape changed"
     missing = sorted(r for r in refs if r not in schemas)
     assert not missing, (
@@ -138,8 +147,9 @@ def test_moment_fragments_reference_only_callable_levers():
 def test_base_prose_references_only_callable_levers():
     # Beyond the `• name —` bullets (covered by test_every_prompt_advertised_lever_is_agent_callable),
     # the base prompt names levers in PROSE too (e.g. "(turnIn)"). Those must be callable as well.
+    # C13: also scan CASTING_INTERVIEW_PROMPT prose (updateCasting, createCharacter).
     schemas = _fe_schema_names()
-    refs = _referenced_levers(_base_prose_block())
+    refs = _referenced_levers(_base_prose_block() + "\n" + _casting_interview_block())
     assert refs, "extracted no lever references from the base prose — parser or prompt shape changed"
     missing = sorted(r for r in refs if r not in schemas)
     assert not missing, f"base prompt PROSE references levers the agent cannot call: {missing}"
@@ -385,10 +395,10 @@ def _call_form_subparams(text: str) -> list[tuple[str, list[str]]]:
 
 def test_call_form_subparameters_are_schema_fields():
     """Sub-parameter drift check: every `call toolName({ field, ... })` directive in the prompt (base
-    prose + moment fragments) names fields that must be REAL properties on that tool's FE schema — or
-    the model is directed to build an argument shape the FE silently drops."""
+    prose + moment fragments + casting interview) names fields that must be REAL properties on that
+    tool's FE schema — or the model is directed to build an argument shape the FE silently drops."""
     schemas = _schema_properties()
-    text = _base_prose_block() + "\n" + _moment_fragments_block()
+    text = _base_prose_block() + "\n" + _moment_fragments_block() + "\n" + _casting_interview_block()
     pairs = _call_form_subparams(text)
     assert pairs, "failed to parse any call-form sub-parameter directives — parser or prompt shape changed"
     missing = []
@@ -421,4 +431,36 @@ def test_makeDeal_leverage_and_tradedSecret_are_schema_fields():
     )
     assert "tradedSecret" in make_deal_props, (
         "makeDeal's FE schema is missing 'tradedSecret' — the prompt directs the model to use it (0099)"
+    )
+
+
+# --- C13 (2026-07-22 gap audit #1841): the CASTING_INTERVIEW_PROMPT is now scanned too -------------
+#
+# The CASTING_INTERVIEW_PROMPT block (lines 595-704 of momentPrompts.ts) sits BETWEEN
+# BASE_GAME_MASTER_PROMPT and export const MOMENT_PROMPTS — the original range limits
+# (_base_prose_block, _moment_fragments_block) never included it. It contains prose references
+# to updateCasting and createCharacter (both agent-callable), and sub-field bullets (playerName,
+# backstory, etc.) that are NOT levers. The `• name —` lever bullets live in BASE_GAME_MASTER_PROMPT
+# (lines 419, 422) which _prompt_levers() already parses — no bullet-parse change needed.
+# The three prose- and reference-scan consumers above were extended to also scan casting interview
+# text; this tests that the gate would catch a phantom unwired lever if one appeared.
+#
+# NOTE — _prompt_levers() does NOT need extending: CASTING_INTERVIEW_PROMPT has no `• leverName —`
+# bullets (only sub-field names like playerName, backstory). The lever names updateCasting and
+# createCharacter appear in prose/flat reference forms and are caught by _referenced_levers().
+
+def test_casting_scan_has_teeth_against_noncallable_lever():
+    """Regression: the real CASTING_INTERVIEW_PROMPT currently references only updateCasting and
+    createCharacter (both agent-callable). Prove the gate has teeth: if a synthetic unwired lever
+    were added as a prose reference, it would be flagged as missing from FE schemas."""
+    # Real scan finds the known callable levers
+    refs = _referenced_levers(_casting_interview_block())
+    for lever in ("updateCasting", "createCharacter"):
+        assert lever in refs, f"{lever} should be referenced in CASTING_INTERVIEW_PROMPT"
+        assert lever in _fe_schema_names(), f"{lever} must be agent-callable"
+    # Teeth check: a synthetic phantom lever is extracted AND rejected by the callability bar
+    phantom = "fakeUnwiredLever"
+    assert phantom not in _fe_schema_names(), "phantom lever should NOT be callable"
+    assert phantom in _referenced_levers(f"then call {phantom}() to finalize"), (
+        "phantom lever should be extracted by _referenced_levers"
     )
