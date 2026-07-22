@@ -43,9 +43,11 @@ export interface HttpMcpResolver {
 function bootFlags(): Record<string, boolean> {
   // Match each flag's ACTUAL parser so /health never reports a value the engine treats differently:
   // most default from a strict `=== "1"` (GameSessionAdapter module consts); seededTieSurfacing and
-  // timeOfDay also accept "true"/"on" (their runtime getters). Mirror both exactly.
+  // timeOfDay also accept "true"/"on" (their runtime getters); the 0066 Phase-2 sleep trio's two
+  // default-ON members read `!== "0"` (see GameSessionAdapter.ts ~688-717). Mirror all three exactly.
   const strict = (v: string | undefined): boolean => v === "1";
   const loose = (v: string | undefined): boolean => v === "1" || v === "true" || v === "on";
+  const defaultOn = (v: string | undefined): boolean => v !== "0";
   return {
     campaigns: strict(process.env.ORWELL_CAMPAIGNS),
     trajectories: strict(process.env.ORWELL_TRAJECTORIES),
@@ -59,6 +61,23 @@ function bootFlags(): Record<string, boolean> {
     voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
     timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
     dealDepth: strict(process.env.ORWELL_DEAL_DEPTH),
+    // G9 (#1843) — the following 9 deploy-on flags (`deploy/orwell-env-defaults.sh`
+    // `orwell_optin_env_defaults`) plus the 0066 Phase-2 sleep trio (`GameSessionAdapter.ts`
+    // ~688-717) were previously live in production but MISSING from this block.
+    strategicCadence: strict(process.env.ORWELL_STRATEGIC_CADENCE),
+    schemeTargets: strict(process.env.ORWELL_SCHEME_TARGETS),
+    confessionalDepth: strict(process.env.ORWELL_CONFESSIONAL_DEPTH),
+    npcDealOffers: strict(process.env.ORWELL_NPC_DEAL_OFFERS),
+    soulDepth: strict(process.env.ORWELL_SOUL_DEPTH),
+    compMechanicsPlus: strict(process.env.ORWELL_COMP_MECHANICS_PLUS),
+    compMixed: strict(process.env.ORWELL_COMP_MIXED),
+    gossipDrift: strict(process.env.ORWELL_GOSSIP_DRIFT),
+    secretBarter: strict(process.env.ORWELL_SECRET_BARTER),
+    // 0066 Phase-2 sleep trio — NOT deploy-opt-in lines (they're code-level defaults): the first
+    // two default ON (`!== "0"`), the third stays default OFF (`=== "1"`).
+    perConversationClock: defaultOn(process.env.ORWELL_TIME_PER_CONVERSATION),
+    socialFatigue: defaultOn(process.env.ORWELL_SOCIAL_FATIGUE),
+    multiNightFatigue: strict(process.env.ORWELL_MULTI_NIGHT_FATIGUE),
   };
 }
 

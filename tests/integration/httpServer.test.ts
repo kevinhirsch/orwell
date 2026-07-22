@@ -1,10 +1,50 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server, AddressInfo } from "node:net";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { createHttpMcpServer } from "../../src/adapters/mcp/HttpMcpServer";
 import { buildMcpServers } from "../../src/composition/appRoot";
 
 let server: Server;
 let base: string;
+
+/**
+ * G9 (#1843) — derives the /health `flags` camelCase key `bootFlags()` should report for an
+ * `ORWELL_*` env var, mirroring the convention `bootFlags()` itself uses (strip the `ORWELL_`
+ * prefix, lowercase the first word, PascalCase the rest): `ORWELL_SECRET_PACING` -> `secretPacing`,
+ * `ORWELL_NPC_DEAL_OFFERS` -> `npcDealOffers`.
+ */
+function camelKeyFor(envVar: string): string {
+  const parts = envVar.replace(/^ORWELL_/, "").toLowerCase().split("_");
+  return parts.map((p, i) => (i === 0 ? p : p.charAt(0).toUpperCase() + p.slice(1))).join("");
+}
+
+/**
+ * G9 (#1843) — pulls the deploy opt-in flag NAMES straight out of `deploy/orwell-env-defaults.sh`'s
+ * `orwell_optin_env_defaults` (the SINGLE SOURCE both `orwell-install.sh` and `orwell-update.sh`
+ * consume to turn these flags ON in production), instead of a hand-maintained literal — so this test
+ * fails the moment a new flag is added there without a matching `bootFlags()` key, closing the exact
+ * gap G9 found: a fixed 11-item literal that silently drifted from both the deploy defaults and
+ * `GameSessionAdapter`'s own read sites.
+ */
+function deployOptInBooleanFlagKeys(): string[] {
+  const src = readFileSync(path.join(__dirname, "../../deploy/orwell-env-defaults.sh"), "utf8");
+  const heredoc = src.match(/orwell_optin_env_defaults\(\)\s*\{[\s\S]*?cat <<EOF([\s\S]*?)\nEOF/);
+  if (!heredoc) throw new Error("could not locate the orwell_optin_env_defaults() heredoc body");
+  const names = Array.from(heredoc[1].matchAll(/^(ORWELL_[A-Z0-9_]+)=/gm)).map((m) => m[1]);
+  // ORWELL_EMBEDDINGS / ORWELL_EMBED_CACHE are config VALUES (a provider name + a path), not
+  // booleans — they're reported via the separate /health `embeddings` block, not `flags`.
+  return names.filter((n) => n !== "ORWELL_EMBEDDINGS" && n !== "ORWELL_EMBED_CACHE").map(camelKeyFor);
+}
+
+// The 0066/ADR-0006 Phase-2 sleep trio (`GameSessionAdapter.ts` ~688-717) are code-level defaults
+// (two default ON, one default OFF), not deploy opt-in lines, so they never appear in
+// orwell-env-defaults.sh — list them explicitly alongside the deploy-derived set.
+const SLEEP_TRIO_FLAG_KEYS = ["perConversationClock", "socialFatigue", "multiNightFatigue"];
+
+// ORWELL_TIME_OF_DAY is the master clock switch — also code-level (not a deploy opt-in line since
+// it isn't turned on in orwell-env-defaults.sh), but always reported.
+const ALWAYS_EXPECTED_FLAG_KEYS = ["timeOfDay"];
 
 beforeAll(async () => {
   server = createHttpMcpServer(buildMcpServers());
@@ -32,8 +72,17 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     // boolean — a pure env read (no game data / no Vault), so an operator can see what's live.
     const flags = body["flags"] as Record<string, unknown>;
     expect(flags, "the /health flags block is present").toBeTruthy();
-    for (const k of ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse",
-      "seededTieSurfacing", "mythMaking", "compIntent", "voteDeduction", "timeOfDay", "dealDepth"]) {
+    // G9 (#1843): the expected key set is DERIVED from the deploy defaults source file (+ the
+    // sleep trio, which is code-level rather than deploy opt-in) rather than a hand-written
+    // literal, so a future flag added to either place without a matching bootFlags() key fails
+    // this test instead of silently going unreported.
+    const expectedKeys = new Set([
+      ...deployOptInBooleanFlagKeys(),
+      ...SLEEP_TRIO_FLAG_KEYS,
+      ...ALWAYS_EXPECTED_FLAG_KEYS,
+    ]);
+    expect(expectedKeys.size).toBeGreaterThanOrEqual(20);
+    for (const k of expectedKeys) {
       expect(typeof flags[k], `flags.${k} is a boolean`).toBe("boolean");
     }
   });
