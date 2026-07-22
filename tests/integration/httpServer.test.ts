@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Server, AddressInfo } from "node:net";
 import { createHttpMcpServer } from "../../src/adapters/mcp/HttpMcpServer";
 import { buildMcpServers } from "../../src/composition/appRoot";
+import { bootFlagKeys } from "../../src/featureFlags";
 
 let server: Server;
 let base: string;
@@ -32,10 +33,12 @@ describe("HTTP MCP entrypoint (runnable engine)", () => {
     // boolean — a pure env read (no game data / no Vault), so an operator can see what's live.
     const flags = body["flags"] as Record<string, unknown>;
     expect(flags, "the /health flags block is present").toBeTruthy();
-    for (const k of ["campaigns", "trajectories", "triggers", "secretPacing", "juryHouse",
-      "seededTieSurfacing", "mythMaking", "compIntent", "voteDeduction", "timeOfDay", "dealDepth"]) {
+    const expectedFlagKeys = bootFlagKeys();
+    for (const k of expectedFlagKeys) {
       expect(typeof flags[k], `flags.${k} is a boolean`).toBe("boolean");
     }
+    // Verify showrunner (one of the G9 flags that were missing before #1843) is in the registry
+    expect(expectedFlagKeys).toContain("showrunner");
   });
 
   it("records a failed tool call in the /health ring — tool name + error class + timing, never args (G1)", async () => {

@@ -7,6 +7,7 @@ import { EngineRefusal, TurnRefusedError, PersistFailureError, StaleBeatError } 
 import { HealthMetrics, errorClassOf } from "./healthMetrics";
 import { handleRpcPayload, rpcIdOf, RPC } from "./jsonRpc";
 import type { ToolGateway } from "./jsonRpc";
+import { bootFlagsFromEnv } from "../../featureFlags.js";
 
 /**
  * A minimal HTTP transport over the permissioned `McpServer` routers — the
@@ -34,32 +35,13 @@ export interface HttpMcpResolver {
 
 /**
  * B2 (DEPLOY-12) — the BOOT-TIME state of every opt-in behavioral-fidelity + sleep-economy env flag,
- * so an operator can answer "which living-house layers is this box running?" from `/health` alone
- * (they were previously undiscoverable without grepping `data/.env` for exact spellings). A pure read
- * of `process.env` — no Vault, no game data, no engine import. NOTE: this reflects the process's BOOT
- * env; the God-Mode `setBehavioralFlags` dial can override a layer per-sandbox at runtime, so this is
- * the deploy default, not necessarily a given live sandbox's current setting.
+ * so an operator can answer "which living-house layers is this box running?" from `/health` alone.
+ * Flag definitions now live in `src/featureFlags.ts` (the single source of truth, #1843).
+ * This function delegates to the registry so the /health / flags block stays in sync with the
+ * full list of 24 flags — see `FEATURE_FLAGS` in the registry for parsers and ordering.
  */
 function bootFlags(): Record<string, boolean> {
-  // Match each flag's ACTUAL parser so /health never reports a value the engine treats differently:
-  // most default from a strict `=== "1"` (GameSessionAdapter module consts); seededTieSurfacing and
-  // timeOfDay also accept "true"/"on" (their runtime getters). Mirror both exactly.
-  const strict = (v: string | undefined): boolean => v === "1";
-  const loose = (v: string | undefined): boolean => v === "1" || v === "true" || v === "on";
-  return {
-    campaigns: strict(process.env.ORWELL_CAMPAIGNS),
-    trajectories: strict(process.env.ORWELL_TRAJECTORIES),
-    triggers: strict(process.env.ORWELL_TRIGGERS),
-    secretPacing: strict(process.env.ORWELL_SECRET_PACING),
-    juryHouse: strict(process.env.ORWELL_JURY_HOUSE),
-    seededTieSurfacing: loose(process.env.ORWELL_SEEDED_TIE_SURFACING),
-    mythMaking: strict(process.env.ORWELL_MYTH_MAKING),
-    showrunner: strict(process.env.ORWELL_SHOWRUNNER),
-    compIntent: strict(process.env.ORWELL_COMP_INTENT),
-    voteDeduction: strict(process.env.ORWELL_VOTE_DEDUCTION),
-    timeOfDay: loose(process.env.ORWELL_TIME_OF_DAY),
-    dealDepth: strict(process.env.ORWELL_DEAL_DEPTH),
-  };
+  return bootFlagsFromEnv();
 }
 
 /**
