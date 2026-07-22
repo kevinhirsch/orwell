@@ -397,6 +397,17 @@ queue" mechanism was considered and is NOT needed. Every OTHER fold-bearing `_ba
 call site keeps `defer_fold=True` unchanged (byte-identical CON-11 behavior — proved by the full
 `tests/test_0065_backfill_cas.py` suite staying green) since they have no ledger to fall back on.
 
+**Discard must be a CONSEQUENCE of a truncate, never of an attempted one (PR #1825 Greptile P1
+fix #5, T-Rex-confirmed).** `SessionManager.truncate_messages` refuses a negative `keep_count`
+(returns `False`, deletes nothing), but `routes/history_routes.py::truncate_session` was calling
+`fold_ledger.discard_pending_fold` regardless of that result — every resolved anchor position
+trivially satisfies `pos < <negative number>` as false, so the fail-safe read every entry as "at
+or past the cutoff" and emptied the ledger while every render row survived: an already-accepted
+turn permanently lost its staged hidden consequence on a malformed request alone. Fixed at both
+layers: the route now rejects `keep_count < 0` with HTTP 400 before touching anything, AND
+`discard_pending_fold` is called only inside `if result:` — covering that case and any other
+False-return path (an internal DB hiccup, etc.) uniformly.
+
 **The compensating-retract fallback — documented, deliberately NOT built (T9 doctrine).** The
 issue specs a fallback for a seam where deferral proves infeasible: commit immediately, then issue
 an explicit "un-fold" if the take turns out superseded. No such seam exists on this build's
@@ -441,7 +452,10 @@ retry drains, then drain BOTH queues and prove `recordInteraction` is never call
 truncated content, plus a source pin that the settle path is the one fold-bearing
 `_backfill_with_cas` call site that stays `defer_fold=False`. `tests/test_0065_backfill_cas.py`
 (unchanged) stays green in full, proving the pre-existing CON-11 belt users' behavior is
-byte-identical.
+byte-identical — plus the PR #1825 fix-#5 cases: a negative `keep_count` over real HTTP rejected
+with 400, zero rows deleted, the ledger untouched, and the staged fold still settling afterward;
+a mocked False return from `truncate_messages` also leaving the ledger untouched; and source pins
+for the ordering (guard before the truncate call, discard gated on `if result:`).
 
 ## Traceability
 

@@ -1044,6 +1044,132 @@ def test_settle_path_never_passes_defer_fold_true():
     )
 
 
+# ── PR #1825 (Greptile P1 #5) — a NEGATIVE `keep_count` (malformed input) let `truncate_messages`
+# refuse the delete (returns False, nothing removed) while the OLD code called
+# `discard_pending_fold` regardless — every resolved anchor position trivially satisfies
+# `pos < negative_number` as false (i.e. reads as "at or past the cutoff"), so the ledger emptied
+# while every render row survived: an ACCEPTED turn permanently lost its staged hidden
+# consequence on a malformed request (T-Rex-confirmed). Fixed at BOTH layers: (1) the route
+# rejects `keep_count < 0` with HTTP 400 before touching anything, and (2) `discard_pending_fold`
+# is now called ONLY after `truncate_messages` returns True — the ledger discard is a
+# CONSEQUENCE of a truncate that actually happened, never of one merely attempted (covers any
+# other False-return path too, not just negative input). ─────────────────────────────────────────
+
+def _truncate_test_client(session_manager, *, token_owner):
+    """A TestClient over the real `history_routes` router with middleware-equivalent state
+    stamped the way `app.py` stamps a bearer-token caller (mirrors the established
+    `_orwell_client` pattern in `tests/test_lane6_turn_integrity.py`)."""
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from routes import history_routes
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def stamp(request: Request, call_next):
+        request.state.current_user = token_owner
+        request.state.api_token = True
+        request.state.api_token_owner = token_owner
+        return await call_next(request)
+
+    app.include_router(history_routes.setup_history_routes(session_manager))
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_truncate_negative_keep_count_rejected_before_touching_anything(monkeypatch):
+    """The repro, end to end over real HTTP: a negative `keep_count` is rejected with 400,
+    ZERO rows are deleted, the staged (anchored) fold in the ledger is left completely untouched,
+    and it still settles normally afterward — nothing about a malformed request may cost an
+    already-accepted turn its hidden consequence."""
+    sm = SessionManager()
+    sid = "b2-negative-keep-count"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"bonding","content":"survives the malformed request"}',
+        "u1", "a1")
+    before_ids = _seq_ordered_ids(sid)
+    assert fl.pending_fold_count("owner", sid) == 1
+
+    client = _truncate_test_client(sm, token_owner="owner")
+    resp = client.post(f"/api/session/{sid}/truncate", json={"keep_count": -1})
+    assert resp.status_code == 400
+
+    assert _seq_ordered_ids(sid) == before_ids, "zero rows may be deleted on a rejected request"
+    assert fl.pending_fold_count("owner", sid) == 1, "the ledger entry must be completely untouched"
+    assert fl._PENDING[("owner", sid)][0]["row_anchor"] == row_id
+
+    # It must still settle normally afterward — nothing about the malformed request may have
+    # corrupted or consumed the entry.
+    applied = []
+
+    async def fake_record(content, with_ids=None, kind=None, consequence=None,
+                          expected_beat_seq=None, idempotency_key=None, felt_minutes=None, user=None):
+        applied.append(content)
+        return {"recorded": True, "beatSeq": 9}
+
+    from src import orwell_engine as oe
+    from routes import chat_helpers
+    chat_helpers._LAST_BEAT_SEQ["owner"] = 1
+    monkeypatch.setattr(oe, "record_interaction", fake_record)
+    settled = _run(al._settle_pending_fold("owner", sid))
+    assert settled is True
+    assert applied == ["survives the malformed request"]
+
+
+def test_truncate_false_return_never_discards_the_ledger(monkeypatch):
+    """The ordering guarantee's other half: ANY False return from `truncate_messages` (not just a
+    negative `keep_count` — e.g. an internal DB hiccup) must leave the ledger untouched. The
+    discard is a consequence of a truncate that happened, never of one merely attempted."""
+    sm = SessionManager()
+    sid = "b2-false-return-truncate"
+    sm.create_session(sid, "n", "http://x", "m", owner="owner")
+
+    row_id = _stage_and_persist_turn(
+        monkeypatch, sm, sid, "owner",
+        '{"withIds":["npc:3"],"kind":"bonding","content":"survives a failed truncate"}',
+        "u1", "a1")
+    before_ids = _seq_ordered_ids(sid)
+
+    monkeypatch.setattr(SessionManager, "truncate_messages",
+                        lambda self, session_id, keep_count: False)
+
+    client = _truncate_test_client(sm, token_owner="owner")
+    resp = client.post(f"/api/session/{sid}/truncate", json={"keep_count": 1})
+    assert resp.status_code == 200
+    assert resp.json()["truncated"] is False
+
+    assert _seq_ordered_ids(sid) == before_ids
+    assert fl.pending_fold_count("owner", sid) == 1, (
+        "a False return from truncate_messages must never discard the ledger entry"
+    )
+    assert fl._PENDING[("owner", sid)][0]["row_anchor"] == row_id
+
+
+def test_truncate_route_rejects_negative_keep_count_before_calling_truncate_messages():
+    """Source pin: the negative-`keep_count` guard must sit textually BEFORE the
+    `truncate_messages` call, and the `discard_pending_fold` call must be gated on the result —
+    both source-pinned so a future refactor can't silently reorder them back into the bug."""
+    src = _read_history_routes_py()
+    fn = src[src.index("async def truncate_session("):]
+    fn = fn[:fn.index("\n    @router.post(\"/api/session/{session_id}/message\")")]
+    guard_at = fn.index("keep_count < 0")
+    truncate_call_at = fn.index("session_manager.truncate_messages(session_id, keep_count)")
+    assert guard_at < truncate_call_at, (
+        "the negative-keep_count guard must run BEFORE truncate_messages is ever called"
+    )
+    assert "raise HTTPException(400" in fn[guard_at:truncate_call_at], (
+        "a negative keep_count must be rejected with HTTP 400, not silently passed through"
+    )
+    discard_at = fn.index("discard_pending_fold(effective_user(request), session_id, keep_count)")
+    if_result_at = fn.rindex("if result:", 0, discard_at)
+    assert truncate_call_at < if_result_at < discard_at, (
+        "discard_pending_fold must be called ONLY inside `if result:` — the ledger discard is a "
+        "CONSEQUENCE of a truncate that actually happened, never of one merely attempted"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # #1728 (B2) — the wiring source pins: the truncate route discards by anchor, the agent-mode
 # persist path attaches the anchor, and the settle-at-turn-start call sits at the top of the turn
