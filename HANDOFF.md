@@ -12,10 +12,21 @@
 
 ---
 
-## 1. State snapshot — 2026-07-21 (evening reconcile)
+## 1. State snapshot — 2026-07-22 (overnight build blitz, ~02:45)
 
-**`main` @ `68d2264d`** (`docs: moonshot refactor synthesis`, #1770). All CI-required lanes green;
-the three recurring FE flakes are **fixed at root** (#1766 in the table below).
+**`main` @ `329a5afb`** (#1829, the Q7 pacing-budget spec). **15 PRs squash-merged since #1770** in
+one overnight campaign: #1771/#1772/#1775 (rulings + backlog DoR/AC/DoD contracts) · #1773 (round-2
+slate + Q1–Q8 rulings + grand synthesis) · #1774 (T0-1 comparator livelock root cause / T0-5
+reasoning scrub / #1729-B1 recorder RED) · #1776 (#1713 premiere block bound) · #1820 (the 14-spec
+Wave-3 batch) · #1823 (matrix motion-quiescence — the tiny-320 tap-target settle flake killed at
+root, #1822) · #1821 (T0-4 capability probe + attempt-counted force telemetry + TUN-10 rig parity) ·
+#1780 (T0-6 the One Casting Bible — FacetLedger + 15-wide genesis; with #1776 this **closes the
+casting mandate**) · #1824 (T0-2 beats terminate themselves) · #1826 (Q2 dark systems live in
+deploy: gossip drift, secret barter, showrunner observe-only) · #1827 (nominations-flake root
+cause: random test username vs. per-user off-screen rng) · #1828 (capability-probe scoped settings
+writes — a real #1821-introduced lost-update race — + probe-thread boundedness + overseer-test
+isolation) · #1829 (Q7 pacing-budget spec, resolves PO-1; 4 PO forks flagged in its §4).
+**Waves 0 / 0.5 / 1 are effectively done** pending the open flagship PRs in §2.
 
 **The working open-items list is now
 `docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md`** — the exhaustive tiered
@@ -44,27 +55,40 @@ session task ledger, each with a disposition. Read it before starting any new wo
 | #1769 | HANDOFF.md v1 |
 | #1770 | Moonshot refactor synthesis (breakage map A–G, portfolio P1–P8, five-wave roadmap, owner questions Q1–Q8) |
 
-## 2. In flight — check these FIRST on resume (updated 2026-07-21 evening, ~90% session)
+## 2. In flight — check these FIRST on resume (updated 2026-07-22 ~02:45)
 
-- **#1772** (rulings doc, this branch): merge on green — sweep armed.
-- **Casting-speed build (LEADS Wave 1, owner order):** two worktree agents dispatched —
-  `claude/1713-premiere-block-fix` (bound the createCharacter→premiere ~300s block) and
-  `claude/casting-ledger-fast` (FacetLedger + 15-wide genesis + early kickoff during the interview +
-  strict all-profiles-before-entry gate; target <10s finalize-to-house). They push branches only;
-  the overseer opens PRs one at a time.
-- **Round-2 moonshot** (divergent ideation, full rated slate, nothing dropped): workflow run
-  `wf_f64dc993-284` — on completion extract the synthesize agent's `result` string from
-  `<transcriptDir>/journal.jsonl` (`type=result` lines), commit to `docs/design/`, deliver to owner.
-  Container rollbacks happen: fetch origin first; only pushed things are durable.
-- Rulings D1–D10 + casting mandate + full-WebSocket + PO-gates: recorded in the backlog §T7 (this PR).
-- **Both playtests are DONE and triaged.** Headless: 5 seeds to finale, 0 structural/Vault/ceremony
-  findings — the engine is launch-ready. Live (GLM-4.7/novita shipped default): findings F1–F10 —
-  every week-1 closed-set outcome narrated falsely first, forced tool_choice ignored (17-turn
-  livelock), reasoning leaked to bubbles. **Narrative fidelity to the board is the broken axis**;
-  the triage/disposition map is §T3 of the exhaustive backlog.
-- **Moonshot synthesis is merged** (`docs/design/2026-07-21-moonshot-refactor-synthesis.md`): the
-  build answer is Wave 1 (T0 tier) — beats terminate themselves, engine chyrons, provider
-  capability contract, casting ledger. **Owner decisions D1–D10 (backlog §T7) gate the big pieces.**
+**Open PRs (merge each on green, one GitHub mutation at a time):**
+- **#1825** fold-integrity (#1728 defer-fold-to-settle; survived SIX review-finding cycles: FIFO
+  queue, row-id anchors, single-custody, truncate-gated discard). Head `d15cdc91`; its earlier reds
+  were the two now-fixed flakes + an npm blip — re-trigger/refresh if stale.
+- **#1830** T0-3 chyrons (the D1 flagship: BeatAnnouncement projection + chyron cards + the
+  hard-drop claims rail + ADR 0003 amendment). Its agent owes the veto-rail P2 fix push
+  (speculative "use the veto" color must survive; only assertive outcomes drop).
+- **#1831** C1 Wipeout Reel (top slate scorer; staging byte-identity forked post-roll). Its agent
+  owes the P1 fix push (history must record only AIRED reel moments — the pre-crown batch leaked).
+
+**Build agents in worktrees (all resumed after the 2×container restarts — worktrees survived,
+shells didn't; every agent is under FOREGROUND-only orders):** attention ledger
+(`claude/attention-ledger`, impl complete, BDD+push owed — gates D4 footage) · Q3 cross-season
+carry-in (`claude/q3-cross-season`) · OQ4 Producer Read + Player Dossier
+(`claude/producer-read-dossier`) · B1 / E2 / F1 (Q8 direct flagged builds,
+`claude/{b1,e2,f1}-direct-build`) · D2 canary (`claude/d2-canary`) · flake eradication
+(`claude/flake-eradication`: creationFreeze wall-clock, f4-order browser race, a11y-matrix RES-5
+(#1644), CI npm-retry hardening).
+
+**Queued dispatches (collision-gated):** after #1830 merges → E1 exit package (Q1 door) + Wave-2
+Act→Commit→Voice (agent_loop/orwellDecision files free up) · after attention-ledger merges → D4
+footage pool (its ruled gate). Locked-file registry while agents run: `orwellDecision.js`, all of
+`agent_loop.py`, `fold_ledger.py`, GameSessionAdapter's commit/advance/submit bodies.
+
+**Backlog-zero estimate (owner asked):** ~15 of the 42-item backlog landed or at-the-door tonight;
+~10 more in the running fleet. Remaining after fleet lands: Wave 2 (Act→Commit→Voice, show bible,
+honest delivery, full-WS consolidation), E1 + D4, Wave 2.5 quick wins, Wave 4 (editorial organ +
+the ≥7.5 mid-band), Wave 5 (agency band + 0128/0129) — ≈20–25 build items, several large.
+**At tonight's cadence: buildable-zero in roughly 2–3 more sessions like this one.** Absolute zero
+is not autonomously reachable: PO-gated/owner-run items stay open — 0097/0098/0103 (parked,
+PO-gated), the ADR-0018 red-line question, the Q7 spec's 4 PO forks, D5 autopsy (parked), TUN-2
+(parked), #0010 real-Proxmox smoke (owner-run), post-#1768 fresh-cast acceptance (owner-run).
 
 ## 3. Owed / obligations
 
