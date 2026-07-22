@@ -98,6 +98,11 @@ work items, and carry neither.
 | T0-6 | **One Casting Bible (FacetLedger)** — cast-wide seeded stratified budgets for vocation family / region / marks / build / hair / voice tics / name phonology minted before any LLM call; every lane gets its dealt hand + taken-list; transactional adopt-or-regenerate merge (never graft); one generic facet-diff validator at `recordCastProfile` replacing per-facet regexes; delete the un-ledgered "first-responder" steering line. Starts from `main` (#1768 merged). | P3; F6; breakage map D | M | — (pairs with GH-1734) |
 | T0-7 | **Wave-1 exit playtest** — a live playtest week 1 with zero phantom outcomes, zero silent retcons, zero livelocks, no reasoning text in visible bubbles. | Wave-1 exit criterion | S | T0-1..T0-6 |
 
+> **Checklist convention for ✅ LANDED sections:** the DoR/AC/DoD boxes below are retained
+> UNCHECKED as the item's static contract (verification evidence lives in the merging PR's
+> body/tests, not re-ticked here) — per demote-never-delete, contracts are never rewritten
+> post-landing. A ⚠️ line on a heading marks any sub-scope that did NOT land.
+
 #### T0-1 — DoR / AC / DoD — ✅ LANDED (PR #1774, 2026-07-22)
 
 **DoR**
@@ -191,7 +196,7 @@ work items, and carry neither.
   both FE languages) stay documented in T9 as designated fallbacks and are built only if T0-3 flakes
   or is later reopened — not built speculatively now.
 
-#### T0-4 — DoR / AC / DoD — ✅ LANDED (PR #1821, 2026-07-22, together with TUN-10; a lost-update capability-probe settings race this item introduced was fixed separately in PR #1828, 2026-07-22)
+#### T0-4 — DoR / AC / DoD — ✅ TELEMETRY/PROBE ARM LANDED (PR #1821, 2026-07-22, together with TUN-10; the settings race it introduced was fixed in PR #1828). ⚠️ The ENFORCEMENT arm — live `require_parameters`/`provider.only` request pinning, role-split routing, red-capability auto-downgrade — REMAINS OPEN per capability_probe.py's own scope note; it ships separately (Wave 2, rides the D3 pinning ruling).
 
 **DoR**
 - [ ] Q3 (provider posture) is ruled: **APPROVED** (D3, 2026-07-21) — pinning plus a direct z.ai
