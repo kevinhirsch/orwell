@@ -7,11 +7,16 @@
 > interaction/feedback · engine bugs · FE bugs · consistency/parity · responsive ·
 > Vault-Wall adversary · a11y), plus a **playtest harness run on the real stack**
 > (engine with deploy-parity flags + FE, deterministic-model UI capture at both
-> breakpoints, then a live-model in-persona roleplay playtest). Every finding is
-> adversarially **verified** against source and **deduplicated** against:
+> breakpoints, then a live-model in-persona roleplay playtest). The original plan ran a
+> second adversarial-verify pass per finding; that pass was **dropped mid-campaign on
+> explicit instruction** to prioritize coverage and speed over verification depth, so
+> the findings below are **single-pass, source-grounded (file:line evidence) but not
+> independently re-verified** — treat them as strong leads to confirm during
+> implementation, not as adjudicated verdicts. All findings ARE **deduplicated** against:
 > `docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md` (T0–T9 + waves),
 > `docs/audits/2026-07-22-repo-gap-audit.md` (G1–G25, now filed as GitHub issues),
-> `HANDOFF.md` §2–4, and the live open-issue set.
+> `HANDOFF.md` §2–4, and the live open-issue set — each auditor read those sources first
+> and was instructed to drop or narrow anything already tracked.
 >
 > **Contract convention:** each item carries DoR / AC / DoD in the house format
 > (per #1775). Items are filed as GitHub issues as they are confirmed; the issue is
@@ -28,9 +33,11 @@
 
 ## Method & evidence base
 
-- **Source lanes:** 14 specialist auditors over the working tree @ `b874476` (includes
-  #1830 chyrons, #1831 wipeout reel, #1860 gateway fold, #1861 gap-audit P1s), each
-  finding re-verified by an independent adversarial pass (default-refute) before entry.
+- **Source lanes:** 14 specialist auditors planned over the working tree @ `b874476`
+  (includes #1830 chyrons, #1831 wipeout reel, #1860 gateway fold, #1861 gap-audit P1s);
+  4 completed (parity, a11y, responsive, vault) before the campaign was closed. Findings
+  are single-pass and source-grounded, NOT independently adversarially re-verified — see
+  the status note above.
 - **Playtest harness:** the committed harness (`docs/audits/playtest-harness/`) against
   the real stack — engine booted with the deploy-parity opt-in flag set (TUN-10,
   single-sourced from `deploy/orwell-env-defaults.sh`), FE with auth ON, admin account,
@@ -73,10 +80,11 @@ in place for a fast resume.
 
 ## Findings
 
-IDs are `R-<lane>-<n>` (R = this 2026-07-22 **R**epo-audit campaign). Verification
-verdicts and issue numbers are appended as they land.
+IDs are `R-<lane>-<n>` (R = this 2026-07-22 **R**epo-audit campaign). No independent
+verification pass was run (see the status note above) — issue numbers are cross-referenced
+inline on each finding heading.
 
-### Lane: parity — consistency & two-window/transport parity (7 findings, verification in progress)
+### Lane: parity — consistency & two-window/transport parity (7 findings, single-pass — not independently re-verified)
 
 #### R-PAR-1 · Issue #1864 · P1 · `exit-interview` decision kind missing from BOTH transport allowlists — the card renders but can never be confirmed
 
@@ -272,7 +280,7 @@ verdicts and issue numbers are appended as they land.
 
 ---
 
-### Lane: a11y — accessibility structure & CI coverage (6 findings, verification in progress)
+### Lane: a11y — accessibility structure & CI coverage (6 findings, single-pass — not independently re-verified)
 
 *Lane self-deduped against the 2026-07-15 rendered-contrast audit, the `a11y_matrix.py`
 XFAIL registry, and #1644 (all in-flight glass-contrast work skipped). The Wipeout Reel
