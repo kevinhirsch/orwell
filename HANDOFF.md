@@ -14,7 +14,7 @@
 
 ## 1. State snapshot — 2026-07-22 (overnight build blitz, ~02:45)
 
-**`main` @ `329a5afb`** (#1829, the Q7 pacing-budget spec). **15 PRs squash-merged since #1770** in
+**`main` @ `c760a130`** (#1825, the fold-integrity fix). **16 PRs squash-merged since #1770** in
 one overnight campaign: #1771/#1772/#1775 (rulings + backlog DoR/AC/DoD contracts) · #1773 (round-2
 slate + Q1–Q8 rulings + grand synthesis) · #1774 (T0-1 comparator livelock root cause / T0-5
 reasoning scrub / #1729-B1 recorder RED) · #1776 (#1713 premiere block bound) · #1820 (the 14-spec
@@ -25,8 +25,10 @@ casting mandate**) · #1824 (T0-2 beats terminate themselves) · #1826 (Q2 dark 
 deploy: gossip drift, secret barter, showrunner observe-only) · #1827 (nominations-flake root
 cause: random test username vs. per-user off-screen rng) · #1828 (capability-probe scoped settings
 writes — a real #1821-introduced lost-update race — + probe-thread boundedness + overseer-test
-isolation) · #1829 (Q7 pacing-budget spec, resolves PO-1; 4 PO forks flagged in its §4).
-**Waves 0 / 0.5 / 1 are effectively done** pending the open flagship PRs in §2.
+isolation) · #1829 (Q7 pacing-budget spec, resolves PO-1; 4 PO forks flagged in its §4) · #1825
+(#1728 fold-integrity: defer-fold-to-settle + supersede-by-id — a regenerate can never double-fold
+the hidden layer; survived six review-finding cycles).
+**Waves 0 / 0.5 / 1 are done** — #1825 closed the last Wave-0.5 item; #1830/#1831 remain open in §2.
 
 **The working open-items list is now
 `docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md`** — the exhaustive tiered
@@ -58,9 +60,6 @@ session task ledger, each with a disposition. Read it before starting any new wo
 ## 2. In flight — check these FIRST on resume (updated 2026-07-22 ~02:45)
 
 **Open PRs (merge each on green, one GitHub mutation at a time):**
-- **#1825** fold-integrity (#1728 defer-fold-to-settle; survived SIX review-finding cycles: FIFO
-  queue, row-id anchors, single-custody, truncate-gated discard). Head `d15cdc91`; its earlier reds
-  were the two now-fixed flakes + an npm blip — re-trigger/refresh if stale.
 - **#1830** T0-3 chyrons (the D1 flagship: BeatAnnouncement projection + chyron cards + the
   hard-drop claims rail + ADR 0003 amendment). Its agent owes the veto-rail P2 fix push
   (speculative "use the veto" color must survive; only assertive outcomes drop).
