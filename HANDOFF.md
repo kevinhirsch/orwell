@@ -116,6 +116,15 @@ landed PRs, and only #1729 (D2 half) / #1778 (T0-3, on #1830) / #1781 (blocked o
 
 ## 5. Operational discipline — the short version (details in `SOUL.md`)
 
+- **THE CAMPAIGN LOOP (owner doctrine, 2026-07-22 — run this cycle continuously):**
+  **Find bugs → Spec fixes → Fix bugs → Playtest harness → BB Nerd / HIG / Bug audits (each time) → Find bugs.**
+  Every fix wave ends with a live playtest-harness capture and the audit panel (BB Nerd, Apple-HIG,
+  bug audits) over the fresh telemetry; audit findings seed the next find-bugs round. Never skip the
+  playtest+audit leg between fix waves. Also standing: stay synced with `main` as quickly and as
+  often as possible (rebase agent branches onto main before every push; merge on green immediately);
+  recent P0/P1 fixes — especially ones that recurred through review — get adversarial
+  hardened-solution verification, not just a green first test.
+
 - **Background code agents: ALWAYS `isolation: "worktree"`.** Non-isolated agents stomp each other's
   checkouts in the shared tree (lived it: 5-agent collision, full re-dispatch).
 - **GitHub mutating calls: strictly one at a time** (two parallel PR-opens/merges trip the abuse
