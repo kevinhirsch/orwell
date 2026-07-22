@@ -28,7 +28,9 @@ writes — a real #1821-introduced lost-update race — + probe-thread boundedne
 isolation) · #1829 (Q7 pacing-budget spec, resolves PO-1; 4 PO forks flagged in its §4) · #1825
 (#1728 fold-integrity: defer-fold-to-settle + supersede-by-id — a regenerate can never double-fold
 the hidden layer; survived six review-finding cycles).
-**Waves 0 / 0.5 / 1 are done** — #1825 closed the last Wave-0.5 item; #1830/#1831 remain open in §2.
+**Waves 0 / 0.5 are done** (#1825 closed the last Wave-0.5 item); **Wave 1 is done EXCEPT T0-3**
+(the chyrons flagship, open on #1830) **and T0-7** (the exit playtest, blocked on T0-3) — #1830/#1831
+remain open in §2.
 
 **The working open-items list is now
 `docs/audits/2026-07-21-campaign-report-and-exhaustive-backlog.md`** — the exhaustive tiered
