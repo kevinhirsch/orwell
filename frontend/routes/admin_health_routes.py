@@ -1501,7 +1501,7 @@ def _is_guard_down_class(kind: str) -> bool:
 
 
 def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_totals=None,
-                    sandbox=None, faithfulness=None) -> list:
+                    sandbox=None, faithfulness=None, capability=None) -> list:
     """WI3 — derive the RED alarms for game-breaking signals from the rollup + the snapshot reads.
     Pure over its inputs (unit-testable): returns a list of ``{code, severity:'red', label, count,
     detail, autoCorrected}``. Vault-free — every input is a count / flag / class token."""
@@ -1631,6 +1631,20 @@ def _compute_alarms(rollup: dict, *, embeddings=None, sync_recent=None, belt_tot
             f"the faithfulness judge is '{faithfulness.get('mode')}' but no model resolves "
             "(faithfulness/utility/default all unset) — the anti-hallucination guard is a silent no-op"))
 
+    # 4e) T0-4 — a provider CapabilityProfile probed RED (forced tool_choice honored under 50% of
+    #     the time, or json-conformance under 50%). A red capability is exactly the F2/F3 failure
+    #     class the playtest hit live — surface it as a standing alarm (not just the one-shot
+    #     probe-time soft-failure event) for as long as the last probe reads red.
+    if isinstance(capability, dict):
+        red_endpoints = [eid for eid, profile in capability.items()
+                         if isinstance(profile, dict) and profile.get("overallTier") == "red"]
+        if red_endpoints:
+            alarms.append(_alarm(
+                "capability-red", "Provider capability probe: RED", len(red_endpoints),
+                f"{len(red_endpoints)} endpoint(s) probed RED on forced tool_choice honoring "
+                "and/or json conformance — narration on this provider can silently ignore a "
+                "closed-set force or a structured-output request"))
+
     # 5) Embeddings degraded (semantic recall fell back).
     if isinstance(embeddings, dict) and embeddings.get("degraded"):
         alarms.append(_alarm(
@@ -1683,7 +1697,8 @@ def _faithfulness_section(user: str | None) -> dict | None:
 
 
 async def _rollup_and_alarms(user: str | None, engine: dict,
-                             faithfulness: dict | None = None) -> tuple[dict, list]:
+                             faithfulness: dict | None = None,
+                             capability: dict | None = None) -> tuple[dict, list]:
     """Assemble the WI2 rollup + the WI3 RED alarms for the health snapshot. Best-effort throughout
     (a broken read simply contributes nothing) — the 10s poll must never hard-fail."""
     try:
@@ -1711,7 +1726,7 @@ async def _rollup_and_alarms(user: str | None, engine: dict,
     try:
         alarms = _compute_alarms(rollup, embeddings=engine.get("embeddings"),
                                  sync_recent=sync_recent, belt_totals=belt_totals, sandbox=sandbox,
-                                 faithfulness=faithfulness)
+                                 faithfulness=faithfulness, capability=capability)
     except Exception:
         alarms = []
     return rollup, alarms
@@ -1773,9 +1788,20 @@ async def _health_snapshot(user: str | None) -> dict:
     # (enabled but unconfigured) surfaces here AND lights the RED alarm below. Vault-free/best-effort.
     faithfulness = _faithfulness_section(user)
 
+    # T0-4 (telemetry + probe arm) — every persisted per-endpoint CapabilityProfile (tool_choice
+    # honoring / json conformance / reasoning-channel separation), Vault-free by construction
+    # (capability_probe.py never stores a request/response body — counts, rates, short tier
+    # tokens only). Best-effort: a broken read answers {} rather than blanking the whole page.
+    try:
+        from src import capability_probe as _cap
+        capability = _cap.get_all_capability_profiles()
+    except Exception:
+        capability = {}
+
     # #1599 WI2/WI3 — the per-class/-tool failure-rate rollup + the RED alarms, both Vault-free and
     # best-effort (a broken read contributes nothing; the poll must never hard-fail).
-    health_rollup, alarms = await _rollup_and_alarms(user, engine, faithfulness=faithfulness)
+    health_rollup, alarms = await _rollup_and_alarms(user, engine, faithfulness=faithfulness,
+                                                      capability=capability)
 
     return {
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -1787,6 +1813,9 @@ async def _health_snapshot(user: str | None) -> dict:
         "enrichment": enrichment,
         # F10 / BL-019 — the faithfulness-judge health posture (dark ⇒ the RED alarm above fires).
         "faithfulness": faithfulness,
+        # T0-4 — per-endpoint provider CapabilityProfiles (see src/capability_probe.py). A RED
+        # overallTier on any profile also lights the `capability-red` alarm below.
+        "capability": capability,
         # #1599 — the per-class/-tool rolling failure-rate rollup (WI2) and the RED game-breaking
         # alarms (WI3). Vault-free: counts / class tokens / booleans only.
         "healthRollup": health_rollup,

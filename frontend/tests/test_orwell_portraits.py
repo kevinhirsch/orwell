@@ -118,7 +118,7 @@ def test_portraits_start_immediately_not_chained_behind_authoring(tmp_portraits,
 
     # ANTI-SYCOPHANCY: kickoff_authoring no longer takes the player's name — NPC storylines are
     # authored player-independent, so the call carries only the cast + owner (+ the top-up callback).
-    def fake_kickoff_authoring(cast, owner, then=None):
+    def fake_kickoff_authoring(cast, owner, then=None, on_authored=None, write=None, seed=None):
         order.append(("authoring", owner))
         captured["cast"] = cast
         captured["then"] = then  # the top-up callback must be wired (not None)

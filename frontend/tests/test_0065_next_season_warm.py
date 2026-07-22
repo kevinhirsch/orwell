@@ -45,7 +45,7 @@ class _FakeAuthoring:
         self.write = None
         self.written = []
 
-    def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None):
+    def kickoff_authoring(self, cast, user, then=None, on_authored=None, write=None, seed=None):
         self.calls += 1
         self.write = write
         for npc in (cast or []):

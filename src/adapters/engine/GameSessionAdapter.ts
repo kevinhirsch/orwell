@@ -20,6 +20,7 @@ import type {
   BehavioralFlags,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
+import { applyClosedFacetGuard, monitorLegacyInkGuard } from "../../engine/facetDiff";
 import { humanizeIds, humanizeForRetrospective } from "./humanize";
 import { singlePickId } from "./decisionFields";
 import type { GameEvent } from "../../domain/event";
@@ -691,6 +692,37 @@ const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVE
 // `timeOfDayEnabled`, so the clock-off calibration sims stay byte-identical.
 const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE !== "0";
 const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
+
+/**
+ * T0-2 ("beats terminate themselves", moonshot P1 stage 1 / #27a) — the CLOSED-SET ceremony/comp
+ * pending kinds whose resolution deterministically implies further server-side progress, so
+ * `submitDecision` auto-advances ONE more beat step in the SAME committed transaction instead of
+ * leaving the loop sitting at "resolved, but nothing moved" until a separate `advanceGame` call
+ * arrives. This is the exact class of pending the weekly ceremony loop raises for itself (HOH →
+ * nominations → veto → veto ceremony → eviction) — every option is engine-enumerated and legality-
+ * checked, there is no free-text/expressive content to capture, and the natural next step is either
+ * another closed-set fact (a day-break, a chip draw, a ballot reveal) or a new pending that would be
+ * reached on the very next `advanceGame` call regardless.
+ *
+ * DELIBERATELY EXCLUDED (kept at CURRENT semantics — resolving them does NOT auto-advance):
+ *   - `goodbye-message`, `exit-interview` — the player's OWN expressive content (E34/0130); the
+ *     engine never authors it and never rushes past it to the next stage on the player's behalf.
+ *   - `finale-statement`, `finale-answer`, `juror-question`, `juror-vote` — the interactive finale
+ *     (0037) is paced deliberately, one reveal/question at a time, for the format's suspense.
+ *   - `self-evict` — an OOC player-level confirmation, not a ceremony beat.
+ *   - `secret-veto` — a player STRATEGY choice (play/hold a one-time safety) with real stakes,
+ *     paced like the other exposed twists rather than folded away invisibly.
+ *   - `deal-offer` — an NPC-initiated SOCIAL approach (0123), not a weekly-loop ceremony fact.
+ *
+ * `comp-intent`/`comp-round` are listed for completeness/documentation even though their own
+ * `applyDecision` case ALREADY re-enters `resolveHohBeat`/`resolveVetoComp` internally (staged-round
+ * resume) — auto-advancing after them is a harmless, already-covered no-op most of the time (see
+ * `advanceOneBeat`'s own `pending` guard).
+ */
+const AUTO_ADVANCE_PENDING_KINDS: ReadonlySet<PendingDecisionView["kind"]> = new Set([
+  "nominations", "veto-decision", "comp-intent", "comp-round", "houseguests-choice",
+  "replacement", "eviction-vote", "tie-break", "final-eviction",
+]);
 
 /**
  * Engine-side implementation of the Vault-free game-session port. It runs the
@@ -2320,7 +2352,10 @@ export class GameSessionAdapter implements GameSession {
 
     // Field NAMES only — never the values (a hidden value must never ride out on the result, §8). The hidden
     // list reports what was actually SEALED, so a peer-naming field that was refused above is not listed.
-    const publicFields = (["biography", "physicalCharacteristics"] as const).filter((f) => req[f] !== undefined) as string[];
+    // `biography` is pushed CONDITIONALLY below (T0-6: it may be dropped whole by the closed-facet guard),
+    // mirroring the "name" field's conditional push a few lines down — `physicalCharacteristics` always
+    // folds (per-field reverted, never dropped wholesale) so it stays unconditional here.
+    const publicFields = (["physicalCharacteristics"] as const).filter((f) => req[f] !== undefined) as string[];
     const hiddenFields = ([
       ["secrets", safeSecrets], ["trueGoals", safeGoals], ["weakness", safeWeakness], ["dayOnePerception", safePerception],
     ] as const).filter(([, v]) => v !== undefined).map(([f]) => f);
@@ -2370,45 +2405,26 @@ export class GameSessionAdapter implements GameSession {
     }
     // Did the occupation the player infers actually change? Drives the hidden-stake re-ground in step 2.
     const occupationChanged = target.character.vocation !== priorVocation;
-    if (req.biography !== undefined) target.character.biography = req.biography;
+    // T0-6 — the ONE generic closed-facet-diff validator (`src/engine/facetDiff.ts`) replaces the
+    // hand-rolled, ink-only inline guard that used to live here (the 2026-07-21 #1768 INK-BUDGET
+    // backstop). It is table-driven (a future closed facet is one registry row, never a new bespoke
+    // guard) and — unlike the old guard — ALSO covers the authored BIOGRAPHY: a tattoo mention smuggled
+    // into the prose used to bypass the physicalCharacteristics-only check entirely. Run it against
+    // whichever fields the author actually supplied (either may be `undefined` on a partial call).
+    const priorPhysical = target.character.physicalCharacteristics;
+    const facetGuard = applyClosedFacetGuard(priorPhysical, req.physicalCharacteristics, req.biography);
+    // T9 (owner resiliency ruling): the demoted per-facet INK_RE guard survives as an ALARMED MONITOR —
+    // a canary proving the generic validator above is doing its job. It never corrects anything itself.
+    monitorLegacyInkGuard(
+      target.id, priorPhysical, facetGuard.physicalCharacteristics,
+      facetGuard.dropBiography ? undefined : req.biography,
+    );
+    if (req.biography !== undefined && !facetGuard.dropBiography) {
+      target.character.biography = req.biography;
+      publicFields.push("biography");
+    }
     if (req.physicalCharacteristics !== undefined) {
-      // 2026-07-21 prompt audit — the INK-BUDGET backstop (same precedent as the skinTone re-ground
-      // below): the engine deals the cast-wide visible-ink budget through the seeded distinguishing-mark
-      // spread (deepProfile `dealCastPhysicalSpread`), but the authoring LLM's tattoo prior reliably
-      // overwrites it ("full sleeve of … tattoos" on 4+ houseguests in one live bundle). The budget is
-      // an ENGINE guarantee, and it must cover EVERY facet field the portrait/context builders render
-      // (Greptile P1 on #1768: a clean mark + a tattooed `style` bypassed a mark-only guard — `style`
-      // flows into the portrait's "Presentation style:" line, and the other five fields flow through
-      // `physicalFacetToAppearance` into both the portrait and the narrator context). So: on a NO-ink
-      // slot (the seeded facet carries no ink in ANY rendered field), each authored field that
-      // INTRODUCES ink is refused per-field — the seeded floor value for THAT field stands (the same
-      // per-field fallback the skinTone re-ground uses); every clean authored facet folds freely. A
-      // seeded facet that already granted ink anywhere leaves the authored look untouched (sharpening,
-      // not inventing).
-      // Word-bounded ink lexicon (CodeRabbit + Greptile on #1768): `\btattoo` covers
-      // tattoo/tattoos/tattooed; `\bink(ed)?\b` covers "forearm ink" / "inked" WITHOUT the unbounded
-      // substring false-positives ("blinked") that would wrongly hold a clean authored field. The
-      // EUPHEMISM tail closes the Greptile bypass class — the live bundle's defects were literally
-      // "full sleeve of …" phrasings that carry neither "tattoo" nor "ink": "blackwork" and "body
-      // art" are unambiguous ink terms (unconditional), and "full/half sleeve(s)" counts as ink
-      // EXCEPT when a clothing noun follows (a "half-sleeve tee" in the style field is a shirt, not
-      // ink — the negative lookahead excludes tee/shirt/top/blouse/sweater/kurta). Kept IDENTICAL to
-      // the test suite's INK_LEXICON (tests/unit/diversity.test.ts) — one lexicon, two pinned sites.
-      const INK_RE = /\btattoo|\bink(?:ed)?\b|\bblackwork\b|\bbody art\b|\b(?:full|half)[- ]sleeves?(?!\s+(?:tee|t-?shirt|shirt|top|blouse|sweater|kurta)s?\b)/i;
-      const RENDERED_FACET_FIELDS = [
-        "heightBuild", "skinTone", "hair", "facialFeatures", "distinguishingMark", "ageLook", "style",
-      ] as const;
-      const prior = target.character.physicalCharacteristics;
-      const priorHasInk = prior !== undefined
-        && RENDERED_FACET_FIELDS.some((f) => INK_RE.test(prior[f] ?? ""));
-      target.character.physicalCharacteristics = req.physicalCharacteristics;
-      if (prior !== undefined && !priorHasInk) {
-        for (const f of RENDERED_FACET_FIELDS) {
-          if (INK_RE.test(req.physicalCharacteristics[f] ?? "")) {
-            target.character.physicalCharacteristics[f] = prior[f];
-          }
-        }
-      }
+      target.character.physicalCharacteristics = facetGuard.physicalCharacteristics as typeof req.physicalCharacteristics;
       // 0063 RE-GROUND (the "olive-skin collapse" fix, 2026-06-23): the FE authoring LLM re-authors the
       // WHOLE physicalCharacteristics block — including skinTone — but it is NOT given the houseguest's
       // guaranteed heritage, so it reliably defaults skinTone to a generic "olive" and silently discards
@@ -8260,54 +8276,79 @@ export class GameSessionAdapter implements GameSession {
     // One persisted commit per beat (E3): interior persists (a deal broken mid-tally) defer to a
     // single hook call AFTER all state mutation — a refused commit throws instead of narrating.
     const view = this.inOneCommit(() => {
-      let ev: BeatEvent | null = null;
-      // 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER. No-op unless
-      // the layer is on; when it fires it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the
-      // beat does NOT advance this turn — the player answers the offer first. Flag off ⇒ byte-identical.
-      this.maybeOfferPlayerDeal();
-      if (!this.live!.pending && !this.live!.dealOffer && !this.live!.finished) {
-        ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
-        // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
-        // toward late-night and wrapping to a new morning (banking a late night the player never ended).
-        // The diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
-        //
-        // #537: the clock advances by SUBSTANTIVE PLAY — once per resolved ceremony/eviction/finale
-        // beat — never on a staged competition's per-round PRESENTATION (the `comp-round` PAUSES, which
-        // emit no event, and the inert `comp-elimination` reveal beats: no rng, no fold, no soul
-        // inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on each of those
-        // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
-        // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
-        // turn one) even before the first substantive beat lands.
-        //
-        // 0066 Phase-2 (PR #715): the graded sleep economy — chronotype bedtimes + continuous night
-        // depth + the night-end fatigue/conflict bookkeeping — rides this SAME substantive-play gate, so
-        // it never over-advances on inert staged-comp beats either. On the bare init advance `advanceClock`
-        // only initializes (returns early), so the bookkeeping below is a harmless no-op there: rest
-        // deficit is 0 (no night ran) and the conflict tally is still empty.
-        if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
-          const wasRetired = this.live!.playerRetired ?? false;
-          // 0119 — different events cost different amounts of the in-game day: a quick ceremony ~1h, a
-          // comp ~3h, an eviction ~2h (beatFeltHours), instead of a flat +3h. Applied ONLY when the
-          // per-conversation clock is live, so golden replay (that clock off, master on) keeps the flat
-          // default and the recorded time-of-day stream is byte-identical (no re-record); calibration
-          // (master off) skips this whole block. A beat with no distinct felt duration ⇒ the flat default.
-          const feltHours = this.perConversationClockLive() ? beatFeltHours(ev?.beat) : null;
-          if (feltHours !== null) advanceClock(this.live!, feltHours);
-          else advanceClock(this.live!);
-          // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
-          // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
-          // did NOT reach via retirement.
-          if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.accrueNightFatigue();
-          this.rollNightConflicts();
-        }
-        this.commit(ev);
-      }
+      const ev = this.advanceOneBeat();
       // Surface the just-resolved beat (it is player-witnessed) so the finale reveal/result beats
       // and every ceremony beat are visible in the view, not only recorded to the event store.
       return this.advanceView(ev);
     });
     // 0065 Part B — cache the committed result under its key, so a retry replays it verbatim.
     return req.idempotencyKey !== undefined ? this.rememberIdempotent(req.idempotencyKey, view) : view;
+  }
+
+  /**
+   * The deterministic "one more step" of the live loop: offer the LULL-gated NPC deal check (0123),
+   * then draw the CURRENT beat's outcome (or raise its pending), apply the SAME ADR-0006 clock/night
+   * bookkeeping a plain `advanceGame` call would, and commit. A no-op (returns `null`, mutates
+   * nothing) when the loop is already blocked on a decision, a standing deal offer, or the season is
+   * finished — so callers may invoke it unconditionally without re-deriving that guard themselves.
+   *
+   * Shared by `advanceGame`'s own main path AND T0-2's `submitDecision` auto-advance (below), so a
+   * beat reached by chaining off a resolved pending is BYTE-IDENTICAL to the same beat reached via a
+   * separate `advanceGame` call — same rng draw (`beatRng` is a pure function of the current
+   * week/beat, not of how many calls got us here), same clock/fatigue/conflict folds, same commit.
+   *
+   * 0123 — at a LULL a motivated houseguest may pull the player aside with a DEAL OFFER.
+   * `maybeOfferPlayerDeal` MUST run before the pending/dealOffer/finished guard below — not after —
+   * because it is what CAN set `live.dealOffer`: the guard's own `!this.live!.dealOffer` check has to
+   * see whatever this SAME call just floated, or a beat could advance in the very turn a fresh offer
+   * was raised (a #1824/Greptile P1 finding: the chained `submitDecision` path used to skip this gate
+   * entirely, since it called `advanceBeat` directly instead of going through `advanceGame`'s
+   * sequence). Folded HERE (not left as a separate call at each call site) so both callers get the
+   * gate by construction and can never drift apart again. No-op unless the layer is on; when it fires
+   * it sets `live.dealOffer` (surfaced as a `deal-offer` pending) and the beat does NOT advance this
+   * turn — the player answers the offer first. Flag off ⇒ byte-identical.
+   */
+  private advanceOneBeat(): BeatEvent | null {
+    this.maybeOfferPlayerDeal();
+    if (!this.live!.pending && !this.live!.dealOffer && !this.live!.finished) {
+      const ev = advanceBeat(this.live!, this.ctx(), this.beatRng());
+      // ADR 0006 (opt-in): the in-game clock moves by PLAY — one phase per SUBSTANTIVE advance, cycling
+      // toward late-night and wrapping to a new morning (banking a late night the player never ended).
+      // The diegetic bound + sleep cost ride this; dormant (byte-identical) unless the clock is enabled.
+      //
+      // #537: the clock advances by SUBSTANTIVE PLAY — once per resolved ceremony/eviction/finale
+      // beat — never on a staged competition's per-round PRESENTATION (the `comp-round` PAUSES, which
+      // emit no event, and the inert `comp-elimination` reveal beats: no rng, no fold, no soul
+      // inflection — see `advanceCompetition`/`stagedTrajectoryNeutral`). Advancing on each of those
+      // cycled most of a day inside ONE competition (the HOH crowned at late-night the morning it
+      // began). The clock still INITIALIZES on the first advance (so the HUD/rest cue are live from
+      // turn one) even before the first substantive beat lands.
+      //
+      // 0066 Phase-2 (PR #715): the graded sleep economy — chronotype bedtimes + continuous night
+      // depth + the night-end fatigue/conflict bookkeeping — rides this SAME substantive-play gate, so
+      // it never over-advances on inert staged-comp beats either. On the bare init advance `advanceClock`
+      // only initializes (returns early), so the bookkeeping below is a harmless no-op there: rest
+      // deficit is 0 (no night ran) and the conflict tally is still empty.
+      if (this.timeOfDayEnabled && (this.live!.timeOfDay === undefined || (ev !== null && !isInertBeat(ev.beat)))) {
+        const wasRetired = this.live!.playerRetired ?? false;
+        // 0119 — different events cost different amounts of the in-game day: a quick ceremony ~1h, a
+        // comp ~3h, an eviction ~2h (beatFeltHours), instead of a flat +3h. Applied ONLY when the
+        // per-conversation clock is live, so golden replay (that clock off, master on) keeps the flat
+        // default and the recorded time-of-day stream is byte-identical (no re-record); calibration
+        // (master off) skips this whole block. A beat with no distinct felt duration ⇒ the flat default.
+        const feltHours = this.perConversationClockLive() ? beatFeltHours(ev?.beat) : null;
+        if (feltHours !== null) advanceClock(this.live!, feltHours);
+        else advanceClock(this.live!);
+        // A genuine night-end is the 8am-wake WRAP (the house ran to the bitter end) — NOT the morning
+        // after a turnIn (that night already accrued). Detect: a fresh morning (back at the wake hour) we
+        // did NOT reach via retirement.
+        if (!wasRetired && this.live!.timeOfDay === DAY_START && (this.live!.nightDepth ?? WAKE_HOUR) === WAKE_HOUR) this.accrueNightFatigue();
+        this.rollNightConflicts();
+      }
+      this.commit(ev);
+      return ev;
+    }
+    return null;
   }
 
   submitDecision(req: SubmitDecisionReq): AdvanceView {
@@ -8353,6 +8394,30 @@ export class GameSessionAdapter implements GameSession {
       // The beat-deterministic rng lets the Houseguest's-Choice resume run the veto comp reproducibly (B45).
       const ev = applyDecision(this.live!, this.toDecisionInput(req), this.ctx(), this.beatRng());
       this.commit(ev);
+      // T0-2 ("beats terminate themselves") — for the CLOSED-SET ceremony/comp pending kinds
+      // (`AUTO_ADVANCE_PENDING_KINDS`, documented above), the resolution's own commit IS the exit: the
+      // loop takes ONE more deterministic step right here, in the SAME `inOneCommit` transaction (one
+      // beatSeq bump, one fault-injection unit — a failed persist rolls back BOTH mutations together),
+      // instead of leaving the game sitting at "decision resolved, nothing moved" until a separate
+      // `advanceGame` call arrives. `advanceOneBeat` is already a no-op when the step it would take is
+      // itself blocked (a fresh pending, a standing deal offer, or the season finishing) — most visibly
+      // for `comp-intent`/`comp-round`, whose own `applyDecision` case already re-entered the staged
+      // sub-loop and so left a fresh `comp-round` pending most of the time.
+      //
+      // The RETURNED event stays `ev` (the pending's OWN resolution) — unchanged contract, so every
+      // existing caller keeps seeing exactly what it saw before. The follow-up step's event (if any) is
+      // still fully recorded/folded via `commit` above (journal, consequence, relationships) and shows
+      // up in the NEXT read (`getGameState`/`stateDelta`/the following `advanceGame`, which — since the
+      // step already ran — returns that already-committed result as a genuine no-op rather than doing
+      // fresh work). Excluded kinds (goodbye-message, the interactive finale, self-evict, secret-veto,
+      // deal-offer) are unaffected — this block never runs for them.
+      //
+      // #1824 (Greptile P1) — `advanceOneBeat` folds the 0123 `maybeOfferPlayerDeal` LULL-gated NPC
+      // deal check BEFORE its own pending/dealOffer/finished guard (see that method's doc comment), so
+      // this chained call honors the SAME gate a separate `advanceGame` call would: if a deal is due at
+      // the post-resolution lull, it sets `live.dealOffer` and the beat does NOT advance here either —
+      // byte-identical to the un-chained two-call path, never bypassed by going straight to a beat draw.
+      if (AUTO_ADVANCE_PENDING_KINDS.has(pendingKind!)) this.advanceOneBeat();
       return this.advanceView(ev);
     }));
   }

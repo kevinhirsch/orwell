@@ -4728,14 +4728,20 @@ async def do_create_character(
             })
         except Exception:
             pass
+    # T0-6: hoisted so the FALLBACK deep-authoring kick further down (the prewarm-missed path) can
+    # thread the SAME season seed into `kickoff_authoring` — the FacetLedger mint needs it to align
+    # with whatever genesis just dealt off this exact seed. `None` when the try below never lands
+    # (genesis kick failed open) ⇒ authoring simply runs without ledger steering (byte-identical).
+    _cast_seed = None
     try:
         from src import orwell_cast_genesis as _genesis_kick
         _warm = await orwell_engine.pre_seed_cast(seed=args.get("seed"), user=owner)
         if isinstance(_warm, dict) and _warm.get("warmed") and _warm.get("house"):
+            _cast_seed = _warm.get("seed")
             # #1713: bounded by _GENESIS_WALL_CLOCK_BACKSTOP_S (see comment above) — never let this
             # inline grind hold the player's turn anywhere near the old multi-minute worst case.
             await asyncio.wait_for(
-                _genesis_kick.run_genesis(_warm.get("house") or [], _warm.get("seed"), owner),
+                _genesis_kick.run_genesis(_warm.get("house") or [], _cast_seed, owner),
                 timeout=_GENESIS_WALL_CLOCK_BACKSTOP_S,
             )
     except Exception as e:
@@ -4931,7 +4937,8 @@ async def do_create_character(
                                 except Exception:
                                     pass
                             orwell_cast_authoring.kickoff_authoring(
-                                cast, owner, then=None, on_authored=_shoot_authored_prewarm)
+                                cast, owner, then=None, on_authored=_shoot_authored_prewarm,
+                                seed=_cast_seed)
                         except Exception:
                             pass  # best-effort — never let it affect game start
             else:
@@ -4982,10 +4989,10 @@ async def do_create_character(
                         # (the original call shape, unchanged, so the seeded floor IS the final cast).
                         if _gate_on:
                             orwell_cast_authoring.kickoff_authoring(
-                                cast, owner, then=None, on_authored=_shoot_authored)
+                                cast, owner, then=None, on_authored=_shoot_authored, seed=_cast_seed)
                         else:
                             orwell_cast_authoring.kickoff_authoring(
-                                cast, owner, then=_refresh_authored_portraits)
+                                cast, owner, then=_refresh_authored_portraits, seed=_cast_seed)
 
                     # #544 — AI-seed the cast's descriptive identity FIRST (engine validates/repairs/folds),
                     # THEN deep-author. Best-effort/fail-soft: no model ⇒ the engine's deterministic floor

@@ -504,22 +504,38 @@ def assign_genesis_slots(seed: int, count: int) -> list[dict]:
 
 def render_slot_directive(hid: str, d: dict) -> str:
     """Render one slot's casting card as a compact fixed-input line for the sketch prompt (mirrors the
-    engine's renderSlotDirective)."""
+    engine's renderSlotDirective; the T0-6 FacetLedger hand — when dealt — rides as an extra clause).
+
+    T0-6: the old un-ledgered "athletic/first-responder/performer" steering line is DELETED — a
+    physical slot's job now comes from its DEALT vocation family (a budgeted deal, not a prompt
+    cluster), so the phys note only asks for credibility inside that family."""
     accent = f"house-accent: {d.get('accent')}" if d.get("accent") else "no house-accent (their own person)"
-    phys = (" PHYSICAL COMPETITOR (give a high physical stat + an athletic/first-responder/performer "
-            "vocation).") if d.get("physical") else ""
+    phys = (" PHYSICAL COMPETITOR (give a high physical stat and pick a physically credible job inside "
+            "the dealt vocation family).") if d.get("physical") else ""
     big = (" BIG PERSONALITY — write them genuinely loud/reactive/unfiltered; do NOT let the accent tone "
            "them down.") if d.get("amplified") else ""
     look = ("look: visible tattoos ARE part of their look (one of the cast's few inked houseguests — "
             "make the ink specific and personal)") if d.get("ink") else (
         f"look: NO visible tattoos; distinguishing feature, if any: {d.get('lookFeature')}")
+    # T0-6: the dealt FacetLedger hand rides the card as an extra fixed-input clause (absent in a
+    # legacy/no-ledger card ⇒ byte-identical output — back-compatible with every existing caller).
+    hand = d.get("ledger")
+    hand_clause = ""
+    if isinstance(hand, dict):
+        try:
+            from src.orwell_facet_ledger import render_hand
+            rendered = render_hand(hand)
+            if rendered:
+                hand_clause = f" DEALT FACETS: {rendered}."
+        except Exception:  # pragma: no cover - defensive: a ledger hiccup never breaks the card
+            hand_clause = ""
     return (f"{hid} — cast as: {d.get('role')} ({d.get('roleNote')}); archetype tag: {d.get('archetype')}; "
             f"age ~{d.get('ageLo')}-{d.get('ageHi')} (name from that birth era); {accent}; "
             f"energy: {d.get('energy')}; register: {d.get('register')}; "
             f"expressiveness: {d.get('expressiveness')}; reactivity: {d.get('emotionalRegister')}; "
             f"self-awareness: {d.get('selfAwareness')}; social-gravity: {d.get('socialGravity')}; "
             f"{look}."
-            + phys + big)
+            + phys + big + hand_clause)
 
 
 # ── the envelope vocabulary (mirrors src/engine/castGenesis.ts + genesisConstants.ts) ───────────────────
@@ -573,9 +589,17 @@ _SYSTEM = (
     "social-gravity): push them to their FULL extreme — a 'loud and impossible to ignore', 'hot-reactive', "
     "'deluded', or 'main-character' card means a genuinely loud/reactive/deluded/spotlight-hogging person, "
     "NOT a muted version; a 'guarded'/'cold'/'loner' card means someone genuinely closed-off. If a card "
-    "says PHYSICAL COMPETITOR, give a high physical stat + an athletic / first-responder / military / "
-    "performer vocation. If it says BIG PERSONALITY, do NOT let the accent or anything else tone them "
+    "says PHYSICAL COMPETITOR, give a high physical stat and pick a physically credible job inside the "
+    "dealt vocation family. If it says BIG PERSONALITY, do NOT let the accent or anything else tone them "
     "down. The cast should span the WHOLE range, never cluster in a polite reserved middle.\n"
+    "  * DEALT FACETS (T0-6 — the casting office's ONE bible; fixed inputs): when the card deals a "
+    "vocation family, hometown (town-size + region), height/build, complexion depth, hair, voice tic, or "
+    "name phonology, honor EACH one for that houseguest — pick the specific job inside the dealt family, "
+    "a real city of the dealt size in the dealt region, a name that fits the dealt phonology, and weave "
+    "the dealt voice tic into how they talk. The complexion cue is steering — coherence with the "
+    "houseguest's own heritage wins. A 'DEALT ACROSS THE REST OF THE CAST' line lists the ground the "
+    "OTHER houseguests already hold: stay distinct from it (their families, regions, and name shapes are "
+    "taken).\n"
     "  * LOOK: the card's ink budget is FIXED. 'visible tattoos ARE part of their look' means this is "
     "one of the cast's FEW inked houseguests — make the ink specific and personal (what, where, why). "
     "'NO visible tattoos' means exactly that: no sleeve, no forearm script, no neck/hand ink anywhere in "
@@ -602,9 +626,10 @@ _SYSTEM = (
     "(this is what the show voices; make each unmistakably distinct).\n"
     '  "archetype": use EXACTLY the archetype tag given in this houseguest\'s casting card (do not '
     "substitute a different one).\n"
-    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter") — honor a PHYSICAL COMPETITOR '
-    "card with an athletic/first-responder/military/performer job; favor castable, story-rich jobs over "
-    "generic desk work, and NEVER a job already listed as taken by an earlier houseguest.\n"
+    '  "vocation": a SHORT occupation noun phrase (e.g. "court reporter") — a specific job inside the '
+    "casting card's DEALT vocation family (a PHYSICAL COMPETITOR card means a physically credible job in "
+    "that family); favor castable, story-rich jobs over generic desk work, and NEVER a job already listed "
+    "as taken by an earlier houseguest.\n"
     '  "hometown": a US hometown (city, state) that fits the season\'s regional flavor. Every houseguest '
     "comes from a DIFFERENT city — never reuse a hometown listed as taken, and never default to the same "
     "famous metro: suburbs, small cities, and towns are exactly as castable as big cities (a real cast "
@@ -700,6 +725,20 @@ def build_genesis_messages(roster: list, brief: dict,
         if cards:
             lines.append("CASTING CARDS (fixed inputs — honor each one for its houseguest):")
             lines.extend(cards)
+        # T0-6 — the cast-wide TAKEN-LIST: a per-NPC call (roster = one id) cannot see its siblings,
+        # so aggregate the OTHER slots' dealt FacetLedger hands (the directives map covers the whole
+        # cast) into one compact "already taken" line. With every hand dealt up front, collisions are
+        # structurally impossible — this line just keeps the model FROM DRIFTING toward taken ground.
+        sibling_hands = [d.get("ledger") for hid, d in directives.items()
+                         if hid not in ids and isinstance(d, dict) and isinstance(d.get("ledger"), dict)]
+        if sibling_hands:
+            try:
+                from src.orwell_facet_ledger import render_taken
+                taken_line = render_taken(sibling_hands)
+                if taken_line:
+                    lines.append(taken_line)
+            except Exception:  # pragma: no cover - defensive: never break the prompt over the ledger
+                pass
     if violation_feedback:
         lines.append(
             "Your previous proposal had these problems (fix EXACTLY these, keep everything else): "
@@ -1013,15 +1052,20 @@ WriteFn = Callable[[dict], Awaitable[dict]]
 
 #: PER-NPC generation (owner directive 2026-07-20): genesis authors ONE houseguest per LLM call — this
 #: maximizes per-NPC independence (killing the batch self-harmonization that made every houseguest read
-#: "reserved") AND eliminates cross-call name collisions at the source. To keep the casting wait no worse
-#: than the old 3-chunk path, the single-NPC calls run with BOUNDED CONCURRENCY: `GENESIS_CHUNK_SIZE` is
-#: now the number IN FLIGHT at once (a "wave"), so a 15-NPC cast runs in 3 waves ≈ the old 3 sequential
-#: chunk calls (and each call is far smaller, so per-call latency drops). Cross-cast coordination comes
-#: from the seeded per-slot pre-assignment (`assign_genesis_slots`) + the used-names ledger threaded
-#: forward between waves + the engine's authoritative cross-cast dedupe backstop. ``seed_cast_genesis``
-#: defaults to NO concurrency (one whole-cast call) so direct-call unit tests stay byte-identical; the
-#: live ``_run_genesis_once`` opts in.
-GENESIS_CHUNK_SIZE = 5
+#: "reserved") AND eliminates cross-call name collisions at the source. `GENESIS_CHUNK_SIZE` is the
+#: number IN FLIGHT at once (a "wave").
+#:
+#: T0-6 (owner casting-speed ruling, 2026-07-21): a FULL 15-WIDE SINGLE WAVE — every NPC concurrently.
+#: The old 3-wave bound existed because concurrent calls can't see each other's picks (waves froze the
+#: used-names/facets ledger between them); with the seeded FacetLedger dealing every slot a DISJOINT
+#: hand (vocation family / region / build / hair / voice tic / name phonology) + the cast-wide
+#: taken-list injected into each per-NPC prompt UP FRONT, collisions are structurally impossible, so
+#: nothing is left for the waves to serialize. Failed-call isolation is unchanged (a failed call is
+#: retried alone; the engine floors its slot); the combined-dedupe backstop still drops any residual
+#: duplicate name/hometown/vocation before the one atomic write-back. ``seed_cast_genesis`` defaults
+#: to NO concurrency (one whole-cast call) so direct-call unit tests stay byte-identical; the live
+#: ``_run_genesis_once`` opts in.
+GENESIS_CHUNK_SIZE = 15
 
 
 async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, valid_ids: set,
@@ -1082,13 +1126,25 @@ async def _gather_chunked_proposal(roster: list, brief: dict, llm_fn: LlmFn, val
                 continue
             any_ok = True
             for npc in prop.get("npcs") or []:
-                # 2026-07-21: feed the facet ledgers forward (the engine backstop dedupes regardless).
+                # 2026-07-21 / T0-6: the committed-facet dedupe. Beyond feeding the ledgers forward,
+                # a DUPLICATE committed hometown (every houseguest comes from a different city) or an
+                # exact-duplicate vocation is DROPPED from the entry so the engine floors that one
+                # field — zero duplicate committed hometowns even in a full-wide single wave (the
+                # engine's cross-cast dedupe backstop still stands behind this).
                 town = npc.get("hometown")
                 if isinstance(town, str) and town.strip():
-                    used_towns.append(town.strip())
+                    t = town.strip()
+                    if t.lower() in {x.lower() for x in used_towns}:
+                        npc.pop("hometown", None)  # collision — the engine floors this slot's town
+                    else:
+                        used_towns.append(t)
                 job = npc.get("vocation")
                 if isinstance(job, str) and job.strip():
-                    used_jobs.append(job.strip())
+                    j = job.strip()
+                    if j.lower() in {x.lower() for x in used_jobs}:
+                        npc.pop("vocation", None)  # collision — the engine floors this slot's job
+                    else:
+                        used_jobs.append(j)
                 name = npc.get("name")
                 if isinstance(name, str) and name.strip():
                     toks = name.strip().lower().split()
@@ -1147,10 +1203,26 @@ async def seed_cast_genesis(roster: list, seed: int, llm_fn: LlmFn, write_fn: Wr
     # the cross-cast constraints computed up front and injected per slot (each per-NPC call sees only its own).
     roster_ids = [str(n.get("id")) for n in (roster or []) if isinstance(n, dict) and n.get("id")]
     slot_list = assign_genesis_slots(seed, len(roster_ids))
+    # T0-6 — mint the cast-wide FacetLedger BEFORE any LLM call and merge each slot's dealt hand into
+    # its casting card (the `ledger` key rides the directive; `render_slot_directive` renders it and
+    # `build_genesis_messages` aggregates the sibling hands as the per-NPC taken-list). The ledger is
+    # aligned to the slots' `physical` flags so a PHYSICAL COMPETITOR slot always holds a physically
+    # credible dealt family. Fail-soft: a ledger hiccup leaves the plain cards (steering only).
+    if slot_list:
+        try:
+            from src.orwell_facet_ledger import mint_facet_ledger
+            hands = mint_facet_ledger(seed, len(roster_ids), [bool(s.get("physical")) for s in slot_list])
+            if hands and len(hands) == len(slot_list):
+                slot_list = [{**s, "ledger": hands[i]} for i, s in enumerate(slot_list)]
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"[cast-genesis] facet-ledger mint failed (plain cards stand): {e}")
     directives = {hid: slot_list[i] for i, hid in enumerate(roster_ids)} if slot_list else None
     feedback: Optional[str] = None
     best = {"committed": 0, "accepted": False, "varianceOk": True, "rerolls": 0, "reason": "no-usable-proposal"}
-    _chunked = isinstance(chunk_size, int) and 0 < chunk_size < len(valid_ids)
+    # T0-6: ANY positive chunk_size selects the per-NPC path (chunk_size is the wave WIDTH — with the
+    # ledger dealing disjoint hands, the live path runs one full-cast-wide wave, chunk_size == cast
+    # size, which the old `< len(valid_ids)` bound wrongly demoted to a single whole-cast call).
+    _chunked = isinstance(chunk_size, int) and chunk_size > 0
     for attempt in range(1 + GENESIS_MAX_REROLLS):
         if _chunked:
             proposal = await _gather_chunked_proposal(roster, brief, llm_fn, valid_ids, feedback, chunk_size,

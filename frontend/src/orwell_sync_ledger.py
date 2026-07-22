@@ -103,6 +103,19 @@ _NAME_MAP_FIELDS = ("beltsFired",)  # {beltName: count} maps — names + small i
 # never pass through a belt name.
 _PENDING_BELTS: dict[str, dict[str, int]] = {}
 
+# ── T0-4 (telemetry + probe arm): ATTEMPT-counted forced-tool_choice outcome telemetry ──
+# The success-gated `beltsFired["forced-tool-choice:<tool>"]` counter above answers "how many
+# forced calls landed" but is BLIND to the denominator — a live playtest logged 20 forced
+# selections against only 7 honored belt-fires, and the ledger had no record of the other 13 at
+# all (an ATTEMPT the model ignored left no trace anywhere). This is an ADDITIVE dimension, not a
+# redefinition: `note_belt_fire` / `beltsFired` / `get_belt_totals` keep their existing
+# success-gated contract (a count still means an APPLIED correction) — `note_forced_choice` /
+# `forcedChoice` / `get_forced_choice_totals` are a SIBLING counter recording every attempt with
+# its outcome (honored | ignored), so `attempted = honored + ignored` is always visible. Same
+# Vault-free floor: tool NAMES + small ints only, never a body.
+_PENDING_FORCED: dict[str, dict[str, dict[str, int]]] = {}
+_MAX_FORCED_TOOLS = 32
+
 # ── S6b (#1599 item 3): count ALL StaleBeatErrors + a beat-continuity dropped-fold check ──
 # Today only the advance path's `_handle_stale_beat` bumped a process-global counter that the agent
 # loop folded into the turn's `staleRejections`. A `recordInteraction` fold that got dropped on a
@@ -201,6 +214,29 @@ def _clean_belt_map(v: Any) -> dict[str, int]:
     return out
 
 
+def _clean_forced_map(v: Any) -> dict[str, dict[str, int]]:
+    """A ``{tool: {"honored": n, "ignored": n}}`` map — short name tokens to non-negative
+    outcome counts only, bounded. Anything unusable ⇒ {}. The same Vault-free floor as
+    ``_clean_belt_map``: a body can never ride a tool name or a count."""
+    if not isinstance(v, dict):
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for name, counts in v.items():
+        if len(out) >= _MAX_FORCED_TOOLS:
+            break
+        try:
+            s = str(name).strip()
+        except Exception:
+            continue
+        if not s or not isinstance(counts, dict):
+            continue
+        honored = _clean_int(counts.get("honored"))
+        ignored = _clean_int(counts.get("ignored"))
+        if honored or ignored:
+            out[s[:_MAX_NAME_LEN]] = {"honored": honored, "ignored": ignored}
+    return out
+
+
 def _entry(
     *,
     session: Any,
@@ -214,6 +250,7 @@ def _entry(
     stale_rejections: Any,
     idempotency_hits: Any,
     belts_fired: Any = None,
+    forced_choice: Any = None,
 ) -> dict:
     """Build the bounded, Vault-free entry. Every field is coerced to a scalar / id /
     name; there is no path for a free-form body to land in the stored shape."""
@@ -230,6 +267,8 @@ def _entry(
         "staleRejections": _clean_int(stale_rejections),
         "idempotencyHits": _clean_int(idempotency_hits),
         "beltsFired": _clean_belt_map(belts_fired),
+        # T0-4: attempt-counted forced-tool_choice outcomes, sibling to beltsFired above.
+        "forcedChoice": _clean_forced_map(forced_choice),
     }
 
 
@@ -331,6 +370,66 @@ def note_belt(user: str | None, belt: Any, n: Any = 1) -> None:
         pass
 
 
+def note_forced_choice(user: str | None, tool: Any, *, honored: bool) -> None:
+    """T0-4 — count one forced-``tool_choice`` ATTEMPT for ``user``, with its outcome.
+
+    Unlike ``note_belt_fire`` (success-gated: a count means the correction landed),
+    this fires for EVERY resolved attempt — call it exactly once per forced selection,
+    after the round has resolved whether the forced tool actually landed
+    (``honored=True``) or was silently ignored (``honored=False``). Buffers per-user in
+    memory (same shape/discipline as the belt buffer) and drains into the next
+    ``record_turn``'s ``forcedChoice`` map. Never raises; telemetry must never hurt the
+    app."""
+    try:
+        try:
+            name = str(tool).strip()[:_MAX_NAME_LEN]
+        except Exception:
+            return
+        if not name:
+            return
+        k = _key(user)
+        with _LOCK:
+            bucket = _PENDING_FORCED.setdefault(k, {})
+            if name not in bucket and len(bucket) >= _MAX_FORCED_TOOLS:
+                return  # bounded: never grow past the tool-name cap
+            entry = bucket.setdefault(name, {"honored": 0, "ignored": 0})
+            entry["honored" if honored else "ignored"] += 1
+    except Exception:  # pragma: no cover - defence in depth
+        pass
+
+
+def _drain_pending_forced(user_key: str) -> dict[str, dict[str, int]]:
+    """Pop (and return) the user's buffered forced-choice attempts. Caller holds no lock."""
+    with _LOCK:
+        return _PENDING_FORCED.pop(user_key, {}) or {}
+
+
+def get_forced_choice_totals(user: str | None) -> dict[str, dict[str, int]]:
+    """Aggregate ``{tool: {"attempted", "honored", "ignored"}}`` for ``user`` — the T0-4
+    attempt-counted forced-``tool_choice`` telemetry: the retained ring PLUS any still-buffered
+    attempts, per-user scoped. A missing/corrupt store answers {}."""
+    k = _key(user)
+    totals: dict[str, dict[str, int]] = {}
+
+    def _fold(m: Any) -> None:
+        for name, counts in _clean_forced_map(m).items():
+            e = totals.setdefault(name, {"honored": 0, "ignored": 0})
+            e["honored"] += counts["honored"]
+            e["ignored"] += counts["ignored"]
+
+    with _LOCK:
+        bucket = _load().get(k)
+        pending = {t: dict(c) for t, c in (_PENDING_FORCED.get(k) or {}).items()}
+    if isinstance(bucket, list):
+        for e in bucket:
+            if isinstance(e, dict):
+                _fold(e.get("forcedChoice"))
+    _fold(pending)
+    for counts in totals.values():
+        counts["attempted"] = counts["honored"] + counts["ignored"]
+    return totals
+
+
 def _drain_pending_belts(user_key: str) -> dict[str, int]:
     """Pop (and return) the user's buffered belt fires. Caller holds no lock."""
     with _LOCK:
@@ -371,6 +470,7 @@ def record_turn(
     stale_rejections: Any = 0,
     idempotency_hits: Any = 0,
     belts_fired: Any = None,
+    forced_choice: Any = None,
 ) -> None:
     """Append one Vault-free per-turn sync record for ``user`` (``_current_user``-scoped),
     bounded by a per-user ring, and emit one structured ``[orwell]`` log line.
@@ -379,19 +479,27 @@ def record_turn(
     narration, casting answers, and any engine secret CANNOT be stored — that is a hard
     invariant, enforced by the coercion in ``_entry`` rather than by careful callers.
     Buffered ``note_belt_fire`` counts for the user are drained into the entry's
-    ``beltsFired`` map (merged with any explicit ``belts_fired`` argument).
+    ``beltsFired`` map (merged with any explicit ``belts_fired`` argument); buffered
+    ``note_forced_choice`` attempts drain the same way into ``forcedChoice`` (T0-4).
     Errors are swallowed: ledgering must never hurt the app."""
     try:
         k = _key(user)
         # RC6 (write-durability): retain the DRAINED buffers so a failed durable write can RESTORE
-        # them. `_drain_pending_belts` / `_drain_pending_stale` POP their in-memory buffers here, but
-        # the persist below (`atomic_write_json`) can still raise — if it does, these counts must go
-        # BACK into the buffers, not vanish, or the fold silently loses this turn's belts/stale.
+        # them. `_drain_pending_belts` / `_drain_pending_stale` / `_drain_pending_forced` POP their
+        # in-memory buffers here, but the persist below (`atomic_write_json`) can still raise — if it
+        # does, these counts must go BACK into the buffers, not vanish, or the fold silently loses
+        # this turn's belts/stale/forced-choice attempts.
         drained_belts = _drain_pending_belts(k)
         drained_stale = _drain_pending_stale(k)
+        drained_forced = _drain_pending_forced(k)
         merged_belts = _clean_belt_map(belts_fired)
         for name, count in drained_belts.items():
             merged_belts[name] = merged_belts.get(name, 0) + count
+        merged_forced = _clean_forced_map(forced_choice)
+        for name, counts in drained_forced.items():
+            e = merged_forced.setdefault(name, {"honored": 0, "ignored": 0})
+            e["honored"] += counts.get("honored", 0)
+            e["ignored"] += counts.get("ignored", 0)
         # S6b: fold every buffered `note_stale_rejection` into this turn's staleRejections so a
         # recordInteraction stale-drop is COUNTED here, not lost (it used to show staleRejections:0).
         eff_stale = _clean_int(stale_rejections) + drained_stale
@@ -407,6 +515,7 @@ def record_turn(
             stale_rejections=eff_stale,
             idempotency_hits=idempotency_hits,
             belts_fired=merged_belts,
+            forced_choice=merged_forced,
         )
         # S6b beat-continuity check: the board must not move MORE than this turn's counted stale
         # rejections explain. `beatSeqBefore` should pick up where the last turn's `beatSeqAfter`
@@ -460,6 +569,12 @@ def record_turn(
                     bucket = _PENDING_BELTS.setdefault(k, {})
                     for name, count in drained_belts.items():
                         bucket[name] = bucket.get(name, 0) + count
+                if drained_forced:
+                    fbucket = _PENDING_FORCED.setdefault(k, {})
+                    for name, counts in drained_forced.items():
+                        e = fbucket.setdefault(name, {"honored": 0, "ignored": 0})
+                        e["honored"] += counts.get("honored", 0)
+                        e["ignored"] += counts.get("ignored", 0)
             raise
         # RC6 (write-durability): the write COMMITTED — now it is safe to advance the beat baseline.
         # Only baseline off a real (tracked, non-zero) beat — an untracked 0/0 turn (the inert spine
@@ -498,6 +613,7 @@ def clear(user: str | None) -> None:
     with _LOCK:
         _PENDING_BELTS.pop(k, None)
         _PENDING_STALE.pop(k, None)
+        _PENDING_FORCED.pop(k, None)
         _LAST_BEAT_AFTER.pop(k, None)
         data = _load()
         if k in data:
@@ -511,9 +627,14 @@ def _log_line(user_key: str, entry: dict) -> None:
     try:
         tools = ",".join(entry.get("toolsCalled") or []) or "-"
         belts = ",".join(f"{n}:{c}" for n, c in (entry.get("beltsFired") or {}).items()) or "-"
+        # T0-4: attempt-counted forced-tool_choice outcomes, e.g. "advanceGame:h2/i1".
+        forced = ",".join(
+            f"{n}:h{c.get('honored', 0)}/i{c.get('ignored', 0)}"
+            for n, c in (entry.get("forcedChoice") or {}).items()
+        ) or "-"
         logger.info(
             "[orwell] sync-ledger turn user=%s session=%s turn=%s beat=%s→%s "
-            "tools=[%s] nudges=%s backfills=%s desync=%s stale=%s idem=%s belts=[%s]",
+            "tools=[%s] nudges=%s backfills=%s desync=%s stale=%s idem=%s belts=[%s] forced=[%s]",
             user_key,
             entry.get("session") or "-",
             entry.get("turnId") or "-",
@@ -526,6 +647,7 @@ def _log_line(user_key: str, entry: dict) -> None:
             entry.get("staleRejections"),
             entry.get("idempotencyHits"),
             belts,
+            forced,
         )
     except Exception:  # pragma: no cover
         pass

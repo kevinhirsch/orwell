@@ -25,6 +25,9 @@ B-Plots · 4. E1 The Exit Package · 5. C3 Seeded Partial Reaction Pan · 6. A2 
 Barium Meal · 11. C5 Cabin-Fever Ceremonies · 12. F2 Cold Cases + F4 Production Memory (without step 2)
 · 13. The Producer Read (commissioned) · 14. The Player Dossier (commissioned).
 
+**Sibling spec (Wave 2, not in this batch):** Q7 The Pacing Budget (#1787, resolves PO-1) ships as its
+own file, same section format, spec #15 of this family — `docs/design/2026-07-22-q7-pacing-budget.md`.
+
 ---
 
 ## 1. Ballot Arithmetic — D1

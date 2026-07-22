@@ -165,7 +165,7 @@ def _wire_fallback(monkeypatch, *, gate_on, authored_ids):
     monkeypatch.setattr(_cid, "kickoff_identity", fake_identity)
 
     # authoring → fire on_authored for exactly the authored ids, then the whole-cast `then`.
-    def fake_authoring(cast, owner, then=None, on_authored=None, write=None):
+    def fake_authoring(cast, owner, then=None, on_authored=None, write=None, seed=None):
         if on_authored:
             for hid in authored_ids:
                 on_authored(hid)
@@ -261,7 +261,7 @@ def _wire_prewarmed(monkeypatch, *, gate_on, authored_ids):
     monkeypatch.setattr(_portraits, "kickoff_backfill", fake_backfill)
 
     # authoring → fire on_authored for exactly the authored ids, then the whole-cast `then`.
-    def fake_authoring(cast, owner, then=None, on_authored=None, write=None):
+    def fake_authoring(cast, owner, then=None, on_authored=None, write=None, seed=None):
         if on_authored:
             for hid in authored_ids:
                 on_authored(hid)
