@@ -646,6 +646,30 @@ allow:
     approved: 2026-07-16
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # The 0072 multi-platform gateway (2026-07-22 gap-audit G10): `frontend/gateway/**` was
+  # invisible to this lint's scan (_PY_ROOTS covered only src/ + routes/) — exactly the blind spot
+  # that let G1 (the gateway's missing consequence fold, fixed the same PR) ship with no RED
+  # signal. The tree is now scanned; these pre-existing swallows are grandfathered by file
+  # (consistent with the rest of this burn-down) rather than fixed tonight. NEW code added to
+  # `gateway/consequence.py` (the G1 fix) is NOT grandfathered — it reaches a RED recorder
+  # directly and needs no grant.
+  # ─────────────────────────────────────────────────────────────────────────────
+  - id: gf-gateway-handler
+    site: frontend/gateway/handler.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 G10) — the engine-read/narration-call WARN-and-return swallows in _call_player_turn/_narrate_gateway_turn predate this PR; each already logs at WARN and degrades to a safe placeholder reply, but is owed a RED recorder like every other engine-call swallow in the codebase."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-gateway-telegram-adapter
+    site: frontend/gateway/platforms/telegram.py
+    class: game-route
+    records: red-eligible
+    reason: "grandfathered pending burn-down (#1599 G10) — TelegramAdapter.send's HTTP-transport swallow (a delivery failure is WARN-logged only); owed a RED recorder, not fixed tonight."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # --- GRANDFATHERED — TS engine (Class-A / A1 burn-down; #1599) ---
   # The pure domain core uses typed errors + the orchestrator's fail-closed integrity
   # checkpoint; the swallow surface is small and concentrated in adapters. A1 (routing these

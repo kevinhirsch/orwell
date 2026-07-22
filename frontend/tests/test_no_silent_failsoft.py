@@ -49,7 +49,14 @@ ALLOWLIST_PATH = os.path.join(FE_ROOT, "failsoft_allowlist.yaml")
 
 # The FE app surface the AST lint enforces (the game build). The inherited-workspace files are
 # swept too — they are grandfathered by file in the allowlist, not exempted here.
-_PY_ROOTS = (os.path.join(FE_ROOT, "src"), os.path.join(FE_ROOT, "routes"))
+# 2026-07-22 gap-audit G10: `gateway/` (the live, unconditionally-mounted 0072 multi-platform
+# surface) was invisible to this scan — the exact blind spot that let G1 (the gateway's missing
+# consequence fold) ship with no RED signal. Added to the scan; its pre-existing hits are
+# grandfathered below (`gf-gateway-handler` / `gf-gateway-telegram-adapter`) rather than fixed
+# tonight. `gateway/turn_limits.py`'s fail-open rate-limit catches carry no risk-token surface
+# (no LLM/engine/HTTP call in the guarded body) and are not flagged by this lint at all.
+_PY_ROOTS = (os.path.join(FE_ROOT, "src"), os.path.join(FE_ROOT, "routes"),
+            os.path.join(FE_ROOT, "gateway"))
 # The five A2-wired files: enforced today (NOT grandfathered). A NEW silent swallow of a real
 # error on a risk surface in these files must fail this lint.
 A2_ENFORCED = (
