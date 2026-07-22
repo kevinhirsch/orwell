@@ -1079,6 +1079,38 @@ async def set_time_of_day(enabled: bool, user: str | None = None) -> dict:
     return await _admin_call("setTimeOfDay", {"enabled": bool(enabled)}, user=user)
 
 
+# B2 (G6 gap fix): the "living house" behavioral-fidelity layers (campaigns / trajectories /
+# triggers / secretPacing / juryHouse / seededTieSurfacing / mythMaking / showrunner) — every
+# field `setBehavioralFlags` accepts. Kept as the single name list so the FE route validates
+# against the SAME set the engine's `requireShape` guard enforces (McpServer.ts), never a
+# hand-duplicated copy that could drift.
+BEHAVIORAL_FLAG_FIELDS = (
+    "campaigns", "trajectories", "triggers", "secretPacing",
+    "juryHouse", "seededTieSurfacing", "mythMaking", "showrunner",
+)
+
+
+async def get_behavioral_flags(user: str | None = None) -> dict:
+    """B2: read the CURRENT resolved on/off state of every behavioral-fidelity flag for THIS
+    user's sandbox (env default or a prior `set_behavioral_flags` override) — so an admin dial
+    can render truthfully instead of only being able to write blind. Vault-free."""
+    return await _admin_call("getBehavioralFlags", {}, user=user)
+
+
+async def set_behavioral_flags(flags: dict, user: str | None = None) -> dict:
+    """B2: turn one or more "living house" behavioral-fidelity layers ON or OFF on the LIVE
+    engine at runtime (no restart) — the admin-tool consumer of `setBehavioralFlags`, previously
+    unwired (gap-audit G6/#1840). Only recognized boolean fields (`BEHAVIORAL_FLAG_FIELDS`) are
+    forwarded; an absent/unrecognized/non-boolean field is dropped rather than sent blind, so a
+    malformed caller can never trip the engine's `requireShape` refusal. Resets on engine restart
+    (the env default stands again) — there is no persisted re-apply-on-boot for this ops dial."""
+    payload = {
+        k: bool(v) for k, v in (flags or {}).items()
+        if k in BEHAVIORAL_FLAG_FIELDS and isinstance(v, bool)
+    }
+    return await _admin_call("setBehavioralFlags", payload, user=user)
+
+
 async def manage_sandbox(op: str | None = None, user: str | None = None) -> dict:
     """God Mode: sandbox lifecycle for THIS user's sandbox only (create | reset | save | load)."""
     args: dict = {}

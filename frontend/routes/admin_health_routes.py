@@ -2270,6 +2270,58 @@ def setup_admin_health_routes() -> APIRouter:
             },
         )
 
+    @router.get("/ops/behavioral-flags")
+    async def admin_behavioral_flags_get(request: Request):
+        """B2 (gap-audit G6/#1840): the admin dial's READ side — the CURRENT resolved on/off
+        state of every "living house" behavioral-fidelity layer for THIS admin's sandbox (env
+        default or a prior override), so the status page can render truthfully. Vault-free;
+        never hard-fails — an unreachable engine reads as every flag False (the deploy floor)."""
+        require_admin(request)
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        try:
+            flags = await orwell_engine.get_behavioral_flags(user=user)
+        except Exception as e:
+            logger.warning("[ops] behavioral-flags read failed: %s", e)
+            flags = {}
+        if not isinstance(flags, dict):
+            flags = {}
+        return {f: bool(flags.get(f)) for f in orwell_engine.BEHAVIORAL_FLAG_FIELDS}
+
+    @router.post("/ops/behavioral-flags")
+    async def admin_behavioral_flags_set(request: Request):
+        """B2 (gap-audit G6/#1840): the admin dial's WRITE side — flip one or more "living
+        house" behavioral-fidelity layers (campaigns/trajectories/triggers/secretPacing/
+        juryHouse/seededTieSurfacing/mythMaking/showrunner) at runtime on THIS admin's sandbox,
+        no engine restart. Body: `{<flag>: bool, ...}`, every field optional — an absent field
+        leaves that layer's current setting untouched. Resets on engine restart (the env default
+        stands again); this is a live-only operator convenience, not a persisted setting."""
+        require_admin(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        user = None
+        try:
+            user = effective_user(request)
+        except Exception:
+            pass
+        try:
+            result = await orwell_engine.set_behavioral_flags(body, user=user)
+        except Exception as e:
+            logger.warning("[ops] behavioral-flags write failed: %s", e)
+            return {"ok": False, "reason": f"engine error: {e}"}
+        if not isinstance(result, dict):
+            return {"ok": False, "reason": "engine returned no state"}
+        logger.info("[ops] admin set behavioral flags: %s",
+                    {k: v for k, v in body.items() if k in orwell_engine.BEHAVIORAL_FLAG_FIELDS})
+        return {"ok": True}
+
     return router
 
 
