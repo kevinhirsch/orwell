@@ -4579,6 +4579,15 @@ async def _pre_emission_outcome_guard(text: str, owner) -> str:
     out = []
     for part in parts:
         try:
+            # T0-3 (issue #1778, D1 2026-07-21) — the HARD-DROP rail: a weekly-loop closed-set claim
+            # (HOH/noms/veto/eviction — the kinds an engine `BeatAnnouncement` chyron now carries
+            # authoritatively, `src/engine/beatAnnouncement.ts`) is dropped OUTRIGHT here, BEFORE the
+            # board-verify below ever runs — never emitted, regardless of whether it would have been
+            # correct. See `chat_helpers._sentence_has_chyron_covered_claim`'s doc comment for the full
+            # T9 rationale; the older verify-then-correct path right below stays live, UNCHANGED, for
+            # the two claim kinds not yet chyron-covered (the season winner, a player expulsion).
+            if chat_helpers._sentence_has_chyron_covered_claim(part):
+                continue  # a chyron already carries this fact — the model's restatement never renders
             if chat_helpers._sentence_has_closed_set_claim(part):
                 if not await chat_helpers.screen_streamed_outcome(owner, part):
                     continue  # phantom closed-set outcome — DROP this sentence before emission
@@ -4702,7 +4711,14 @@ async def _emit_guarded_scene(clean: str, owner, *, scene_broken: bool, emitted_
          real narration yet, ONE diegetic feeds-cut line (`_SCENE_CUTAWAY_LINE`) is emitted in its place
          — never the lie, never a raw error.
       2. Only when the scene is NOT broken does the existing per-sentence outcome guard run (dropping a
-         lone stray phantom sentence while its neighbours stream, with the blank-turn raw-clean fallback).
+         lone stray phantom sentence while its neighbours stream). T0-3 (issue #1778, D1 2026-07-21):
+         a turn the guard emptied out entirely gets the SAME diegetic cutaway the scene circuit-breaker
+         uses (below) when nothing else has streamed yet — NEVER the raw, unguarded `clean` text. The
+         guard existing to drop a closed-set claim, then a blank turn re-emitting that SAME claim
+         unguarded, defeated the whole rail (the deleted "blank-turn phantom re-emit"): the engine's
+         `BeatAnnouncement` chyron is now the sole source of truth for the fact, so a turn with nothing
+         SAFE left to say is a legitimate (and correctly silent-on-the-claim) outcome, not a gap to fill
+         by breaking the rail.
 
     Jurisdiction is closed-set board claims ONLY (ADR 0005 #1) — creative/social prose never trips the
     breaker (the cheap pre-filter short-circuits before any engine read), so it streams untouched."""
@@ -4721,8 +4737,16 @@ async def _emit_guarded_scene(clean: str, owner, *, scene_broken: bool, emitted_
             return _GuardedScene(_SCENE_CUTAWAY_LINE, True, True)
         return _GuardedScene("", True, cutaway_emitted)  # drop the fabricated prose
     guarded = await _pre_emission_outcome_guard(clean, owner)
-    if not guarded.strip() and clean.strip() and not emitted_visible:
-        guarded = clean  # blank-turn fallback — better a real (if unverified) beat than an empty turn
+    if not guarded.strip() and clean.strip() and not emitted_visible and not cutaway_emitted:
+        # T0-3: the pre-emission guard dropped EVERY sentence this chunk offered (each one asserted a
+        # closed-set claim the board couldn't confirm) and the player has seen nothing yet this turn.
+        # The removed fallback used to re-emit `clean` HERE — the exact unguarded, unverified prose the
+        # guard just spent a cycle dropping — "better a real (if unverified) beat than an empty turn".
+        # That is precisely the phantom-narration failure mode T0-3 exists to close (F1/F4): it defeated
+        # the rail on the one turn it mattered most. The same diegetic cutaway line the scene
+        # circuit-breaker (above) already uses for an identical "nothing safe to show yet" situation
+        # covers it instead — in-fiction, never the lie, never a raw error.
+        return _GuardedScene(_SCENE_CUTAWAY_LINE, False, True)
     return _GuardedScene(guarded, False, cutaway_emitted)
 
 

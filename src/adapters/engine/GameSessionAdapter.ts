@@ -18,6 +18,7 @@ import type {
   PremiereIntrosView, FirstImpressionView, MarkHouseguestMetOpts,
   StateDeltaView, DeltaEventView,
   BehavioralFlags,
+  BeatAnnouncementView,
 } from "../../ports/GameSession";
 import { randomBytes } from "node:crypto";
 import { applyClosedFacetGuard, monitorLegacyInkGuard } from "../../engine/facetDiff";
@@ -220,6 +221,7 @@ import {
   type LiveSeasonState, type SeasonCtx, type BeatEvent, type DecisionInput, type PendingDecision, type GoodbyeTone, type ExitStance,
   type FinaleProgress, type EvictionProgress, type DailyRecapHook,
 } from "../../engine/liveSeason";
+import { buildBeatAnnouncements, announcementHeadline, type BeatAnnouncement } from "../../engine/beatAnnouncement";
 import { genCompetitionsEnvDefault } from "../../engine/genCompetitionConstants";
 import { themeForWeek, applyTheme } from "../../engine/competitionThemes";
 import type { CompetitionDef } from "../../engine/competitionLibrary";
@@ -783,6 +785,33 @@ export class GameSessionAdapter implements GameSession {
   private readonly idempotencyCache = new Map<string, AdvanceView>();
   private static readonly IDEMPOTENCY_CACHE_MAX = 32;
   /**
+   * T0-3 (issue #1778) — the STABLE, NEVER-REUSED per-sandbox announcement-id counter. Persisted
+   * (unlike `announcementLog`/`pendingAnnouncements` below) so an id is never reused even across a
+   * restart — the FE's per-id dedup (F4: a chyron renders exactly once) would otherwise be able to
+   * collide a post-restart fact against a pre-restart id. Bumped once per emitted announcement.
+   */
+  private announcementSeq = 0;
+  /**
+   * T0-3 — the announcement(s) `commit()` just produced for the CURRENT mutation, read (and the array
+   * reference kept) by `advanceView()` when it builds `AdvanceView.announcements`, then cleared. Each
+   * `beatSeq` here is provisional (captured pre-bump, like `out.beatSeq` — see `inOneCommit`'s doc
+   * comment) and corrected IN PLACE by `inOneCommit`'s post-persist patch, which also flushes these
+   * same object references into `announcementLog` below — so the corrected value is visible from
+   * BOTH the returned `AdvanceView` and the delta-catch-up log without a second pass.
+   */
+  private pendingAnnouncements: BeatAnnouncementView[] = [];
+  /**
+   * T0-3 — a bounded, IN-MEMORY-ONLY ring of recently-committed announcements, sliced by `stateDelta`
+   * for a reconnecting/second window's catch-up (`StateDeltaView.announcements`). Deliberately NOT
+   * persisted: `beatCheckpoints` (the ring it is indexed against) is ALSO cleared on every restore
+   * (`seedDeltaBaseline`'s doc comment) — any token from before a restart already forces a full
+   * refresh, so an empty post-restart log is exactly as consistent as the existing `events` delta
+   * already is. The underlying facts are never lost (they're durable, ordinary `EventStore` events
+   * via `onEvent`, same as always) — this is a presentation-layer catch-up convenience only.
+   */
+  private readonly announcementLog: BeatAnnouncementView[] = [];
+  private static readonly ANNOUNCEMENT_LOG_MAX = 200;
+  /**
    * A10 / #591 / R1c — the at-most-once ledger for the FOLD-BEARING PLAYER LEVERS `makeDeal` / `confide`
    * / `exposeSecret` / `tradeSecret` (the `recordInteraction` siblings, `EngineCommandsAdapter`'s
    * `recordIdempotency` mirrored on this port). Each of these RECORDS/creates state AND folds a hidden
@@ -1279,6 +1308,15 @@ export class GameSessionAdapter implements GameSession {
       // a VALUE correction, never a new field — and it only runs after a successful commit (a refused/
       // failed `onPersist` throws on the line above, before this runs, so `out` is never returned then).
       out.beatSeq = this.beatSeq;
+      // T0-3 — the SAME staleness applies to each buffered announcement's `beatSeq` (captured in
+      // `recordAnnouncements`, before this bump). `out` is not always an `AdvanceView` (other mutating
+      // methods share this helper), so the announcements array is read defensively; when present, its
+      // entries are the SAME object references pushed into `announcementLog`, so correcting them here
+      // in place fixes both the returned view and the persisted delta-catch-up log in one pass.
+      const withAnnouncements = out as { announcements?: BeatAnnouncementView[] };
+      if (withAnnouncements.announcements) {
+        for (const a of withAnnouncements.announcements) a.beatSeq = this.beatSeq;
+      }
     }
     return out;
   }
@@ -1324,6 +1362,10 @@ export class GameSessionAdapter implements GameSession {
     const eventCount = this.deltaSource?.count() ?? this.record?.events().length ?? 0;
     this.beatCheckpoints.set(this.beatSeq, {
       eventCount,
+      // T0-3 — same timing contract as `eventCount` above: this beat's `commit()` already ran (and
+      // already pushed onto `announcementLog`, if it produced any) by the time the commit funnel calls
+      // this, so the captured count is "AS OF this beat" — a later `stateDelta` slices from it cleanly.
+      announcementCount: this.announcementLog.length,
       week: this.week,
       phase: this.phase,
       ...(this.ceremony.hoh !== undefined ? { hoh: this.ceremony.hoh } : {}),
@@ -1875,6 +1917,8 @@ export class GameSessionAdapter implements GameSession {
    */
   private readonly beatCheckpoints = new Map<number, {
     eventCount: number;
+    /** T0-3 — `announcementLog.length` AS OF this beat (mirrors `eventCount`'s slicing contract). */
+    announcementCount: number;
     week: number;
     phase: string;
     hoh?: EntityId;
@@ -3135,6 +3179,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.idempotencyCache.size > 0
         ? { idempotency: [...this.idempotencyCache.entries()] as Array<[string, AdvanceView]> }
         : {}),
+      // T0-3 (issue #1778) — persist the announcement-id counter (NOT the log/ring itself, which is
+      // deliberately in-memory-only, see its own field comment) so an id is never reused even across a
+      // restart. Absent ⇒ 0 on restore (byte-shaped as a pre-T0-3 save).
+      ...(this.announcementSeq > 0 ? { announcementSeq: this.announcementSeq } : {}),
       week: this.week,
       phase: this.phase,
       ceremony: { ...this.ceremony, nominees: [...this.ceremony.nominees] },
@@ -3392,6 +3440,13 @@ export class GameSessionAdapter implements GameSession {
     // 0065 Part A — resume the beat counter at the saved value (restart-safe CAS). Absent on a pre-0065
     // save ⇒ 0 (the next commit bumps it).
     this.beatSeq = core.beatSeq ?? 0;
+    // T0-3 — resume the announcement-id counter (restart-safe: an id is never reused). The log/ring
+    // itself is process-local (like `beatCheckpoints` just below) and resets empty on a resume — the
+    // FE's pre-restart delta token resets too, so it correctly full-refreshes rather than slicing
+    // against a window whose checkpoint no longer exists.
+    this.announcementSeq = core.announcementSeq ?? 0;
+    this.announcementLog.length = 0;
+    this.pendingAnnouncements = [];
     // PERSIST-9 — RESTORE the at-most-once cache instead of clearing it. An `AdvanceView` is plain JSON
     // (a player-witnessed progression view — no reference to a dead in-memory houseguest object, no Vault
     // content), so it round-trips safely; restoring it keeps at-most-once intact across a restart AND the
@@ -9410,9 +9465,78 @@ export class GameSessionAdapter implements GameSession {
       this.rel.decay(RELATIONSHIP_CONSTANTS.DECAY_RATE);
       this.deals.expireWeekScoped(this.live?.week ?? 0);
     }
+    // T0-3 (issue #1778) — derive this beat's Vault-free broadcast chyron(s), IF ANY, from the SAME
+    // `ev` + the now-committed `this.live` (every read/mutation above this line is either read-only
+    // over the ceremony fields `buildBeatAnnouncements` also reads, or scoped to a different beat, so
+    // nothing here perturbs what it sees). Runs at this ONE commit seam for both a plain `advanceGame`
+    // step and a T0-2 auto-advanced beat chained off `submitDecision` (both call `commit`), so the two
+    // paths announce identically — the whole point of the fix.
+    this.recordAnnouncements(ev);
     this.syncProjection();
     this.prunePresence(); // the just-evicted occupy no room (0049)
     this.persist();
+  }
+
+  /**
+   * T0-3 — build this beat's Vault-free `BeatAnnouncementView`(s) (if any), resolve their subject/
+   * detail ids to public names, assign each a stable never-reused `id`, and buffer them into
+   * `pendingAnnouncements` (read by `advanceView()` for THIS call's `AdvanceView.announcements`) AND
+   * `announcementLog` (the bounded catch-up ring `stateDelta` slices). Each `beatSeq` is provisional
+   * here (this runs before the commit funnel's bump) and corrected in place by `inOneCommit`'s
+   * post-persist patch — see that method's doc comment for why the correction must happen after.
+   */
+  private recordAnnouncements(ev: BeatEvent | null): void {
+    if (!this.live) return;
+    const s = this.live;
+    // A structural gap in `advanceBeat`'s NPC-driven "veto-ceremony" case (`src/engine/liveSeason.ts`):
+    // when an NPC HOLDS and USES the veto and the PLAYER is HOH (but not the holder), resolving the
+    // decision calls `resolveReplacement`, which immediately raises the player's "replacement" pending
+    // and returns `null` — so the beat's OWN `commit(null)` never carries an event, and the just-committed
+    // "the veto was used" fact would otherwise never announce (its sibling player-veto-holder path,
+    // `applyDecision`'s "veto-decision" case, avoids this with an `ev ?? {...}` fallback the NPC path
+    // lacks). Detected PURELY structurally, from state this commit already mutated (`vetoUsed`/`saved`
+    // just flipped, a fresh "replacement" pending now standing) — this never touches `liveSeason.ts` or
+    // consumes the seeded `RandomnessSource`, so it cannot perturb the calibration spine. `announcedVetoDecisionWeek`
+    // guards against re-firing on an unrelated later null-ev commit while the SAME pending still stands.
+    // `advanceOneBeat` — the ONLY caller of `commit()` that can pass `null` here — calls `commit(null)`
+    // for this specific gap AT MOST ONCE per raised "replacement" pending: its own guard
+    // (`if (!this.live!.pending && ...)`) means a REPEAT `advanceGame()` call, made while the SAME
+    // pending still stands, short-circuits BEFORE ever calling `advanceBeat`/`commit` again — so this
+    // branch cannot double-fire for one pending, and no extra bookkeeping is needed to prevent it.
+    if (ev === null && s.vetoUsed === true && s.saved !== undefined && s.vetoHolder !== undefined && s.pending?.kind === "replacement") {
+      this.emitAnnouncement({ kind: "veto-decision", week: s.week, subjects: [s.vetoHolder], detail: { used: true, saved: s.saved } });
+    }
+    if (!ev) return;
+    for (const fact of buildBeatAnnouncements(ev, s)) this.emitAnnouncement(fact);
+  }
+
+  /** Resolve one engine-internal `BeatAnnouncement` to a public `BeatAnnouncementView`, assign it a
+   *  stable never-reused id, and buffer it into both `pendingAnnouncements` (this call's `AdvanceView`)
+   *  and `announcementLog` (the bounded `stateDelta` catch-up ring). See `recordAnnouncements`'s doc
+   *  comment for the commit-timing contract `beatSeq` relies on. */
+  private emitAnnouncement(fact: BeatAnnouncement): void {
+    const named = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
+    const resolveDetail = (d: BeatAnnouncement["detail"]): BeatAnnouncementView["detail"] => {
+      if (!d) return undefined;
+      return {
+        ...(d.by !== undefined ? { by: named(d.by) } : {}),
+        ...(d.used !== undefined ? { used: d.used } : {}),
+        ...(d.saved !== undefined ? { saved: named(d.saved) } : {}),
+        ...(d.tieBroken !== undefined ? { tieBroken: d.tieBroken } : {}),
+      };
+    };
+    const view: BeatAnnouncementView = {
+      id: `ann:${this.announcementSeq++}`,
+      kind: fact.kind,
+      week: fact.week,
+      beatSeq: this.beatSeq, // provisional — corrected post-commit, see `inOneCommit`.
+      headline: announcementHeadline(fact, (id) => this.nameOf(id)),
+      subjects: fact.subjects.map(named),
+      ...(fact.detail ? { detail: resolveDetail(fact.detail) } : {}),
+    };
+    this.pendingAnnouncements.push(view);
+    this.announcementLog.push(view);
+    while (this.announcementLog.length > GameSessionAdapter.ANNOUNCEMENT_LOG_MAX) this.announcementLog.shift();
   }
 
   /** The beats whose directly-involved houseguests confess (E55: noms, the veto ceremony, eviction). */
@@ -10028,6 +10152,13 @@ export class GameSessionAdapter implements GameSession {
 
   private advanceView(ev: BeatEvent | null): AdvanceView {
     const s = this.live;
+    // T0-3 — drain whatever `commit()` buffered for THIS transaction (one or two commits, per the
+    // T0-2 auto-advance chain — see `submitDecision`) into the returned view, then clear the buffer so
+    // it never bleeds into a LATER, unrelated `advanceView()` call. Each entry's `beatSeq` is still
+    // provisional here; `inOneCommit`'s post-persist patch corrects it in place (same object
+    // references, so the correction is visible through this returned array too).
+    const announcements = this.pendingAnnouncements.length ? [...this.pendingAnnouncements] : undefined;
+    this.pendingAnnouncements = [];
     return {
       started: this.house !== null,
       beatSeq: this.beatSeq, // 0065 Part A — the counter AFTER this advance/decision committed
@@ -10043,6 +10174,7 @@ export class GameSessionAdapter implements GameSession {
       winner: this.named(s?.winner),
       finale: this.finaleView(),
       eviction: this.evictionView(),
+      ...(announcements ? { announcements } : {}),
     };
   }
 
@@ -10175,10 +10307,15 @@ export class GameSessionAdapter implements GameSession {
     const finishedNow = !!this.live?.finished;
     const finishedChanged = cp.finished !== finishedNow || cp.winner !== this.live?.winner;
     const hasChanges = Object.keys(changes).length > 0;
+    // T0-3 — the SAME O(Δ) tail slice as `events`, over the (in-memory-only) announcement ring; a token
+    // older than the retained window already full-refreshed above via the SAME `beatCheckpoints` miss,
+    // so this never needs its own staleness handling.
+    const announcements = this.announcementLog.slice(cp.announcementCount);
     return {
       beatSeq: current,
       fullRefresh: false,
       events,
+      ...(announcements.length ? { announcements } : {}),
       ...(hasChanges ? { changes } : {}),
       ...(finishedChanged ? { finishedChanged: true } : {}),
       ...(finishedNow ? { winner: this.named(this.live?.winner) } : {}),

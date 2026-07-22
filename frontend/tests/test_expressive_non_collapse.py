@@ -459,8 +459,14 @@ def test_creative_narration_streams_through_the_pre_emission_guard_untouched(pur
 
 
 def test_pre_emission_guard_still_holds_a_phantom_eviction(monkeypatch):
-    """The mirror — the pre-emission guard stays USEFUL: a streamed eviction the board never moved on
-    is HELD (dropped) before emission and queues a re-ground (ADR 0005 #5 — closed-set strictness)."""
+    """The mirror — the pre-emission guard stays USEFUL: a streamed eviction is HELD (dropped) before
+    emission (ADR 0005 #5 — closed-set strictness).
+
+    T0-3 (issue #1778): an eviction claim is one of the 8 weekly-loop kinds now HARD-DROPPED
+    unconditionally — the board is never even read to decide (it's stubbed to a stale, un-moved state
+    here purely to prove that a genuinely PHANTOM claim is still caught; a real one would be too, per
+    `test_0065_pre_emission_guard.py`'s `test_guard_hard_drops_an_eviction_claim_even_when_the_board_DID_confirm_it`).
+    No `_DESYNC_REGROUND` entry is stashed — the drop itself is the whole correction now."""
     user = "u-preemit-phantom"
     chat_helpers._DESYNC_REGROUND.pop(user, None)
     chat_helpers._LAST_BEAT_SIG[user] = {**_UNCHANGED, "phase": "eviction"}
@@ -482,7 +488,7 @@ def test_pre_emission_guard_still_holds_a_phantom_eviction(monkeypatch):
 
     out = _run(agent_loop._pre_emission_outcome_guard(
         "After a tense vote, one houseguest is evicted from the house.", user))
-    assert "is evicted" not in out  # the phantom sentence was held before emission
-    assert user in chat_helpers._DESYNC_REGROUND and "RE-GROUND" in chat_helpers._DESYNC_REGROUND[user]
+    assert "is evicted" not in out  # the claim sentence was hard-dropped before emission
+    assert user not in chat_helpers._DESYNC_REGROUND  # T0-3: hard-drop, not a verify-then-correct hold
     chat_helpers._LAST_BEAT_SIG.pop(user, None)
     chat_helpers._DESYNC_REGROUND.pop(user, None)

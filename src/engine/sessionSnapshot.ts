@@ -84,6 +84,15 @@ export interface SessionCore {
    * to a pre-fix load).
    */
   idempotency?: Array<[string, AdvanceView]>;
+  /**
+   * T0-3 (issue #1778) — the STABLE announcement-id counter (`GameSessionAdapter.announcementSeq`),
+   * persisted so a `BeatAnnouncementView.id` is never reused even across a restart (the FE dedups a
+   * chyron by this id — F4: it must render exactly once). NOT a `counts()` dimension: it is a monotonic
+   * counter with no "content" to thin, the same class as `beatSeq` above, not a non-degradation surface.
+   * The announcement log/ring itself is deliberately NOT persisted (process-local convenience only —
+   * see `GameSessionAdapter.announcementLog`'s own comment). Absent ⇒ 0 (byte-shaped as a pre-T0-3 save).
+   */
+  announcementSeq?: number;
   week: number;
   phase: string;
   ceremony: CeremonyState;

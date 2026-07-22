@@ -1894,6 +1894,22 @@ _CLAIM_VETO_WINNER_RE = re.compile(
     r"\bwins (?:the )?(?:power of veto|veto|pov)\b|\b(?:new )?veto (?:holder|winner)\b",
     re.IGNORECASE,
 )
+# T0-3 (issue #1778) — the 11th `_CLAIM_*_RE`: the veto USE DECISION itself ("uses the veto on X",
+# "does not use the veto", "the veto goes unused/unplayed", "pulls X off the block"/"saves X with
+# the veto") — distinct from `_CLAIM_VETO_WINNER_RE` (who WON the competition). A live scripted-
+# ceremony pass (the T0-3 FE gate) surfaced this exact gap: "Priya uses the veto on herself" matched
+# NONE of the original ten patterns, so the decision narrated ahead of/instead of the engine's
+# `veto-decision` `BeatAnnouncement` chyron sailed through unchecked. Paired with `vetoUsed` in
+# `_narration_claims_outcome` for the (unchanged) verify-then-correct path, and — like the other
+# weekly-loop kinds — HARD-DROPPED unconditionally via `_sentence_has_chyron_covered_claim` below.
+_CLAIM_VETO_USE_RE = re.compile(
+    r"\buses? (?:the )?(?:power of veto|veto|pov)(?:\s+on\b|\b)|"
+    r"\bdoes(?:n'?t| not) use (?:the )?(?:power of veto|veto|pov)\b|"
+    r"\b(?:the )?(?:power of veto|veto|pov)\s+(?:goes|remains)\s+(?:unused|unplayed)\b|"
+    r"\bpulls?\s+(?:\w+\s+){0,2}?off\s+the\s+block\b|"
+    r"\bsaves?\s+(?:\w+\s+){0,2}?with\s+the\s+veto\b",
+    re.IGNORECASE,
+)
 # #1659 R2 — a committed PLAYER REMOVAL / EXPULSION narrated at the player ("you're being removed from
 # the game", "you've been expelled", "production is removing you"). The 2026-07-16 debug-bundle incident
 # shipped exactly this (msg63: "You're being removed from the game… You're done here") while the engine
@@ -2261,6 +2277,15 @@ def _narration_claims_outcome(narration: str, before_sig: dict, after_sig: dict)
           and after.get("vetoHolder") == before.get("vetoHolder")
           and not (before.get("vetoHolder") is None and after.get("vetoHolder") is not None)):
         desync = "the POWER OF VETO being won"
+    # (6c) T0-3 (issue #1778): the veto USE DECISION itself was narrated ("uses the veto on X" /
+    #      "does not use the veto"), but `vetoUsed` never moved this turn — no decision committed.
+    #      Distinct from (6) above (who WON the competition, not what the holder DID with it).
+    #      Scoped to the veto-ceremony phase; a plan/speculation elsewhere ("I might use the veto on
+    #      you") is never policed.
+    if not desync and (_CLAIM_VETO_USE_RE.search(text)
+          and str(after.get("phase") or "").lower().startswith(_VETO_PHASES)
+          and after.get("vetoUsed") == before.get("vetoUsed")):
+        desync = "the VETO USE DECISION (whether the veto was played)"
     # (7) #1659 R2: a phantom PLAYER REMOVAL / EXPULSION. Production-removal / expulsion language directed
     #     at the player is a COMMITTED closed-set outcome (the player is OUT of the game). It is a
     #     fabrication when the board shows the player is STILL ACTIVE and the season is not finished — the
@@ -3153,7 +3178,39 @@ def _sentence_has_closed_set_claim(text: str) -> bool:
         or _CLAIM_EVICT_RESULT_RE.search(text)  # LIVE-7 (#540): self-counted majority/short
         or _CLAIM_NOMINATED_RE.search(text)
         or _CLAIM_VETO_WINNER_RE.search(text)
+        or _CLAIM_VETO_USE_RE.search(text)  # T0-3: the veto USE decision (distinct from who WON it)
         or _CLAIM_PLAYER_EXPULSION_RE.search(text)  # #1659 R2: "you're being removed/expelled from the game"
+    )
+
+
+# T0-3 (issue #1778, D1 2026-07-21 owner ruling) — the WEEKLY-LOOP closed-set claim kinds that now
+# have an authoritative engine `BeatAnnouncement` chyron (HOH winner, nominations, veto winner, the
+# veto decision, the eviction ballot tally/result — `src/engine/beatAnnouncement.ts`'s weekly-loop
+# scope). Once the chyron is the record of a fact, model prose asserting the SAME fact is not "maybe
+# right, maybe a phantom" — it is simply redundant AND risks disagreeing with the chyron (F4's triple
+# re-narration), so these 9 of the 11 `_CLAIM_*_RE` patterns flip from a VERIFY-then-correct detector
+# to a BLUNT hard-drop rail (see `_pre_emission_outcome_guard`'s caller in `src/agent_loop.py`): a
+# match here is dropped UNCONDITIONALLY, never board-verified, regardless of whether the claim would
+# have been correct. `_CLAIM_WINNER_RE` (the finale — an explicit T0-3 follow-up, not yet chyron-
+# covered) and `_CLAIM_PLAYER_EXPULSION_RE` (no ceremony-fact analogue — a player-status guard, not a
+# ceremony outcome) are DELIBERATELY excluded here; they keep the existing verify-then-correct
+# behavior via `screen_streamed_outcome`/`_narration_claims_outcome` unchanged.
+def _sentence_has_chyron_covered_claim(text: str) -> bool:
+    """Does `text` assert one of the WEEKLY-LOOP outcome kinds a `BeatAnnouncement` chyron now carries
+    authoritatively? True here means: HARD-DROP this sentence outright (see the module comment above)
+    — never verify it against the board, never emit it, regardless of correctness."""
+    if not text or not text.strip():
+        return False
+    return bool(
+        _CLAIM_EVICTED_RE.search(text)
+        or _CLAIM_NEW_HOH_RE.search(text)
+        or _CLAIM_SELF_HOH_WIN_RE.search(text)
+        or _CLAIM_SELF_VETO_WIN_RE.search(text)
+        or _CLAIM_TALLY_RE.search(text)
+        or _CLAIM_EVICT_RESULT_RE.search(text)
+        or _CLAIM_NOMINATED_RE.search(text)
+        or _CLAIM_VETO_WINNER_RE.search(text)
+        or _CLAIM_VETO_USE_RE.search(text)  # T0-3: the veto USE decision (distinct from who WON it)
     )
 
 

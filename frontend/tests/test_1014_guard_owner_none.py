@@ -109,7 +109,12 @@ def test_pre_emission_guard_holds_premature_tally_with_owner_none(monkeypatch):
 
     Fail-before: on main the guard's `if not text or not owner` bail returned the text untouched, so
     the tally streamed to the player. Pass-after: the bail is gone, the #1045 session-keyed inner
-    screen runs, and the phantom sentence is held."""
+    screen runs, and the phantom sentence is held.
+
+    T0-3 (issue #1778): a vote tally is one of the 8 weekly-loop claim kinds that now HARD-DROP
+    unconditionally (`chat_helpers._sentence_has_chyron_covered_claim`) — the drop never even reaches
+    the board-verify that used to stash a re-ground, so (unlike this file's ORIGINAL #1014 assertion)
+    no `_DESYNC_REGROUND` entry is stashed here anymore: the drop itself is the whole correction."""
     # The baseline the framing checkpoint stashed this userless turn (engine has NOT yet committed).
     chat_helpers._LAST_BEAT_SIG[_KEY] = _evict_sig(phase="eviction", evicted=0)
     _board_fakes(monkeypatch, phase="eviction", evicted=0)
@@ -125,21 +130,21 @@ def test_pre_emission_guard_holds_premature_tally_with_owner_none(monkeypatch):
     # …while the surrounding creative prose still streams (sentence granularity, delimiters intact).
     assert "The living room is dead silent." in out
     assert "the cameras keep rolling" in out
-    # And the next-turn re-ground backstop was stashed under the session key (not under None).
-    assert _KEY in chat_helpers._DESYNC_REGROUND
-    assert "RE-GROUND" in chat_helpers._DESYNC_REGROUND[_KEY]
+    # T0-3: hard-drop, not a verify-then-correct hold — no re-ground stash under any key.
+    assert _KEY not in chat_helpers._DESYNC_REGROUND
 
 
 def test_pre_emission_guard_holds_committed_count_with_owner_none(monkeypatch):
     """A "By a vote of ten…" committed-count phrasing narrated ahead of the engine commit is held
-    single-tenant too — the engine never hands the player a count (anonymized ballots only)."""
+    single-tenant too — the engine never hands the player a count (anonymized ballots only). T0-3:
+    hard-dropped unconditionally, so no re-ground is stashed (see the test above)."""
     chat_helpers._LAST_BEAT_SIG[_KEY] = _evict_sig(phase="eviction", evicted=0)
     _board_fakes(monkeypatch, phase="eviction", evicted=0)
 
     out = _run(agent_loop._pre_emission_outcome_guard(
         "By a vote of ten to one, you have been evicted from the Big Brother house.", None))
     assert out.strip() == "", "the premature committed-eviction sentence must be held"
-    assert _KEY in chat_helpers._DESYNC_REGROUND
+    assert _KEY not in chat_helpers._DESYNC_REGROUND
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -210,15 +215,31 @@ def test_creative_turn_post_check_no_reground_with_owner_none(monkeypatch):
 
 def test_pre_emission_guard_fail_open_when_no_session_binding(monkeypatch):
     """Hardest fail-open: `owner=None` AND no canonical session binding yet → `_desync_key` falls
-    soft to the raw (None) user, no baseline exists, so a closed-set claim still EMITS (we cannot tell
-    phantom from real). The guard must never crash on the userless/unbound path."""
+    soft to the raw (None) user, no baseline exists, so a claim kind NOT yet chyron-covered (the
+    season winner — T0-3's hard-drop rail is scoped to the weekly loop; finale kinds are an explicit
+    follow-up) still EMITS (we cannot tell phantom from real). The guard must never crash on the
+    userless/unbound path. The weekly-loop kinds' own (unconditional) behavior on this same unbound
+    path is pinned separately below."""
+    monkeypatch.setattr(orwell_game_session, "get_game_session", lambda user: None)
+    chat_helpers._LAST_BEAT_SIG.pop(None, None)
+    _board_fakes(monkeypatch, phase="eviction", evicted=0)
+
+    text = "Confetti falls — the houseguest is crowned the winner of Big Brother!"
+    out = _run(agent_loop._pre_emission_outcome_guard(text, None))
+    assert out == text  # fail-open: no baseline → emit, no crash
+
+
+def test_pre_emission_guard_hard_drops_a_weekly_loop_claim_even_when_unbound(monkeypatch):
+    """T0-3 (issue #1778) — the flip side: a weekly-loop claim kind hard-drops even on the hardest
+    fail-open path above (no owner, no session binding, no baseline) — it never reads the board at
+    all, so there is nothing for the missing baseline to make uncertain."""
     monkeypatch.setattr(orwell_game_session, "get_game_session", lambda user: None)
     chat_helpers._LAST_BEAT_SIG.pop(None, None)
     _board_fakes(monkeypatch, phase="eviction", evicted=0)
 
     text = "After the vote, one houseguest is evicted from the house."
     out = _run(agent_loop._pre_emission_outcome_guard(text, None))
-    assert out == text  # fail-open: no baseline → emit, no crash
+    assert out == ""
 
 
 # ════════════════════════════════════════════════════════════════════════════

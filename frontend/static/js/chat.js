@@ -3103,6 +3103,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                     try {
                       const _adv = JSON.parse(json.output || '{}');
                       window.dispatchEvent(new CustomEvent('orwell:pending', { detail: { pending: _adv && _adv.pending ? _adv.pending : null } }));
+                      // T0-3 (issue #1778): the SAME tool result's Vault-free `announcements`
+                      // (BeatAnnouncementView[]) — the engine's broadcast chyron(s) for whatever
+                      // ceremony fact(s) just committed (including a T0-2 auto-advanced beat chained
+                      // onto this same call). Riding this SAME dispatch (not a new poll/transport) is
+                      // what makes F5 two-window mirror parity inherited, not re-derived.
+                      if (_adv && Array.isArray(_adv.announcements) && _adv.announcements.length) {
+                        window.dispatchEvent(new CustomEvent('orwell:announcements', { detail: { announcements: _adv.announcements } }));
+                      }
                     } catch (_) {}
                   }
                   // G15: every game-MUTATING tool result nudges the panels through THE one

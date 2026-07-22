@@ -1170,4 +1170,105 @@
   // composes the .odec-* classes statically and calls ensureStyles() to get the kit's
   // injected structural CSS without a live pending. Additive — the live card path is untouched.
   window.OrwellDecisionStyles = { ensureStyles };
+
+  // ── T0-3 (issue #1778, D1 2026-07-21) — the BeatAnnouncement broadcast CHYRON ────────────────
+  //
+  // ADR 0003 amendment ("the chat gains a stage, not a dashboard"): every committed closed-set
+  // ceremony fact (HOH winner, nominations, veto winner, the veto decision, the replacement
+  // nominee, the anonymized ballot sequence, the eviction result) is now emitted by the engine as
+  // a Vault-free `BeatAnnouncementView` (src/ports/GameSession.ts) on the SAME advanceGame /
+  // submitDecision tool result the g15 seam and the pending card above already read — so
+  // two-window mirror parity (F5) is INHERITED here, not re-derived: both windows render the
+  // identical tool result via the existing SSE mirror. Extends this SAME kit/file (the .odec
+  // structural conventions — entrance animation, shadow/radius tokens) but is intentionally
+  // simpler than the decision card above: a chyron is a BROADCAST, not a binding guardrail — no
+  // confirm, no dismiss-forfeits-your-turn semantics, no sheet-hosting. Staged CARD-BY-CARD (a
+  // short stagger between announcements landing in the same batch — a veto decision immediately
+  // followed by its replacement nominee, or a batch of eviction ballots) mirrors the staged
+  // eviction reveal's own one-ballot(-batch)-at-a-time cadence.
+  const _CHYRON_ICON = {
+    "hoh-winner": "\u{1F3C6}", nominations: "\u{1F528}", "veto-winner": "\u{1F48E}",
+    "veto-decision": "\u{1F48E}", "replacement-nominee": "\u{1F528}",
+    "eviction-ballot": "\u{1F5F3}️", "eviction-result": "\u{1F5F3}️",
+  };
+  const _CHYRON_KICKER = {
+    "hoh-winner": "Head of Household", nominations: "Nominations", "veto-winner": "Power of Veto",
+    "veto-decision": "Veto Ceremony", "replacement-nominee": "Replacement Nominee",
+    "eviction-ballot": "Live Vote", "eviction-result": "Eviction",
+  };
+  // F4: dedup by announcement id — a chyron renders exactly once per session. Backed ALSO by a DOM
+  // check (`data-chyron-id`) so a transcript replay on reload — which re-delivers the SAME historical
+  // tool result before this module's in-memory Set has seen it this page load — still renders it only
+  // once (the DOM already carries the prior render from the earlier page's own dispatch, OR the reload
+  // path's own historical-render pass already painted it; either way this seam skips a re-paint).
+  const _chyronSeen = new Set();
+  function _chyronCss() {
+    if (document.getElementById("orwell-chyron-css")) return;
+    const st = document.createElement("style");
+    st.id = "orwell-chyron-css";
+    st.textContent = `
+      .ow-chyron {
+        margin: .5rem auto; max-width: 640px; border-radius: 12px; padding: .65rem .85rem;
+        background: var(--panel, #111); color: var(--fg, #9cdef2);
+        border: 1px solid var(--accent, var(--gold, #d9a441));
+        font-family: var(--ow-ui-font); font-size: var(--ow-fs-body, .875rem); line-height: 1.4;
+        box-shadow: var(--win-shadow, 0 8px 32px rgba(0, 0, 0, 0.45));
+        animation: ow-chyron-in .22s ease-out;
+        display: flex; align-items: flex-start; gap: .5rem;
+      }
+      .ow-chyron .ow-chyron-icon { font-size: 1.1em; line-height: 1; flex: none; }
+      .ow-chyron .ow-chyron-text { flex: 1 1 auto; }
+      .ow-chyron .ow-chyron-kicker {
+        display: block; font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
+        opacity: .65; margin-bottom: .15rem;
+      }
+      @keyframes ow-chyron-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+      @media (prefers-reduced-motion: reduce) { .ow-chyron { animation: none; } }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function _renderChyron(a) {
+    if (!a || !a.id || _chyronSeen.has(a.id)) return;
+    _chyronSeen.add(a.id);
+    let already = false;
+    try { already = !!document.querySelector('[data-chyron-id="' + CSS.escape(a.id) + '"]'); }
+    catch (_) { /* CSS.escape unavailable — fall through, the in-memory Set still guards this page load */ }
+    if (already) return;
+    const chatBox = document.getElementById("chat-history");
+    if (!chatBox) return;
+    _chyronCss();
+    const card = document.createElement("div");
+    card.className = "ow-chyron ow-chyron-" + esc(a.kind || "");
+    card.setAttribute("data-chyron-id", a.id);
+    card.setAttribute("role", "status");
+    const icon = _CHYRON_ICON[a.kind] || "\u{1F4FA}";
+    const kicker = _CHYRON_KICKER[a.kind] || "Big Brother";
+    card.innerHTML =
+      '<span class="ow-chyron-icon" aria-hidden="true">' + icon + "</span>" +
+      '<span class="ow-chyron-text"><span class="ow-chyron-kicker">' + esc(kicker) + "</span>" +
+      esc(a.headline || "") + "</span>";
+    chatBox.appendChild(card);
+    try { chatBox.scrollTop = chatBox.scrollHeight; } catch (_) {}
+  }
+
+  function _renderChyronBatch(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    list.forEach((a, i) => {
+      if (i === 0) { _renderChyron(a); return; }
+      setTimeout(() => _renderChyron(a), i * 260); // the staged, card-by-card cadence
+    });
+  }
+
+  // Fed by chat.js's tool-result seam (mirrors `orwell:pending` immediately above — the SAME
+  // advanceGame/submitDecision tool result, so this needs no new transport and no new polling).
+  window.addEventListener("orwell:announcements", (e) => {
+    try { _renderChyronBatch(e.detail && e.detail.announcements); }
+    catch (_) { /* fail open — the model's own prose still carries the beat as color */ }
+  });
+
+  // The tiny public seam (mirrors OrwellDecisionStyles): exposed for tests and the element-kit
+  // demo page, and so a caller can seed the dedup set (e.g. from an already-rendered transcript
+  // replay) without a live DOM query on every historical tool result.
+  window.OrwellChyron = { render: _renderChyron, renderBatch: _renderChyronBatch, _seen: _chyronSeen };
 })();
