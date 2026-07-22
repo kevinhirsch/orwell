@@ -443,6 +443,15 @@ async def serve_generated_image(filename: str, request: Request):
     # SECURITY: filename is the only key, so anyone who knows / guesses a
     # 12-hex content hash could pull another user's image bytes. Require
     # auth and verify ownership via the gallery row (when one exists).
+    #
+    # G3 (2026-07-22 gap audit): this check must fail CLOSED, not open. An unexpected error while
+    # resolving ownership (get_current_user, SessionLocal(), or the ORM query itself — e.g. a
+    # SQLite "database is locked" contention error) used to fall through a bare
+    # `except Exception: pass` and serve the image bytes UNCONDITIONALLY — the failure path was
+    # MORE permissive than the success path, a silent violation of the cross-user isolation
+    # guarantee CLAUDE.md calls "first-class... alongside the Vault Wall." Now: log at WARNING,
+    # record a RED-eligible soft-failure event (#1599), and REFUSE the request (404 — never
+    # confirm existence, matching the sibling ownership-mismatch branch below).
     try:
         from src.auth_helpers import get_current_user
         from core.database import SessionLocal as _SL, GalleryImage as _GI
@@ -459,8 +468,14 @@ async def serve_generated_image(filename: str, request: Request):
                 _db.close()
     except HTTPException:
         raise
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "generated-image ownership check failed — refusing to serve %r (fail-closed): %s",
+            filename, e, exc_info=False,
+        )
+        from src import log_rings
+        log_rings.record_soft_failure("image:ownership-check-failed", e, filename=filename)
+        raise HTTPException(status_code=404, detail="Image not found")
     ext = filename.rsplit('.', 1)[-1].lower()
     mime = {
         "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",

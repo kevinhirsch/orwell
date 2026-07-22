@@ -78,6 +78,48 @@ export function _setMessageActionsDeps(deps) {
   if (deps.setPendingRegenAttachments) _setPendingRegenAttachments = deps.setPendingRegenAttachments;
 }
 
+/**
+ * #1728/#1751 (D1) + G4 (2026-07-22 gap audit) — the id-keyed truncate + fetch-status-check
+ * integrity fix, shared by EVERY entry point that supersedes a persisted row
+ * (editUserMessage / resendUserMessage / regenerateFrom) so they cannot drift out of lockstep
+ * again (G4 caught exactly that: the fix originally landed on regenerateFrom only).
+ *
+ * Prefers the anchor element's stamped DB row id (`dataset.dbId`, set by chatRenderer.js for
+ * BOTH user and assistant bubbles) so the server resolves the true `keep_count` from its own
+ * `seq` order instead of trusting this module's DOM-index count, which can drift from the real
+ * DB row count (hidden/system rows persist without ever rendering a bubble) and leave a stale
+ * row un-truncated — the "two near-identical persisted rows" bug (#1728 T3). Falls back to the
+ * DOM-index `keepCount` only when the row hasn't been stamped with an id yet (rare: the action
+ * clicked before that bubble's own persistence round-trip completed).
+ *
+ * THROWS on a non-2xx response — fetch() does NOT reject on an HTTP error status
+ * (CodeRabbit/Greptile, #1751): left unchecked, a caller falls through and strips DOM rows +
+ * resubmits ANYWAY, leaving the un-truncated stale DB row behind. Throwing here means every
+ * caller's existing `catch` handles a failed truncate exactly like any other network failure,
+ * BEFORE any DOM mutation or resubmit.
+ *
+ * @param {string} apiBase
+ * @param {string} sessionId
+ * @param {number} keepCount - DOM-index fallback keep_count.
+ * @param {Element|null} anchorElement - the message element whose OWN persisted row anchors the
+ *   truncate (the AI bubble for a regenerate; the user bubble for an edit/resend).
+ * @returns {Promise<Response>} the (ok) fetch Response, for callers that want it.
+ */
+async function _truncateFromMessage(apiBase, sessionId, keepCount, anchorElement) {
+  const anchorDbId = anchorElement?.dataset?.dbId || null;
+  const res = await fetch(`${apiBase}/api/session/${sessionId}/truncate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(anchorDbId
+      ? { truncate_from_id: anchorDbId, keep_count: keepCount }
+      : { keep_count: keepCount })
+  });
+  if (!res.ok) {
+    throw new Error('Truncate failed (' + res.status + ')');
+  }
+  return res;
+}
+
 export async function editUserMessage(userMsgElement) {
   const API_BASE = _apiBaseResolver();
   const box = document.getElementById('chat-history');
@@ -127,11 +169,10 @@ export async function editUserMessage(userMsgElement) {
 
     const keepCount = msgIndex;
     try {
-      await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_count: keepCount })
-      });
+      // G4 (2026-07-22 gap audit) — id-keyed truncate + ok-check (the #1728/#1751 fix), shared
+      // with resendUserMessage/regenerateFrom via _truncateFromMessage. Throws BEFORE any DOM
+      // mutation or resubmit on a failed/stale truncate.
+      await _truncateFromMessage(API_BASE, sessionId, keepCount, userMsgElement);
 
       // Remove DOM elements from msgIndex onward
       for (let i = allMsgs.length - 1; i >= msgIndex; i--) {
@@ -209,11 +250,10 @@ export async function resendUserMessage(userMsgElement) {
   // Truncate backend to keep everything before this user message
   const keepCount = msgIndex;
   try {
-    await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keep_count: keepCount })
-    });
+    // G4 (2026-07-22 gap audit) — id-keyed truncate + ok-check (the #1728/#1751 fix), shared
+    // with editUserMessage/regenerateFrom via _truncateFromMessage. Throws BEFORE any DOM
+    // mutation or resubmit on a failed/stale truncate.
+    await _truncateFromMessage(API_BASE, sessionId, keepCount, userMsgElement);
 
     // Drop the AI replies after the user message but KEEP the user bubble
     // itself (so its photo stays visible). Then suppress the new user
@@ -320,32 +360,12 @@ export async function regenerateFrom(aiMsgElement) {
   }
 
   const keepCount = userIndex;
-  // #1728 (D1) — prefer the id-keyed supersede: the AI bubble's DB row id (stamped once the row
-  // is persisted — see chat.js `dataset.dbId`) lets the server resolve the true `keep_count` from
-  // its own `seq` order instead of trusting this function's DOM-index count, which can drift from
-  // the real DB row count (hidden/system rows persist without a rendered bubble) and leave the
-  // stale reply un-truncated — two near-identical persisted rows after "Try again" (T3). Falls
-  // back to the DOM-index count only when the row hasn't been stamped with an id yet (rare: a
-  // regenerate clicked before the bubble's own persistence round-trip completed).
-  const _aiDbId = aiMsgElement.dataset.dbId || null;
-
   try {
-    const _truncRes = await fetch(`${API_BASE}/api/session/${sessionId}/truncate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(_aiDbId
-        ? { truncate_from_id: _aiDbId, keep_count: keepCount }
-        : { keep_count: keepCount })
-    });
-    // CodeRabbit/Greptile review (both independently confirmed) — fetch() does NOT reject on an
-    // HTTP error status. `truncate_session` now 404s a stale/missing `truncate_from_id` (#1728):
-    // left unchecked, the client fell through and stripped the DOM rows + fired the regenerate
-    // ANYWAY, leaving the un-truncated stale DB row behind — reintroducing the exact "two
-    // near-identical rows" bug (T3) this change was meant to close. Throw BEFORE touching the DOM
-    // or resubmitting so the existing catch below handles it like any other network failure.
-    if (!_truncRes.ok) {
-      throw new Error('Truncate failed (' + _truncRes.status + ')');
-    }
+    // #1728 (D1) / G4 (2026-07-22 gap audit) — id-keyed truncate + ok-check, shared with
+    // editUserMessage/resendUserMessage via _truncateFromMessage (its doc holds the full
+    // rationale: prefer the AI bubble's stamped DB row id over the DOM-index guess, and throw
+    // BEFORE any DOM mutation/resubmit on a failed/stale truncate).
+    await _truncateFromMessage(API_BASE, sessionId, keepCount, aiMsgElement);
 
     for (let i = allMsgs.length - 1; i > aiIndex; i--) {
       allMsgs[i].remove();

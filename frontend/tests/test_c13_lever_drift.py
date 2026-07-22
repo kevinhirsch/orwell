@@ -204,7 +204,7 @@ def test_social_initiatives_passthrough(monkeypatch):
 def test_make_deal_forwards_and_validates(monkeypatch):
     seen = {}
 
-    async def fake(with_id, kind, terms, user=None):
+    async def fake(with_id, kind, terms, leverage=None, traded_secret=None, user=None):
         seen.update({"with": with_id, "kind": kind, "terms": terms})
         return {"deal": {"kind": kind}}
 
@@ -214,6 +214,95 @@ def test_make_deal_forwards_and_validates(monkeypatch):
     assert seen == {"with": "npc:2", "kind": "final-two", "terms": "to the end"}
     bad = _run(tool_impl.do_make_deal(json.dumps({"with": "npc:2", "kind": "coronation", "terms": "x"}), owner="p"))
     assert bad.get("exit_code") == 1
+
+
+# --- G2 (2026-07-22 gap audit): makeDeal's leverage/tradedSecret sub-parameters reach the engine ----
+#
+# The narrator prompt (src/engine/momentPrompts.ts) directs the model to press `makeDeal` with a
+# `{ leverage }` (0093, a secret about the deal partner) or `{ tradedSecret }` (0099, a secret about a
+# third party) — but the top-level lever-name scans above only ever proved `makeDeal` ITSELF is
+# callable, not that these two sub-parameters actually reach the engine. Both fields are fully built
+# and engine-tested (SecretLeverDescriptor, src/ports/GameSession.ts) but were dropped silently at
+# every FE layer. These tests pin the fix end to end: schema exposes the fields, do_make_deal forwards
+# them (shape-checked, never interpreted), and the engine wrapper carries them through.
+
+def test_make_deal_forwards_leverage_opaquely(monkeypatch):
+    seen = {}
+
+    async def fake(with_id, kind, terms, leverage=None, traded_secret=None, user=None):
+        seen.update({"with": with_id, "kind": kind, "terms": terms, "leverage": leverage,
+                     "traded_secret": traded_secret})
+        return {"deal": {"kind": kind}}
+
+    monkeypatch.setattr(orwell_engine, "make_deal", fake)
+    ok = _run(tool_impl.do_make_deal(json.dumps({
+        "with": "npc:2", "kind": "safety", "terms": "keep me off the block",
+        "leverage": {"factId": "fact:9"},
+    }), owner="p"))
+    assert ok.get("exit_code") == 0
+    assert seen["leverage"] == {"factId": "fact:9"}
+    assert seen["traded_secret"] is None
+
+
+def test_make_deal_forwards_traded_secret_opaquely(monkeypatch):
+    seen = {}
+
+    async def fake(with_id, kind, terms, leverage=None, traded_secret=None, user=None):
+        seen.update({"leverage": leverage, "traded_secret": traded_secret})
+        return {"deal": {"kind": kind}}
+
+    monkeypatch.setattr(orwell_engine, "make_deal", fake)
+    ok = _run(tool_impl.do_make_deal(json.dumps({
+        "with": "npc:3", "kind": "vote", "terms": "vote with me this week",
+        "tradedSecret": {"factId": "fact:4"},
+    }), owner="p"))
+    assert ok.get("exit_code") == 0
+    assert seen["leverage"] is None
+    assert seen["traded_secret"] == {"factId": "fact:4"}
+
+
+def test_make_deal_forwards_a_bluffed_leverage(monkeypatch):
+    seen = {}
+
+    async def fake(with_id, kind, terms, leverage=None, traded_secret=None, user=None):
+        seen.update({"leverage": leverage})
+        return {"deal": {"kind": kind}}
+
+    monkeypatch.setattr(orwell_engine, "make_deal", fake)
+    ok = _run(tool_impl.do_make_deal(json.dumps({
+        "with": "npc:2", "kind": "safety", "terms": "safety this week",
+        "leverage": {"bluff": True, "subject": "npc:2"},
+    }), owner="p"))
+    assert ok.get("exit_code") == 0
+    assert seen["leverage"] == {"bluff": True, "subject": "npc:2"}
+
+
+def test_make_deal_leverage_absent_is_byte_identical():
+    """An ordinary deal (no leverage/tradedSecret) must forward NEITHER field — a lever-free deal is
+    unchanged from the pre-0093/0099 wire shape."""
+    assert tool_impl._parse_secret_lever(None) is None
+    assert tool_impl._parse_secret_lever({}) is None
+    assert tool_impl._parse_secret_lever("not a dict") is None
+
+
+def test_engine_wrapper_make_deal_only_includes_lever_fields_when_present(monkeypatch):
+    seen = {}
+
+    async def fake_call(tool, args, user=None):
+        seen["args"] = args
+        return {}
+
+    monkeypatch.setattr(orwell_engine, "_call", fake_call)
+    _run(orwell_engine.make_deal("npc:2", "safety", "terms", user="p"))
+    assert "leverage" not in seen["args"] and "tradedSecret" not in seen["args"]
+
+    _run(orwell_engine.make_deal("npc:2", "safety", "terms", leverage={"factId": "fact:1"}, user="p"))
+    assert seen["args"]["leverage"] == {"factId": "fact:1"}
+    assert "tradedSecret" not in seen["args"]
+
+    _run(orwell_engine.make_deal("npc:2", "safety", "terms", traded_secret={"factId": "fact:2"}, user="p"))
+    assert seen["args"]["tradedSecret"] == {"factId": "fact:2"}
+    assert "leverage" not in seen["args"]
 
 
 def test_w6_every_keep_set_tool_has_a_diegetic_beat_label():
@@ -262,3 +351,74 @@ def test_turn_in_forwards_and_surfaces_daily_recap(monkeypatch):
     res = _run(tool_impl.do_turn_in("", owner="p"))
     assert res.get("exit_code") == 0 and seen.get("called")
     assert "dailyRecap" in res["output"] and "a quiet day" in res["output"]
+
+
+# --- G2 hardening: a SUB-PARAMETER drift gate ----------------------------------------------------
+#
+# The top-level scans above (`_prompt_levers`, `_referenced_levers`) only ever prove a NAMED TOOL is
+# agent-callable — they are structurally blind to a directive naming a FIELD of an already-recognized
+# tool ("use makeDeal with { leverage }"), which is exactly how 0093/0099's leverage/tradedSecret went
+# unreachable while `makeDeal` itself passed every existing gate. This closes that blind spot two ways:
+# a general call-form scan (`call toolName({ a, b })` directives, which every OTHER lever already uses)
+# and an explicit pin for the prose-only makeDeal case the call-form scan cannot parse.
+
+def _schema_properties() -> dict[str, set[str]]:
+    return {
+        t["function"]["name"]: set(t["function"].get("parameters", {}).get("properties", {}) or {})
+        for t in tool_schemas.FUNCTION_TOOL_SCHEMAS
+        if isinstance(t, dict) and t.get("type") == "function"
+    }
+
+
+def _call_form_subparams(text: str) -> list[tuple[str, list[str]]]:
+    """Extract direct call-form sub-parameter lists: `call toolName({ a, b })` (spaces around the
+    braces optional). Returns (toolName, [fields]) pairs — the fields the prompt literally directs
+    the model to pass as that tool's argument object."""
+    out: list[tuple[str, list[str]]] = []
+    for m in re.finditer(r"\bcall\s+([a-zA-Z]+)\(\{\s*([^}]*?)\s*\}\)", text):
+        tool = m.group(1)
+        fields = [f.strip() for f in m.group(2).split(",") if f.strip()]
+        if fields:
+            out.append((tool, fields))
+    return out
+
+
+def test_call_form_subparameters_are_schema_fields():
+    """Sub-parameter drift check: every `call toolName({ field, ... })` directive in the prompt (base
+    prose + moment fragments) names fields that must be REAL properties on that tool's FE schema — or
+    the model is directed to build an argument shape the FE silently drops."""
+    schemas = _schema_properties()
+    text = _base_prose_block() + "\n" + _moment_fragments_block()
+    pairs = _call_form_subparams(text)
+    assert pairs, "failed to parse any call-form sub-parameter directives — parser or prompt shape changed"
+    missing = []
+    for tool, fields in pairs:
+        props = schemas.get(tool)
+        if props is None:
+            missing.append(f"{tool} (tool itself missing from FE schemas)")
+            continue
+        for field in fields:
+            if field not in props:
+                missing.append(f"{tool}.{field}")
+    assert not missing, f"prompt directs a call-form sub-parameter the FE schema doesn't accept: {missing}"
+
+
+def test_makeDeal_leverage_and_tradedSecret_are_schema_fields():
+    """G2 pin (2026-07-22 gap audit): the prose directive 'use makeDeal with { leverage } ... or
+    { tradedSecret }' (0093/0099) is a sub-parameter directive that is NOT a `call X({...})` form, so
+    the general scan above cannot see it either — pin it explicitly so this specific drift (fully
+    engine-built + engine-tested, but silently dropped at every FE layer) can never silently return."""
+    text = _base_prose_block()
+    assert re.search(r"makeDeal\s+with\s+\{\s*leverage\s*\}", text), (
+        "the prompt no longer directs 'makeDeal with { leverage }' — update this pin if the prose changed"
+    )
+    assert re.search(r"\{\s*tradedSecret\s*\}", text), (
+        "the prompt no longer names '{ tradedSecret }' — update this pin if the prose changed"
+    )
+    make_deal_props = _schema_properties().get("makeDeal", set())
+    assert "leverage" in make_deal_props, (
+        "makeDeal's FE schema is missing 'leverage' — the prompt directs the model to use it (0093)"
+    )
+    assert "tradedSecret" in make_deal_props, (
+        "makeDeal's FE schema is missing 'tradedSecret' — the prompt directs the model to use it (0099)"
+    )

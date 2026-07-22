@@ -774,17 +774,28 @@ async def social_initiatives(user: str | None = None) -> dict:
     return await _call("socialInitiatives", {}, user=user)
 
 
-async def make_deal(with_id: str, kind: str, terms: str, expected_beat_seq: int | None = None,
+async def make_deal(with_id: str, kind: str, terms: str, leverage: dict | None = None,
+                    traded_secret: dict | None = None, expected_beat_seq: int | None = None,
                     idempotency_key: str | None = None, user: str | None = None) -> dict:
     """Record a player<->NPC deal (0039). The engine tracks and adjudicates it. 0065 Part A — an
     optional `expected_beat_seq` CAS token is threaded in only when provided (absent ⇒ identical to
     today).
+
+    0093/0099 — optional `leverage` / `traded_secret` SecretLeverDescriptor dicts
+    ({factId?, bluff?, subject?}), threaded in ONLY when provided (absent ⇒ byte-identical to the
+    pre-0093/0099 shape). Forwarded OPAQUELY to the engine, which is the single authority on whether
+    a held `factId` is legal, whether a bluff lands, and how the pressure/sweetener folds — the FE
+    never interprets either field.
 
     A10 / #591 / R1c — an optional `idempotency_key` (0065 Part B, the fold-lever sibling of
     `record_interaction`'s) threads in ONLY when provided: a deal folds a hidden relationship impact AND
     creates state, so a stale-409 re-drive (the #591 retry + the CON-11 deferred-fold queue) must be
     at-most-once at the ENGINE — a repeat key returns the prior result without re-folding (#1305)."""
     args: dict = {"with": with_id, "kind": kind, "terms": terms}
+    if leverage is not None:
+        args["leverage"] = leverage
+    if traded_secret is not None:
+        args["tradedSecret"] = traded_secret
     if expected_beat_seq is not None:
         args["expectedBeatSeq"] = expected_beat_seq
     if idempotency_key is not None:
