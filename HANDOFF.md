@@ -109,9 +109,10 @@ acceptance (owner-run).
 
 **Moved.** The full residual ledger now lives in the exhaustive backlog (§T4), deduplicated against
 the moonshot portfolio and the open issues — #738's real fix is subsumed by #1644; the C2
-first-name gap, `_stages_in_scene` verbs, and test-convention nits carry forward unchanged; the 7
-open GitHub issues are mapped with dispositions in §T2 (notably #1713 re-scoped: its CI symptom is
-moot post-#1765 but the ~300s premiere block is potentially production-relevant).
+first-name gap, `_stages_in_scene` verbs, and test-convention nits carry forward unchanged. The
+issue map in §T2 is now a *historical* audit-time list — of its original seven, #1713 is **CLOSED**
+(owner-closed; the premiere-block bound landed in #1776), #1728/#1777/#1779/#1787 closed with their
+landed PRs, and only #1729 (D2 half) / #1778 (T0-3, on #1830) / #1781 (blocked on T0-3) remain open.
 
 ## 5. Operational discipline — the short version (details in `SOUL.md`)
 

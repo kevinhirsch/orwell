@@ -19,7 +19,10 @@ overseer session's task ledger.
 
 ### A.1 Where main stands
 
-`main @ 68d2264d`. Seventeen PRs merged this cycle, all squash-merged on green required gates:
+`main @ 68d2264d` *(audit-time snapshot, 2026-07-21 — the table below is that cycle's merge list.
+As of the 2026-07-22 reconcile, main is @ `c760a130` with the #1771–#1829 + #1825 overnight batch
+merged on top; `HANDOFF.md` §1 is the current snapshot.)*. Seventeen PRs merged this cycle, all
+squash-merged on green required gates:
 
 | PR | What landed |
 |---|---|
