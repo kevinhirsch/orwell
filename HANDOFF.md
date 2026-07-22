@@ -81,22 +81,26 @@ Act→Commit→Voice (agent_loop/orwellDecision files free up) · after attentio
 footage pool (its ruled gate). Locked-file registry while agents run: `orwellDecision.js`, all of
 `agent_loop.py`, `fold_ledger.py`, GameSessionAdapter's commit/advance/submit bodies.
 
-**Backlog-zero estimate (owner asked):** ~15 of the 42-item backlog landed or at-the-door tonight;
-~10 more in the running fleet. Remaining after fleet lands: Wave 2 (Act→Commit→Voice, show bible,
-honest delivery, full-WS consolidation), E1 + D4, Wave 2.5 quick wins, Wave 4 (editorial organ +
-the ≥7.5 mid-band), Wave 5 (agency band + 0128/0129) — ≈20–25 build items, several large.
-**At tonight's cadence: buildable-zero in roughly 2–3 more sessions like this one.** Absolute zero
-is not autonomously reachable: PO-gated/owner-run items stay open — 0097/0098/0103 (parked,
-PO-gated), the ADR-0018 red-line question, the Q7 spec's 4 PO forks, D5 autopsy (parked), TUN-2
-(parked), #0010 real-Proxmox smoke (owner-run), post-#1768 fresh-cast acceptance (owner-run).
+**Backlog-zero estimate (owner asked; buckets are non-overlapping slices of the 42-issue backlog):**
+~13 items closed by tonight's merges, ~3 more at-the-door in the open PRs above, ~9 in the running
+fleet ⇒ ~17 issues left untouched afterward (Wave 2: Act→Commit→Voice, show bible, honest delivery,
+full-WS consolidation · E1 + D4 · the Wave-2.5 quick wins · Wave 4: editorial organ + the ≥7.5
+mid-band · Wave 5: agency band + 0128/0129) — several of them large. (Tonight also landed work
+OUTSIDE the 42 — flake root-causes, the matrix quiescence gate, the probe-race fix — so merge count
+≠ issue count.) **At tonight's cadence: buildable-zero in roughly 2–3 more sessions like this
+one.** Absolute zero is not autonomously reachable: PO-gated/owner-run items stay open —
+0097/0098/0103 (parked, PO-gated), the ADR-0018 red-line question, the Q7 spec's 4 PO forks, D5
+autopsy (parked), TUN-2 (parked), #0010 real-Proxmox smoke (owner-run), post-#1768 fresh-cast
+acceptance (owner-run).
 
 ## 3. Owed / obligations
 
 1. **🔑 Key rotation: CLOSED (D9, 2026-07-21)** — the owner rotated all exposed keys; the session
    scratchpad copy was destroyed by the container rollback. Nothing outstanding.
 2. **Owner decisions D1–D10 are ALL RULED** (backlog §T7 rulings table, finalized via #1772) — no
-   operator should wait on them. The only live gates are sequencing ones: the casting mandate leads
-   Wave 1, and T0-6 must land before the Footage Pool (D4's condition).
+   operator should wait on them. The casting mandate is **CLOSED** (#1776 + #1780 both merged);
+   D4's Footage Pool condition is now the **attention ledger** landing (its build is in the fleet,
+   `claude/attention-ledger`) — dispatch D4 when that merges, nothing else gates it.
 3. **Post-#1768 acceptance:** the next *freshly generated* cast is the acceptance check for the
    tattoo fix (expect 2–4 inked of 16, varied hometowns/vocations; committed dups structurally 0).
 
