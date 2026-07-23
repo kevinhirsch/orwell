@@ -25,6 +25,18 @@ _CAP = 2000
 _PAYLOAD_CAP = 2048
 
 
+_HIDDEN_CONTENT_TOOLS = {
+    "npcVoice",
+    "knowledgeScopeManifest",
+    "getOffscreenSceneSkeletons",
+    "getMomentPrompt",
+}
+
+
+def _is_hidden_content_tool(tool: str) -> bool:
+    return tool in _HIDDEN_CONTENT_TOOLS
+
+
 class Ring:
     def __init__(self):
         self.buf = collections.deque(maxlen=_CAP)
@@ -102,6 +114,9 @@ def _clip(v) -> str:
     return s if len(s) <= _PAYLOAD_CAP else s[:_PAYLOAD_CAP] + f"… [+{len(s) - _PAYLOAD_CAP} chars]"
 
 
+
+
+_REDACTED = "***REDACTED***"
 def record_io(tool: str, args, ok: bool, duration_ms: int, payload, user=None) -> None:
     """One Engine I/O entry per tool call — what was written, what came back.
 
@@ -111,16 +126,17 @@ def record_io(tool: str, args, ok: bool, duration_ms: int, payload, user=None) -
     first-class alongside the Vault Wall). A genuinely userless/system call stays None ⇒ maps to the
     shared ``default`` bucket, which never leaks to a NAMED user."""
     import time as _t
+    hidden = _is_hidden_content_tool(tool)
     IO.push({
         "ts": int(_t.time() * 1000),
         "level": "INFO" if ok else "ERROR",
         "logger": "engine-io",
-        "msg": f"{tool} {'ok' if ok else 'FAILED'} {duration_ms}ms",
+        "msg": f"{tool} {'ok' if ok else 'FAILED'} {duration_ms}ms" + (' [HIDDEN CONTENT — redacted]' if hidden else ''),
         "tool": tool,
         "ok": ok,
         "durationMs": duration_ms,
-        "args": _clip(args),
-        "result": _clip(payload),
+        "args": _REDACTED if hidden else _clip(args),
+        "result": _REDACTED if hidden else _clip(payload),
         "user": _clip(user) if user is not None else None,
     })
 

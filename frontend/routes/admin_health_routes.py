@@ -796,7 +796,14 @@ def _llm_io_section() -> dict:
         if isinstance(rec, dict):
             parsed.append(rec)
     out["meta"]["truncated"] = partial or len(parsed) > _BUNDLE_LLM_IO_CAP
-    out["records"] = parsed[-_BUNDLE_LLM_IO_CAP:]
+    # #1865: redact sealed call class records unless vault is unsealed
+    from src import llm_trace as _lt
+    vault_open = _lt._vault_is_unsealed()
+    raw = parsed[-_BUNDLE_LLM_IO_CAP:]
+    if not vault_open:
+        out["records"] = [_lt.redact_sealed_record(r) for r in raw]
+    else:
+        out["records"] = raw
     return out
 
 
