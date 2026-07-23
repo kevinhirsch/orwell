@@ -21,6 +21,7 @@ from src.orwell_sync_ledger import note_belt as _note_belt  # gap #3 belt-fire t
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
 from fastapi import HTTPException
+from src.log_rings import record_soft_failure
 
 logger = logging.getLogger(__name__)
 
@@ -3012,11 +3013,13 @@ async def fetch_sealed_from_house(user) -> list:
         try:
             raw += list(await orwell_engine.sealed_from_house(user=user) or [])
         except Exception as e1:
-            logger.debug("[orwell] sealed-from-house fetch skipped for user=%s: %s", user, _exc_detail(e1))
+            logger.warning("[orwell] sealed-from-house fetch failed for user=%s: %s", user, _exc_detail(e1))
+            record_soft_failure("knowledge-wall:sealed-from-house-fetch-failed", e1, corrected="fail-closed:keep-last-good", user=user)
         try:
             raw += list(await orwell_engine.knowledge_scope_manifest(user=user) or [])
         except Exception as e2:
-            logger.debug("[orwell] knowledge-scope manifest fetch skipped for user=%s: %s", user, _exc_detail(e2))
+            logger.warning("[orwell] knowledge-scope manifest fetch failed for user=%s: %s", user, _exc_detail(e2))
+            record_soft_failure("knowledge-wall:knowledge-scope-manifest-fetch-failed", e2, corrected="fail-closed:keep-last-good", user=user)
         for f in raw:
             if not isinstance(f, dict):
                 continue
@@ -3028,9 +3031,10 @@ async def fetch_sealed_from_house(user) -> list:
             if sigs:
                 facts.append({"content": content, "knownTo": known, "signatures": sigs})
     except Exception as e:
-        logger.debug("[orwell] knowledge-wall manifest fetch skipped for user=%s: %s", user, _exc_detail(e))
-        facts = cached[1] if cached else []
-    _KW_SEALED_CACHE[key] = (now, facts)
+        logger.warning("[orwell] knowledge-wall total manifest fetch failed for user=%s: %s", user, _exc_detail(e))
+        record_soft_failure("knowledge-wall:manifest-fetch-failed", e, corrected="fail-closed:keep-last-good", user=user)
+        facts = cached[1] if cached else facts
+    _KW_SEALED_CACHE[key] = (now, facts) if facts else _KW_SEALED_CACHE.get(key, (now, []))
     return facts
 
 
