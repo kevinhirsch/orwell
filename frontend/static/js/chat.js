@@ -1638,18 +1638,42 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           if (clearResponseTimeout) clearResponseTimeout();
           return;
         } catch (err) {
-          // Pre-stream refusal (stale-beat / forbidden / not-bound, §3.5): fall soft —
-          // drop the pinned round, release the lock, and reconcile from history. A
-          // stale-beat reconcile lets the player retry with the fresh beatSeq (0065).
-          // #891 order-stability: the send was REFUSED before any server write — release the
-          // durable in-flight record so a later reload can't resurrect a turn the player must
-          // consciously retry (stale-beat semantics).
+          // ── #1878: stale-beat auto-retry once ──
+          if (err && err.code === "stale-beat") {
+            // err.detail.beatSeq was already adopted by orwellWs.js _adoptBeat, so
+            // our next sendTurn will get the fresh expectedBeatSeq from lastBeatSeq().
+            try {
+              await window.OrwellWs.sendTurn({
+                message: _finalMsgWithInject,
+                clientMsgId: _clientMsgId,
+                mode: isAgentMode ? 'agent' : 'chat',
+                // Don't pass expectedBeatSeq — sendTurn uses lastBeatSeq() as default
+              });
+              // Retry ACCEPTED — normal stream flow continues. Keep the pinned round.
+              if (clearResponseTimeout) clearResponseTimeout();
+              return;
+            } catch (retryErr) {
+              // Retry failed again — fall through to existing cleanup + restore composer.
+              // Log the double-failure so it's not silent.
+              console.warn('[orwell #1878] stale-beat retry ALSO failed:', retryErr);
+            }
+          }
+
+          // ── Existing fall-soft cleanup (preserved unchanged) ──
           try { _outboxReleaseInflightSend(_clientMsgId); } catch (_) {}
           _wsResetRound();
           if (clearResponseTimeout) clearResponseTimeout();
           try { if (spinner) spinner.destroy(); } catch (_) {}
           if (chatState._streamSessionId === streamSessionId) chatState._streamSessionId = null;
           try { if (holder) holder.remove(); } catch (_) {}
+
+          // ── #1878: restore composer text + visible notice when auto-retry failed or wasn't stale-beat ──
+          // The player's text was in _finalMsgWithInject. Restore the composer so they don't have to retype.
+          try {
+            const msgEl = document.getElementById('message');
+            if (msgEl) msgEl.value = _finalMsgWithInject;
+          } catch (_) {}
+
           try { await softReloadHistory(streamSessionId); } catch (_) {}
           return;
         }
