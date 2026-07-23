@@ -5429,6 +5429,17 @@ async def do_daily_recap(content: str, owner: Optional[str] = None) -> Dict:
         return {"error": f"engine error: {e}", "exit_code": 1}
 
 
+async def do_world_snapshot_view(content: str, owner: Optional[str] = None) -> Dict:
+    from src import orwell_engine
+    try:
+        res = await orwell_engine.world_snapshot_view(user=owner)
+        if res is None or (isinstance(res, dict) and not res):
+            return {"output": json.dumps({}), "exit_code": 0}
+        return {"output": json.dumps(res, indent=2), "exit_code": 0}
+    except Exception as e:
+        return {"error": f"engine error: {e}", "exit_code": 1}
+
+
 async def do_npc_voice(content: str, owner: Optional[str] = None) -> Dict:
     from src import orwell_engine
     try:
