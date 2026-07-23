@@ -66,6 +66,37 @@ describe("0070 — off-screen texture enrichment reaches the engine over the MCP
     }
   });
 
+  it("templateContent exposes only base pattern, never enrichment clauses (#1869 Vault-leak guard)", async () => {
+    const reg = new GameSessionRegistry();
+    const user = "tx-vault-leak";
+    const SEED = 8675309;
+    const orch = new Orchestrator(reg, { now: () => SEED }, { seed: SEED });
+    const sb = reg.sandboxFor(user);
+    sb.session.createCharacter({ playerName: "The Player", seed: SEED });
+    // Advance multiple offscreen ticks to trigger all enrichment paths
+    for (let t = 0; t < 5; t++) {
+      orch.advance(user, "offscreen-tick");
+    }
+    const commands = new EngineCommandsAdapter(sb.engine.events, sb.engine.knowledge);
+    const server = new McpServer("player", { player: sb.player, admin: sb.admin, summary: sb.summary, commands, session: sb.session });
+    const res = await server.callTool("getOffscreenSceneSkeletons", {}) as { eventId: string; templateContent: string }[];
+    if (res.length === 0) return; // no scenes this run — skip
+    for (const sk of res) {
+      // templateContent must be the base deterministic content (participants+nature ONLY).
+      // It must NOT contain enrichment markers:
+      // B50: hidden-element detail appended after " — " (from line 408)
+      // PV1: player-subject clause appended after " — " (from line 424)
+      // scheme-target: clause appended after " — " (from line 438)
+      // The base pattern is "npc:ID verb npc:ID" where verbs can be multi-word ("formed an alliance with").
+      // A single em-dash in the content signals enrichment leaked through.
+      expect(sk.templateContent).not.toContain(" — ");
+      // No "plots against" or "scheming" language
+      expect(sk.templateContent).not.toMatch(/ plots against /i);
+      expect(sk.templateContent).not.toMatch(/scheming/i);
+      expect(sk.templateContent).not.toMatch(/ scheme against /i);
+    }
+  });
+
   it("recordOffscreenSceneTexture dispatches and returns { ok: boolean }", async () => {
     const reg = new GameSessionRegistry();
     const user = "tx-write-test";

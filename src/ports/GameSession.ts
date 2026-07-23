@@ -2091,9 +2091,9 @@ export interface OffscreenSceneSkeleton {
   /** Public participant entity ids (both participants — no Vault content). */
   participants: string[];
   /**
-   * The current prose content of the scene — either the deterministic template or the voiced
-   * texture if the FE has already written one back. Never contains hidden attributes or
-   * relationship numbers.
+   * The current prose content of the scene — either the voiced texture if the FE has written one back,
+   * or the base deterministic template (participants+nature ONLY, no hidden-element/player-subject/scheme-target
+   * enrichment). Never contains hidden attributes or relationship numbers.
    */
   templateContent: string;
 }
