@@ -37,10 +37,14 @@ WriteFn = Callable[[str, str], Awaitable[dict]]     # (eventId, content) -> { ok
 
 # ── Prompt helpers ────────────────────────────────────────────────────────────────────────────────
 
-def _voicing_messages(nature: str, participants: list[str], template: str) -> list[dict]:
+def _voicing_messages(nature: str, participants: list[str], template: str,
+                      zeitgeist_offscreen: str = "") -> list[dict]:
     """Build a tight LLM prompt to voice one off-screen scene skeleton as vivid in-character prose.
     The prompt is Vault-free: it only receives the PUBLIC nature + participant ids + the existing
-    template — no relationship numbers, no hidden attributes, no soul data."""
+    template — no relationship numbers, no hidden attributes, no soul data.
+
+    When ``zeitgeist_offscreen`` is provided (feature 0062), it is appended as background context
+    so the zeitgeist flavor colors the off-screen narration."""
     part_str = " and ".join(f"houseguest {p}" for p in participants[:2])
     system = (
         "You are voicing a short behind-the-scenes beat from a reality-TV social game. "
@@ -54,9 +58,11 @@ def _voicing_messages(nature: str, participants: list[str], template: str) -> li
     user = (
         f"Scene nature: {nature}\n"
         f"Participants: {part_str}\n"
-        f"Template: {template}\n\n"
-        "Write one vivid prose sentence for this off-screen moment:"
+        f"Template: {template}\n"
     )
+    if zeitgeist_offscreen:
+        user += f"\nBackground zeitgeist context for the house: {zeitgeist_offscreen}\n"
+    user += "\nWrite one vivid prose sentence for this off-screen moment:"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
@@ -68,7 +74,8 @@ def _sanitize_prose(text: str, max_chars: int = 400) -> str:
 
 # ── Core orchestrator ─────────────────────────────────────────────────────────────────────────────
 
-async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
+async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn,
+                       zeitgeist_offscreen: str = "") -> bool:
     """Voice one off-screen scene skeleton and write the result back. Returns True if the write-back
     was accepted. Fail-soft: any error returns False (the template content stands)."""
     try:
@@ -76,6 +83,7 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
             nature=sk.get("nature", "conversation"),
             participants=sk.get("participants", []),
             template=sk.get("templateContent", ""),
+            zeitgeist_offscreen=zeitgeist_offscreen,
         )
         raw = await llm_fn(msgs)
         prose = _sanitize_prose(raw or "")
@@ -88,7 +96,8 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn) -> bool:
         return False
 
 
-async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn: WriteFn) -> dict:
+async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn: WriteFn,
+                       zeitgeist_offscreen: str = "") -> dict:
     """Fan out: read skeletons for the current tick, voice each in parallel (budget-capped), write
     them back. Returns a summary dict. Never raises — any failure is logged and skipped."""
     try:
@@ -113,7 +122,7 @@ async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn:
     batch = skeletons[:MAX_SCENES_PER_TICK]
     total = len(batch)
 
-    tasks = [voice_scene(sk, llm_fn, write_fn) for sk in batch]
+    tasks = [voice_scene(sk, llm_fn, write_fn, zeitgeist_offscreen=zeitgeist_offscreen) for sk in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     voiced = sum(1 for r in results if r is True)
 
@@ -162,8 +171,17 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     async def write_back(event_id: str, content: str) -> dict:
         return await orwell_engine.record_offscreen_scene_texture(event_id, content, user=owner)
 
+    # Feature 0062: fetch the zeitgeist offscreenPrompt once per tick so it colors the prose.
+    zeitgeist_offscreen = ""
     try:
-        result = await enrich_tick(get_skeletons, llm_fn, write_back)
+        z = await orwell_engine.world_snapshot_view(user=owner)
+        if isinstance(z, dict):
+            zeitgeist_offscreen = z.get("offscreenPrompt", "") or ""
+    except Exception:
+        pass
+
+    try:
+        result = await enrich_tick(get_skeletons, llm_fn, write_back, zeitgeist_offscreen=zeitgeist_offscreen)
     except Exception as exc:
         # #1599 (CodeRabbit): a whole-tick enrichment CRASH must show RED regardless of policy. The
         # strict branch already RED-records via enrichment_policy.record_failure → record_overseer(ok=False);

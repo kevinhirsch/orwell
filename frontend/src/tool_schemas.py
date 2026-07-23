@@ -1446,6 +1446,14 @@ FUNCTION_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "worldSnapshotView",
+            "description": "The move-in zeitgeist snapshot (0062): public flavor from the real world on the approximate move-in date — what's trending in screen/music/sports/news/internet, plus a mood. Vault-free flavor only, never a game input. Returns {screen: [str], music: [str], sports: [str], news: [str], internet: [str], mood: str, offscreenPrompt: str} or {}. Call to enrich the off-screen texture when writing social-scene prose so the zeitgeist flavor colors the narration.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "seasonRetrospective",
             "description": "POST-SEASON ONLY (0048): opens the Producer's Vault for the FINISHED season — off-screen scheming, confessionals, the twist that never fired. Returns nothing while a season is live; after the winner it is the payoff.",
             "parameters": {"type": "object", "properties": {}},
@@ -1995,6 +2003,8 @@ ORWELL_GAME_TOOLS = frozenset({
     "seasonRecap", "seasonRetrospective",
     # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
     "dailyRecap",
+    # 0062: the move-in zeitgeist snapshot — public flavor + offscreenPrompt.
+    "worldSnapshotView",
     # ADR 0006 (#1385): the player's bedtime lever — ends their night, rolls the house to morning,
     # folds the hidden rest penalty in the ENGINE, and delivers the dailyRecap (0102) inline on its result.
     "turnIn",

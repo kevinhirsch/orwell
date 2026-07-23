@@ -79,6 +79,8 @@ export const ORWELL_TOOL_BEATS = {
   'seasonRetrospective': '\u{1F513} The producers’ vault',
   // 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
   'dailyRecap': '\u{1F4C6} The day in review',
+  // 0062: the move-in zeitgeist snapshot — public flavor from the outside world.
+  'worldSnapshotView': '\u{1F30D} The world outside',
   // ADR 0006 (#1385): the player turns in for the night — the house rolls to morning (the 0102 recap
   // rides this beat's result). A real mutation, so it stays VISIBLE (never in ORWELL_SILENT_BEATS).
   'turnIn': '\u{1F319} Lights out',
@@ -116,6 +118,8 @@ export const ORWELL_SILENT_BEATS = new Set([
   'whereabouts', 'socialRead', 'socialInitiatives', 'npcVoice', 'seasonRecap',
   // 0102: a pure re-fetch of a digest already delivered inline on turnIn — no new mutation.
   'dailyRecap',
+  // 0062: a pure read of the zeitgeist snapshot — no mutation, no player-facing outcome.
+  'worldSnapshotView',
   'inspectNonVaultState', 'sandboxHealth', 'list_models', 'search_chats',
   // FEDEEP-6/CA-23 — the admin/God-Mode meta-port tools (CLAUDE.md: "configure, override
   // mechanics, inspect non-Vault state, manage the sandbox"). These should never reach the player
