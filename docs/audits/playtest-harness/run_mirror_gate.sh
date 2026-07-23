@@ -210,10 +210,27 @@ curl -s -b "$CK" "$BASE_URL/api/orwell/state" | node -e "let s='';process.stdin.
 #    fake model booted with FAKE_SCRIPT=toolturn, step 2 above); default is the chat-render
 #    live-parity gate (F5 chat-render half, R2 / ADR 0015).
 if [ -n "${MIRROR_HUD:-}" ]; then
-  say "6) MIRROR HUD-PARITY GATE (F5 status/gadget half · 0064 §B/D)"
-  cd "$ROOT" && node "$HARNESS/mirror_hud_parity.mjs"
-  GATE=$?
-  echo ""; echo "gate exit: $GATE  (0=PASS B's HUD mirrors A's mutation off the push · 1=FAIL stale-until-poll · 2=precondition unmet)"
+  run_hud_parity() {  # $1 = mode label · $2 = MIRROR_WS_TRANSPORT value
+    say "6) MIRROR HUD-PARITY GATE (F5 status/gadget half · 0064 §B/D) — $1 transport"
+    ( cd "$ROOT" && MIRROR_HUD=1 MIRROR_WS_TRANSPORT="$2" exec node "$HARNESS/mirror_hud_parity.mjs" )
+    local rc=$?
+    echo ""; echo "[$1] gate exit: $rc (0=PASS · 1=FAIL · 2=precondition unmet)"
+    return $rc
+  }
+  if [ -n "${MIRROR_WS_TRANSPORT+x}" ]; then
+    if [ "$MIRROR_WS_TRANSPORT" = "1" ] || [ "$MIRROR_WS_TRANSPORT" = "true" ]; then
+      run_hud_parity ws 1; GATE=$?
+    else
+      run_hud_parity fallback 0; GATE=$?
+    fi
+  else
+    run_hud_parity fallback 0; GATE_SSE=$?
+    run_hud_parity ws 1;       GATE_WS=$?
+    echo ""; echo "──── BOTH-MODE SUMMARY (HUD parity) ────"
+    echo "  SSE/fallback : $([ "$GATE_SSE" -eq 0 ] && echo PASS || echo FAIL) (exit $GATE_SSE)"
+    echo "  WS transport : $([ "$GATE_WS" -eq 0 ] && echo PASS || echo FAIL) (exit $GATE_WS)"
+    if [ "$GATE_SSE" -eq 0 ] && [ "$GATE_WS" -eq 0 ]; then GATE=0; else GATE=1; fi
+  fi
 elif [ -n "$TOOLTURN" ]; then
   # The tool-rich multi-round settled-parity gate, under BOTH transports (#1087 — the WS
   # rebind→ring-replay churn regression failed exactly this gate while the single-round live gate

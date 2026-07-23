@@ -524,6 +524,41 @@ jobs:
           done
           echo "::error::mirror-toolturn WS leg failed all attempts (the #1087 rebind→ring-replay churn class: dup bubbles / subscribe churn on a tool-rich turn under WS)."
           exit 1
+      # ── F5 HUD/status parity (0064 §B/D), BOTH transports (#1880) ──────────────────────────────
+      # The executable, model-independent HUD-parity gate for F5's STATUS/GADGET half:
+      # two windows on one started game; A sends a mutating turn (the 0055 _auto_record_scene belt
+      # commits an engine mutation via a long player line); B must reconcile its HUD off the SERVER
+      # PUSH (the 0064 `game-updated` SSE or the ws:state bridge) within the budget, not on its own
+      # 20-30s poll. Key-free, deterministic fake model, same run_mirror_gate.sh driver as the live
+      # and toolturn parity gates. See docs/audits/playtest-harness/README.md §10.
+      - name: mirror-hud gate — SSE/poll transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            echo "──── mirror-hud (SSE) attempt $attempt ────"
+            if MIRROR_HUD=1 MIRROR_WS_TRANSPORT=0 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-hud (SSE): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-hud (SSE): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-hud SSE leg failed all attempts (B's HUD did not reconcile off the SSE push within budget)."
+          exit 1
+      - name: mirror-hud gate — WebSocket transport (blocking)
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            echo "──── mirror-hud (WS) attempt $attempt ────"
+            if MIRROR_HUD=1 MIRROR_WS_TRANSPORT=1 bash docs/audits/playtest-harness/run_mirror_gate.sh; then
+              echo "mirror-hud (WS): PASS on attempt $attempt"
+              exit 0
+            fi
+            echo "mirror-hud (WS): attempt $attempt did not pass; retrying"
+            sleep 3
+          done
+          echo "::error::mirror-hud WS leg failed all attempts (B's HUD did not reconcile off the ws:state push within budget under WS transport)."
+          exit 1
 
   # ── #1375 rendered a11y gate — axe-core + WCAG/APCA contrast over the staged matrix ──────────
   #
