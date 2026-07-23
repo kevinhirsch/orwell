@@ -1295,13 +1295,55 @@
       esc(a.headline || "") + "</span>";
     chatBox.appendChild(card);
     try { chatBox.scrollTop = chatBox.scrollHeight; } catch (_) {}
+    try { if (window.orwellAnnounce) window.orwellAnnounce(esc(kicker) + ": " + esc(a.headline || "")); } catch (_) {}
+  }
+
+  function _announceBatchCoalesced(rendered) {
+    if (!rendered.length) return;
+    if (rendered.length === 1) {
+      try { if (window.orwellAnnounce) window.orwellAnnounce(rendered[0].kicker + ": " + rendered[0].headline); } catch (_) {}
+      return;
+    }
+    // Check if all items share the same kicker (homogeneous batch)
+    var firstKicker = rendered[0].kicker;
+    var allSameKicker = rendered.every(function(r) { return r.kicker === firstKicker; });
+    if (allSameKicker) {
+      try { if (window.orwellAnnounce) window.orwellAnnounce(firstKicker + ": " + rendered.length + (rendered.length === 1 ? " announcement" : " announcements")); } catch (_) {}
+    } else {
+      // Mixed batch — join unique kicker+headline combos
+      var seen = {};
+      var parts = [];
+      rendered.forEach(function(r) {
+        var key = r.kicker + r.headline;
+        if (!seen[key]) { seen[key] = true; parts.push(r.kicker + ": " + r.headline); }
+      });
+      try { if (window.orwellAnnounce) window.orwellAnnounce(parts.join("; ")); } catch (_) {}
+    }
   }
 
   function _renderChyronBatch(list) {
     if (!Array.isArray(list) || !list.length) return;
-    list.forEach((a, i) => {
-      if (i === 0) { _renderChyron(a); return; }
-      setTimeout(() => _renderChyron(a), i * 260); // the staged, card-by-card cadence
+    var rendered = [];
+    list.forEach(function(a, i) {
+      if (!a || !a.id) return;
+      var willRender = !_chyronSeen.has(a.id) && !(function() {
+        try { return !!document.querySelector('[data-chyron-id="' + CSS.escape(a.id) + '"]'); }
+        catch (_) { return false; }
+      })();
+      if (i === 0) {
+        _renderChyron(a);
+        if (willRender) rendered.push({ kicker: _CHYRON_KICKER[a.kind] || "Big Brother", headline: a.headline || "" });
+        return;
+      }
+      setTimeout(function() {
+        _renderChyron(a);
+        if (willRender) rendered.push({ kicker: _CHYRON_KICKER[a.kind] || "Big Brother", headline: a.headline || "" });
+        if (i === list.length - 1) {
+          setTimeout(function() {
+            _announceBatchCoalesced(rendered);
+          }, 300);
+        }
+      }, i * 260);
     });
   }
 
