@@ -2027,9 +2027,19 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           }
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
-            // D2: count every processed SSE event for resume from_seq cursor
-            _sseEventCount++;
-            chatState._sseEventCount[streamSessionId] = _sseEventCount;
+            // D2: count every processed SSE event for resume from_seq cursor.
+            // Skip prepended route events (run-started, canonical_session) — they
+            // are NOT in the agent_runs buffer, so counting them makes from_seq
+            // overshoot the buffer index, causing a narration GAP on self-resume.
+            let _skipCount = false;
+            try {
+              const p = JSON.parse(data);
+              if (p && (p.type === 'run-started' || p.type === 'canonical_session')) _skipCount = true;
+            } catch (_) { /* non-JSON payloads ([DONE], etc.) always count */ }
+            if (!_skipCount) {
+              _sseEventCount++;
+              chatState._sseEventCount[streamSessionId] = _sseEventCount;
+            }
 
             // (thinking spinner removal is handled in agent_step / tool_start / content handlers)
 
