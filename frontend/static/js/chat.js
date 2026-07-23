@@ -2275,15 +2275,11 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   }
                 }
 
-                // GAME BUILD (2026-06-20 owner ruling): the model's reasoning must be
-                // CLEANLY SEPARATED from the public bubble — never mixed in. Reasoning
-                // streams into a condensed, DEFAULT-COLLAPSED "Thinking" accordion
-                // (debug-viewable, expandable) while the public bubble carries ONLY the
-                // in-character narration. The reasoning is Vault-free (the model receives
-                // no secret state) so showing it collapsed for debug is safe; the reply
-                // render below still scrubs any reasoning/draft that bled into content.
-                // The shared live-think path (immediately below) already builds a
-                // collapsed accordion — both the game build and the non-game build use it.
+                // R-VLT-2 (#1867): ADR-0019 Layer 2 means the MODEL receives secret state
+                // (presentKnowledge). The reasoning is structurally walled server-side: the SSE
+                // stream from agent_loop.py drops thinking deltas when game_mode is truthy, so
+                // no Vault content reaches this accordion in the game build. The accordion still
+                // works for debug builds (ORWELL_GAME_BUILD=0) where the raw reasoning passes through.
                 // An operator may fully hide the accordion via `body.hide-thinking`.
                 if (isGameBuild() && document.body.classList.contains('hide-thinking') &&
                     (hasUnclosedThink || isThinking)) {
