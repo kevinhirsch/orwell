@@ -21767,9 +21767,6 @@ body.theme-frosted .ow-btn-xl {
   border-radius: var(--ow-radius-pill, 9999px);  /* extra-large → capsule */
 }
 
-    var(--ow-btn-tint-primary, rgba(255,255,255,0.18));
-  border-color: rgba(255,255,255,0.34);
-}
 
 /* ── CONCENTRIC NESTING (WWDC25 356 concentric math) ─────────────────────────────
    356's three shape types: fixed (constant radius), capsule (radius = ½ height), and
