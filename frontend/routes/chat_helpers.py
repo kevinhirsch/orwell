@@ -975,6 +975,15 @@ def _desync_key(user):
 _TURN_WHEREABOUTS: dict = {}      # frozen W0 per user — the snapshot this turn's prose was grounded in
 _TURN_NPC_MOVES: dict = {}        # engine-CONFIRMED FE belt NPC moves this turn: [{"id", "room"}, ...]
 _TURN_FREEZE_OK: dict = {}        # False once the model issues a move the FE could not capture
+# BL-007: did the model call whereabouts on the immediately-preceding turn?
+# Set by the agent_loop wiring after each turn's tool events are known.
+_LAST_TURN_CALLED_WHEREABOUTS: dict = {}  # owner (str "" for None) -> bool
+
+
+def set_last_turn_called_whereabouts(user: str, called: bool) -> None:
+    """BL-007: set whether the model called whereabouts on the just-completed turn, for anti-spam."""
+    key = user or ""
+    _LAST_TURN_CALLED_WHEREABOUTS[key] = called
 
 
 def freeze_capture_whereabouts(user, whereabouts) -> None:
