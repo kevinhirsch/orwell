@@ -4681,7 +4681,17 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           } else if (json.type === 'doc_stream_open' || json.type === 'doc_stream_delta') {
             rich = true;
           } else if (json.type === 'orwell_narrator') {
-            if (json.name) { _persistNarratorForSession(sessionId, json.name); _refreshLiveByline(holder); }
+            // #1729 D2: match resumeStream pattern — persist season-scoped ALWAYS, gate tab-global
+            // byline behind _activeNow so a background/resumed stream doesn't hijack the byline.
+            if (json.name) {
+              _persistNarratorForSession(sessionId, json.name);
+              const _activeNow = !(sessionModule.getCurrentSessionId
+                && sessionModule.getCurrentSessionId() !== sessionId);
+              if (_activeNow) {
+                setGameNarrator(json.name);
+                _refreshLiveByline(holder);
+              }
+            }
           } else if (/^(tool_start|tool_output|tool_progress|agent_step|web_sources|rag_sources|research_progress|research_sources|research_findings|research_done)$/.test(json.type)) {
             rich = true;
           }
