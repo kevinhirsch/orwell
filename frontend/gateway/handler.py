@@ -21,6 +21,8 @@ from typing import Optional
 from .consequence import fold_gateway_turn
 from .pairing import get_paired_user
 from .scrub import scrub_for_platform
+from routes.chat_helpers import screen_knowledge_wall, screen_presence_wall
+from src.agent_loop import _scrub_inline_planning_leak
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,29 @@ async def _call_player_turn(user: str, message_text: str) -> str:
         orwell_game_session.publish_game_updated(user)
     except Exception:
         logger.debug("gateway: game-updated publish skipped", exc_info=True)
+
+    # 2026-07-22 R-VLT-3: Vault Wall guards — knowledge wall, presence wall,
+    # inline-planning scrub.  The web agent_loop applies these pre-emission
+    # (agent_loop.py:6902-6905, 7072-7073); the gateway path was missing them
+    # entirely.  All three are callable from the gateway context (owner-keyed,
+    # no request-scoped deps).
+    try:
+        # Inline-planning scrub first: catches GLM-4.7's untagged content-channel
+        # planning
+        reply = _scrub_inline_planning_leak(
+            reply, reasoning_empty=True, at_bubble_start=True
+        )
+    except Exception:
+        pass  # fail-soft: a scrub hiccup never drops the reply
+    if reply:
+        try:
+            reply = await screen_knowledge_wall(user, reply)
+        except Exception:
+            pass
+        try:
+            reply = await screen_presence_wall(user, reply)
+        except Exception:
+            pass
 
     return reply or _ENGINE_ERROR_MSG
 

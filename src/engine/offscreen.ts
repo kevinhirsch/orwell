@@ -398,6 +398,7 @@ export function richOffscreenStretch(deps: {
       hidden: true,
       content: `${a} ${RICH_VERBS[type]} ${b}`,
     };
+    event.baseContent = event.content; // capture the Vault-free base before enrichment
     // B50: a hidden element of the initiator occasionally slips into the (still-hidden) scene — the
     // rare-reveal "treat" loop. The side rng keeps the main stream byte-stable; the content stays hidden.
     if (hiddenElementsOf) {
