@@ -46,6 +46,12 @@ export interface McpDeps {
 const isStr = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const isStrArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
+/** Matches the canonical EntityId form: "player" or "npc:<digits>". */
+const ENTITY_ID_PATTERN = /^(?:player|npc:\d+)$/;
+const isEntityId = (v: unknown): v is string => typeof v === "string" && ENTITY_ID_PATTERN.test(v);
+/** Array where every entry is a valid EntityId. */
+const isEntityIdArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => isEntityId(x));
+
 function requireShape(name: string, args: Record<string, unknown>): void {
   const refuse = (field: string, want: string): never => {
     throw new EngineRefusal(`invalid args for ${name}: "${field}" must be ${want}`);
@@ -68,11 +74,11 @@ function requireShape(name: string, args: Record<string, unknown>): void {
   switch (name) {
     case "recordInteraction":
       guardSyncFields(true); // 0065 Part A CAS + Part B at-most-once idempotencyKey (A10/#591 — the FE re-drives a fold-bearing scene after a stale-409; the key makes that at-most-once, so a concurrent re-drive can't double-fold)
-      if (!isStr(args["initiator"])) refuse("initiator", "a houseguest id (string)");
-      if (!isStrArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids");
+      if (!isEntityId(args["initiator"])) refuse("initiator", "a houseguest id ('player' or 'npc:<n>')");
+      if (!isEntityIdArray(args["witnessSet"])) refuse("witnessSet", "an array of houseguest ids ('player' or 'npc:<n>')");
       if (!isStr(args["content"])) refuse("content", "a non-empty string");
       if (args["kind"] !== undefined && typeof args["kind"] !== "string") refuse("kind", "a string when present");
-      if (args["toward"] !== undefined && !isStrArray(args["toward"])) refuse("toward", "an array of houseguest ids when present");
+      if (args["toward"] !== undefined && !isEntityIdArray(args["toward"])) refuse("toward", "an array of houseguest ids ('player' or 'npc:<n>') when present");
       // Phase 2 — the LLM's per-scene felt duration in minutes; the engine clamps it (feltHoursFromMinutes).
       if (args["feltMinutes"] !== undefined && typeof args["feltMinutes"] !== "number") refuse("feltMinutes", "a number of minutes when present");
       // 0005: the optional generative-consequence descriptor. Shape-guard only (R6 class: a string
@@ -199,8 +205,8 @@ function requireShape(name: string, args: Record<string, unknown>): void {
     case "recallSceneMemories":
       // Feature #1394 — both fields optional (absent ⇒ the adapter returns { moments: [] }); shape-guard
       // only so a malformed value can't cast blindly into the recall closure.
-      if (args["withIds"] !== undefined && !isStrArray(args["withIds"])) {
-        refuse("withIds", "an array of houseguest ids when present");
+      if (args["withIds"] !== undefined && !isEntityIdArray(args["withIds"])) {
+        refuse("withIds", "an array of houseguest ids ('player' or 'npc:<n>') when present");
       }
       if (args["cue"] !== undefined && typeof args["cue"] !== "string") refuse("cue", "a string when present");
       return;
