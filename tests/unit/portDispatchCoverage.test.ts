@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { GameSession } from "../../src/ports/GameSession";
 import type { EngineCommands } from "../../src/ports/EngineCommands";
 import { PLAYER_TOOLS, ADMIN_TOOLS, DEBUG_VAULT_TOOL_NAMES } from "../../src/surfaces/tools/registry";
+import { INFRA_TOOL_NAMES } from "../../src/adapters/mcp/McpServer";
 
 /**
  * TCG-16 — the "four-place write-back" wiring gotcha (CLAUDE.md's own build brief) keeps recurring: a
@@ -81,6 +82,7 @@ describe("TCG-16 — every GameSession/EngineCommands port method is reachable e
     ...PLAYER_TOOLS.map((t) => t.name),
     ...ADMIN_TOOLS.map((t) => t.name),
     ...DEBUG_VAULT_TOOL_NAMES,
+    ...INFRA_TOOL_NAMES,
   ]);
   const dispatched = dispatchedToolNames();
   const allMethods = [...Object.keys(GAME_SESSION_METHODS), ...Object.keys(ENGINE_COMMANDS_METHODS)];

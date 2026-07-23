@@ -281,17 +281,32 @@ async def _post_tool(path: str, name: str, args: dict | None, user: str | None, 
 
 async def _call(name: str, args: dict | None = None, user: str | None = None, timeout: float | None = None) -> dict:
     """G1b: every engine call flows through the I/O tap — what was written and
-    what came back (or the failure) — feeding the /admin/status viewer."""
+    what came back (or the failure) — feeding the /admin/status viewer.
+
+    Issue #1870: knowledgeScopeManifest and sealedFromHouse carry the player's Vault manifest
+    which includes NPC-only secret content (confides, gossip-diffused beliefs, off-screen
+    surfacings). The full response MUST NOT be recorded in the god/God-Mode-readable io ring —
+    we strip the payload to timing metadata only (the seal prevents the Vault leak through the
+    I/O tap described in R-VLT-5: docs/audits/2026-07-22-full-repo-audit-backlog.md).
+    """
     import time as _t
     from src import log_rings as _rings
     t0 = _t.monotonic()
     try:
         res = await _call_inner(name, args, user=user, timeout=timeout)
-        _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000), res, user=user)
+        if name in ("sealedFromHouse", "knowledgeScopeManifest"):
+            _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000),
+                             {"_stripped": "io-ring-sealed"}, user=user)
+        else:
+            _rings.record_io(name, args, True, int((_t.monotonic() - t0) * 1000), res, user=user)
         return res
     except Exception as e:
-        _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
-                         f"{type(e).__name__}: {e}", user=user)
+        if name in ("sealedFromHouse", "knowledgeScopeManifest"):
+            _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
+                             {"_stripped": "io-ring-sealed"}, user=user)
+        else:
+            _rings.record_io(name, args, False, int((_t.monotonic() - t0) * 1000),
+                             f"{type(e).__name__}: {e}", user=user)
         raise
 
 

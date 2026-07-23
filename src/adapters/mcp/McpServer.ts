@@ -8,6 +8,16 @@ import type { EngineCommands, RecordInteractionReq, SurfaceReq, DiaryRoomReq, Re
 import type { EntityId } from "../../domain/ids";
 import type { GameSession, CreateCharacterReq, UpdateCastingReq, PreSeedCastReq, PreSeedNextSeasonReq, RecordCastProfileReq, RecordCastIdentityReq, RecordCastGenesisReq, RecordWorldSnapshotReq, RecordProducerProfileReq, RecordCompetitionFictionReq, MomentPromptReq, RecallSceneMemoriesReq, RunCompetitionReq, SubmitDecisionReq, MakeDealReq, FormAllianceReq, JoinAllianceReq, RecordOffscreenSceneTextureReq, ExposeSecretReq, TradeSecretReq, BehavioralFlags } from "../../ports/GameSession";
 
+
+/** Tools that are deliberately NOT in the advertised player channel allowlist (out-of-band
+ * dispatch-only), but which the player MCP channel must still route when called by name.
+ * These are FE/narration-guard infra tools, not game-driving levers: they are unadvertised
+ * (not in `listTools()`) but still reachable through `callTool()`. The pattern mirrors
+ * `DEBUG_VAULT_TOOL_NAMES` for the admin channel, but these are Vault-free player-infra tools,
+ * not debug Vault readers.
+ * @see registry.ts INFRA_LEVERS — the same tools are excluded from `PLAYER_AGENT_LEVERS`.
+ */
+export const INFRA_TOOL_NAMES: ReadonlySet<string> = new Set(["sealedFromHouse", "knowledgeScopeManifest"]);
 /**
  * The engine's permissioned outward MCP API (0009). It mounts ONLY the
  * allowlisted tools for its channel, sources read/narrate tools from the visible
@@ -347,7 +357,14 @@ export class McpServer {
     // the advertised allowlist — it is a separate, out-of-band debug capability the admin/God-Mode
     // channel alone may dispatch (by explicit name, fired behind an explicit FE "unseal"). The player
     // channel can never reach it.
-    return this.channel === "admin/God Mode" && DEBUG_VAULT_TOOL_NAMES.has(name);
+    if (this.channel === "admin/God Mode" && DEBUG_VAULT_TOOL_NAMES.has(name)) return true;
+    // Issue #1870: `sealedFromHouse` and `knowledgeScopeManifest` are Vault-free FE guard-support
+    // tools (the narration guard reads them to strip content a houseguest should not know). They are
+    // REMOVED from `PLAYER_TOOLS` (so `listTools()` does not advertise them), but the player channel
+    // must STILL dispatch them by name (the existing switch-case handles both). This is the same
+    // out-of-band dispatch pattern `producerVault` uses on the admin channel, except these stay
+    // Vault-free — they never read the Vault, only the player's own knowledge projection.
+    return this.channel === "player" && INFRA_TOOL_NAMES.has(name);
   }
 
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
