@@ -41,6 +41,8 @@ _DECISION_KINDS = [
     "finale-answer",
     "juror-question",
     "juror-vote",
+    # 0130: the player-evictee's exit interview (posture + optional words) rides the same seam.
+    "exit-interview",
     # 0061: the confirmed self-eviction rides the same validated decision seam (and gets the barrier).
     "self-evict",
 ]
@@ -81,6 +83,28 @@ def test_decision_kinds_list_matches_the_engine_set():
         f"(engine-only={engine_kinds - set(_DECISION_KINDS)}, "
         f"gate-only={set(_DECISION_KINDS) - engine_kinds}) — update both."
     )
+
+    # Also scan ws_routes.py for its _DECISION_KINDS — three-way lockstep drift gate
+    # (the issue #1864 AC demands both transport allowlists stay in sync).
+    ws_src = open(
+        os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "routes",
+            "ws_routes.py",
+        ),
+        encoding="utf-8",
+    ).read()
+    ws_block = re.search(r"_DECISION_KINDS\s*=\s*\{([^}]*)\}", ws_src)
+    assert ws_block, "could not locate _DECISION_KINDS in routes/ws_routes.py"
+    ws_kinds = set(re.findall(r'"([a-z-]+)"', ws_block.group(1)))
+    assert ws_kinds == set(_DECISION_KINDS), (
+        "the ws_routes.py _DECISION_KINDS drifted from the pinned list "
+        f"(ws-only={ws_kinds - set(_DECISION_KINDS)}, "
+        f"gate-only={set(_DECISION_KINDS) - ws_kinds}) — update both."
+    )
+    # exit-interview must be present in BOTH transport allowlists (issue #1864).
+    assert "exit-interview" in engine_kinds, "exit-interview missing from orwell_routes.py _DECISION_KINDS"
+    assert "exit-interview" in ws_kinds, "exit-interview missing from ws_routes.py _DECISION_KINDS"
 
 
 def test_every_player_decision_kind_gets_a_forceful_barrier():
