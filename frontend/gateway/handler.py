@@ -160,6 +160,17 @@ async def _call_player_turn(user: str, message_text: str) -> str:
         from src import log_rings
         log_rings.record_soft_failure("gateway:consequence-fold-raised", exc, user=user)
 
+    # 2026-07-22 R-PAR-4 fix (#1879): push game-updated so every web device on the
+    # user's canonical session reconciles its HUD instantly instead of waiting for
+    # the next poll (which under default-ON WS mode is cancelled entirely —
+    # orwellStatusPanel.js:852-877). Best-effort, fail-soft — polling is the
+    # correctness floor.
+    try:
+        from src import orwell_game_session
+        orwell_game_session.publish_game_updated(user)
+    except Exception:
+        logger.debug("gateway: game-updated publish skipped", exc_info=True)
+
     return reply or _ENGINE_ERROR_MSG
 
 
@@ -214,10 +225,33 @@ async def _narrate_gateway_turn(
             "Set a default model in Orwell settings to enable messaging-platform play."
         )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
+    # R-PAR-4 (#1879): feed recent gateway narration history (last N=5 turns)
+    # so the gateway can remember its own prior replies in the shared transcript
+    # surface. History is stored per-user via the orwell_game_session's canonical
+    # session transcript — we load the latest few assistant messages.
+    recent_history = []
+    try:
+        from src import orwell_game_session as _ogs
+        from core import models as _models
+        canonical_sid = _ogs.get_game_session(user)
+        if canonical_sid and _models._session_manager:
+            sess = _models._session_manager.get_session(canonical_sid)
+            for msg in list(sess.history)[-10:]:
+                if hasattr(msg, "role") and msg.role == "assistant":
+                    recent_history.append({"role": "assistant", "content": msg.content})
+                    if len(recent_history) >= 5:
+                        break
+                elif isinstance(msg, dict) and msg.get("role") == "assistant":
+                    recent_history.append({"role": "assistant", "content": msg.get("content", "")})
+                    if len(recent_history) >= 5:
+                        break
+    except Exception:
+        logger.debug("gateway: narration history load failed", exc_info=True)
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if recent_history:
+        messages.extend(reversed(recent_history))
+    messages.append({"role": "user", "content": user_message})
     try:
         result = await llm_fn(messages)
         # The resolver's LlmFn returns the assembled assistant text; tolerate a dict shape too.
