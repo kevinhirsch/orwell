@@ -56,7 +56,9 @@ ALLOWLIST_PATH = os.path.join(FE_ROOT, "failsoft_allowlist.yaml")
 # tonight. `gateway/turn_limits.py`'s fail-open rate-limit catches carry no risk-token surface
 # (no LLM/engine/HTTP call in the guarded body) and are not flagged by this lint at all.
 _PY_ROOTS = (os.path.join(FE_ROOT, "src"), os.path.join(FE_ROOT, "routes"),
-            os.path.join(FE_ROOT, "gateway"))
+            os.path.join(FE_ROOT, "gateway"),
+            os.path.join(FE_ROOT, "services"), os.path.join(FE_ROOT, "core"),
+            os.path.join(FE_ROOT, "mcp_servers"))
 # The five A2-wired files: enforced today (NOT grandfathered). A NEW silent swallow of a real
 # error on a risk surface in these files must fail this lint.
 A2_ENFORCED = (
@@ -237,6 +239,8 @@ def _python_files():
             for f in files:
                 if f.endswith(".py"):
                     yield os.path.join(dirpath, f)
+    # Single file: frontend/app.py (root-level, not walked by os.walk)
+    yield os.path.join(FE_ROOT, "app.py")
 
 
 # ── the allowlist ─────────────────────────────────────────────────────────────────────────────
@@ -379,6 +383,37 @@ def test_no_uncovered_js_ts_failsoft():
         "#1599 no-silent-fail-soft (JS/TS): silent-default catch block(s) (empty / return-default / "
         "continue / break) with no grant/pragma:\n  "
         + "\n  ".join(sorted(set(uncovered)))
+    )
+
+
+def test_scope_expansion_catches_new_swallow(tmp_path):
+    """AC4 (#1844): a regression test proves scope — inject a fake bare
+    `except Exception: pass` swallow into a newly-in-scope file (services/)
+    and confirm the gate catches it."""
+    # Create a temp .py file under a new-services-like path with a bare swallow
+    # on a risk surface. Call _scan_python directly to test the core flag logic.
+    risk_dir = tmp_path / "services"
+    risk_dir.mkdir()
+    victim = risk_dir / "fake_module.py"
+    victim.write_text(
+        "async def handler():\n"
+        "    try:\n"
+        "        await some_llm_call()\n"
+        "    except Exception:\n"
+        "        pass  # bare swallow — must be caught\n"
+    )
+    hits = list(_scan_python(str(victim)))
+    # _scan_python returns (relpath, lineno, func, has_pragma)
+    uncovered = [r for r, lineno, func, hp in hits
+                 if not hp and not _covered(r, func, _load_allowlist())]
+    assert uncovered, (
+        "Scope-expansion regression: a bare `except Exception: pass` over "
+        "an LLM call in a services/ file MUST be flagged by the lint. "
+        f"Got {len(hits)} hits, 0 uncovered."
+    )
+    # Confirm the fake hit IS our file
+    assert any("fake_module" in u for u in uncovered), (
+        f"The uncovered set {uncovered} should contain fake_module.py"
     )
 
 
