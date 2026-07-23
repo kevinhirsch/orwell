@@ -116,6 +116,33 @@ def test_chyron_never_adds_a_second_gamechanged_dispatcher():
     assert "new CustomEvent('orwell:gamechanged'" not in card
 
 
+def test_chyron_calls_orwell_announce_on_render():
+    """R-A11Y-2: a rendered chyron must call window.orwellAnnounce with the kicker:headline."""
+    card = _read("static", "js", "orwellDecision.js")
+    assert "window.orwellAnnounce" in card, \
+        "the chyron renderer must call the app's SR-broadcast helper"
+    assert "esc(kicker) + ': ' + esc(a.headline" in card or \
+           "orwellAnnounce(esc(kicker" in card, \
+        "announcement text must include the kicker and headline"
+
+
+def test_chyron_batch_never_announces_per_card():
+    """R-A11Y-3: a batch of announcements must call orwellAnnounce at most ONCE, not per-card."""
+    card = _read("static", "js", "orwellDecision.js")
+    idx = card.index("_renderChyronBatch")
+    block = card[idx:idx + 2000]
+    count = block.count("orwellAnnounce")
+    assert count <= 1, \
+        f"batch must call orwellAnnounce at most ONCE (for the coalesced summary), got {count}"
+
+
+def test_batch_coalesces_homogeneous_kinds_into_summary():
+    """R-A11Y-3: a batch of same-kinder items announces a count summary, not per-item text."""
+    card = _read("static", "js", "orwellDecision.js")
+    assert "allSameKicker" in card or "rendered.length" in card, \
+        "batch coalesce must count same-kind items for the summary"
+
+
 def test_chyron_renders_no_machinery_or_raw_ids():
     # C14/immersion: the chyron's own template code must never leak an engine field name or a raw
     # npc:<id> token into the player-visible markup it builds (the headline itself is Vault-free,
@@ -144,6 +171,16 @@ def test_chyron_renders_and_dedups_in_a_real_browser(tmp_path):
     js_path = os.path.join(FRONTEND, "static", "js", "orwellDecision.js")
     html = f"""<!doctype html><html><body>
       <div id="chat-history"></div>
+      <div id="a11y-announcer"></div>
+      <script>
+        window.orwellAnnounce = function(arg) {{
+          var region = document.getElementById('a11y-announcer');
+          if (!region) return;
+          var text = (typeof arg === 'string') ? arg : (arg && arg.text ? arg.text : '');
+          text = (text || '').replace(/\s+/g, ' ').trim();
+          region.textContent = text || '';
+        }};
+      </script>
       <script src="file://{js_path}"></script>
     </body></html>"""
     page_file = tmp_path / "chyron_harness.html"
@@ -175,6 +212,13 @@ def test_chyron_renders_and_dedups_in_a_real_browser(tmp_path):
             assert "Alex is the new Head of Household." in cards[0]
             assert "npc:" not in cards[0]
 
+            # Assert the a11y-announcer received the announcement text via orwellAnnounce
+            announcer_text = page.eval_on_selector(
+                "#a11y-announcer", "el => el.textContent")
+            assert "Head of Household" in announcer_text, \
+                f"a11y-announcer should contain the chyron text after first batch, got: {announcer_text!r}"
+            assert "Alex" in announcer_text
+
             # A SECOND batch: a NEW announcement + a RE-DELIVERY of the SAME id already rendered
             # (the exact shape a reconnecting/second window or a resumed stream can produce).
             second = [
@@ -200,6 +244,15 @@ def test_chyron_renders_and_dedups_in_a_real_browser(tmp_path):
             ids = page.eval_on_selector_all(
                 "[data-chyron-id]", "els => els.map(e => e.getAttribute('data-chyron-id'))")
             assert sorted(ids) == ["ann:0", "ann:1"]
+
+            # After the second batch settles, the announcer should contain the coalesced
+            # batch summary. ann:0 was deduped, so only ann:1 rendered — the single-item
+            # coalesced path announces "Nominations: Alex has nominated Sam and Jo for eviction."
+            page.wait_for_timeout(800)  # allow stagger (260ms) + settle buffer (300ms) + margin
+            announcer2 = page.eval_on_selector(
+                "#a11y-announcer", "el => el.textContent")
+            assert announcer2 != announcer_text, \
+                f"announcer should have been updated after second batch; was still: {announcer2!r}"
         finally:
             browser.close()
 
