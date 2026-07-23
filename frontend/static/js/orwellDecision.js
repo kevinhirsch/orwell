@@ -941,15 +941,15 @@
       confirm.disabled = true;
       confirm.textContent = "Locking in…";
       try {
-        // WS Phase-1 (ADR 0017 §3.5): when the OrwellWs socket is LIVE (flag ON + a successful
-        // handshake), the confirm goes UP as a `decision` frame carrying the 0065 expectedBeatSeq
-        // CAS; the server relay runs the EXACT POST /api/orwell/decision handler below the
-        // transport (ws_routes `_handle_decision`) and fans a `state` edge back that re-reads the
-        // moved board. DORMANT when the socket is not active (the flag is OFF by default — the
-        // zero-risk Phase-1 default — or the upgrade failed/downgraded to SSE): the byte-identical
-        // HTTP POST below stands. A WS error is mapped onto the SAME httpStatus the catch below
-        // already branches on, so a stale-beat reconciles through the existing 409 desync path
-        // exactly as the HTTP 409 does.
+        // WS Phase-1 (ADR 0017 §3.5, fix #1866): when the OrwellWs socket is LIVE (flag ON + a
+        // successful handshake), the confirm goes UP as a `decision` frame carrying the 0065
+        // expectedBeatSeq CAS; the server relay now runs the EXACT post-submit seams the HTTP
+        // /api/orwell/decision handler runs (F14 advance, pending cache, CON-4 reconcile, DB1
+        // debounce — imported via `_post_decision_tail`): the parity claim is TRUE. DORMANT when
+        // the socket is not active (the flag is OFF by default — the zero-risk Phase-1 default — or
+        // the upgrade failed/downgraded to SSE): the byte-identical HTTP POST below stands. A WS
+        // error is mapped onto the SAME httpStatus the catch below already branches on, so a
+        // stale-beat reconciles through the existing 409 desync path exactly as the HTTP 409 does.
         const _ws = window.OrwellWs;
         const _wsLive = !!(_ws && _ws.isActive && _ws.isActive() && _ws.sendDecision);
         let _beat;
