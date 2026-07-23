@@ -8,8 +8,16 @@ gateway code boundary does the enforcement.
 
 from __future__ import annotations
 
+import asyncio
+import os
+import sys
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+
+_FRONTEND = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _FRONTEND not in sys.path:
+    sys.path.insert(0, _FRONTEND)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -76,7 +84,7 @@ class TestKnowledgeWall:
     async def test_strips_sealed_diary_room_content(self):
         """A narrated reply where a houseguest voices a sealed Diary-Room
         secret must have the leaked sentence stripped."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-dr"
         message = "What did I say in the Diary Room?"
@@ -106,7 +114,7 @@ class TestKnowledgeWall:
         # inside `_call_player_turn` resolves to it.
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=leaked_reply)),
             # Return a pre-processed fact with known signatures
             patch("routes.chat_helpers.fetch_sealed_from_house",
@@ -136,7 +144,7 @@ class TestKnowledgeWall:
 
     async def test_does_not_strip_legitimate_content(self):
         """A narrated reply with no sealed content must pass through intact."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-no-seal"
         message = "What is everyone doing?"
@@ -151,7 +159,7 @@ class TestKnowledgeWall:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
             # Nothing sealed this turn
             patch("routes.chat_helpers.fetch_sealed_from_house",
@@ -180,7 +188,7 @@ class TestPresenceWall:
     async def test_strips_evicted_houseguest_from_scene(self):
         """A reply staging an evicted houseguest must have that sentence
         dropped."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-evict"
         message = "Who is in the living room?"
@@ -216,7 +224,7 @@ class TestPresenceWall:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_with_phantom)),
         ]
         for p in patches:
@@ -241,7 +249,7 @@ class TestPresenceWall:
 
     async def test_legitimate_scene_unchanged(self):
         """A reply with only in-view houseguests must pass through intact."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-legit"
         message = "What is happening?"
@@ -269,7 +277,7 @@ class TestPresenceWall:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
         ]
         for p in patches:
@@ -296,7 +304,7 @@ class TestInlinePlanningScrub:
     async def test_strips_planning_preamble(self):
         """A reply beginning with a model's internal planning preamble must
         have the planning sentence stripped."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-plan"
         message = "What happens next?"
@@ -324,7 +332,7 @@ class TestInlinePlanningScrub:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=planning_reply)),
         ]
         for p in patches:
@@ -346,7 +354,7 @@ class TestInlinePlanningScrub:
 
     async def test_does_not_strip_regular_narration(self):
         """A normal narration without planning must pass through intact."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-regular"
         message = "What happens next?"
@@ -368,7 +376,7 @@ class TestInlinePlanningScrub:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
         ]
         for p in patches:
@@ -393,7 +401,7 @@ class TestFailSoft:
 
     async def test_knowledge_wall_failure_returns_original(self):
         """When screen_knowledge_wall raises, the original reply survives."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-fail1"
         message = "hello"
@@ -413,7 +421,7 @@ class TestFailSoft:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
             patch("routes.chat_helpers.screen_knowledge_wall",
                   AsyncMock(side_effect=RuntimeError("engine down"))),
@@ -432,7 +440,7 @@ class TestFailSoft:
 
     async def test_presence_wall_failure_returns_original(self):
         """When screen_presence_wall raises, the original reply survives."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-fail2"
         message = "hello"
@@ -452,7 +460,7 @@ class TestFailSoft:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
             patch("routes.chat_helpers.screen_presence_wall",
                   AsyncMock(side_effect=RuntimeError("engine down"))),
@@ -471,7 +479,7 @@ class TestFailSoft:
 
     async def test_inline_planning_scrub_failure_returns_original(self):
         """When _scrub_inline_planning_leak raises, the original reply survives."""
-        from frontend.gateway.handler import _call_player_turn
+        from gateway.handler import _call_player_turn
 
         user = "test-user-fail3"
         message = "hello"
@@ -491,7 +499,7 @@ class TestFailSoft:
 
         patches = [
             patch.dict("sys.modules", {"src.orwell_engine": eng}),
-            patch("frontend.gateway.handler._narrate_gateway_turn",
+            patch("gateway.handler._narrate_gateway_turn",
                   AsyncMock(return_value=reply_text)),
             patch("src.agent_loop._scrub_inline_planning_leak",
                   side_effect=RuntimeError("crash")),
