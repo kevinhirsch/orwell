@@ -53,6 +53,13 @@ _NARRATOR_TIMEOUT_MARKERS = (
 )
 
 
+_ORWELL_SILENT_TOOLS = frozenset({
+    'npcVoice', 'getGameState', 'gameStatus', 'getVisibleStateFor', 'getMomentPrompt',
+    'whereabouts', 'socialRead', 'socialInitiatives', 'seasonRecap', 'dailyRecap',
+    'worldSnapshotView', 'inspectNonVaultState', 'sandboxHealth', 'list_models', 'search_chats',
+})
+
+
 def _classify_narrator_stream_error(err_msg: Any, data: Any = None) -> str:
     """Return the truthful narrator failure class for a mid-stream `data.error` frame. An explicit
     numeric HTTP status on the frame (or an HTTP status in the message) is `narrator-http`; a
@@ -9094,6 +9101,10 @@ async def _stream_agent_loop_impl(
             elif "error" in result:
                 output_text = result["error"][:2000]
 
+            # #1871 — Vault Wall: silent tools carry NO output to the player channel.
+            if block.tool_type in _ORWELL_SILENT_TOOLS:
+                output_text = ""
+
             # Emit tool_output (include ui_event data if present)
             tool_output_data = {"type": "tool_output", "tool": block.tool_type, "command": cmd_display, "output": output_text, "exit_code": result.get("exit_code")}
             if "ui_event" in result:
@@ -9153,11 +9164,13 @@ async def _stream_agent_loop_impl(
                 yield 'data: ' + json.dumps({"delta": _anchor}) + '\n\n'
 
             # Save for history persistence
+            # #1871 — Vault Wall: silent tools carry NO output in persisted metadata either.
+            _persisted_output = "" if block.tool_type in _ORWELL_SILENT_TOOLS else output_text
             tool_event = {
                 "round": round_num,
                 "tool": block.tool_type,
                 "command": cmd_display,
-                "output": output_text,
+                "output": _persisted_output,
                 "exit_code": result.get("exit_code"),
             }
             if result.get("image_url"):
