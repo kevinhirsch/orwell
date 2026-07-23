@@ -530,6 +530,94 @@ def audit_state(page, context, axe_src, w, h):
     passes += 1
 
 
+def _keyboard_regression_test(page):
+    """Regression test for keyboard focus trap, focus restore, and arrow-key move/resize.
+
+    Opens the settings modal, tests focus trapping (orwellWindow._trapFocus),
+    focus restore on close (orwellWindow focus-return-to-opener), and arrow-key
+    move/resize (orwellWindow). Returns a list of failure descriptions;
+    an empty list means all checks passed.
+    """
+    failures = []
+
+    # 1. Open Settings Modal — use the same selector chain as main()
+    opened = page.evaluate("""() => {
+        const btn = document.getElementById('user-bar-settings')
+            || document.getElementById('tool-settings-btn')
+            || document.getElementById('rail-settings')
+            || document.querySelector('#settings-btn,[data-settings],[aria-label*=ettings]');
+        if (btn) { btn.click(); return true; }
+        return false;
+    }""")
+    if not opened:
+        failures.append("Settings button not found — cannot test keyboard regression")
+        return failures
+    page.wait_for_timeout(700)
+    if not page.query_selector(".ow-window"):
+        failures.append("Settings .ow-window not visible after click")
+        return failures
+
+    # 2. Focus Trap Test (orwellWindow._trapFocus ~L1328)
+    # Tab 10 times; each press must keep focus inside .ow-window.
+    for i in range(10):
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(50)
+        in_window = page.evaluate(
+            "document.activeElement?.closest('.ow-window') ? true : false")
+        if not in_window:
+            failures.append(
+                f"Focus trap broken at Tab {i + 1}: active element outside .ow-window")
+            break
+
+    # 3. Focus Restore Test (orwellWindow ~L1710 focus-return-to-opener)
+    opener_id = page.evaluate("""() => {
+        const w = document.activeElement?.closest('.ow-window');
+        return w?.previousElementSibling?.id || document.activeElement?.id || '';
+    }""")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(200)
+    restored_id = page.evaluate("document.activeElement?.id || ''")
+    if restored_id != opener_id:
+        failures.append(
+            f"Focus restore failed: expected opener id '{opener_id}', "
+            f"got active id '{restored_id}'")
+
+    # 4. Arrow Key Move/Resize Test (orwellWindow ~L1113)
+    # Re-open the window (it was closed by Escape above).
+    reopened = page.evaluate("""() => {
+        const btn = document.getElementById('user-bar-settings')
+            || document.getElementById('tool-settings-btn')
+            || document.getElementById('rail-settings')
+            || document.querySelector('#settings-btn,[data-settings],[aria-label*=ettings]');
+        if (btn) { btn.click(); return true; }
+        return false;
+    }""")
+    if reopened:
+        page.wait_for_timeout(700)
+        if page.query_selector(".ow-window"):
+            init_top = page.evaluate(
+                "document.querySelector('.ow-window')?.style?.top || ''")
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(100)
+            new_top = page.evaluate(
+                "document.querySelector('.ow-window')?.style?.top || ''")
+            if new_top == init_top:
+                failures.append(
+                    "ArrowDown did not move window: top unchanged")
+
+            init_height = page.evaluate(
+                "document.querySelector('.ow-window')?.style?.height || ''")
+            page.keyboard.press("Shift+ArrowDown")
+            page.wait_for_timeout(100)
+            new_height = page.evaluate(
+                "document.querySelector('.ow-window')?.style?.height || ''")
+            if new_height == init_height:
+                failures.append(
+                    "Shift+ArrowDown did not resize window: height unchanged")
+
+    return failures
+
+
 def main():
     from playwright.sync_api import sync_playwright
 
@@ -557,6 +645,11 @@ def main():
                 page = ctx.new_page()
                 page.goto(rm.FE, wait_until="domcontentloaded")
                 audit_state(page, vp_name, axe_src, w, h)
+
+                # #1876: keyboard regression test on the desktop chrome surface
+                if vp_name == "desktop-1366":
+                    for err in _keyboard_regression_test(page):
+                        record(f"a11y:keyboard-regression {err}", vp_name)
 
                 # Endgame surfaces (live finale card + the post-season retro) render only at the phone
                 # tier here, mounted in ISOLATION via rm's own seams (they never co-exist in a real
