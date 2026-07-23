@@ -6878,7 +6878,12 @@ async def _stream_agent_loop_impl(
                         # round_response unchanged.
                         if data.get("thinking"):
                             round_reasoning += data["delta"]
-                            yield chunk  # reasoning is filtered downstream; pass through
+                            # R-VLT-2 (#1867): game-build reasoning is structurally walled — the Vault
+                            # content the model receives (ADR-0019 Layer 2, presentKnowledge in narration
+                            # prompts) must never reach the player-facing channel. The accumulating
+                            # round_reasoning is kept for the next-request echo-back only.
+                            if not game_mode:
+                                yield chunk
                         elif _scrub_active:
                             # LIVE game: scrub operator-aside / tool-process leaks before they reach
                             # the player. round_response keeps the RAW text (tool parsing + stall
