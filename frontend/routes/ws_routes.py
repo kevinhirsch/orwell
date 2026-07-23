@@ -66,6 +66,8 @@ _DECISION_KINDS = {
     "replacement", "eviction-vote", "tie-break", "final-eviction",
     "goodbye-message", "finale-statement", "finale-answer",
     "juror-question", "juror-vote",
+    # 0130 — the player-evictee's exit-interview (posture + optional words) rides the same seam.
+    "exit-interview",
     "self-evict",
 }
 
