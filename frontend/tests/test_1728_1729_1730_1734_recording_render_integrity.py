@@ -105,6 +105,18 @@ def test_duplicate_ids_are_deduped():
     assert rejected == []
 
 
+def test_empty_list_returns_empty_normalized_and_empty_rejected():
+    ids, rejected = al._normalize_with_ids([], _VALID)
+    assert ids == []
+    assert rejected == []
+
+
+def test_invalid_type_in_list_is_rejected():
+    ids, rejected = al._normalize_with_ids(["npc:3", {"id": "npc:5"}, True], _VALID)
+    assert ids == ["npc:3"]
+    assert rejected == [{"id": "npc:5"}, True]
+
+
 def test_non_list_withids_is_rejected_wholesale():
     ids, rejected = al._normalize_with_ids("npc:3", _VALID)
     assert ids == []
