@@ -235,4 +235,9 @@ describe("0039 — deal model & ledger (pure core)", () => {
     expect(actionHonors(d, { actor: "a", kind: "nominate", targets: ["b"] })).toBe(false); // that's a break, not honor
     expect(actionHonors(d, { actor: "c", kind: "nominate", targets: ["d"] })).toBe(false); // not a party
   });
+
+  it("G19 (T9 dead-export removal): the module no longer exports the superseded actionImplicates — reconcile() decides kept/broken from actionBreaks/actionHonors alone, never a pre-filter", async () => {
+    const dealModule: Record<string, unknown> = await import("../../src/domain/deal");
+    expect("actionImplicates" in dealModule).toBe(false);
+  });
 });

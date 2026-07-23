@@ -17,6 +17,13 @@ Hard rules (0070 §§3-6):
 - Budget-capped — at most ``MAX_SCENES_PER_TICK`` scenes voiced per tick; skeletons beyond
   that budget retain their deterministic template.
 - Idempotent — writing the same texture twice is harmless; the last write wins.
+
+0062 zeitgeist consumer (BE-103 close-out — the G5 gap): docs/features/0062-world-snapshot-zeitgeist.md
+§5 requires off-screen society/gossip prompts to also receive the frozen move-in zeitgeist, so two
+houseguests' off-screen scene reads from the SAME shared world the player does. ``run_enrich`` fetches
+``worldSnapshotView().offscreenPrompt`` ONCE per tick (fail-soft: any failure or ``None`` snapshot ⇒ ""),
+and every scene voiced that tick is handed the same block. Flavor only — never a game input, never
+persisted anywhere but the voiced prose itself (§6).
 """
 from __future__ import annotations
 
@@ -33,18 +40,18 @@ MAX_SCENES_PER_TICK = 6
 LlmFn = Callable[[list], Awaitable[str]]           # messages -> completion text ("" on failure)
 GetSkeletonsFn = Callable[[], Awaitable[list]]      # () -> list[OffscreenSceneSkeleton]
 WriteFn = Callable[[str, str], Awaitable[dict]]     # (eventId, content) -> { ok: bool }
+GetZeitgeistFn = Callable[[], Awaitable[str]]       # () -> the offscreen-channel zeitgeist block ("" if none)
 
 
 # ── Prompt helpers ────────────────────────────────────────────────────────────────────────────────
 
-def _voicing_messages(nature: str, participants: list[str], template: str,
-                      zeitgeist_offscreen: str = "") -> list[dict]:
+def _voicing_messages(nature: str, participants: list[str], template: str, zeitgeist: str = "") -> list[dict]:
     """Build a tight LLM prompt to voice one off-screen scene skeleton as vivid in-character prose.
     The prompt is Vault-free: it only receives the PUBLIC nature + participant ids + the existing
-    template — no relationship numbers, no hidden attributes, no soul data.
-
-    When ``zeitgeist_offscreen`` is provided (feature 0062), it is appended as background context
-    so the zeitgeist flavor colors the off-screen narration."""
+    template + the optional shared move-in zeitgeist block (0062 §5) — no relationship numbers, no
+    hidden attributes, no soul data. ``zeitgeist`` is the engine's already-rendered, already-Vault-free
+    off-screen-channel block; an empty string (no snapshot captured, or the fail-soft path) omits the
+    section entirely — byte-identical to the pre-0062-wiring prompt."""
     part_str = " and ".join(f"houseguest {p}" for p in participants[:2])
     system = (
         "You are voicing a short behind-the-scenes beat from a reality-TV social game. "
@@ -60,8 +67,11 @@ def _voicing_messages(nature: str, participants: list[str], template: str,
         f"Participants: {part_str}\n"
         f"Template: {template}\n"
     )
-    if zeitgeist_offscreen:
-        user += f"\nBackground zeitgeist context for the house: {zeitgeist_offscreen}\n"
+    if zeitgeist:
+        user += (
+            f"\nThe world they moved in with (optional color — reach for it only if it fits naturally, "
+            f"never force it):\n{zeitgeist}\n"
+        )
     user += "\nWrite one vivid prose sentence for this off-screen moment:"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -74,16 +84,16 @@ def _sanitize_prose(text: str, max_chars: int = 400) -> str:
 
 # ── Core orchestrator ─────────────────────────────────────────────────────────────────────────────
 
-async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn,
-                       zeitgeist_offscreen: str = "") -> bool:
+async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn, zeitgeist: str = "") -> bool:
     """Voice one off-screen scene skeleton and write the result back. Returns True if the write-back
-    was accepted. Fail-soft: any error returns False (the template content stands)."""
+    was accepted. Fail-soft: any error returns False (the template content stands). ``zeitgeist`` is
+    the shared move-in world block (0062 §5) — optional, empty when no snapshot was ever captured."""
     try:
         msgs = _voicing_messages(
             nature=sk.get("nature", "conversation"),
             participants=sk.get("participants", []),
             template=sk.get("templateContent", ""),
-            zeitgeist_offscreen=zeitgeist_offscreen,
+            zeitgeist=zeitgeist,
         )
         raw = await llm_fn(msgs)
         prose = _sanitize_prose(raw or "")
@@ -97,9 +107,13 @@ async def voice_scene(sk: dict, llm_fn: LlmFn, write_fn: WriteFn,
 
 
 async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn: WriteFn,
-                       zeitgeist_offscreen: str = "") -> dict:
+                       get_zeitgeist_fn: Optional[GetZeitgeistFn] = None) -> dict:
     """Fan out: read skeletons for the current tick, voice each in parallel (budget-capped), write
-    them back. Returns a summary dict. Never raises — any failure is logged and skipped."""
+    them back. Returns a summary dict. Never raises — any failure is logged and skipped.
+
+    ``get_zeitgeist_fn``, if given, is called ONCE per tick to fetch the shared move-in world block
+    (0062 §5, the G5 close-out) and every scene voiced this tick receives the SAME block — fail-soft:
+    any error or falsy result resolves to "" (byte-identical to omitting the arg)."""
     try:
         skeletons = await get_skeletons_fn()
     except Exception as exc:
@@ -122,7 +136,15 @@ async def enrich_tick(get_skeletons_fn: GetSkeletonsFn, llm_fn: LlmFn, write_fn:
     batch = skeletons[:MAX_SCENES_PER_TICK]
     total = len(batch)
 
-    tasks = [voice_scene(sk, llm_fn, write_fn, zeitgeist_offscreen=zeitgeist_offscreen) for sk in batch]
+    zeitgeist = ""
+    if get_zeitgeist_fn is not None:
+        try:
+            zeitgeist = await get_zeitgeist_fn() or ""
+        except Exception as exc:  # failsoft-ok: flavor-only (0062 §6) — never blocks voicing
+            logger.debug("[offscreen-texture] zeitgeist fetch failed: %s", exc)
+            zeitgeist = ""
+
+    tasks = [voice_scene(sk, llm_fn, write_fn, zeitgeist=zeitgeist) for sk in batch]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     voiced = sum(1 for r in results if r is True)
 
@@ -171,17 +193,32 @@ async def run_enrich(owner: Optional[str] = None) -> dict:
     async def write_back(event_id: str, content: str) -> dict:
         return await orwell_engine.record_offscreen_scene_texture(event_id, content, user=owner)
 
-    # Feature 0062: fetch the zeitgeist offscreenPrompt once per tick so it colors the prose.
-    zeitgeist_offscreen = ""
-    try:
-        z = await orwell_engine.world_snapshot_view(user=owner)
-        if isinstance(z, dict):
-            zeitgeist_offscreen = z.get("offscreenPrompt", "") or ""
-    except Exception:
-        pass
+    # G5 close-out (BE-103): read the frozen move-in zeitgeist's off-screen-channel block (0062 §5) so
+    # off-screen society/gossip prose is colored by the SAME shared world the player's own scenes are.
+    # Fail-soft + flavor-only (§6) — a read failure or an absent snapshot just yields "" (byte-identical
+    # to the pre-wiring prompt); it never blocks voicing.
+    async def get_zeitgeist() -> str:
+        try:
+            view = await orwell_engine.world_snapshot_view(user=owner)
+        except Exception as exc:
+            # #1599 loud fail-soft: a genuine worldSnapshotView read fault is a real error on a
+            # risk surface — record it RED-eligible (WARNING) rather than swallow it, matching the
+            # skeletons-read/enrich-run siblings. Flavor-only ⇒ auto-corrected to the un-colored
+            # prompt (byte-identical to pre-wiring); it never blocks voicing.
+            logger.warning("[offscreen-texture] worldSnapshotView failed: %s", exc)
+            try:
+                from src import log_rings
+                log_rings.record_soft_failure("offscreen-texture:zeitgeist-read-failed", str(exc),
+                                              corrected="uncolored-prompt", user=owner)
+            except Exception:  # pragma: no cover — failsoft-ok: recorder-self
+                pass
+            return ""
+        if not isinstance(view, dict):
+            return ""
+        return view.get("offscreenPrompt") or ""
 
     try:
-        result = await enrich_tick(get_skeletons, llm_fn, write_back, zeitgeist_offscreen=zeitgeist_offscreen)
+        result = await enrich_tick(get_skeletons, llm_fn, write_back, get_zeitgeist_fn=get_zeitgeist)
     except Exception as exc:
         # #1599 (CodeRabbit): a whole-tick enrichment CRASH must show RED regardless of policy. The
         # strict branch already RED-records via enrichment_policy.record_failure → record_overseer(ok=False);

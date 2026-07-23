@@ -7,7 +7,7 @@ import type { EntityId } from "./ids";
  * binding action (a nomination, replacement, veto, or eviction vote) can break. The ENGINE —
  * never the narrator — decides kept/broken by evaluating the action against the condition
  * (anti-sycophancy, priority #3). This module is pure data + predicates: no I/O, no relationship
- * math, no Vault — it only answers "does this action implicate / honor / break this deal?".
+ * math, no Vault — it only answers "does this action honor / break this deal?".
  */
 
 /**

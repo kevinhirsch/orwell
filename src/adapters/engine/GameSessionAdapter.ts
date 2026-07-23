@@ -695,9 +695,11 @@ const GOSSIP_DRIFT_ENABLED_DEFAULT = process.env.ORWELL_GOSSIP_DRIFT === "1";
  *     "fast-forward" playtest bug. It rides the MASTER clock (`timeOfDayEnabled`), so the seeded sims (which
  *     leave `ORWELL_TIME_OF_DAY` off) never advance it ⇒ byte-identical calibration regardless of this flag.
  *  2. `ORWELL_SOCIAL_FATIGUE` — a tired houseguest sways the house LESS next day + a conflict drains them
- *     to an earlier bedtime (social, not just comps).
+ *     to an earlier bedtime (social, not just comps). **Default ON** (set `=0` to disable) — see the
+ *     per-flag comment above its const below.
  *  3. `ORWELL_MULTI_NIGHT_FATIGUE` — the compounding multi-night fatigue meter (consecutive late nights
- *     stack a deeper deficit; rested nights recover).
+ *     stack a deeper deficit; rested nights recover). **Default OFF** (set `=1` to enable) — the one
+ *     flag in the trio that stayed opt-in.
  */
 // Default ON — a real playtest runs the master clock (the FE flips `time_of_day_enabled` on at boot), and
 // with per-conversation advance OFF the day had no in-fiction time between ceremonies (the fast-forward
