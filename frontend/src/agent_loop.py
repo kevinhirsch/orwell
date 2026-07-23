@@ -9,6 +9,7 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import collections
 import json
+import os
 import re
 import time
 import logging
@@ -1677,6 +1678,55 @@ def _forced_tool_choice_for_casting(turn_tool_names, *, ready: bool, finalizable
     if _CASTING_FINALIZE_TOOL in (turn_tool_names or set()):
         return None
     return {"type": "function", "function": {"name": _CASTING_FINALIZE_TOOL}}
+
+
+def _forced_tool_choice_for_whereabouts(turn_tool_names, *, game_mode, premiere_view, frozen_whereabouts, last_turn_called_whereabouts):
+    """Return `tool_choice` to FORCE `whereabouts` on a free-play turn where the model has no
+    location grounding from the engine, or None. Pure + side-effect-free.
+
+    Triggers (both are conservative defaults — only force when the engine has the data):
+      (a) Premiere opener: the engine reports an ACTIVE premiere view (still welcoming/introducing
+          houseguests, not yet complete). The model has never seen a whereabouts for this game.
+      (b) Co-present with >=2 others: the per-turn occupancy freeze shows the player co-present
+          with 2+ other named houseguests, so the model MUST know the room layout.
+
+    Anti-spam (both triggers): if `last_turn_called_whereabouts` is True, skip — don't force
+    whereabouts two turns running for a static scene (the model's own call from last turn was
+    sufficient for the current scene to be narratable).
+
+    Inputs:
+      • turn_tool_names — set of tool names already fired THIS turn. If whereabouts already
+        fired, the guarantee is met → None.
+      • game_mode — "live" or None/other. Only force in live game.
+      • premiere_view — the engine's `premiere` dict (from game_status), or None/empty.
+      • frozen_whereabouts — `_TURN_WHEREABOUTS[owner]` dict (per-turn occupancy snapshot), or None.
+      • last_turn_called_whereabouts — bool from `_LAST_TURN_CALLED_WHEREABOUTS[owner]`.
+    """
+    # Kill-switch
+    if os.getenv("ORWELL_FORCE_WHEREABOUTS", "1") != "1":
+        return None
+    # Already called this turn
+    if "whereabouts" in (turn_tool_names or set()):
+        return None
+    # Only live game
+    if game_mode != "live":
+        return None
+    # Anti-spam: don't force two turns running
+    if last_turn_called_whereabouts:
+        return None
+
+    # Trigger (a): Premiere opener — active premiere view
+    if isinstance(premiere_view, dict) and not premiere_view.get("complete"):
+        # Premiere is still in progress → force whereabouts
+        return {"type": "function", "function": {"name": "whereabouts"}}
+
+    # Trigger (b): Co-present with >=2 others
+    if isinstance(frozen_whereabouts, dict):
+        present = frozen_whereabouts.get("present") or []
+        if isinstance(present, (list, tuple)) and len(present) >= 2:
+            return {"type": "function", "function": {"name": "whereabouts"}}
+
+    return None
 
 
 def _note_belt(owner, belt: str, n: int = 1) -> None:
@@ -6755,6 +6805,32 @@ async def _stream_agent_loop_impl(
             except Exception as _esc_err:
                 logger.warning(f"[orwell] S1b escalation force skipped: {_esc_err}")
 
+        # ── BL-007: force whereabouts on premiere/group free-play turns ───────────────────────────────
+        if _forced_tool_choice is None and _is_live_game and all_tool_schemas\
+                and bool(get_setting("force_tool_choice_at_beats", True))\
+                and _model_honors_forced_tool_choice(model):
+            try:
+                from routes import chat_helpers as _ch_wa
+                _wa_frozen = _ch_wa._TURN_WHEREABOUTS.get(_force_owner)
+                _wa_called_last = _ch_wa._LAST_TURN_CALLED_WHEREABOUTS.get(_force_owner, False)
+                _wa_premiere = None
+                from src import orwell_engine as _oe_wa
+                _wa_status = await _oe_wa.game_status(user=_force_owner)
+                if isinstance(_wa_status, dict):
+                    _wa_premiere = _wa_status.get("premiere")
+                _candidate_wa = _forced_tool_choice_for_whereabouts(
+                    _turn_tool_names_force if _turn_tool_names_force else set(),
+                    game_mode=game_mode,
+                    premiere_view=_wa_premiere,
+                    frozen_whereabouts=_wa_frozen,
+                    last_turn_called_whereabouts=_wa_called_last)
+                if _candidate_wa is not None:
+                    _forced_tool_choice = _candidate_wa
+                    _forced_belt_tool = "whereabouts"
+                    logger.info(f"[orwell] BL-007 forcing whereabouts at round={round_num} user={_force_owner}")
+            except Exception as _wa_err:
+                logger.warning(f"[orwell] BL-007 whereabouts force skipped: {_wa_err}")
+
         # Primary target + any configured fallback models. stream_llm_with_fallback
         # only switches on a pre-content failure, so streamed output is never
         # duplicated; the dead-host cooldown keeps repeat primary attempts cheap.
@@ -9272,6 +9348,16 @@ async def _stream_agent_loop_impl(
         if _forced_belt_tool:
             _note_forced_choice(owner, _forced_belt_tool, honored=False)
             _forced_belt_tool = None
+
+        # BL-007: record whether whereabouts was called this turn for anti-spam
+        try:
+            from routes import chat_helpers as _ch_stash
+            _wa_this_turn_called = "whereabouts" in {
+                ev.get("tool") for ev in (tool_events or []) if isinstance(ev, dict) and ev.get("tool")
+            }
+            _ch_stash.set_last_turn_called_whereabouts(owner if owner else "", _wa_this_turn_called)
+        except Exception:
+            pass
 
         # If budget was hit, stop the loop
         if budget_hit:

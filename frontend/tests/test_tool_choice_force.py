@@ -515,6 +515,63 @@ def test_loop_non_game_chat_never_forces(monkeypatch):
     assert cap.get("tool_choice") is None, cap.get("tool_choice")
 
 
+# ── BL-007: forced whereabouts on premiere/group free-play turns ──────────────────────────────────────
+# Pure gate tests for `_forced_tool_choice_for_whereabouts`: forces `whereabouts` on free-play turns
+# where the model lacks location grounding from the engine.
+
+_WHEREABOUTS = {"type": "function", "function": {"name": "whereabouts"}}
+
+
+def _whereabouts_gate(fired, *, game_mode="live", premiere_view=None, frozen_whereabouts=None, last_turn_called=False):
+    from src.agent_loop import _forced_tool_choice_for_whereabouts
+    return _forced_tool_choice_for_whereabouts(
+        set(fired), game_mode=game_mode, premiere_view=premiere_view,
+        frozen_whereabouts=frozen_whereabouts,
+        last_turn_called_whereabouts=last_turn_called)
+
+
+def test_whereabouts_gate_forces_on_active_premiere():
+    # Trigger (a): premiere is active (not complete) → force whereabouts
+    assert _whereabouts_gate([], premiere_view={"champagneCircle": "gathered", "total": 16}) == _WHEREABOUTS
+
+
+def test_whereabouts_gate_forces_on_co_present_with_two_or_more():
+    # Trigger (b): >=2 co-present others in the frozen whereabouts
+    frozen = {"room": "living-room", "present": [{"id": "npc:1"}, {"id": "npc:2"}, {"id": "npc:3"}]}
+    assert _whereabouts_gate([], frozen_whereabouts=frozen) == _WHEREABOUTS
+
+
+def test_whereabouts_gate_does_not_force_on_solo_whereabouts():
+    # Off-trigger: only 0-1 co-present
+    frozen = {"room": "kitchen", "present": [{"id": "npc:1"}]}
+    assert _whereabouts_gate([], frozen_whereabouts=frozen) is None
+    frozen_empty = {"room": "storage", "present": []}
+    assert _whereabouts_gate([], frozen_whereabouts=frozen_empty) is None
+    assert _whereabouts_gate([], frozen_whereabouts=None) is None
+
+
+def test_whereabouts_gate_does_not_force_when_already_called_this_turn():
+    frozen = {"room": "living-room", "present": [{"id": "npc:1"}, {"id": "npc:2"}, {"id": "npc:3"}]}
+    assert _whereabouts_gate(["whereabouts"], frozen_whereabouts=frozen) is None
+
+
+def test_whereabouts_gate_anti_spam_does_not_force_two_turns_running():
+    frozen = {"room": "living-room", "present": [{"id": "npc:1"}, {"id": "npc:2"}, {"id": "npc:3"}]}
+    assert _whereabouts_gate([], frozen_whereabouts=frozen, last_turn_called=True) is None
+
+
+def test_whereabouts_gate_does_not_force_outside_live_game():
+    frozen = {"room": "living-room", "present": [{"id": "npc:1"}, {"id": "npc:2"}]}
+    assert _whereabouts_gate([], game_mode=None, frozen_whereabouts=frozen) is None
+    assert _whereabouts_gate([], game_mode="casting", frozen_whereabouts=frozen) is None
+
+
+def test_whereabouts_gate_premiere_wins_over_present_count():
+    # Both triggers hold → still force (latched by premiere)
+    frozen_none = None
+    assert _whereabouts_gate([], premiere_view={"total": 16}, frozen_whereabouts=frozen_none) == _WHEREABOUTS
+
+
 # ── Gap #3: the CASTING-FINALIZE force (docs/design/undercall-seam-structural.md §4) ────────────────
 # The one pre-game closed-set beat with exactly one legal lever: casting engine-`ready` AND
 # `finalizable`, the season not started, the PLAYER explicitly signalled readiness — the same gates
