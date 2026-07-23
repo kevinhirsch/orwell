@@ -111,7 +111,7 @@ def test_incomplete_stream_fault_routes_to_stream_drop_retry_not_a_gm_bubble():
     )
     # When nothing was produced (the pure no-[DONE] drop), _tryAutoRecover surfaces a user-controlled
     # Retry via _renderStreamDropRetry — an honest control, not a silent auto-resend and not a GM bubble.
-    recover_fn = CHAT_JS.split("function _tryAutoRecover", 1)[1][:900]
+    recover_fn = CHAT_JS.split("function _tryAutoRecover", 1)[1][:2000]
     assert "_renderStreamDropRetry(holder, sessionId)" in recover_fn, (
         "a drop that produced no tokens must surface a user-controlled Retry (_renderStreamDropRetry), not "
         "a silent resend."
@@ -126,6 +126,12 @@ def test_incomplete_stream_fault_routes_to_stream_drop_retry_not_a_gm_bubble():
     assert "btn.textContent = 'Retry';" in render_fn and "target.appendChild(note);" in render_fn, (
         "the drop notice must offer a Retry button appended to the message body — a user retry control, "
         "never GM-voiced narration."
+    )
+    # #1729 D2: self-resume honesty — a no-token drop must not silently auto-resend;
+    # accumulated-gated self-resume is the honest path that falls through to _renderStreamDropRetry.
+    assert "if (accumulated && chatState._ownRunIds[sessionId])" in recover_fn or "if (accumulated" in recover_fn, (
+        "self-resume must be gated on accumulated (truthy partial text); "
+        "a no-token drop falls through to _renderStreamDropRetry"
     )
 
 
