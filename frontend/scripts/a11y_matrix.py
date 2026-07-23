@@ -376,7 +376,7 @@ _XRAY_CSS = ("*, *::before, *::after { color: transparent !important;"
 # the page chrome + onboarding. Leaf text under any of these is swept.
 _CONTRAST_SELECTOR = ", ".join(
     ["#chat-form *", "#sidebar *", "#settings-modal *", ".settings-layout *",
-     "[data-ow-scrim] *", "#orwell-onboarding *"]
+     "[data-ow-scrim] *", "#orwell-onboarding *", "#chat-history *"]
     + [f"{sel} *" for sel in rm.GAME_SURFACES])
 
 
@@ -522,6 +522,9 @@ def audit_contrast(page, context, w, h):
 def audit_state(page, context, axe_src, w, h):
     global passes
     page.wait_for_timeout(600)  # let the state settle before auditing
+    # #1875: mount test chat content (bubbles, reasoning accordion, chyrons) so the
+    # axe and contrast sweeps cover the chat transcript during staged runs.
+    rm.mount_chat_transcript(page)
     audit_axe(page, context, axe_src)
     audit_contrast(page, context, w, h)
     passes += 1

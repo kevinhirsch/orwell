@@ -305,7 +305,11 @@ GAME_SURFACES = ["#orwell-status", "#orwell-presence",
                  # M3-1: the room-strip chips sit directly above the composer — register so the
                  # overlap sweep (and the generic overflow:page check) covers it at every phone
                  # tier down to tiny-320, proving it collapses gracefully on narrow viewports.
-                 "#orwell-room-strip"]
+                 "#orwell-room-strip",
+                 # #1875: the chat transcript — chyrons, message bubbles, and the reasoning
+                 # accordion are now swept by the a11y/responsive gates. Registering here
+                 # propagates to CROWD_SELECTOR automatically (both overlap and crowding sweeps).
+                 "#chat-history"]
 CHROME = {"composer": "#chat-form", "sidebar": "#sidebar"}
 
 # #651 Gap 2: the crowding scan used to cover only settings + status + composer — a sub-floor font
@@ -338,6 +342,11 @@ def _close_drawer(page):
 
 def audit_page(page, vp_name, width, height, coarse, with_game):
     page.wait_for_timeout(2500)
+
+    # #1875: mount test chat content (bubbles, reasoning accordion, chyrons) so the
+    # overlap / crowding / tap-target sweeps cover the chat transcript during staged runs.
+    # Mount AFTER the 2.5s settle and BEFORE the first sweep below. Fail-soft.
+    mount_chat_transcript(page)
 
     # --- overflow: the page itself never scrolls horizontally -----------------
     over = page.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
@@ -785,6 +794,60 @@ def mount_face_grid_card(page):
         )
         page.wait_for_timeout(600)  # let the card's entrance animation + face renders settle
         return bool(page.query_selector("#orwell-decision-card .odec-face"))
+    except Exception:
+        return False
+
+
+def mount_chat_transcript(page):
+    """#1875: populate #chat-history with test content (bubbles, reasoning accordion, chyrons)
+    so the a11y/responsive sweeps actually measure chat transcript surfaces during a staged run.
+    Injects user + AI message bubbles (matching the app's real DOM class structure), a thinking
+    section with visible reasoning content, and dispatches orwell:announcements for chyrons.
+    Returns True if content was mounted. Fail-soft."""
+    try:
+        page.evaluate("""
+            (() => {
+                const ch = document.getElementById('chat-history');
+                if (!ch) return false;
+
+                // User bubble — matches chat.js addMessage('user', …) DOM structure
+                const ub = document.createElement('div');
+                ub.className = 'msg msg-user';
+                ub.innerHTML = '<div class="body">Hello, what is the current house situation?</div>';
+                ch.appendChild(ub);
+
+                // AI bubble — matches chat.js addMessage('assistant', …) DOM structure
+                const ab = document.createElement('div');
+                ab.className = 'msg msg-ai';
+                ab.innerHTML = '<div class="body">I can help with that. The current power of veto holder is Kevin, and nominations are coming up soon.</div>';
+                ch.appendChild(ab);
+
+                // Thinking section (reasoning accordion) — visible, not collapsed
+                const ts = document.createElement('div');
+                ts.className = 'thinking-section';
+                ts.innerHTML = '<div class="thinking-header" data-thinking-id="matrix-think-1">'
+                    + '<div class="thinking-header-left"><span class="live-think-header-text">Thinking\u2026</span></div>'
+                    + '<span class="thinking-toggle live-think-toggle" id="matrix-think-1-toggle"></span></div>'
+                    + '<div class="thinking-content" id="matrix-think-1" style="display:block">'
+                    + '<div class="thinking-content-inner live-think-inner">Here is my reasoning about the game theory optimal play given your current position and the alliances at play this week.</div></div>';
+                ch.appendChild(ts);
+
+                // Chyron via announcement dispatch — matches orwellDecision.js orwell:announcements
+                window.dispatchEvent(new CustomEvent('orwell:announcements', {
+                    detail: {
+                        announcements: [{
+                            id: 'matrix-chyron-1',
+                            kind: 'eviction',
+                            headline: 'Test: A houseguest has been evicted from the Big Brother house'
+                        }]
+                    }
+                }));
+
+                return true;
+            })()
+        """)
+        page.wait_for_timeout(300)  # let chyrons render
+        return bool(page.query_selector("#chat-history .msg"))
     except Exception:
         return False
 
