@@ -1265,7 +1265,8 @@
       .ow-chyron .ow-chyron-text { flex: 1 1 auto; }
       .ow-chyron .ow-chyron-kicker {
         display: block; font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
-        opacity: .65; margin-bottom: .15rem;
+        color: color-mix(in srgb, var(--fg, currentColor) 73%, transparent);
+        margin-bottom: .15rem;
       }
       @keyframes ow-chyron-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) { .ow-chyron { animation: none; } }
