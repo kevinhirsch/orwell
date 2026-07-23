@@ -81,9 +81,9 @@ def test_retry_bounded_once(chat_source):
     assert send_calls_in_catch == 1, \
         f"retry must call sendTurn exactly once (found {send_calls_in_catch} calls in catch)"
     # No loop structure around the retry
-    assert "while" not in body[:body.find("// ── Existing fall-soft cleanup")], \
+    assert "while" not in body[:body.find("// ── Pre-stream refusal")], \
         "retry must NOT be inside a loop"
-    assert "for" not in body[:body.find("// ── Existing fall-soft cleanup")], \
+    assert "for" not in body[:body.find("// ── Pre-stream refusal")], \
         "retry must NOT be inside a for loop"
 
 
@@ -107,8 +107,8 @@ def test_composer_text_restored(chat_source):
 def test_non_stale_beat_also_restores(chat_source):
     body = _ws_section(chat_source)
     # The composer restoration must be OUTSIDE the stale-beat if block (fallthrough path)
-    stale_if_end = body.find("// ── Existing fall-soft cleanup")
-    assert stale_if_end != -1, "the existing cleanup comment must exist as the fallthrough marker"
+    stale_if_end = body.find("// ── Pre-stream refusal")
+    assert stale_if_end != -1, "the pre-stream refusal comment must exist as the fallthrough marker"
     restore_pos = body.find("msgEl.value = _finalMsgWithInject")
     assert restore_pos > stale_if_end, \
         "composer restoration must be AFTER the stale-beat retry block (so non-stale-beat errors also restore)"
@@ -119,7 +119,7 @@ def test_retry_has_no_expected_beat_seq(chat_source):
     # The original sendTurn in the TRY block (outside catch) has expectedBeatSeq, but the retry must NOT.
     # Find the retry section between stale-beat guard and its catch
     retry_start = body.find("stale-beat")
-    retry_end = body.find("// ── Existing fall-soft cleanup")
+    retry_end = body.find("// ── Pre-stream refusal")
     retry_block = body[retry_start:retry_end]
     # Inside the retry's inner try block
     try_start = retry_block.find("await window.OrwellWs.sendTurn")

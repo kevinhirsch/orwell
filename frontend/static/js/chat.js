@@ -1659,7 +1659,7 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
             }
           }
 
-          // ── Existing fall-soft cleanup (preserved unchanged) ──
+          // ── Pre-stream refusal (stale-beat / forbidden / not-bound) — release the in-flight record so a later reload can't resurrect a turn the player already saw fail. Auto-retry is the only hold — once it's a client-visible refusal, drop the durable copy. ──
           try { _outboxReleaseInflightSend(_clientMsgId); } catch (_) {}
           _wsResetRound();
           if (clearResponseTimeout) clearResponseTimeout();
