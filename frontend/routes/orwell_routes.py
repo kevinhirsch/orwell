@@ -228,6 +228,59 @@ def _clear_decision_failure(user: Optional[str], decision: dict) -> None:
     _LAST_DECISION_FAIL.pop(_decision_fail_key(user, decision), None)
 
 
+# ── Shared post-submit tail (extracted for HTTP/WS parity, fix #1866) ─────────────
+
+
+async def _post_decision_tail(
+    decision: dict,
+    res: dict,
+    user: Optional[str],
+    kind: str,
+    dec_ik: Optional[str] = None,
+) -> dict:
+    """Post-submit tail SHARED by HTTP and WS decision handlers (fix #1866).
+
+    Extracted from the HTTP ``orwell_decision`` POST handler's success path so the
+    WS ``_handle_decision`` relay runs the EXACT same post-submit seams:
+
+      * **F14 post-goodbye advance_game** — when ``kind == 'goodbye-message'`` and no
+        player pending remains, drive ONE follow-up ``advance_game`` to roll the
+        result (idempotent; engine-direct, never authoring content).
+      * **Pending cache (F5 safety)** — after submit, call ``remember_pending`` /
+        ``clear_pending`` matching the engine's ``pending`` key.
+      * **Publish game-updated** — 0064 cross-device HUD reconcile.
+      * **DB2 clear decision failure** — a success retires any prior refusal so an
+        identical-looking future payload is judged fresh.
+
+    Returns the (possibly modified) result dict.
+    """
+    from src import orwell_engine
+    # F14 (#1013): the player's goodbye-message resolves the LAST player-owned gate of the
+    # eviction sub-loop, but submitDecision returns only the goodbye BEAT — the engine still
+    # owes goodbye → eviction-result → rollWeek, and ONLY advanceGame delivers it.
+    _gb_done = (kind == "goodbye-message"
+                and isinstance(res, dict)
+                and not _pending_is_player(res.get("pending"), user))
+    if _gb_done:
+        try:
+            # CON-16: guard the follow-up advance with an idempotency key derived from the
+            # goodbye card's key, so a retried goodbye cannot double-roll the eviction result.
+            _gb_ik = (dec_ik + ":gb-adv") if isinstance(dec_ik, str) else None
+            res = await orwell_engine.advance_game(
+                expected_beat_seq=None, idempotency_key=_gb_ik, user=user)
+        except Exception as _adv_e:
+            logger.warning(f"[orwell] post-goodbye follow-up advance skipped: {_adv_e}")
+    # D3/E66 + F5: pending cache. A successful submit means the just-resolved card is gone,
+    # so if the engine's result didn't carry an explicit `pending`, clear it here.
+    if isinstance(res, dict) and "pending" not in res:
+        orwell_engine.clear_pending(user=user)
+    else:
+        orwell_engine.remember_pending(res, user=user)
+    _publish_game_updated(user)  # 0064: instant cross-device HUD reconcile
+    _clear_decision_failure(user, decision)  # DB1/DB2: a success retires any prior refusal
+    return res
+
+
 # ── Calibration instrumentation: capture the per-season PUBLIC outcome when a season finishes ─────
 # The owner chose "instrument & gather data first" over tuning the calibration weights. This is the
 # data-gathering half: when a season ends, we durably log the public, player-known outcome facts a
@@ -1556,39 +1609,11 @@ def setup_orwell_routes() -> APIRouter:
                 decision, expected_beat_seq=_dec_ebs, idempotency_key=_dec_ik, user=user)
             if _refresh_beat_seq is not None:
                 _refresh_beat_seq(user, res if isinstance(res, dict) else {})  # CON-4: track new beatSeq
-            # D3/E66 + F5: mirror the engine's `pending` into the FE cache. remember_pending now KEEPS
-            # the cache when a view OMITS `pending` (the route's omit-fallback for an old engine). A
-            # SUCCESSFUL submit, though, means the just-resolved card is gone — so if the engine's result
-            # didn't carry an explicit `pending`, clear it here rather than keep a stale card that would
-            # re-arm on the next status reload. (A present `pending`, incl. null, is handled as engine truth.)
-            # F14 (#1013): the player's goodbye-message resolves the LAST player-owned gate of the
-            # eviction sub-loop, but submitDecision returns only the goodbye BEAT — the engine still
-            # owes `goodbye → eviction-result → rollWeek`, and ONLY advanceGame delivers it. The model
-            # reliably under-calls that advance (the same under-call class as everywhere), wedging the
-            # week at `phase:eviction`. So when the goodbye is in and the engine raised NO new player
-            # pending, drive ONE follow-up advanceGame here to roll the result. Engine-direct (never
-            # authoring content); idempotent; if it instead surfaces a new player pending, we keep that.
-            _gb_done = (body.kind == "goodbye-message"
-                        and isinstance(res, dict)
-                        and not _pending_is_player(res.get("pending"), user))
-            if _gb_done:
-                try:
-                    # CON-16: guard the follow-up advance with an idempotency key derived from the
-                    # goodbye card's key, so a retried goodbye POST cannot double-roll the eviction
-                    # result. Refresh last-seen after so the FE tracks the new beat.
-                    _gb_ik = (_dec_ik + ":gb-adv") if isinstance(_dec_ik, str) else None
-                    res = await orwell_engine.advance_game(
-                        expected_beat_seq=None, idempotency_key=_gb_ik, user=user)
-                    if _refresh_beat_seq is not None:
-                        _refresh_beat_seq(user, res if isinstance(res, dict) else {})
-                except Exception as _adv_e:
-                    logger.warning(f"[orwell] post-goodbye follow-up advance skipped: {_adv_e}")
-            if isinstance(res, dict) and "pending" not in res:
-                orwell_engine.clear_pending(user=user)
-            else:
-                orwell_engine.remember_pending(res, user=user)
-            _publish_game_updated(user)  # 0064: instant cross-device HUD reconcile
-            _clear_decision_failure(user, decision)  # DB1/DB2: a success retires any prior refusal
+            # ── Shared post-submit tail (fix #1866) — runs the EXACT same seams the WS relay runs.
+            # _post_decision_tail handles F14 advance, pending cache, publish, and DB2 clear.
+            res = await _post_decision_tail(decision, res, user, body.kind, _dec_ik)
+            if _refresh_beat_seq is not None:
+                _refresh_beat_seq(user, res if isinstance(res, dict) else {})
             return res
         except orwell_engine.EngineToolError as e:
             # A stale decision-card POST after the game has ended (or pre-game) — the engine refused

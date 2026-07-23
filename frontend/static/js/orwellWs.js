@@ -583,13 +583,15 @@
     payload = payload || {};
     // Carry the FULL decision body (kind + kind-specific fields — vote/save/use/intent/
     // statement/appeal/confirmed/choice…) VERBATIM so the server relay reconstructs the SAME
-    // body the HTTP POST /api/orwell/decision handler receives (ws_routes `_handle_decision`
-    // strips the two sync-spine tokens back out and forwards the rest to submit_decision). The
-    // engine requires `kind` — a fixed {pendingId,choice,target} shape would drop it and be
-    // refused `unknown-kind`. The explicit pendingId/choice/target still round-trip through the
-    // spread (superset — back-compatible). `expectedBeatSeq` defaults to the last-seen beatSeq
-    // (0065 CAS) when the caller didn't pin one; `idempotencyKey` (snake_case `idempotency_key`
-    // accepted too) rides its own normalized slot the server pulls out.
+    // body the HTTP POST /api/orwell/decision handler receives (fix #1866: ws_routes
+    // `_handle_decision` now runs the EXACT shared `_post_decision_tail` from orwell_routes,
+    // so the parity claim is TRUE — F14 advance, pending cache, CON-4 reconcile, and DB1
+    // debounce all fire over the WS path). The engine requires `kind` — a fixed
+    // {pendingId,choice,target} shape would drop it and be refused `unknown-kind`. The explicit
+    // pendingId/choice/target still round-trip through the spread (superset — back-compatible).
+    // `expectedBeatSeq` defaults to the last-seen beatSeq (0065 CAS) when the caller didn't pin
+    // one; `idempotencyKey` (snake_case `idempotency_key` accepted too) rides its own normalized
+    // slot the server pulls out.
     var d = {};
     for (var k in payload) {
       if (!Object.prototype.hasOwnProperty.call(payload, k)) continue;
