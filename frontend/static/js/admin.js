@@ -1490,6 +1490,7 @@ const TOOL_META = {
   diaryRoom:           { name: 'Diary Room',         desc: 'Record a private player confessional', cat: 'Game', ctx: '~100' },
   turnIn:              { name: 'Turn In',            desc: 'End the player\'s night',          cat: 'Game', ctx: '~150' },
   dailyRecap:          { name: 'Daily Recap',        desc: 'Re-fetch the closed day\'s digest', cat: 'Game', ctx: '~150' },
+  worldSnapshotView:  { name: 'World Snapshot',     desc: 'The move-in zeitgeist snapshot',    cat: 'Game', ctx: '~150' },
   seasonRecap:         { name: 'Season Recap',       desc: 'The season\'s public arc',         cat: 'Game', ctx: '~200' },
   seasonRetrospective: { name: 'Season Retrospective', desc: 'Post-season Vault unsealing',    cat: 'Game', ctx: '~200' },
   requestSelfEviction: { name: 'Self-Eviction',      desc: 'Raise the self-eviction confirm',  cat: 'Game', ctx: '~100' },

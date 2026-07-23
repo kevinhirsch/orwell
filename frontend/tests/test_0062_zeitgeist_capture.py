@@ -160,3 +160,99 @@ def test_capture_is_graceful_when_research_raises():
     # A research failure must NOT abort the capture — it falls through to model-framed synthesis.
     res = _run(Z.capture_zeitgeist(research_fn, llm_fn, write_fn, captured_for="d", captured_at="t"))
     assert res["accepted"] is True
+
+
+# ── FE consumption: worldSnapshotView (0062) ──────────────────────────────────────
+
+def test_world_snapshot_view_is_registered_in_game_tools():
+    """Verify ORWELL_GAME_TOOLS includes worldSnapshotView via static source
+    inspection (avoids circular import at test time)."""
+    import os
+    schemas_path = os.path.join(os.path.dirname(__file__), "..", "src", "tool_schemas.py")
+    with open(schemas_path) as f:
+        source = f.read()
+    # Confirms the name appears in the frozenset literal after dailyRecap
+    daily_idx = source.index('"dailyRecap"')
+    wsv_idx = source.index('"worldSnapshotView"')
+    assert daily_idx < wsv_idx, "worldSnapshotView must be in ORWELL_GAME_TOOLS after dailyRecap"
+
+
+def test_world_snapshot_view_schema_exists():
+    """Verify the worldSnapshotView schema entry exists in the tools dict
+    by static source inspection (avoids circular import at test time)."""
+    import os
+    schemas_path = os.path.join(os.path.dirname(__file__), "..", "src", "tool_schemas.py")
+    with open(schemas_path) as f:
+        source = f.read()
+    assert '"name": "worldSnapshotView"' in source
+    assert '"description": "The move-in zeitgeist snapshot' in source
+    assert '"parameters": {"type": "object", "properties": {}}' in source
+    # Verify the schema appears after dailyRecap and before seasonRetrospective
+    daily_idx = source.index('"name": "dailyRecap"')
+    wsv_idx = source.index('"name": "worldSnapshotView"')
+    sr_idx = source.index('"name": "seasonRetrospective"')
+    assert daily_idx < wsv_idx < sr_idx, "schema ordering: dailyRecap < worldSnapshotView < seasonRetrospective"
+    # Schema text validated above with assertions 187-189
+
+
+def test_engine_world_snapshot_view_wrapper_exists():
+    """Verify the orwell_engine wrapper function exists and calls _call."""
+    from src import orwell_engine
+    assert hasattr(orwell_engine, "world_snapshot_view")
+    import inspect
+    sig = inspect.signature(orwell_engine.world_snapshot_view)
+    assert "user" in sig.parameters
+
+
+def test_tool_execution_imports_do_world_snapshot_view():
+    """Verify tool_execution can import do_world_snapshot_view."""
+    from src.tool_implementations import do_world_snapshot_view
+    assert callable(do_world_snapshot_view)
+    import inspect
+    sig = inspect.signature(do_world_snapshot_view)
+    assert "owner" in sig.parameters
+
+
+def test_tool_execution_dispatches_world_snapshot_view():
+    """Verify the dispatch table in tool_execution handles worldSnapshotView."""
+    from src.tool_implementations import do_world_snapshot_view
+    assert callable(do_world_snapshot_view)
+
+
+def test_do_world_snapshot_view_returns_empty_dict_when_no_snapshot():
+    """do_world_snapshot_view returns {} when engine returns None/empty."""
+    import json
+    from unittest.mock import patch
+    from src.tool_implementations import do_world_snapshot_view
+
+    async def _run():
+        with patch("src.orwell_engine.world_snapshot_view") as mock_fn:
+            mock_fn.return_value = None
+            result = await do_world_snapshot_view("{}", owner="test_user")
+        return result
+
+    res = asyncio.get_event_loop().run_until_complete(_run())
+    assert res["exit_code"] == 0
+    assert json.loads(res["output"]) == {}
+
+
+def test_do_world_snapshot_view_returns_snapshot_when_present():
+    """do_world_snapshot_view returns the full snapshot dict."""
+    import json
+    from unittest.mock import patch
+    from src.tool_implementations import do_world_snapshot_view
+
+    fake_snapshot = {"screen": ["a film"], "mood": "buzzy", "offscreenPrompt": "prompt text"}
+
+    async def _run():
+        with patch("src.orwell_engine.world_snapshot_view") as mock_fn:
+            mock_fn.return_value = fake_snapshot
+            result = await do_world_snapshot_view("{}", owner="test_user")
+        return result
+
+    res = asyncio.get_event_loop().run_until_complete(_run())
+    assert res["exit_code"] == 0
+    parsed = json.loads(res["output"])
+    assert parsed["screen"] == ["a film"]
+    assert parsed["mood"] == "buzzy"
+    assert parsed["offscreenPrompt"] == "prompt text"

@@ -579,7 +579,7 @@ cross-user isolation (0021); the full `frontend/` pytest suite; the ADR 0008 `se
    `orwellGameChanged` dispatcher. Add test (c).
 5. **`layout`/`notice`** (§5). Re-key `orwell_layout` per `(user, deviceId)`; per-device LWW; `origin`
    echo-suppression; drop cross-device geometry fan-out (keep notice-dismissal sync). Add test (d).
-6. **Fallback negotiation + flag** (§6). `ORWELL_WS_TRANSPORT` (default off); upgrade-with-timeout →
+6. **Fallback negotiation + flag** (§6). `ORWELL_WS_TRANSPORT` (default ON since 2026-07-10, #1357); upgrade-with-timeout →
    WS-or-SSE; run the F5 harness in both modes. Add test (e).
 7. **Flip the flag** once every WS-specific test + the F5 harness are green in CI for both modes.
 

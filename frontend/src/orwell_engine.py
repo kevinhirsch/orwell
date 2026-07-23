@@ -958,6 +958,14 @@ async def daily_recap(user: str | None = None):
     return await _call("dailyRecap", {}, user=user)
 
 
+async def world_snapshot_view(user: str | None = None):
+    """Feature 0062: the move-in zeitgeist snapshot — Vault-free public flavor
+    (screen, music, sports, news, internet, mood) plus an offscreenPrompt meant to
+    inform off-screen scene prose. Returns {} when no snapshot has been captured
+    (pre-game / early casting)."""
+    return await _call("worldSnapshotView", {}, user=user)
+
+
 async def npc_voice(npc_id: str, user: str | None = None):
     """The knowledge-bounded voicing projection for one active houseguest (B65) — persona,
     room/co-presence, what THEY know/suspect, organic stances. ``None`` for unknown/departed."""

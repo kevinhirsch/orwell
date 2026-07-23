@@ -38,10 +38,9 @@ The player tier ships a **multiplexed WebSocket transport** (ADR
 [`0017`](../../docs/decisions/0017-multiplexed-websocket-session-transport.md); wire spec
 `docs/design/websocket-phase1-protocol.md`) that re-hosts the live chat stream, the mirror
 resume, and the HUD/presence pushes on **one socket per tab** at `GET /api/ws/session`. It is
-**dormant by default** — the browser only *attempts* the upgrade when the front-end is started
-with `ORWELL_WS_TRANSPORT=1` (add it to `data/.env`, then restart the FE). Unset ⇒ the page is
-byte-identical and the proven SSE/poll stack carries everything, so turning it on is reversible
-by flipping the flag back.
+**ON by default** (since 2026-07-10, #1357) — the browser will *attempt* the upgrade automatically.
+Set `ORWELL_WS_TRANSPORT=0` to fall back to the byte-identical SSE/poll stack (reversible at any
+time by unsetting or removing the override).
 
 > **⚠ Prerequisite for PUBLIC turn-on (not yet met).** The WS handshake in
 > `frontend/routes/ws_routes.py` currently authenticates by **session cookie only** — it does **not**

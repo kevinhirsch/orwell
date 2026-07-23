@@ -288,7 +288,7 @@ Every open item is now decided; the list is kept with pointers (cross-check `CLA
    constants firmed in `src/domain/temperatureConstants.ts` (feature 0028).
 3. **Vector approach** — ✅ resolved: adopted, engine-only; embedding provider is
    **fastembed, local ONNX** per ADR `docs/decisions/0004` (deterministic fake in tests;
-   the fastembed adapter itself is not yet built — runtime uses the fake today, E86).
+   the fastembed adapter itself is built (since 2026-06-11, E86a) — runtime uses fastembed by default, with the deterministic fake as the test/fallback adapter (ADR 0004)).
 4. **Veto-draw rules, jury procedure, twists** — ✅ resolved: six-player veto +
    "Houseguest's Choice" (`docs/decisions/0001`, 0005); jury choreography (0037);
    reserve twists Vault-sealed (0025).

@@ -322,6 +322,11 @@
       .odec .odec-hint { opacity: .7; font-size: var(--ow-fs-caption, .75rem); font-style: italic; flex-basis: 100%; order: 99; margin-top: 0; line-height: 1.35; }
       .odec .odec-hint[hidden] { display: none; }
       .odec .odec-err { color: var(--color-error, var(--red, #e06c75)); margin-top: .4rem; }
+      /* G15: structured field blocks for evictee/finalist/offer */
+      .odec .odec-structured { padding: 8px 16px; font-size: 14px; background: rgba(128,128,128,0.08); border-radius: 6px; margin: 4px 16px; line-height: 1.4; }
+      .odec .odec-structured strong { font-weight: 600; }
+      .odec .odec-offer-kind { font-style: italic; opacity: 0.8; }
+      .odec .odec-offer-terms { margin-top: 4px; font-size: 13px; }
       .odec.odec-done { border-color: var(--border, #355a66); opacity: .8; }
       /* Narrow: the note must not squeeze into a thin column beside the button —
          stack it full-width above a full-width Confirm. */
@@ -604,10 +609,14 @@
       p.setAttribute("role", "region");
       p.setAttribute("aria-label", "decision prompt");
       let promptText = pending.prompt;
-      if (willRenderStillIn) {
-        promptText = promptText.replace(/\s*Still in with you:\s*[^.]+\.\s*/, " ").replace(/\s{2,}/g, " ").trim();
+      // G15: structured finalist signal — who is being asked
+      if (pending.finalist && pending.finalist.name) {
+        promptText = `${esc(pending.finalist.name)} — ` + promptText;
       }
-      p.textContent = promptText + (pending.juror && pending.juror.name ? ` (asked by ${pending.juror.name})` : "");
+      if (willRenderStillIn) {
+        promptText = promptText.replace(/\s*Still in with you:\s*[^.]+\s*\.\s*/, " ").replace(/\s{2,}/g, " ").trim();
+      }
+      p.textContent = promptText + (pending.juror && pending.juror.name ? ` (asked by ${esc(pending.juror.name)})` : "");
       card.appendChild(p);
     }
 
@@ -724,6 +733,16 @@
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
       confirm.disabled = false; // free text; the engine scores nothing here
+      // G15: structured finalist label below the textarea
+      if (pending.finalist && pending.finalist.name) {
+        const fl = document.createElement("div");
+        fl.className = "odec-structured";
+        fl.setAttribute("tabindex", "0");
+        fl.setAttribute("role", "region");
+        fl.setAttribute("aria-label", "finalist");
+        fl.innerHTML = `<strong>Asking:</strong> ${esc(pending.finalist.name)}`;
+        card.appendChild(fl);
+      }
     } else if (kind === "goodbye-message") {
       // E34: pick a tone (the binding part) + optional message text (the model voices it).
       (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
@@ -732,6 +751,16 @@
       textarea.setAttribute("aria-label", "Your goodbye message (optional)"); // J5-02
       textarea.addEventListener("input", sync);
       card.appendChild(textarea);
+      // G15: structured evictee signal — who is saying goodbye
+      if (pending.evictee && pending.evictee.name) {
+        const ev = document.createElement("div");
+        ev.className = "odec-structured";
+        ev.setAttribute("tabindex", "0");
+        ev.setAttribute("role", "region");
+        ev.setAttribute("aria-label", "evictee identity");
+        ev.innerHTML = `<strong>Saying goodbye:</strong> ${esc(pending.evictee.name)}`;
+        card.appendChild(ev);
+      }
     } else if (kind === "exit-interview") {
       // 0130: the player-evictee's own exit interview — pick a posture (the binding part) + optional words.
       (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id));
@@ -785,6 +814,22 @@
           sync();
         });
       });
+    } else if (kind === "deal-offer") {
+      // G15: structured offer rendering (0123 accept/decline of NPC deal)
+      if (pending.offer && pending.offer.from && pending.offer.from.name) {
+        const of = document.createElement("div");
+        of.className = "odec-structured";
+        of.setAttribute("tabindex", "0");
+        of.setAttribute("role", "region");
+        of.setAttribute("aria-label", "offer details");
+        let offerHtml = `<strong>Offer from ${esc(pending.offer.from.name)}</strong>`;
+        if (pending.offer.kind) offerHtml += ` <span class="odec-offer-kind">(${esc(pending.offer.kind)})</span>`;
+        if (pending.offer.terms) offerHtml += `<div class="odec-offer-terms">${esc(pending.offer.terms)}</div>`;
+        of.innerHTML = offerHtml;
+        card.appendChild(of);
+      }
+      // options chips for accept/decline
+      (pending.options || []).forEach((o) => addChip(o.name || String(o.id), o.id, o));
     } else {
       // M2-2: every kind that lands here picks a HOUSEGUEST (nominations, eviction-vote,
       // replacement, houseguests-choice, tie-break, juror-vote, final-eviction) — the chip
@@ -896,15 +941,15 @@
       confirm.disabled = true;
       confirm.textContent = "Locking in…";
       try {
-        // WS Phase-1 (ADR 0017 §3.5): when the OrwellWs socket is LIVE (flag ON + a successful
-        // handshake), the confirm goes UP as a `decision` frame carrying the 0065 expectedBeatSeq
-        // CAS; the server relay runs the EXACT POST /api/orwell/decision handler below the
-        // transport (ws_routes `_handle_decision`) and fans a `state` edge back that re-reads the
-        // moved board. DORMANT when the socket is not active (the flag is OFF by default — the
-        // zero-risk Phase-1 default — or the upgrade failed/downgraded to SSE): the byte-identical
-        // HTTP POST below stands. A WS error is mapped onto the SAME httpStatus the catch below
-        // already branches on, so a stale-beat reconciles through the existing 409 desync path
-        // exactly as the HTTP 409 does.
+        // WS Phase-1 (ADR 0017 §3.5, fix #1866): when the OrwellWs socket is LIVE (flag ON + a
+        // successful handshake), the confirm goes UP as a `decision` frame carrying the 0065
+        // expectedBeatSeq CAS; the server relay now runs the EXACT post-submit seams the HTTP
+        // /api/orwell/decision handler runs (F14 advance, pending cache, CON-4 reconcile, DB1
+        // debounce — imported via `_post_decision_tail`): the parity claim is TRUE. DORMANT when
+        // the socket is not active (the flag is OFF by default — the zero-risk Phase-1 default — or
+        // the upgrade failed/downgraded to SSE): the byte-identical HTTP POST below stands. A WS
+        // error is mapped onto the SAME httpStatus the catch below already branches on, so a
+        // stale-beat reconciles through the existing 409 desync path exactly as the HTTP 409 does.
         const _ws = window.OrwellWs;
         const _wsLive = !!(_ws && _ws.isActive && _ws.isActive() && _ws.sendDecision);
         let _beat;
@@ -1220,7 +1265,8 @@
       .ow-chyron .ow-chyron-text { flex: 1 1 auto; }
       .ow-chyron .ow-chyron-kicker {
         display: block; font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
-        opacity: .65; margin-bottom: .15rem;
+        color: color-mix(in srgb, var(--fg, currentColor) 73%, transparent);
+        margin-bottom: .15rem;
       }
       @keyframes ow-chyron-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       @media (prefers-reduced-motion: reduce) { .ow-chyron { animation: none; } }
@@ -1250,13 +1296,55 @@
       esc(a.headline || "") + "</span>";
     chatBox.appendChild(card);
     try { chatBox.scrollTop = chatBox.scrollHeight; } catch (_) {}
+    try { if (window.orwellAnnounce) window.orwellAnnounce(esc(kicker) + ": " + esc(a.headline || "")); } catch (_) {}
+  }
+
+  function _announceBatchCoalesced(rendered) {
+    if (!rendered.length) return;
+    if (rendered.length === 1) {
+      try { if (window.orwellAnnounce) window.orwellAnnounce(rendered[0].kicker + ": " + rendered[0].headline); } catch (_) {}
+      return;
+    }
+    // Check if all items share the same kicker (homogeneous batch)
+    var firstKicker = rendered[0].kicker;
+    var allSameKicker = rendered.every(function(r) { return r.kicker === firstKicker; });
+    if (allSameKicker) {
+      try { if (window.orwellAnnounce) window.orwellAnnounce(firstKicker + ": " + rendered.length + (rendered.length === 1 ? " announcement" : " announcements")); } catch (_) {}
+    } else {
+      // Mixed batch — join unique kicker+headline combos
+      var seen = {};
+      var parts = [];
+      rendered.forEach(function(r) {
+        var key = r.kicker + r.headline;
+        if (!seen[key]) { seen[key] = true; parts.push(r.kicker + ": " + r.headline); }
+      });
+      try { if (window.orwellAnnounce) window.orwellAnnounce(parts.join("; ")); } catch (_) {}
+    }
   }
 
   function _renderChyronBatch(list) {
     if (!Array.isArray(list) || !list.length) return;
-    list.forEach((a, i) => {
-      if (i === 0) { _renderChyron(a); return; }
-      setTimeout(() => _renderChyron(a), i * 260); // the staged, card-by-card cadence
+    var rendered = [];
+    list.forEach(function(a, i) {
+      if (!a || !a.id) return;
+      var willRender = !_chyronSeen.has(a.id) && !(function() {
+        try { return !!document.querySelector('[data-chyron-id="' + CSS.escape(a.id) + '"]'); }
+        catch (_) { return false; }
+      })();
+      if (i === 0) {
+        _renderChyron(a);
+        if (willRender) rendered.push({ kicker: _CHYRON_KICKER[a.kind] || "Big Brother", headline: a.headline || "" });
+        return;
+      }
+      setTimeout(function() {
+        _renderChyron(a);
+        if (willRender) rendered.push({ kicker: _CHYRON_KICKER[a.kind] || "Big Brother", headline: a.headline || "" });
+        if (i === list.length - 1) {
+          setTimeout(function() {
+            _announceBatchCoalesced(rendered);
+          }, 300);
+        }
+      }, i * 260);
     });
   }
 

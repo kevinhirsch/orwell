@@ -32,8 +32,7 @@ The ``layout`` channel leg is now WIRED (#1293): it rides the same per-session `
 and its per-device ``patch_layout(user, deviceId, …)`` re-key has merged, so ``_run_layout_channel`` /
 ``_handle_layout`` below are live (per-device LWW, ADR 0017 §5 — geometry is per-device, only game
 state syncs). The route is registered but the client only ATTEMPTS the upgrade when the
-``ORWELL_WS_TRANSPORT`` flag is on — **default off** in Phase 1 (owner-gated rollout), so nothing
-ships to users from this PR alone; flipping it on is the separate turn-on step.
+``ORWELL_WS_TRANSPORT`` flag is on — **default ON** since 2026-07-10 (#1357).
 """
 from __future__ import annotations
 
@@ -67,6 +66,8 @@ _DECISION_KINDS = {
     "replacement", "eviction-vote", "tie-break", "final-eviction",
     "goodbye-message", "finale-statement", "finale-answer",
     "juror-question", "juror-vote",
+    # 0130 — the player-evictee's exit-interview (posture + optional words) rides the same seam.
+    "exit-interview",
     "self-evict",
 }
 
@@ -678,6 +679,14 @@ async def ws_session(websocket: WebSocket) -> None:
                 await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "forbidden"}})
                 return
             from src import orwell_engine
+            # CON-4 / F5 / DB1/DB2: import shared helpers from orwell_routes so the WS runs
+            # the EXACT same seams the HTTP handler runs (fix #1866).
+            from routes.orwell_routes import (
+                _post_decision_tail,
+                _recent_decision_failure,
+                _clear_decision_failure,
+                _remember_decision_failure,
+            )
             expected = d.get("expectedBeatSeq")
             idem = d.get("idempotencyKey")
             decision = {k: v for k, v in d.items()
@@ -686,6 +695,13 @@ async def ws_session(websocket: WebSocket) -> None:
             # BEFORE any engine call — prose can never bind through this surface.
             if decision.get("kind") not in _DECISION_KINDS:
                 await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "unknown-kind"}})
+                return
+            # DB1/DB2 (#1025): if this EXACT decision just failed (within the debounce window),
+            # replay the cached refusal WITHOUT re-hitting the engine or re-logging.
+            _dup = _recent_decision_failure(user, decision)
+            if _dup is not None:
+                await send({"t": "error", "ch": "chat", "cid": cid,
+                            "d": {"code": "debounced", "status": _dup["status"], "error": _dup["error"]}})
                 return
             try:
                 res = await orwell_engine.submit_decision(
@@ -697,17 +713,41 @@ async def ws_session(websocket: WebSocket) -> None:
                 bs = _beat_seq_of(res if isinstance(res, dict) else {})
                 if bs is not None:
                     sock["beatSeq"] = bs
+                # ── Shared post-submit tail (fix #1866) — runs the EXACT same seams the HTTP
+                # orwell_decision handler runs (F14 post-goodbye advance, pending cache,
+                # publish, DB2 clear).
+                await _post_decision_tail(decision, res, user, decision.get("kind"), idem)
                 await send({"t": "ack", "ch": "chat", "cid": cid, "d": {"accepted": True}})
                 # Fan a state edge so every window re-reads the moved board (§4).
                 await send({"t": "state", "ch": "state", "d": {"beatSeq": sock["beatSeq"], "reason": "decision"}})
                 session_events.publish(sock["canonical"], "game-updated")
             except orwell_engine.EngineToolError as e:
                 if _is_stale_beat(e):
+                    # CON-4: stale-beat CAS refusal — a concurrent window already moved the
+                    # board. Reconcile silently (like the HTTP handler does) and return
+                    # current state via a state edge, NOT an error frame.
+                    try:
+                        from routes.chat_helpers import _handle_stale_beat
+                        await _handle_stale_beat(user, e)
+                        _cur = await orwell_engine.get_game_state(user=user)
+                        orwell_engine.remember_pending(_cur, user=user)
+                        session_events.publish(sock["canonical"], "game-updated")
+                        _bs = _cur.get("beatSeq") or _beat_seq_of(_cur)
+                        if _bs is not None:
+                            sock["beatSeq"] = _bs
+                        await send({"t": "state", "ch": "state", "d": {"beatSeq": sock["beatSeq"], "reason": "decision-reconciled"}})
+                        return
+                    except Exception:
+                        pass  # reconcile failed — fall through to error frame below
                     await send({"t": "error", "ch": "chat", "cid": cid,
                                 "d": {"code": "stale-beat", "beatSeq": getattr(e, "beat_seq", None)}})
                 elif getattr(e, "no_game", False):
                     await send({"t": "error", "ch": "chat", "cid": cid, "d": {"code": "no-game"}})
                 else:
+                    # DB1/DB2: the engine answered with a structured error — debounce an
+                    # identical repeat so a buggy client can't storm the log ring.
+                    _status = e.status if isinstance(getattr(e, "status", None), int) and e.status else None
+                    _remember_decision_failure(user, decision, _status or 502, str(e))
                     await send({"t": "error", "ch": "chat", "cid": cid,
                                 "d": {"code": "engine-error", "status": getattr(e, "status", None)}})
             except Exception as e:

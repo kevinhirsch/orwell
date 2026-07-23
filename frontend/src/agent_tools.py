@@ -71,6 +71,8 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
              "seasonRecap", "seasonRetrospective", "npcVoice",
              # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
              "dailyRecap",
+             # 0062: the move-in zeitgeist snapshot — public flavor + offscreenPrompt.
+             "worldSnapshotView",
              "gameStatus", "getVisibleStateFor", "socialRead", "askProducers",
              "renderScene", "endOfSessionSummary",
              # God Mode (0016): admin-gated non-Vault levers (gated by _ADMIN_TOOLS).
@@ -126,6 +128,8 @@ GAME_TOOL_KEEP = frozenset({
     "seasonRecap", "seasonRetrospective",
     # 0102: the daily "day in review" digest re-fetch (usually delivered inline on turnIn).
     "dailyRecap",
+    # 0062: the move-in zeitgeist snapshot — public flavor + offscreenPrompt.
+    "worldSnapshotView",
     # B65: the knowledge-bounded per-NPC voicing projection.
     "npcVoice",
     "renderScene", "endOfSessionSummary",

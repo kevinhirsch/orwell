@@ -48,6 +48,51 @@ const TURN = process.env.MIRROR_HUD_TURN ||
 const HUD_PARITY_BUDGET_MS = parseInt(process.env.HUD_PARITY_BUDGET_MS || '2000', 10);
 const B_WAIT_MS = parseInt(process.env.MIRROR_HUD_B_WAIT_MS || '15000', 10);
 
+// TRANSPORT MODE (the WS Phase-1 turn-on gate — protocol spec §6/§7 case f, ADR 0017 §Phasing):
+// the SAME two-window parity invariant must hold whether the windows mirror over the WebSocket
+// (`MIRROR_WS_TRANSPORT=1`) or the permanent SSE/poll fallback (`=0`/unset). The client reads the
+// `ORWELL_WS_TRANSPORT` flag off a window global (orwellWs.js `_flagOn`); we set it in an init
+// script that runs BEFORE any app JS, so we force WS mode WITHOUT touching app code or the server
+// env (the server-side default stays OFF). Absent/`0` ⇒ the flag is never set ⇒ pure fallback,
+// exactly the production default. This is the ONLY difference between the two gate invocations —
+// the bytes, the checks, and the acceptance are identical (spec §6 "Both modes must pass F5").
+const WS_TRANSPORT = process.env.MIRROR_WS_TRANSPORT === '1' || process.env.MIRROR_WS_TRANSPORT === 'true';
+const MODE = WS_TRANSPORT ? 'ws' : 'fallback';
+// Force the flag on before app scripts evaluate (null when fallback — nothing is set, so
+// `_flagOn()` stays false and the client never even attempts the upgrade, §6 zero-risk default).
+const WS_FLAG_INIT = WS_TRANSPORT
+  ? `(() => { try {
+      window.ORWELL_WS_TRANSPORT = true;
+      if (document.documentElement) document.documentElement.dataset.wsForced = '1';
+      // DIAG: wrap WebSocket to record every frame in/out on /api/ws/session (why a WS run fell back).
+      window.__wsFrames = [];
+      var _OWS = window.WebSocket;
+      window.WebSocket = function (url, protocols) {
+        var s = protocols ? new _OWS(url, protocols) : new _OWS(url);
+        try {
+          if (/\/api\/ws\/session/.test(String(url))) {
+            var _send = s.send.bind(s);
+            s.send = function (data) { try { window.__wsFrames.push({ dir: 'out', d: String(data).slice(0, 300), t: Date.now() }); } catch (_) {} return _send(data); };
+            s.addEventListener('message', function (ev) { try { window.__wsFrames.push({ dir: 'in', d: String(ev.data).slice(0, 300), t: Date.now() }); } catch (_) {} });
+            s.addEventListener('close', function (ev) { try { window.__wsFrames.push({ dir: 'close', code: ev.code, reason: String(ev.reason || '').slice(0, 120), t: Date.now() }); } catch (_) {} });
+            s.addEventListener('error', function () { try { window.__wsFrames.push({ dir: 'error', t: Date.now() }); } catch (_) {} });
+          }
+        } catch (_) {}
+        return s;
+      };
+      window.WebSocket.prototype = _OWS.prototype;
+      window.WebSocket.CONNECTING = _OWS.CONNECTING; window.WebSocket.OPEN = _OWS.OPEN;
+      window.WebSocket.CLOSING = _OWS.CLOSING; window.WebSocket.CLOSED = _OWS.CLOSED;
+      // Record the WS lifecycle edges so a WS-mode FAILURE is diagnosable (why it fell back).
+      window.__wsLife = [];
+      ['orwell:ws-ready','orwell:ws-active','orwell:ws-inactive','orwell:ws-dead','orwell:ws-adopted']
+        .forEach((n) => window.addEventListener(n, (e) => {
+          try { window.__wsLife.push({ n: n.replace('orwell:',''), d: (e && e.detail) || {}, t: Date.now() }); } catch (_) {}
+        }));
+    } catch (_) {} })()`
+  : null;
+console.log(`\nMIRROR HUD-PARITY transport mode: ${MODE.toUpperCase()}`);
+
 // A B-side tap: record every `orwell:gamechanged` (with its reason + wall) and every off-cycle HUD
 // re-fetch of /api/orwell/{state,status}. Installed BEFORE app JS so we catch the first push.
 const HUD_TAP = `(() => {
@@ -66,9 +111,12 @@ const HUD_TAP = `(() => {
 })()`;
 
 const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
-const A = await openMirrorWindow(browser, 'A');
+const A = await openMirrorWindow(browser, 'A', { extraInit: WS_FLAG_INIT });
 // Window B installs the HUD tap on top of the mirror tap (openMirrorWindow already added the latter).
-const B = await openMirrorWindow(browser, 'B', { extraInit: HUD_TAP });
+// Also inject the WS init script BEFORE it (WS_FLAG_INIT must run before any app JS triggers the WS
+// upgrade; HUD_TAP runs after to intercept orwell:gamechanged. Concatenate them so both run in order).
+const B_INIT = WS_FLAG_INIT ? [WS_FLAG_INIT, HUD_TAP].join('\n') : HUD_TAP;
+const B = await openMirrorWindow(browser, 'B', { extraInit: B_INIT });
 
 // CP0 — both windows on the SAME started game (shared canonical session) or the mirror can't engage.
 const e0 = { A: pub(await engineSnapshot(A.ctx)), B: pub(await engineSnapshot(B.ctx)) };
@@ -146,7 +194,7 @@ const checks = {
 const PASS = Object.values(checks).every(Boolean);
 
 const report = {
-  meta: { turn: TURN, sendWall, reasonA, budgetMs: HUD_PARITY_BUDGET_MS, model: process.env.FAKE_MODEL_ID || 'fake/echo-stream' },
+  meta: { turn: TURN, sendWall, reasonA, budgetMs: HUD_PARITY_BUDGET_MS, model: process.env.FAKE_MODEL_ID || 'fake/echo-stream', transportMode: MODE },
   engine: { beatWarmBaseline: eWarm.beatSeq, beatAfter: e1.A.beatSeq, mutated, convergedBeat: [e1.A.beatSeq, e1.B.beatSeq] },
   timing: { aSettleMs, firstPushMs, parityLagMs },
   bPush: { firstPushReason: bPush ? bPush.reason : null, firstPushMs, parityLagMs, allChanged: hudB.changed, firstHudFetchMs, hudFetch: hudB.hudFetch },
@@ -168,15 +216,18 @@ await A.ctx.close(); await B.ctx.close(); await browser.close();
 process.exit(PASS ? 0 : 1);
 
 // ── helpers ──
-// Poll B's HUD tap until the first `orwell:gamechanged` carrying the 0064 push reason
-// (sync:game-updated) lands AFTER `sinceWall`. That reason is dispatched ONLY by sessionSync.js's
-// notifyGameUpdated on a server `game-updated` SSE — by construction it is the push, not the poll.
+// Poll B's HUD tap until the first `orwell:gamechanged` carrying the push reason
+// (sync:game-updated for SSE, ws:state for WS transport) lands AFTER `sinceWall`. Under SSE,
+// `sync:game-updated` is dispatched ONLY by sessionSync.js's notifyGameUpdated on a server
+// `game-updated` SSE — by construction it is the push, not the poll. Under WS, the
+// platform.js ws:state bridge fires `orwell:gamechanged` with reason `ws:state` on the
+// same game-updated edge. Accept BOTH so the gate works under either transport.
 async function waitForBPush(page, sinceWall, timeoutMs) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     const hit = await page.evaluate((since) => {
       const c = (window.__hud && window.__hud.changed) || [];
-      return c.find((e) => e.wall >= since && /sync:game-updated/.test(e.reason || '')) || null;
+      return c.find((e) => e.wall >= since && /sync:game-updated|ws:state/.test(e.reason || '')) || null;
     }, sinceWall);
     if (hit) return hit;
     await page.waitForTimeout(100);

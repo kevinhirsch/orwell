@@ -670,7 +670,109 @@ allow:
     approved: 2026-07-22
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # --- GRANDFATHERED — TS engine (Class-A / A1 burn-down; #1599) ---
+  # --- GRANDFATHERED — new scope #1844 (app.py, services/, core/, mcp_servers/) ---
+  # These trees were added to the no-silent-failsoft scan in issue #1844. All
+  # pre-existing hits are grandfathered so CI is GREEN on landing; each registry
+  # removal is a follow-up PR that wires the site to a RED recorder.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  # app.py — slim startup/stats/lifecycle orchestrator (best-effort startup
+  # routines, auth middleware, shutdown cleanup). The startup tasks (MCP
+  # connections, warmups, time-of-day, keepalive, default-tasks, owner-sweep,
+  # skill-audit, portrait-reconciler) all log their failures already but owe a
+  # RED-eligible rollup per #1844. The middlware-level `except Exception: pass`
+  # around bearer-token auth is the auth-internal path (token-cache miss) owed
+  # a different RED path.
+  - id: gf-apppy
+    site: frontend/app.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — app.py startup/lifecycle/middleware catch-and-log handlers (_startup_mcp_connections, _warmup_tool_index, _warmup_endpoints, _apply_time_of_day, _keepalive_loop, _ensure_default_tasks, _startup_event, _null_owner_sweep_loop, _skill_audit_nightly_loop, _shutdown_event, dispatch, _touch_last_used). All log their failure already; owed a RED-eligible rollup per #1844."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+
+  # core/database.py — SQL migration helpers (classic schema-migration pattern:
+  # each _migrate_* is a bare-except-swallow over a single ALTER TABLE); every
+  # migration does a no-op when the column/table already exists, so the catch is
+  # the expected path, not a real failure. The risk surface (a single DDL query)
+  # is the caller's context, not an LLM/engine risk.
+  - id: gf-core-database-migrations
+    site: frontend/core/database.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — all SQL migration helpers (_migrate_* functions). Classic idempotent-schema pattern: each migration catches errors on ALTER TABLE that are the expected \"column exists\" path. The risk surface is a single DDL query, not an LLM/engine call."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+
+  # mcp_servers/ — inherited MCP tool servers (email, image-gen, memory, RAG)
+  - id: gf-mcp-email-server
+    site: frontend/mcp_servers/email_server.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited workspace MCP email server (call_tool, _detect_sent_folder, _get_cached_summaries, _send_email, _list_accounts_raw). Not a game-owned surface; owes RED wiring per #1844."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-mcp-image-gen-server
+    site: frontend/mcp_servers/image_gen_server.py
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited workspace MCP image-gen server (call_tool). Not a game-owned surface; owes RED wiring per #1844."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+
+  # services/ — inherited workspace services (search, memory, research, shell,
+  # STT, TTS, youtube). All are workspace verticals excluded or soft-disabled
+  # under the game build (GAME_DROP_SET). Their pre-existing fail-soft handlers
+  # are grandfathered; removal is a separate slice.
+  - id: gf-services-search
+    site: frontend/services/search/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited search service (searxng_search_results, searxng_search_api, searxng_search, _html_fallback, duckduckgo_search). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-memory
+    site: frontend/services/memory/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited memory extraction/skill services (extract_and_store, audit_memories, maybe_extract_skill, fetch_skill_bundle, add_skill). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-research
+    site: frontend/services/research/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited research service (_run, _save_result, call_research_service, _fallback_research, _handle_research_failure, _initialize_legacy_engine). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-shell
+    site: frontend/services/shell/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited shell service (execute, stream). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-stt
+    site: frontend/services/stt/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited STT service (_transcribe_api). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-tts
+    site: frontend/services/tts/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited TTS service (_synthesize_api). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
+  - id: gf-services-youtube
+    site: frontend/services/youtube/**
+    class: grandfathered-inherited
+    records: red-eligible
+    reason: "grandfathered #1844 — inherited YouTube service (extract_transcript_async, fetch_youtube_comments). Workspace vertical; not game-owned."
+    approved_by: kevinhirsch
+    approved: 2026-07-22
   # The pure domain core uses typed errors + the orchestrator's fail-closed integrity
   # checkpoint; the swallow surface is small and concentrated in adapters. A1 (routing these
   # adapter swallows into the orchestrator's RED-eligible channel — new EngineHealth.recordSoftFault

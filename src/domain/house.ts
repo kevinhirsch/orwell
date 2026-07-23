@@ -198,11 +198,6 @@ export function pickZone(room: Room, key: number): Zone | undefined {
   return zones[((key % zones.length) + zones.length) % zones.length];
 }
 
-/** The PUBLIC display name for a zone ("poolside" → "poolside", "window-nook" → "window nook"). */
-export function zoneDisplayName(zone: Zone): string {
-  return zone.replace(/-/g, " ");
-}
-
 /**
  * The PUBLIC, natural display name for a room (the same `kitchen`/`living room`/`bedroom A`
  * the player and narrator say aloud). Pure presentation of a public room id — never a Vault
