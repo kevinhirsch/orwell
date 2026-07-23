@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
 import os
 import re
 import threading
@@ -100,6 +101,35 @@ def retention_days() -> int:
     except Exception:
         return _DEFAULT_RETENTION_DAYS
 
+
+
+
+# ── sealed call classes (Vault leak seal, issue #1865) ─────────────────────
+_SEALED_CALL_CLASSES = {
+    "narration",
+    "cast-authoring",
+    "off-screen-voicing",
+    "zeitgeist",
+}
+_vault_context = threading.local()
+
+
+def set_vault_unsealed(vault_unsealed: bool = True) -> None:
+    _vault_context.unsealed = vault_unsealed
+
+
+def _vault_is_unsealed() -> bool:
+    return getattr(_vault_context, 'unsealed', False)
+
+
+@contextmanager
+def sealed_unseal_scope():
+    old = _vault_is_unsealed()
+    set_vault_unsealed(True)
+    try:
+        yield
+    finally:
+        set_vault_unsealed(old)
 
 # ── redaction (defence in depth — headers are never passed in) ──────────────────
 
@@ -395,17 +425,35 @@ def record_llm_call(
 def _push_ring(record: dict, messages: List[Dict], resp: dict, user: Optional[str] = None) -> None:
     try:
         from src import log_rings
-        sys_txt, last_user = _system_and_last_user(messages)
-        in_chars = sum(len(str(m.get("content") or "")) for m in messages)
-        out_chars = len(resp.get("text") or "")
-        tcs = resp.get("toolCalls") or []
-        tool_suffix = (" · tools: " + ",".join(str(c.get("name") or "?") for c in tcs)) if tcs else ""
-        verb = "ok" if record["ok"] else "FAILED"
-        reasoning = resp.get("reasoning") or ""
-        req_summary = (("sys: " + _clip(sys_txt, 800) + "\n") if sys_txt else "") + ("user: " + _clip(last_user, 1200))
-        res_summary = (("[reasoning] " + _clip(reasoning, 800) + "\n") if reasoning else "") + _clip(resp.get("text") or "", 1600)
-        if resp.get("error"):
-            res_summary = "[error] " + _clip(json.dumps(resp.get("error")), 600)
+        call_class = record.get('callClass')
+        is_sealed = call_class in _SEALED_CALL_CLASSES
+        vault_open = _vault_is_unsealed()
+        if is_sealed and not vault_open:
+            in_chars = sum(len(str(m.get('content') or '')) for m in messages)
+            out_chars = len(resp.get('text') or '')
+            tcs = resp.get('toolCalls') or []
+            tool_calls_count = len(tcs)
+            tool_suffix = ''
+            verb = 'ok' if record['ok'] else 'FAILED'
+            reasoning = resp.get('reasoning') or ''
+            reasoning_chars = len(reasoning)
+            req_summary = f'[REDACTED — sealed call class {call_class} — {in_chars} chars in messages]'
+            res_summary = f'[REDACTED — sealed call class {call_class} — {out_chars} chars text, {reasoning_chars} chars reasoning, {tool_calls_count} tool calls]'
+            if resp.get('error'):
+                res_summary = '[error] ' + _clip(json.dumps(resp.get('error')), 600)
+            sys_txt, last_user = '', ''
+        else:
+            sys_txt, last_user = _system_and_last_user(messages)
+            in_chars = sum(len(str(m.get("content") or "")) for m in messages)
+            out_chars = len(resp.get("text") or "")
+            tcs = resp.get("toolCalls") or []
+            tool_suffix = (" · tools: " + ",".join(str(c.get("name") or "?") for c in tcs)) if tcs else ""
+            verb = "ok" if record["ok"] else "FAILED"
+            reasoning = resp.get("reasoning") or ""
+            req_summary = (("sys: " + _clip(sys_txt, 800) + "\n") if sys_txt else "") + ("user: " + _clip(last_user, 1200))
+            res_summary = (("[reasoning] " + _clip(reasoning, 800) + "\n") if reasoning else "") + _clip(resp.get("text") or "", 1600)
+            if resp.get("error"):
+                res_summary = "[error] " + _clip(json.dumps(resp.get("error")), 600)
         # 2026-07-13: surface the call class + terminal stop reason in the glanceable summary line
         # (records that predate the top-level fields simply omit them — .get, never KeyError).
         cls = record.get("callClass")
@@ -646,6 +694,28 @@ _auto_count = 0
 _auto_last = 0.0
 _AUTO_EVERY = 100        # records
 _AUTO_MIN_INTERVAL = 1800.0  # seconds
+
+
+def redact_sealed_record(record: dict) -> dict:
+    """Return a redacted copy of the record, keeping metadata only."""
+    cc = record.get('callClass')
+    if cc not in _SEALED_CALL_CLASSES:
+        return record
+    rec = dict(record)
+    if 'request' in rec:
+        req = dict(rec['request'])
+        req['messages'] = [{'role': 'REDACTED', 'content': f'[sealed call class — {cc}]'}]
+        req['tools'] = []
+        rec['request'] = req
+    if 'response' in rec:
+        resp = dict(rec['response'])
+        resp['text'] = f'[REDACTED — sealed call class {cc}]'
+        resp['reasoning'] = None
+        resp['toolCalls'] = []
+        rec['response'] = resp
+    rec['_redacted'] = True
+    return rec
+
 
 
 def _maybe_auto_trim() -> None:
