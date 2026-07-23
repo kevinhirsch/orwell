@@ -10669,7 +10669,7 @@ export class GameSessionAdapter implements GameSession {
       const ev = byId.get(id);
       if (!ev || !ev.hidden) continue; // only hidden events are part of the off-screen texture layer
       // Apply texture override if one exists; otherwise the deterministic template content stands.
-      const prose = this.textureOverrides.get(id) ?? ev.content;
+      const prose = this.textureOverrides.get(id) ?? ev.baseContent ?? ev.content;
       result.push({
         eventId: ev.id,
         nature: ev.type,
