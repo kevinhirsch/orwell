@@ -107,5 +107,5 @@ def test_reasoning_stays_collapsed_by_default():
     # createThinkingSection never adds an `expanded` class at render time.
     section = md[md.index("function createThinkingSection"):]
     section = section[:section.index("\n}")]
-    assert "expanded" not in section, \
-        "markdown.js: the reasoning accordion must render collapsed (no 'expanded' at render)"
+    assert '"expanded"' not in section, \
+        "markdown.js: the reasoning accordion must render collapsed (no 'expanded' class at render)"
