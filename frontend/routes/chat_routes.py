@@ -2135,12 +2135,26 @@ def setup_chat_routes(
             # this window adopts the canonical session client-side (selectSession) and re-attaches its
             # SSE/HUD there. Then fan out the canonical run's buffer like any subscriber. Vault-free
             # (a session id only); idempotent on the client if it already converged.
+            # D2: also prepend run-started so the sender learns its run_id directly (not just via
+            # sessionSync self-echo), enabling self-resume on mid-stream drop.
+            _run_id_val = agent_runs.run_id(run_key)
             async def _adopt_then_subscribe() -> AsyncGenerator[str, None]:
                 yield f'data: {json.dumps({"type": "canonical_session", "id": run_key})}\n\n'
+                if _run_id_val:
+                    yield f'event: run-started\ndata: {json.dumps({"type": "run-started", "runId": _run_id_val})}\n\n'
                 async for ev in agent_runs.subscribe(run_key):
                     yield ev
             return StreamingResponse(_adopt_then_subscribe(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
+        # D2: prepend run-started event so the sender knows its run_id directly from this SSE stream,
+        # enabling self-resume on mid-stream drop without waiting for the sessionSync self-echo.
+        _run_id_val = agent_runs.run_id(run_key)
+        if _run_id_val:
+            async def _with_run_start() -> AsyncGenerator[str, None]:
+                yield f'event: run-started\ndata: {json.dumps({"type": "run-started", "runId": _run_id_val})}\n\n'
+                async for ev in agent_runs.subscribe(run_key):
+                    yield ev
+            return StreamingResponse(_with_run_start(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
         return StreamingResponse(agent_runs.subscribe(run_key), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     # ------------------------------------------------------------------ #
@@ -2167,16 +2181,18 @@ def setup_chat_routes(
     # (e.g. after reopening a session whose agent kept running in the background)
     # ------------------------------------------------------------------ #
     @router.get("/api/chat/resume/{session_id}")
-    async def chat_resume(request: Request, session_id: str) -> StreamingResponse:
+    async def chat_resume(request: Request, session_id: str, from_seq: int = Query(0)) -> StreamingResponse:
         _verify_session_owner(request, session_id)
         # ADR 0012 — allow resuming a run that EXISTS (running OR terminal-but-still-buffered within
         # the evict grace), not only an actively-running one. A short turn finishes before a peer's
         # `run-started`→resume arrives; gating on is_active 404'd the mirroring window and forced it to
         # fall back to a full reload (the cross-tab "render on reload, not live" gap). subscribe()
         # replays the finished run's buffer then ends, so the peer still mirrors the turn's tokens.
+        # D2: from_seq cursor so the caller can skip already-consumed events and reattach to the same
+        # server-buffered run live instead of re-submitting the truncated tail as a new turn.
         if not agent_runs.has_run(session_id):
             raise HTTPException(404, "No active run for this session")
-        return StreamingResponse(agent_runs.subscribe(session_id), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+        return StreamingResponse(agent_runs.subscribe(session_id, from_seq=from_seq), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     # ------------------------------------------------------------------ #
     # POST /api/chat/stop — cancel a detached run (Stop button). Closing the SSE

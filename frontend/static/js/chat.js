@@ -1072,6 +1072,13 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
 
     // Declare accumulated outside try block so it's accessible in catch
     let accumulated = '';
+    // D2: per-stream SSE event counter — incremented for each processed data: line so the
+    // self-resume knows how many events were already consumed and can resume from_seq there.
+    let _sseEventCount = 0;
+    // Also store on chatState so _trySelfResume (module-level, no closure access) can read it.
+    chatState._sseEventCount ||= {};
+    try { delete chatState._sseEventCount[streamSessionId]; } catch (_) {}
+    chatState._sseEventCount[streamSessionId] = 0;
     // ADR 0012 §2.4: set if the server tells this (loser-of-the-bind) window the run lives under a
     // DIFFERENT canonical session id; converged onto in the finally (never mid-stream).
     let _adoptCanonicalAfterStream = null;
@@ -2020,6 +2027,9 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           }
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
+            // D2: count every processed SSE event for resume from_seq cursor
+            _sseEventCount++;
+            chatState._sseEventCount[streamSessionId] = _sseEventCount;
 
             // (thinking spinner removal is handled in agent_step / tool_start / content handlers)
 
@@ -2838,6 +2848,14 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                 // M2-6: `json.moment` (the beat's in-world stamp) rides the same event so the live
                 // bubble shows it immediately, identical to the reload render. Absent ⇒ wall clock.
                 if (currentHolder && (json.ts || json.moment)) _applyServerTimestamp(currentHolder, json.ts, json.moment);
+
+              } else if (json.type === 'run-started') {
+                // D2: the POST stream now prepends a run-started event with the server's run ID.
+                // Record it as our own so self-resume can find it later. Only record it when not
+                // already set (the sessionSync path may have already set it via events SSE).
+                if (json.runId && !chatState._ownRunIds[streamSessionId]) {
+                  chatState._ownRunIds[streamSessionId] = json.runId;
+                }
 
               } else if (json.type === 'canonical_session') {
                 // ADR 0012 §2.4: the loser-of-the-bind window — it POSTed under its own per-tab id but
@@ -4415,6 +4433,8 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
           } catch (_) {}
         }, 0);
       } catch (_) {}
+      // D2 clean up per-stream event counter so the next stream starts from 0.
+      try { delete chatState._sseEventCount[streamSessionId]; } catch (_) {}
       // ADR 0012 §2.4: a loser-of-the-bind window POSTed under its own per-tab id but the run lived
       // under the canonical game session (server `canonical_session` event). Now that the stream has
       // settled, converge onto canonical so this window's history/SSE/HUD re-key onto the shared game
@@ -4571,6 +4591,121 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     }
   }
 
+  /**
+   * D2 — self-resume: reattach to the SAME server-buffered run after a mid-stream SSE drop,
+   * painting continued tokens into the EXISTING holder (from_seq = _sseEventCount) so
+   * no tokens are duplicated and no new user turn is submitted. Returns true if
+   * self-resume attached, false to let the caller fall back to the old continuance path.
+   */
+  async function _trySelfResume(holder, accumulated, sessionId) {
+    if (!sessionId || !holder || !accumulated) return false;
+    const _runId = chatState._ownRunIds[sessionId];
+    if (!_runId) return false;  // no known run for this session — can't self-resume
+
+    const fromSeq = (chatState._sseEventCount && chatState._sseEventCount[sessionId]) || 0;
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/chat/resume/${encodeURIComponent(sessionId)}?from_seq=${fromSeq}`);
+    } catch (e) {
+      return false;  // network error — fall back
+    }
+    if (!res.ok || !res.body) return false;  // run no longer buffered — fall back
+
+    // ── Self-resume attached — pipe into existing holder ──
+    chatState._resumingStreams.add(sessionId);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let replyText = accumulated || '';
+    let reasoningText = '';
+    let gotDelta = false;
+    let serverTs = null;
+    let serverMoment = null;
+    let savedDbId = null;
+    let rich = false;
+    let paintDirty = false;
+
+    const bodyDiv = holder.querySelector('.body');
+    const _liveState = {};
+    const _liveRender = (t) => markdownModule.processWithThinking(markdownModule.squashOutsideCode(t));
+    const renderDelta = () => {
+      if (bodyDiv) _renderLiveStream(bodyDiv, replyText, reasoningText, _liveRender, _liveState, holder);
+    };
+
+    // Clean up any existing spinner in the holder
+    try {
+      const sp = bodyDiv && bodyDiv.querySelector('.spinner-container');
+      if (sp) sp.remove();
+    } catch (_) {}
+
+    try {
+      readLoop:
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop();
+        for (const part of parts) {
+          const line = part.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          const payload = line.slice(6);
+          if (payload === '[DONE]') {
+            if (paintDirty) { paintDirty = false; renderDelta(); }
+            try { await reader.cancel(); } catch (_) {}
+            break readLoop;
+          }
+          let json;
+          try { json = JSON.parse(payload); } catch (_) { continue; }
+          if (json.type === 'user_message') continue;  // Sender already rendered its own bubble
+          if (json.delta) {
+            if (json.thinking) reasoningText += json.delta;
+            else replyText += json.delta;
+            if (!gotDelta) { gotDelta = true; }
+            paintDirty = true;
+          } else if (json.type === 'message_saved') {
+            if (typeof json.moment === 'string' && json.moment) serverMoment = json.moment;
+            if (json.ts || serverMoment) { if (json.ts) serverTs = json.ts; _applyServerTimestamp(holder, serverTs, serverMoment); }
+            if (json.id) { savedDbId = json.id; holder.dataset.dbId = json.id; }
+          } else if (json.type === 'doc_stream_open' || json.type === 'doc_stream_delta') {
+            rich = true;
+          } else if (json.type === 'orwell_narrator') {
+            if (json.name) { _persistNarratorForSession(sessionId, json.name); _refreshLiveByline(holder); }
+          } else if (/^(tool_start|tool_output|tool_progress|agent_step|web_sources|rag_sources|research_progress|research_sources|research_findings|research_done)$/.test(json.type)) {
+            rich = true;
+          }
+        }
+        if (paintDirty) { paintDirty = false; renderDelta(); }
+      }
+    } catch (e) {
+      // Second drop during self-resume — keep accumulated, cleanup below
+    }
+
+    chatState._resumingStreams.delete(sessionId);
+
+    // Finalize in-place
+    const onThisSession = sessionModule.getCurrentSessionId && sessionModule.getCurrentSessionId() === sessionId;
+    if (onThisSession && !rich && replyText.trim() && bodyDiv) {
+      bodyDiv.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(replyText));
+      if (window.hljs) {
+        try { bodyDiv.querySelectorAll('pre code').forEach(function(b){ window.hljs.highlightElement(b); }); } catch (_) {}
+      }
+      if (serverTs || serverMoment) _applyServerTimestamp(holder, serverTs, serverMoment);
+      if (savedDbId) holder.dataset.dbId = savedDbId;
+      holder.dataset.raw = markdownModule.scrubMachineryForPersistence(replyText);
+      if (typeof createMsgFooter === 'function' && !holder.querySelector('.msg-footer')) {
+        try { holder.appendChild(createMsgFooter(holder)); } catch (_) {}
+      }
+      try { uiModule.scrollHistory(); } catch (_) {}
+      try { flushPendingReconcile(sessionId); } catch (_) {}
+    } else if (onThisSession) {
+      try { sessionModule.selectSession(sessionId); } catch (_) {}
+    }
+
+    return true;
+  }
+
   // ── Stall watchdog ──────────────────────────────────────────────
   // Auto-recover a turn whose stream died (connection drop) or went silent:
   // preserve the partial, then re-submit a completion handshake by reusing the
@@ -4589,6 +4724,16 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
   }
 
   function _tryAutoRecover(holder, accumulated, sessionId) {
+    // D2: attempt self-resume FIRST when we have partial content and a known run.
+    // Self-resume re-establishes the live SSE to the same server-buffered run instead of
+    // submitting a new continuance turn. Fire-and-forget: _trySelfResume handles everything
+    // (stream, paint, finalize) and is async — but _tryAutoRecover must return synchronously
+    // (the caller gates on its return), so kick off the async work and return true immediately.
+    if (accumulated && chatState._ownRunIds[sessionId]) {
+      // Fire _trySelfResume asynchronously — it handles the fetch, streaming, and finalize.
+      _trySelfResume(holder, accumulated, sessionId);
+      return true;  // handled by self-resume attempt — caller must not render generic error
+    }
     const tail = (accumulated || '').slice(-400);
     // PRODUCED NOTHING: the stream died before any token. Do NOT silently auto-resend — the old path
     // puppeteered the composer with a "stream dropped" prompt and `.send-btn.click()`, which frequently
