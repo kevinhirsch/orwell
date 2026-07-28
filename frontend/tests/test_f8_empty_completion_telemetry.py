@@ -143,3 +143,68 @@ def test_cross_user_isolation_of_empty_completion_counts():
     assert not any(a["code"] == "empty-completion-storm" for a in alarms_b)
     rollup_a = ahr._compute_health_rollup(user="alice")
     assert rollup_a["llm"]["narration"]["emptyCompletions"] == ahr._STORM_THRESHOLD
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1785 (T1-4 B1-B4) — MINIMUM-VIABLE-TURN GATE (_isBelowThresholdOrDanglingTurn)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _read(rel):
+    import os
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel), encoding="utf-8") as f:
+        return f.read()
+
+
+def test_below_threshold_predicate_exists():
+    """The predicate must be exported from chatReconcile.js."""
+    src = _read("static/js/chatReconcile.js")
+    assert "export function _isBelowThresholdOrDanglingTurn(" in src,         "_isBelowThresholdOrDanglingTurn must be exported"
+
+
+def test_below_threshold_predicate_checks_unclosed_bold():
+    """Unclosed ** must be checked."""
+    src = _read("static/js/chatReconcile.js")
+    assert "% 2 !== 0" in src,         "must check for odd count of tokens"
+    assert "doubleStar" in src or "\*\*" in src,         "must check for ** occurrences"
+
+
+def test_below_threshold_predicate_checks_odd_backticks():
+    """Odd count of unescaped backticks must be checked."""
+    src = _read("static/js/chatReconcile.js")
+    assert "% 2 !== 0" in src,         "must check for odd count"
+    assert "backtick" in src.lower(),         "must check for backticks"
+
+
+def test_below_threshold_predicate_checks_trailing_lone():
+    """Trailing lone * or _ must be checked."""
+    src = _read("static/js/chatReconcile.js")
+    assert "[*_]" in src or "trailing" in src.lower(),         "must check for trailing lone */_"
+
+
+def test_below_threshold_predicate_constant_exists():
+    """The _MIN_VIABLE_TURN_CHARS constant must exist with the conservative default of 3."""
+    src = _read("static/js/chatReconcile.js")
+    assert "const _MIN_VIABLE_TURN_CHARS = 3" in src,         "_MIN_VIABLE_TURN_CHARS must equal 3"
+
+
+def test_below_threshold_predicate_imported_in_chat_js():
+    """_isBelowThresholdOrDanglingTurn must be imported in chat.js."""
+    js = _read("static/js/chat.js")
+    assert "_isBelowThresholdOrDanglingTurn" in js,         "_isBelowThresholdOrDanglingTurn must be referenced in chat.js"
+
+
+def test_gate_and_retry_helper_exists():
+    """The _gateAndRetryBelowThresholdTurn shared helper must exist in chat.js."""
+    js = _read("static/js/chat.js")
+    assert "function _gateAndRetryBelowThresholdTurn(" in js,         "_gateAndRetryBelowThresholdTurn helper must exist in chat.js"
+    assert "_gateBelowThresholdFired" in js,         "one-shot latch _gateBelowThresholdFired must exist"
+    # The retry call is a setTimeout with handleChatSubmit and hideUserBubble option
+    idx = js.find("function _gateAndRetryBelowThresholdTurn")
+    assert idx >= 0, "helper function not found"
+    helper_src = js[idx:idx+1500]
+    assert "handleChatSubmit" in helper_src, "the retry must call handleChatSubmit"
+    assert "hideUserBubble" in helper_src, "the retry must be headless (hideUserBubble)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────

@@ -27,6 +27,8 @@ class ChatMessage:
     role: str
     content: str
     metadata: Optional[Dict[str, Any]] = None
+    # #1785: client-provided optimistic id for idempotent dedup / outbox confirm
+    client_msg_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for API responses."""

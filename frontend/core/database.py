@@ -186,12 +186,17 @@ class ChatMessage(Base):
     # backfilled from timestamp order by _migrate_add_chat_message_seq_column; new rows always get one).
     seq = Column(Integer, nullable=True)
 
+    # #1785: client-provided optimistic id for idempotent dedup / outbox confirm
+    client_msg_id = Column(String, nullable=True)
+
     # Relationship to Session
     session = relationship("Session", back_populates="messages")
 
     # Indexes - optimized composite
     __table_args__ = (
         Index('ix_messages_session_time', 'session_id', 'timestamp'),  # Composite for efficient message retrieval
+        # #1785: unique on (session_id, client_msg_id) for idempotent replay
+        Index('ix_messages_session_client_msg_id', 'session_id', 'client_msg_id', unique=True),
         # ADR 0008: the authoritative order is (session_id, seq); UNIQUE backstops the assignment
         # against a race (a second writer that computed the same MAX(seq)+1 fails and retries).
         Index('ix_messages_session_seq', 'session_id', 'seq', unique=True),
@@ -750,6 +755,72 @@ def _migrate_add_chat_message_seq_column():
         logging.getLogger(__name__).info("Migrated: added + backfilled 'seq' on chat_messages (ADR 0008)")
     except Exception as e:
         logging.getLogger(__name__).warning(f"chat_messages.seq migration failed: {e}")
+
+
+def _migrate_add_chat_message_client_msg_id_column():
+    """#1785: add client_msg_id to chat_messages + backfill from metadata + defensive de-dup + unique index.
+
+    Idempotent: the column-add is guarded; the backfill only touches NULL rows; the unique index is
+    `IF NOT EXISTS`. Pre-index de-dup nulls out conflicting non-null duplicates within a session so
+    the index creation cannot fail on pre-existing duplicates from concurrent client_msg_id generation.
+    """
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(chat_messages)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "client_msg_id" not in columns:
+            conn.execute("ALTER TABLE chat_messages ADD COLUMN client_msg_id TEXT")
+        # Backfill from existing JSON metadata blob.
+        conn.execute(
+            """
+            UPDATE chat_messages
+               SET client_msg_id = json_extract(metadata, '$.client_msg_id')
+             WHERE client_msg_id IS NULL
+               AND json_extract(metadata, '$.client_msg_id') IS NOT NULL
+            """
+        )
+        # ★ Defensive de-dup: null out all but one conflicting client_msg_id per session.
+        # Do NOT delete rows — only clear the client_msg_id from duplicates so the unique index
+        # creation doesn't fail. SQLite treats NULL as distinct per row, so legacy/system rows
+        # without a client_msg_id never collide with the index.
+        import logging as _log
+        dup_rows = conn.execute(
+            """
+            SELECT COUNT(*) - COUNT(DISTINCT client_msg_id) AS dups
+              FROM chat_messages
+             WHERE client_msg_id IS NOT NULL
+            """
+        ).fetchone()[0]
+        if dup_rows:
+            _log.getLogger(__name__).warning(
+                f"chat_messages.client_msg_id: {dup_rows} duplicate(s) found — nulling all but one per (session, client_msg_id)"
+            )
+        conn.execute(
+            """
+            UPDATE chat_messages
+               SET client_msg_id = NULL
+             WHERE rowid NOT IN (
+                 SELECT MIN(rowid)
+                   FROM chat_messages
+                  WHERE client_msg_id IS NOT NULL
+                  GROUP BY session_id, client_msg_id
+             )
+               AND client_msg_id IS NOT NULL
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_session_client_msg_id "
+            "ON chat_messages(session_id, client_msg_id)"
+        )
+        conn.commit()
+        conn.close()
+        logging.getLogger(__name__).info("Migrated: added + backfilled 'client_msg_id' on chat_messages (#1785)")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"chat_messages.client_msg_id migration failed: {e}")
 
 
 def _migrate_add_document_archived_column():
@@ -1678,6 +1749,7 @@ def _init_db_inner():
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
     _migrate_add_chat_message_seq_column()  # ADR 0008: authoritative per-session chat order
+    _migrate_add_chat_message_client_msg_id_column()  # #1785: idempotent replay dedup column
     _migrate_add_folder_column()
     _migrate_add_token_columns()
     _migrate_add_mode_column()

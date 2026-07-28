@@ -240,6 +240,45 @@ export function _setReconcileDeps(deps) {
       (visibleReply == null || String(visibleReply).trim() === '');
   }
 
+  // #1785: minimum char threshold for a viable turn reply. Anything shorter is degenerate
+  // (a bare "The" or a single punctuation mark). Flagged for PO tuning post-merge — the
+  // conservative default of 3 catches only truly empty/near-empty generations.
+  const _MIN_VIABLE_TURN_CHARS = 3;
+
+  /**
+   * #1785 (F8): minimum-viable-turn gate. True iff the visible reply is below a conservative
+   * length threshold OR carries a dangling-markdown syntax error (unclosed **, odd backticks,
+   * trailing lone */_). Pure structural pattern matching — no product tuning.
+   *
+   * Two halves OR'd together:
+   *   1. LENGTH-threshold: visibleReply is shorter than _MIN_VIABLE_TURN_CHARS chars.
+   *      A valid short reply like "Yes." (4 chars) must NOT trip it.
+   *   2. DANGLING-MARKDOWN: visibleReply ends mid-token — unclosed **, an odd count of
+   *      unescaped backticks, a trailing lone * or _ not followed by content.
+   *
+   * Mutually compatible with siblings: fully-blank is caught by _isEmptyTurnNoSave first;
+   * the reasoning-only casting hang is caught by _isCastingEmptyReplyReprompt first.
+   */
+  export function _isBelowThresholdOrDanglingTurn({ sawDone, cancelled, usedTools, producedVisible, visibleReply, alreadyGated } = {}) {
+    if (!sawDone || cancelled || usedTools || producedVisible || alreadyGated) return false;
+    if (visibleReply == null || visibleReply === '') return false;  // fully-blank goes to _isEmptyTurnNoSave
+    const text = String(visibleReply);
+    // ── LENGTH threshold ──
+    if (text.length < _MIN_VIABLE_TURN_CHARS) return true;
+    // ── DANGLING-MARKDOWN checks ──
+    // Unclosed ** (odd number of ** pairs, i.e. odd count of ** occurrences)
+    const doubleStarMatches = text.match(/\*\*/g);
+    if (doubleStarMatches && doubleStarMatches.length % 2 !== 0) return true;
+    // Odd count of unescaped backticks (backtick not preceded by backslash)
+    const backtickMatches = text.match(/(?<!\\)`/g);
+    if (backtickMatches && backtickMatches.length % 2 !== 0) return true;
+    // Trailing lone * or _ not followed by content (end of string, or followed by space/punctuation)
+    if (/[*_]$/.test(text)) return true;
+    // Trailing lone * or _ followed only by whitespace/punctuation at the very end
+    if (/[*_]\s*$/.test(text)) return true;
+    return false;
+  }
+
   /**
    * F5 (dedup hardening): count the message bubbles that SHOULD map 1:1 to a persisted server message
    * — i.e. exclude rows that are intentionally hidden (display:none): a tool-only continuation round
