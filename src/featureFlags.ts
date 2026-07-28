@@ -70,6 +70,7 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
   { envKey: 'ORWELL_TIME_PER_CONVERSATION',  key: 'timePerConversation',    parser: 'inverted' },
   { envKey: 'ORWELL_SOCIAL_FATIGUE',         key: 'socialFatigue',          parser: 'inverted' },
   { envKey: 'ORWELL_MULTI_NIGHT_FATIGUE',    key: 'multiNightFatigue',      parser: 'strict' },
+  { envKey: 'ORWELL_ACT_COMMIT_VOICE_VETO_CEREMONY', key: 'actCommitVoiceVetoCeremony', parser: 'strict' },
 ];
 
 /** The parsers, keyed by kind, to avoid re-creating closures on every call. */
