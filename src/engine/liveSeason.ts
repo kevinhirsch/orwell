@@ -2421,6 +2421,12 @@ export function advance(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSourc
       return resolveVetoComp(s, ctx, rng);
     }
     case "veto-ceremony": {
+      // #1782 slice 1 — flag scaffold. When ON, the DECIDE micro-call hooks here in
+      // a later slice; for NOW, both ON and OFF fall through to today's exact behavior.
+      // OFF is the default (calibration-neutrality invariant).
+      // TODO(#1782 slice 2): DECIDE micro-call hooks here (consult
+      // `this.actCommitVoiceVetoCeremonyEnabled`).
+      // ── existing behavior follows ──
       // Phase 3a NIGHT-GATE: the veto ceremony is its own day (Day 4). One-shot day-break before it resolves.
       if (ctx.nightGate && !s.preVetoCeremonyNightPassed && s.twist?.phase !== "running") {
         s.preVetoCeremonyNightPassed = true;
