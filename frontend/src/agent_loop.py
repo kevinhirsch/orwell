@@ -4496,6 +4496,22 @@ _GAME_TOOL_WORDS = (
     "gameStatus", "updateCasting", "createCharacter", "surfaceInformationTo", "npcVoice",
     "whereabouts", "socialRead", "makeDeal", "getVisibleStateFor",
 )
+
+# ── Real-world denylist (#1784 F9) — structural defense ────────────────────
+# The narrator must NEVER name a real host, network, or real-season continuity.
+# "Big Brother" is ALLOWED — it's the product's own name (~9 refs in momentPrompts.ts).
+# This is a SEPARATE denylist from the machinery scrub: real-show canon vs engine jargon.
+_REAL_HOST_SURNAMES: tuple[str, ...] = (
+    "Chen", "Grodner",  # Big Brother
+    # Short curated list; extend as needed.
+)
+_REAL_NETWORKS: tuple[str, ...] = ("CBS", "Fox", "ABC", "NBC", "MTV", "Bravo", "Netflix", "Hulu")
+# Season-numbering / continuity — "Season 25", "BB25", "BB 25" when used as a real-continuity claim
+_SEASON_CONTINUITY_RE = re.compile(
+    r"\bSeason\s+\d+\b|"      # "Season 25"
+    r"\bBB\s?\d+\b",            # "BB25" or "BB 25"
+    re.IGNORECASE,
+)
 _GAME_LEAK_SENTENCE_RE = re.compile(
     r"(?:" + "|".join(_GAME_TOOL_WORDS) + r")"
     # machinery NOUNS that never appear in in-character narration
@@ -4597,10 +4613,25 @@ def _scrub_game_leak(text: str) -> str:
     if not text:
         return text
     parts = re.split(r"(?<=[.!?\n;])", text)
-    return "".join(
-        p for p in parts
-        if not _GAME_LEAK_SENTENCE_RE.search(p) and not _GAME_LEAK_START_RE.match(p)
-    )
+    def _keep_sentence(p: str) -> bool:
+        if _GAME_LEAK_SENTENCE_RE.search(p):
+            return False
+        if _GAME_LEAK_START_RE.match(p):
+            return False
+        # ── Real-world denylist (#1784 F9) — structural defense ──────────────
+        # Scrub-AND-continue: drop the sentence but keep the rest of the message.
+        # Has the real-host/network check BEFORE the season continuity check
+        # because a sentence containing a host surname wins immediately.
+        for host in _REAL_HOST_SURNAMES:
+            if re.search(rf"\b{re.escape(host)}\b", p, re.IGNORECASE):
+                return False
+        for net in _REAL_NETWORKS:
+            if re.search(rf"\b{re.escape(net)}\b", p, re.IGNORECASE):
+                return False
+        if _SEASON_CONTINUITY_RE.search(p):
+            return False
+        return True
+    return "".join(p for p in parts if _keep_sentence(p))
 
 
 # ── T0-5 (#1771 F3) — inline-planning / debugger-monologue leak scrub ────────────────────

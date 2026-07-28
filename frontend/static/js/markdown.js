@@ -322,6 +322,20 @@ const _MACHINERY_NOUN_VERBS = 'decided|decides|deciding|says?|said|thinks?|thoug
 // kitchen" — is never matched): "let me (call|advance|run|check|record|walk through|…)…",
 // "I'll/I should/I need to … (record|advance|call|…)", "advance/move/push the
 // game". "walk through it/this" is included (the #1047 "let me walk through it").
+
+// ── Real-world denylist (#1784 F9) — structural defense ────────────────────
+// PARITY-LOCKED with the Python _REAL_HOST_SURNAMES / _REAL_NETWORKS / _SEASON_CONTINUITY_RE.
+// The narrator must NEVER name a real host, network, or real-season continuity.
+// "Big Brother" is ALLOWED — it is the product's own name.
+const _REAL_HOST_SURNAMES = ['Chen', 'Grodner'];
+const _REAL_NETWORKS = ['CBS', 'Fox', 'ABC', 'NBC', 'MTV', 'Bravo', 'Netflix', 'Hulu'];
+const _REAL_WORLD_DENY_RE = new RegExp(
+  '\\b(?:' + _REAL_HOST_SURNAMES.join('|') + ')\\b'
+  + '|\\b(?:' + _REAL_NETWORKS.join('|') + ')\\b'
+  + '|\\bSeason\\s+\\d+\\b'
+  + '|\\bBB\\s?\\d+\\b',
+  'i'
+);
 const _MACHINERY_ASIDE_RE = new RegExp(
   '\\b(?:' + _GAME_TOOL_WORDS.join('|') + ')\\b'
   // #1109(a)/FEDEEP-3 — machinery NOUNS that never appear in in-character BB narration (parity
@@ -428,6 +442,33 @@ export function scrubMachineryAsides(text) {
   // sentence so the surrounding prose reads clean (never merges across lines).
   const joined = kept.join('').replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n');
   return _rebalanceParenAsides(joined);
+}
+
+/**
+ * Real-world denylist scrub (#1784 F9) — structural defense.
+ * Drops sentences that name a real host, network, or real-season continuity.
+ * "Big Brother" is ALLOWED — the product's own name.
+ * Behavior: SCRUB-AND-CONTINUE (drops the offending sentence, keeps the rest).
+ * PARITY-LOCKED with Python _scrub_game_leak's denylist block.
+ */
+export function scrubRealWorldDeny(text) {
+  if (!text) return text;
+  const parts = text.split(/(?<=[.!?\n])/);
+  return parts.filter(p => {
+    // Real host surnames — word-boundary check so "chen" in "kitchen" never matches
+    for (const host of _REAL_HOST_SURNAMES) {
+      const rx = new RegExp('\\b' + host + '\\b', 'i');
+      if (rx.test(p)) return false;
+    }
+    // Real network names — word-boundary check
+    for (const net of _REAL_NETWORKS) {
+      const rx = new RegExp('\\b' + net + '\\b', 'i');
+      if (rx.test(p)) return false;
+    }
+    // Season continuity
+    if (_REAL_WORLD_DENY_RE.test(p)) return false;
+    return true;
+  }).join('');
 }
 
 export function normalizeThinkingMarkup(text) {
@@ -780,6 +821,7 @@ export function scrubMachineryForPersistence(text) {
   cleaned = (scrubReasoningPreamble(cleaned) || '').trim();
   cleaned = (redactRawIds(cleaned) || '').trim();
   cleaned = (scrubMachineryAsides(cleaned) || '').trim();
+  cleaned = (scrubRealWorldDeny(cleaned) || '').trim();
   return cleaned;
 }
 
@@ -1216,6 +1258,7 @@ export function processWithThinking(text) {
       // inside otherwise-clean prose and survives them — run the sentence-level
       // machinery-aside scrub so it never reaches the public bubble.
       reply = (scrubMachineryAsides(reply) || '').trim();
+      reply = (scrubRealWorldDeny(reply) || '').trim();
     }
     // NARR-9: the GM marks an OUT-OF-CHARACTER answer by wrapping its WHOLE reply
     // in `((...))` (the momentPrompts contract). The reload renderer reclassifies
