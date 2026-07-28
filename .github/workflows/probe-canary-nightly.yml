@@ -1,0 +1,99 @@
+# Nightly probe canary (T1-2) — capability probe + scripted ceremony turn.
+#
+# A non-blocking, key-gated, cents-scale nightly CI workflow that exercises a REAL
+# LLM endpoint through the T0-4 capability probe (~10 calls measuring forced-tool_choice
+# honoring, JSON conformance, and reasoning-channel separation) plus one scripted
+# ceremony game turn (engine boot → createCharacter → advanceGame → submitDecision).
+#
+# Purpose: detect provider regressions (phantom capability claims) that the stubbed
+# CI gates cannot see, at <1% of the decommissioned golden-path fixture cost.
+#
+# Phantom-claim alarm: fires when the capability probe returns a RED overallTier
+# (any dimension < 50%) or YELLOW overallTier (< 90%). A transport-level probe failure
+# ('unknown' — all calls failed) also surfaces as an alarm. The ceremony leg alarms
+# only on a hard failure (engine won't boot, game won't create, advanceGame hangs,
+# decision won't bind).
+#
+# It never blocks a merge (scheduled workflow, not a PR gate; the leg is individually
+# non-blocking with `|| echo ::warning`) and is a clean skip when no provider key is
+# present (forks / a missing secret). The evidence artifact is retained for 14 days.
+#
+# Secret: OPENROUTER_API_KEY (repo secret).
+name: probe-canary-nightly
+
+on:
+  schedule:
+    - cron: "13 7 * * *"   # 07:13 UTC — just before live-harness-nightly at 07:33
+  workflow_dispatch: {}
+
+# Minimal token scope: the job only checks out code and uploads artifacts (no repo write-back).
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-canary-nightly
+  cancel-in-progress: true
+
+env:
+  ORWELL_DISABLE_IMAGE_GEN: "1"
+
+jobs:
+  probe-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: provider key gate
+        id: key
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=probe-canary-nightly skipped::no OPENROUTER_API_KEY secret — the nightly probe canary is a clean skip."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.present == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - if: steps.key.outputs.present == 'true'
+        run: npm ci
+
+      - if: steps.key.outputs.present == 'true'
+        run: npm run build
+
+      - if: steps.key.outputs.present == 'true'
+        run: pip install -r frontend/requirements.txt
+
+      # ── Leg: capability probe + scripted ceremony turn ─────────────────────────
+      - name: capability probe + ceremony turn
+        if: steps.key.outputs.present == 'true'
+        working-directory: frontend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python3 scripts/_verify_probe_canary.py \
+            || echo "::warning title=probe-canary::phantom claim(s) or ceremony failure detected — inspect the probe-canary-evidence artifact (data/_probe_canary/)."
+
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.present == 'true'
+        with:
+          name: probe-canary-evidence
+          path: frontend/data/_probe_canary/
+          retention-days: 14
+          if-no-files-found: warn
