@@ -9,6 +9,7 @@ import type {
   PendingDecisionView,
 } from "../../src/ports/GameSession";
 import type { GameSessionAdapter } from "../../src/adapters/engine/GameSessionAdapter";
+import type { HiddenKind } from "../../src/ports/VaultStore";
 import { SeededRandom } from "../../src/adapters/random/SeededRandom";
 import { PLAYER, npc } from "../../src/domain/ids";
 
@@ -75,7 +76,7 @@ function buildAnnouncementSandbox(seed: number): AnnouncementSandbox {
     const sentinel = freshSentinel(kind);
     const id = `vault:${sc}`;
     const content = `[${kind}]${subject ? ` ${subject}` : ""} secret-detail ${sentinel}`;
-    sandbox.engine.vault.writeHidden({ id, kind, content, ...(subject ? { subject } : {}) });
+    sandbox.engine.vault.writeHidden({ id, kind: kind as HiddenKind, content, ...(subject ? { subject } : {}) });
     hiddenContents.push(content);
     return { id, content, sentinel };
   };
