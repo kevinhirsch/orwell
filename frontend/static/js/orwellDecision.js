@@ -1235,11 +1235,13 @@
     "hoh-winner": "\u{1F3C6}", nominations: "\u{1F528}", "veto-winner": "\u{1F48E}",
     "veto-decision": "\u{1F48E}", "replacement-nominee": "\u{1F528}",
     "eviction-ballot": "\u{1F5F3}️", "eviction-result": "\u{1F5F3}️",
+    "correction": "\u{1F4FC}",  // #1785 AC3: diegetic control-room correction card
   };
   const _CHYRON_KICKER = {
     "hoh-winner": "Head of Household", nominations: "Nominations", "veto-winner": "Power of Veto",
     "veto-decision": "Veto Ceremony", "replacement-nominee": "Replacement Nominee",
     "eviction-ballot": "Live Vote", "eviction-result": "Eviction",
+    "correction": "Control Room",  // #1785 AC3: diegetic control-room correction card
   };
   // F4: dedup by announcement id — a chyron renders exactly once per session. Backed ALSO by a DOM
   // check (`data-chyron-id`) so a transcript replay on reload — which re-delivers the SAME historical
@@ -1353,6 +1355,22 @@
   window.addEventListener("orwell:announcements", (e) => {
     try { _renderChyronBatch(e.detail && e.detail.announcements); }
     catch (_) { /* fail open — the model's own prose still carries the beat as color */ }
+  });
+
+  // #1785 AC3: diegetic control-room correction card — piggybacks on the SAME
+  // orwell:gamechanged event (no second dispatcher) via the correction detail
+  // field that platform.js now carries when the engine emits a post-air correction.
+  window.addEventListener("orwell:gamechanged", (e) => {
+    try {
+      const c = e.detail && e.detail.correction;
+      if (c && typeof c === 'string' && c.trim()) {
+        _renderChyron({
+          kind: 'correction',
+          id: 'correction-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          headline: '\u{1F4FC} The control room reviewed the tape \u2014 ' + c.trim(),
+        });
+      }
+    } catch (_) { /* fail open */ }
   });
 
   // The tiny public seam (mirrors OrwellDecisionStyles): exposed for tests and the element-kit

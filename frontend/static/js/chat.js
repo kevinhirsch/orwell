@@ -3206,9 +3206,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   if (ok && window.orwellIsMutatingTool && window.orwellIsMutatingTool(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
-                    let _beat;
-                    try { _beat = (JSON.parse(json.output || '{}') || {}).beatSeq; } catch (_) {}
-                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool, _beat);
+                    // #1785 AC3: the correction field from the engine's tool output rides the SAME
+                    // G15 path as the third param to orwellGameChanged(reason, beatSeq, correction).
+                    let _beat, _correction;
+                    try {
+                      const _parsed = JSON.parse(json.output || '{}') || {};
+                      _beat = _parsed.beatSeq;
+                      if (_parsed.correction && typeof _parsed.correction === 'string') _correction = _parsed.correction;
+                    } catch (_) {}
+                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool, _beat, _correction);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
                       // next-season); NO-OP for the initial onboarding — it stays ONE conversation.

@@ -108,10 +108,14 @@ let _gameChangedBeat = 0;
 // still the ONE `orwell:gamechanged` emitter (test_g15_gamechanged.py).
 const _gameChangedReasons = new Set();
 
-export function orwellGameChanged(reason, beatSeq) {
+export function orwellGameChanged(reason, beatSeq, correction) {
   const b = Number(beatSeq);
   if (Number.isFinite(b) && b > _gameChangedBeat) _gameChangedBeat = b;
   _gameChangedReasons.add(String(reason || ''));
+  // #1785 AC3: store the optional correction text for the deferred re-dispatch
+  // (the debounce timer may have already started, so we capture it here and
+  // re-emit with the correction detail ~100ms after the routine HUD refresh).
+  const _correction = (correction && typeof correction === 'string' && correction.trim()) ? correction.trim() : null;
   if (_gameChangedTimer) clearTimeout(_gameChangedTimer);
   _gameChangedTimer = setTimeout(() => {
     _gameChangedTimer = null;
@@ -120,9 +124,15 @@ export function orwellGameChanged(reason, beatSeq) {
     const reasons = Array.from(_gameChangedReasons);
     _gameChangedReasons.clear();
     try {
-      window.dispatchEvent(new CustomEvent('orwell:gamechanged', {
-        detail: { reason: String(reason || ''), beatSeq: beat > 0 ? beat : undefined, reasons },
-      }));
+      const detail = { reason: String(reason || ''), beatSeq: beat > 0 ? beat : undefined, reasons };
+      // #1785 AC3: post-air correction piggybacks on the SAME event so the
+      // diegetic control-room card (orwellDecision.js) picks it up merged
+      // with the normal HUD-refresh payload — no second dispatcher.
+      const _dc = _correction;
+      if (_dc && typeof _dc === 'string' && _dc.trim()) {
+        detail.correction = _dc.trim();
+      }
+      window.dispatchEvent(new CustomEvent('orwell:gamechanged', { detail }));
     } catch (_) { /* fail open — every panel keeps its poll fallback */ }
   }, GAMECHANGED_DEBOUNCE_MS);
 }
