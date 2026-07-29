@@ -416,6 +416,7 @@ class SessionManager:
                     meta_data=_meta_json,
                     timestamp=msg_time,
                     seq=next_seq,
+                    client_msg_id=message.client_msg_id,  # #1785: write to the dedicated column
                 )
                 db.add(db_message)
                 # Re-apply the parent-session bookkeeping each attempt (a rollback expires it).
@@ -428,7 +429,36 @@ class SessionManager:
                     db.commit()
                     assigned_seq = next_seq
                     break
-                except IntegrityError:
+                except IntegrityError as _ie:
+                    _err_msg = str(_ie)
+                    # #1785: client_msg_id unique-constraint violation is a LEGITIMATE idempotent
+                    # replay (a retried outbox item can race the DB) — adopt the existing row
+                    # instead of retrying indefinitely.
+                    if message.client_msg_id and 'ix_messages_session_client_msg_id' in _err_msg:
+                        db.rollback()
+                        _existing = (
+                            db.query(DbChatMessage.id, DbChatMessage.seq)
+                            .filter(
+                                DbChatMessage.session_id == session_id,
+                                DbChatMessage.client_msg_id == message.client_msg_id,
+                            )
+                            .first()
+                        )
+                        if _existing:
+                            logger.info(
+                                "Idempotent replay: client_msg_id=%s already exists in session %s — adopting existing row",
+                                message.client_msg_id, session_id,
+                            )
+                            msg_id = _existing.id
+                            assigned_seq = _existing.seq
+                            message.metadata['_db_id'] = msg_id
+                            message.metadata['_seq'] = assigned_seq
+                            break
+                        # Existing row vanished (rare race with delete) — fall through to retry loop
+                        logger.warning(
+                            "client_msg_id=%s collision but row NOT found for session %s — retrying",
+                            message.client_msg_id, session_id,
+                        )
                     # Lost the seq race (another writer committed the same seq) — roll back and retry.
                     db.rollback()
 

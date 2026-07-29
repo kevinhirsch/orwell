@@ -109,8 +109,9 @@ def _chat_g15_block():
     # createCharacter branch (fresh-session hook + the P1 finalizing indicator). The
     # window covers that whole branch — these are deeply indented lines. (#1412 SHRANK
     # the seam: the inline 21-name array became a single orwellIsMutatingTool call, so
-    # the fresh-session hook now sits ~offset 1950; 2200 keeps a comfortable margin.)
-    return CHAT[i:i + 2200]
+    # the fresh-session hook now sits ~offset 1950; 2400 keeps a comfortable margin
+    # (#1785 AC3 adds ~150 chars for the correction seam).)
+    return CHAT[i:i + 2450]
 
 
 def test_chat_tool_result_seam_consumes_the_shared_manifest_not_a_hand_array():

@@ -853,3 +853,92 @@ def test_drain_self_continues_both_items_in_one_recovery_cycle(_app):
     assert result["uniqueIds"], "each delivery must carry its own clientMsgId (no double-send)"
     assert result["ids"] == seeded["ids"], "the dispatched sends must be the queued items themselves"
     assert result["queueDrained"], "the queue must be empty after the drain"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1785 (T1-4 A1-A5) — ACK-IS-THE-ROW: outbox confirm from stream event path + migration
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_stream_event_path_calls_outbox_confirm_delivery():
+    """#1785 A5: _outboxConfirmDelivery must be called from the stream event path
+    (renderObserverUserMessage), not only from the reconcile poll."""
+    js = _read("static/js/chat.js")
+    # Find renderObserverUserMessage and verify it calls _outboxConfirmDelivery
+    fn = js[js.index("export function renderObserverUserMessage(ev, opts)"):]
+    fn_body = fn[:fn.index("export function ")] if "\nexport function " in fn else fn[:2000]
+    assert "_outboxConfirmDelivery(cid)" in fn_body, \
+        "renderObserverUserMessage must call _outboxConfirmDelivery from the dedup branch"
+    # Verify the call is INSIDE the dedup-if block (after the `return existing;`)
+    dedup_block = js[js.index("if (existing) {"):]
+    dedup_block = dedup_block[:dedup_block.index("}" + 3)]  # up to closing brace after return
+    assert "_outboxConfirmDelivery(cid)" in dedup_block, \
+        "_outboxConfirmDelivery must be called in the dedup-existing branch"
+
+
+def test_migration_adds_client_msg_id_column_and_unique_index():
+    """#1785 A2: migration must add client_msg_id column, backfill from metadata,
+    de-dup pre-existing duplicates, and create the unique index."""
+    import sqlite3
+    import tempfile
+    import os
+    import json
+    from core.database import _migrate_add_chat_message_client_msg_id_column, DATABASE_URL
+
+    db_fd, db_path = tempfile.mkstemp(suffix=".db")
+    os.close(db_fd)
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute("CREATE TABLE chat_messages (id TEXT PRIMARY KEY, session_id TEXT, content TEXT, metadata TEXT)")
+        # Insert rows: two with distinct client_msg_ids, two with same client_msg_id (duplicates)
+        conn.execute(
+            "INSERT INTO chat_messages (id, session_id, content, metadata) VALUES (?, ?, ?, ?)",
+            ("1", "sess1", "hello", json.dumps({"client_msg_id": "cid-a"}))
+        )
+        conn.execute(
+            "INSERT INTO chat_messages (id, session_id, content, metadata) VALUES (?, ?, ?, ?)",
+            ("2", "sess1", "world", json.dumps({"client_msg_id": "cid-b"}))
+        )
+        conn.execute(
+            "INSERT INTO chat_messages (id, session_id, content, metadata) VALUES (?, ?, ?, ?)",
+            ("3", "sess1", "dup", json.dumps({"client_msg_id": "cid-a"}))  # duplicate! same session + client_msg_id
+        )
+        conn.execute(
+            "INSERT INTO chat_messages (id, session_id, content, metadata) VALUES (?, ?, ?, ?)",
+            ("4", "sess2", "alone", json.dumps({"client_msg_id": "cid-c"}))
+        )
+        conn.commit()
+        conn.close()
+
+        # Monkey-patch DATABASE_URL to point at our temp file
+        import core.database as db_module
+        _original_url = db_module.DATABASE_URL
+        try:
+            db_module.DATABASE_URL = f"sqlite:///{db_path}"
+            _migrate_add_chat_message_client_msg_id_column()
+
+            conn2 = sqlite3.connect(db_path)
+            cursor = conn2.execute("PRAGMA table_info(chat_messages)")
+            cols = [row[1] for row in cursor.fetchall()]
+            assert "client_msg_id" in cols, "client_msg_id column must exist after migration"
+
+            # Verify backfill
+            for row in conn2.execute("SELECT id, client_msg_id FROM chat_messages ORDER BY id"):
+                assert row[1] is not None, f"row {row[0]} must have client_msg_id backfilled"
+
+            # Verify de-dup: only one row per (session_id, client_msg_id) pair survives
+            rows = list(conn2.execute(
+                "SELECT session_id, client_msg_id, COUNT(*) as cnt FROM chat_messages GROUP BY session_id, client_msg_id"
+            ))
+            for r in rows:
+                assert r[2] == 1, f"duplicate (session={r[0]}, cid={r[1]}) not removed: count={r[2]}"
+
+            # Verify unique index was created
+            indexes = conn2.execute("PRAGMA index_list(chat_messages)").fetchall()
+            index_names = [row[1] for row in indexes]
+            assert "ix_messages_session_client_msg_id" in index_names, \
+                "unique index ix_messages_session_client_msg_id must exist after migration"
+            conn2.close()
+        finally:
+            db_module.DATABASE_URL = _original_url
+    finally:
+        os.unlink(db_path)

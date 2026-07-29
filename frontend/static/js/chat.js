@@ -98,7 +98,7 @@ import {
 // reach the cluster through the chatModule re-export, unchanged.
 import {
   softReloadHistory, flushPendingReconcile, deferPeerResume, flushPendingPeerResume,
-  _isSkippableUserPrompt, _isEmptyTurnNoSave, _isCastingEmptyReplyReprompt, _msgSeq, _insertBySeq, _reorderBySeq,
+  _isSkippableUserPrompt, _isEmptyTurnNoSave, _isCastingEmptyReplyReprompt, _isBelowThresholdOrDanglingTurn, _msgSeq, _insertBySeq, _reorderBySeq,
   _visibleMsgCount, _expectedVisibleBubbleCount, _setReconcileDeps,
 } from './chatReconcile.js';
 // #1414 (R3 PR8): the SEVERABLE stream-presentation helpers (PARTIAL by design — the ~1,660-line
@@ -227,6 +227,35 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
     "(Production cue — your last turn produced no visible reply. Continue the casting interview now: " +
     "respond to me directly, in character as the producers.)";
   let _castingEmptyRepromptSent = false;
+  // #1785 (F8) one-shot latch: the below-threshold/dangling-turn gate fires AT MOST ONCE per turn.
+  let _gateBelowThresholdFired = false;
+
+  /** #1785 (F8): shared helper for minimum-viable-turn gate. Judges the visible reply; if below
+   *  threshold or dangling-markdown, re-triggers generation headless (single bounded retry).
+   *  Extracted so a future change can wire it into _trySelfResume's separate finalize (~4707-4724)
+   *  WITHOUT touching _trySelfResume now (explicitly out-of-scope follow-up). */
+  function _gateAndRetryBelowThresholdTurn({ holder, streamSessionId, sawDone, cancelled, usedTools, producedVisible, visibleReply }) {
+    if (_gateBelowThresholdFired) return;
+    if (!_isBelowThresholdOrDanglingTurn({ sawDone, cancelled, usedTools, producedVisible, visibleReply })) return;
+    _gateBelowThresholdFired = true;
+    // If holder is still in DOM and the gate tripped, render a retry label on the holder AND fire
+    // a headless re-submit. The retry label tells the player the generation was too short/truncated.
+    const _sid = streamSessionId;
+    if (holder && holder.parentNode) {
+      try {
+        _renderStreamDropRetry(holder, _sid, {
+          label: "The response was too short — retrying silently.",
+        });
+      } catch (_) {}
+    }
+    // Defer so the turn's finally settles first. Drop if the user switched chats.
+    setTimeout(() => {
+      try {
+        if (_sid && sessionModule.getCurrentSessionId() !== _sid) return;
+        handleChatSubmit(null, null, { hideUserBubble: true });
+      } catch (_) {}
+    }, 50);
+  }
 
   // ── #985 P2-A / #891 / #830: the SEND OUTBOX subsystem moved to chatOutbox.js (#1414 R3 PR6). ──
   // Its state — the three queues (chatState._sendOutbox / ._outboxAwaitingConfirm / ._outboxFailed)
@@ -3177,9 +3206,15 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
                   if (ok && window.orwellIsMutatingTool && window.orwellIsMutatingTool(json.tool)) {
                     // M1-3: the tool result carries the COMMITTED beatSeq (0065) — thread it
                     // through the single dispatcher so panels can verify their refetch caught up.
-                    let _beat;
-                    try { _beat = (JSON.parse(json.output || '{}') || {}).beatSeq; } catch (_) {}
-                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool, _beat);
+                    // #1785 AC3: the correction field from the engine's tool output rides the SAME
+                    // G15 path as the third param to orwellGameChanged(reason, beatSeq, correction).
+                    let _beat, _correction;
+                    try {
+                      const _parsed = JSON.parse(json.output || '{}') || {};
+                      _beat = _parsed.beatSeq;
+                      if (_parsed.correction && typeof _parsed.correction === 'string') _correction = _parsed.correction;
+                    } catch (_) {}
+                    if (window.orwellGameChanged) window.orwellGameChanged('tool:' + json.tool, _beat, _correction);
                     if (json.tool === 'createCharacter') {
                       // E65: a season RESTART opens a FRESH chat (armed only by reset-progress /
                       // next-season); NO-OP for the initial onboarding — it stays ONE conversation.
@@ -4131,6 +4166,19 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
             } catch (_) {}
           }, 50);
         }
+
+        // #1785 (F8) — minimum-viable-turn gate: if the visible reply is below threshold or
+        // dangling-markdown, re-trigger silently (headless, single bounded retry). Distinct from
+        // the siblings above: the reply HAS content but it's degenerate (bare "The", unclosed **).
+        _gateAndRetryBelowThresholdTurn({
+          holder,
+          streamSessionId,
+          sawDone: _streamSawDone,
+          cancelled: _turnWasCancelled,
+          usedTools: _usedToolsThisTurn,
+          producedVisible: _producedVisibleOutput,
+          visibleReply: _castingVisibleReply,
+        });
       } // end if (!_isBgFinal)
 
     } catch (err) {
@@ -5011,6 +5059,8 @@ import { _ensureStreamLayout, _toolLabels, _thinkingLabel, _showThinkingSpinner 
       if (dbId) existing.dataset.dbId = dbId;
       if (ev.seq != null) existing.dataset.seq = String(ev.seq);
       if (cid) existing.dataset.clientMsgId = cid;
+      // #1785: the stream OBSERVED this row — release the outbox copy immediately
+      if (cid) { try { _outboxConfirmDelivery(cid); } catch (_) {} }
       return existing;
     }
     const content = typeof ev.content === 'string' ? ev.content : '';

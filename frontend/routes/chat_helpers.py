@@ -5513,7 +5513,10 @@ def add_user_message(sess, chat_handler, preprocessed: PreprocessedMessage, inco
     # server-assigned {id, seq} on reconcile (temp -> canonical), instead of rendering a duplicate.
     if client_msg_id:
         user_meta = {**(user_meta or {}), "client_msg_id": client_msg_id}
-    sess.add_message(ChatMessage("user", preprocessed.user_content, metadata=user_meta))
+    sess.add_message(ChatMessage(
+        "user", preprocessed.user_content, metadata=user_meta,
+        client_msg_id=client_msg_id  # #1785: write to the dedicated column for idempotent dedup
+    ))
     if not incognito:
         chat_handler.update_session_name_if_needed(sess, preprocessed.text_for_context)
 
