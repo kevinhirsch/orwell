@@ -760,16 +760,31 @@ def _migrate_add_chat_message_seq_column():
 def _migrate_add_chat_message_client_msg_id_column():
     """#1785: add client_msg_id to chat_messages + backfill from metadata + defensive de-dup + unique index.
 
-    Idempotent: the column-add is guarded; the backfill only touches NULL rows; the unique index is
+    TRUE no-op after first run: checks for the unique index upfront and returns immediately if it
+    already exists, so the backfill + de-dup + index phases never re-run on a subsequent restart.
+    The column-add is guarded; the backfill only touches NULL rows; the unique index is created with
     `IF NOT EXISTS`. Pre-index de-dup nulls out conflicting non-null duplicates within a session so
     the index creation cannot fail on pre-existing duplicates from concurrent client_msg_id generation.
+
+    Connection-safe: `finally` guarantees `conn.close()` even on exception, preventing "database is
+    locked" connection leaks.
     """
     import sqlite3
     db_path = DATABASE_URL.replace("sqlite:///", "")
     if not os.path.exists(db_path):
         return
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
+        # ★ BUG 1 fix: if the unique index already exists, this migration has already run —
+        # return immediately to avoid re-backfilling/re-deduping (which would re-populate rows
+        # nulled by a previous run and violate the existing index).
+        existing_idx = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='ix_messages_session_client_msg_id'"
+        ).fetchone()
+        if existing_idx:
+            return
+
         cursor = conn.execute("PRAGMA table_info(chat_messages)")
         columns = [row[1] for row in cursor.fetchall()]
         if "client_msg_id" not in columns:
@@ -817,10 +832,17 @@ def _migrate_add_chat_message_client_msg_id_column():
             "ON chat_messages(session_id, client_msg_id)"
         )
         conn.commit()
-        conn.close()
-        logging.getLogger(__name__).info("Migrated: added + backfilled 'client_msg_id' on chat_messages (#1785)")
     except Exception as e:
         logging.getLogger(__name__).warning(f"chat_messages.client_msg_id migration failed: {e}")
+        raise
+    finally:
+        # ★ BUG 2 fix: always close the connection so a write lock is never stranded.
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        logging.getLogger(__name__).info("Migrated: added + backfilled 'client_msg_id' on chat_messages (#1785)")
 
 
 def _migrate_add_document_archived_column():
