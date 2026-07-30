@@ -1920,7 +1920,7 @@ export class GameSessionAdapter implements GameSession {
    */
   private playerKnowledgeReader?: () => ReadonlyArray<{
     id: string; content: string; subject?: EntityId; factId?: string; pathway?: string;
-    distortion?: number; confidence?: number;
+    distortion?: number; confidence?: number; hops?: number;
   }>;
   /**
    * 0093/0099 — surface a fact INTO another houseguest's (or the house's) knowledge through the in-game
@@ -10793,10 +10793,13 @@ export class GameSessionAdapter implements GameSession {
    * nothing fresh (byte-identical prompt to before this fix).
    */
   private freshSurfacedFacts(): string | undefined {
+    const drift = this.gossipDriftEnabledNow();
     const facts = (this.playerKnowledgeReader?.() ?? [])
       .filter((f) => f.pathway !== NO_NPC_PATHWAY)
       .slice(-GameSessionAdapter.SURFACED_FACTS_WINDOW)
-      .map((f) => ({ content: this.humanize(f.content) }));
+      .map((f) => drift
+        ? { content: this.humanize(f.content), hops: f.hops }
+        : { content: this.humanize(f.content) });
     return renderSurfacedFacts(facts);
   }
 

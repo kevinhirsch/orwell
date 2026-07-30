@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { humanizeIds, humanizeForRetrospective } from "../../src/adapters/engine/humanize";
-import { confidenceWord, makeForPlayerScrub } from "../../src/domain/humanize";
+import { confidenceWord, makeForPlayerScrub, provenanceWord } from "../../src/domain/humanize";
 import { PLAYER, npc } from "../../src/domain/ids";
 
 /**
@@ -239,5 +239,38 @@ describe("PV2 (#997) — the overhear surfacing prefix renders with source + gra
     const once = makeForPlayerScrub([])("(overheard, muffled) a quiet plan about the votes…");
     expect(makeForPlayerScrub([])(once)).toBe(once);    // re-running does not re-grade
     expect(makeForPlayerScrub([])("word around the house is they are scheming")).toBe("word around the house is they are scheming");
+  });
+});
+
+/**
+ * #1789 — the provenance-WORD mapping for gossip chain length. Maps fact hops to a Vault-free
+ * provenance texturizer: a WORD reflecting chain length ONLY, never which NPCs are in the chain.
+ * Bounded: hops < 2 → empty string; hops≥4 → "everyone's saying". No digit ever leaks.
+ */
+describe("#1789 — provenanceWord maps gossip hop count to a provenance texture word", () => {
+  it("leaves a short chain (hops < 2) with no provenance word at all", () => {
+    expect(provenanceWord(1)).toBe("");
+    expect(provenanceWord(0)).toBe("");
+    expect(provenanceWord(-1)).toBe("");
+  });
+
+  it("returns 'second-hand' for precisely 2 hops", () => {
+    expect(provenanceWord(2)).toBe("second-hand");
+  });
+
+  it("returns 'third-hand' for precisely 3 hops", () => {
+    expect(provenanceWord(3)).toBe("third-hand");
+  });
+
+  it("returns 'everyone\'s saying' for 4 or more hops", () => {
+    expect(provenanceWord(4)).toBe("everyone's saying");
+    expect(provenanceWord(5)).toBe("everyone's saying");
+    expect(provenanceWord(10)).toBe("everyone's saying");
+  });
+
+  it("never emits a raw hops number", () => {
+    for (const h of [0, 1, 2, 3, 4, 5]) {
+      expect(provenanceWord(h)).not.toMatch(/\d/);
+    }
   });
 });
