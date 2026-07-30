@@ -90,9 +90,10 @@ describe("#1790 — reveal-order neutrality (grouping is presentation-only)", ()
       onFinished = stepLoop(sbOn);
       if (!onFinished) orchOn.advance("neutral-on", "offscreen-tick");
     }
-    const onWinner = sbOn.engine.live?.winner;
-    const onFinalTwo = sbOn.engine.live?.finalTwo;
-    const onVotes = sbOn.engine.live?.finale?.votes;
+    const snapOn = sbOn.session.snapshot();
+    const onWinner = snapOn.live?.winner;
+    const onFinalTwo = snapOn.live?.finalTwo;
+    const onVotes = snapOn.live?.finale?.votes;
 
     const reg2 = new GameSessionRegistry();
     const sbOff = reg2.sandboxFor("neutral-off");
@@ -105,9 +106,10 @@ describe("#1790 — reveal-order neutrality (grouping is presentation-only)", ()
       offFinished = stepLoop(sbOff);
       if (!offFinished) orchOff.advance("neutral-off", "offscreen-tick");
     }
-    const offWinner = sbOff.engine.live?.winner;
-    const offFinalTwo = sbOff.engine.live?.finalTwo;
-    const offVotes = sbOff.engine.live?.finale?.votes;
+    const snapOff = sbOff.session.snapshot();
+    const offWinner = snapOff.live?.winner;
+    const offFinalTwo = snapOff.live?.finalTwo;
+    const offVotes = snapOff.live?.finale?.votes;
 
     // Winner, final two, and vote tally MUST be identical with grouping ON vs OFF
     expect(onWinner).toEqual(offWinner);
@@ -142,9 +144,11 @@ describe("#1790 — reveal-order neutrality (grouping is presentation-only)", ()
         if (!offFin) orchOff.advance(`f-${seed}`, "offscreen-tick");
       }
 
-      expect(sbOn.engine.live?.winner).toEqual(sbOff.engine.live?.winner);
-      expect(sbOn.engine.live?.finalTwo).toEqual(sbOff.engine.live?.finalTwo);
-      expect(sbOn.engine.live?.finale?.votes).toEqual(sbOff.engine.live?.finale?.votes);
+      const snapOn = sbOn.session.snapshot();
+      const snapOff = sbOff.session.snapshot();
+      expect(snapOn.live?.winner).toEqual(snapOff.live?.winner);
+      expect(snapOn.live?.finalTwo).toEqual(snapOff.live?.finalTwo);
+      expect(snapOn.live?.finale?.votes).toEqual(snapOff.live?.finale?.votes);
     }
   });
 });
