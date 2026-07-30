@@ -639,6 +639,14 @@ const TRAITORS_FURY_ENABLED_DEFAULT = process.env.ORWELL_TRAITORS_FURY === "1";
  */
 const PRODUCER_READ_ENABLED_DEFAULT = process.env.ORWELL_PRODUCER_READ === "1";
 /**
+ * #1802 — whether the DEAL WITNESSES (formation-witness collateral on deals) layer runs
+ * by DEFAULT. OFF unless `ORWELL_DEAL_WITNESSES=1`. Flag-gated so a disabled flag means
+ * `formationWitnesses` is either unpopulated or ignored, trust-fold magnitude and breach
+ * diffusion behave exactly as today ⇒ byte-identical. A test overrides per-session
+ * via `setDealsWitnessesEnabled`.
+ */
+const DEALS_WITNESSES_ENABLED_DEFAULT = process.env.ORWELL_DEAL_WITNESSES === "1";
+/**
  * 0101 — whether NPC MYTH-MAKING runs by DEFAULT. OFF unless `ORWELL_MYTH_MAKING=1`. A DEDICATED flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_JURY_HOUSE`) so calibration neutrality is provable in isolation:
  * with it unset, `legendTick` no-ops before drawing anything (the dedicated legend-rng stream never
@@ -1098,6 +1106,8 @@ export class GameSessionAdapter implements GameSession {
   private traitorsFuryEnabled = TRAITORS_FURY_ENABLED_DEFAULT;
   /** #1792 — whether the Producer Read (post-scene exchange-accounting beat) runs. OFF by default. */
   private producerReadEnabled = PRODUCER_READ_ENABLED_DEFAULT;
+  /** #1802 — whether formation-witness deal collateral is active (ORWELL_DEAL_WITNESSES). */
+  private dealsWitnessesEnabled = DEALS_WITNESSES_ENABLED_DEFAULT;
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
@@ -7896,6 +7906,12 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the Producer Read is live (#1792) — exposed for the orchestrator's wiring
    *  symmetry/tests. */
   producerReadEnabledNow(): boolean { return this.producerReadEnabled; }
+
+  /** Turn formation-witness deal collateral on/off (#1802). OFF by default. */
+  setDealsWitnessesEnabled(on: boolean): void { this.dealsWitnessesEnabled = on; }
+
+  /** Whether formation-witness deal collateral is live (#1802) — exposed for tests. */
+  dealsWitnessesEnabledNow(): boolean { return this.dealsWitnessesEnabled; }
   /**
    * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
    * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
@@ -8901,7 +8917,18 @@ export class GameSessionAdapter implements GameSession {
       [PLAYER, target], "deal",
     );
     // `madeWeek` (E43) anchors the horizon: a safety/vote promise binds through THIS week's eviction.
-    const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week);
+    // #1802: when the flag is on, capture co-present houseguests (excluding the two deal parties)
+    // as formation witnesses — recorded from presence ground truth at the commit moment.
+    let witnesses: EntityId[] | undefined;
+    if (this.dealsWitnessesEnabled && this.presence) {
+      const playerRoom = this.presence.get(PLAYER);
+      if (playerRoom !== undefined) {
+        witnesses = Array.from(this.presence.entries())
+          .filter(([id, room]) => room === playerRoom && id !== PLAYER && id !== target)
+          .map(([id]) => id);
+      }
+    }
+    const deal = this.deals.make([PLAYER, target], req.kind, terms, evId, this.live.week, undefined, witnesses);
     // 0093 — OPTIONAL leverage: a secret the player holds ABOUT the partner colors the deal's formation
     // and folds the squeeze (a wary partner resents it / a persuadable one is bound tighter). The threat
     // persists while the deal is open — it is NOT spent here (only `exposeSecret` spends it). Absent ⇒
@@ -9538,6 +9565,19 @@ export class GameSessionAdapter implements GameSession {
       // is on, and the sink is registry-wired (it owns the KnowledgeService), so off ⇒ byte-identical.
       reputation: (honorer, other) => this.dealReputationSink?.(honorer, other),
       // 0014: the wronged party will weigh this betrayal against the breaker in their jury lean.
+      // #1802: formation-witness deal collateral — when enabled, the formation trust-fold
+      // scales with audience size (capped by caps) and breaches seed into witness knowledge.
+      // OFF ⇒ the plain fold and no diffusion ⇒ byte-identical.
+      dealsWitnesses: this.dealsWitnessesEnabled,
+      // #1802: at breach, seed the breach fact into each formation-witness via the standard
+      // 0038 diffusion pathway. The registry wires this to the KnowledgeService/gossip;
+      // standalone ⇒ no-op ⇒ byte-identical.
+      revealToWitness: (witness, breaker) => {
+        this.onPlayerEvent?.(
+          `${this.nameOf(breaker)} broke a deal that ${this.nameOf(witness)} witnessed`,
+          [witness], "betrayal",
+        );
+      },
       juryDemerit: (wronged, breaker) => recordDealBetrayal(this.live!, wronged, breaker),
       // 0002: the wronged party learns the break as a witnessed event (a public ceremony break) —
       // UNLESS the triggering action is the SEALED eviction ballot (E12/A7). Naming the breaker there

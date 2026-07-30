@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { DealLedger } from "../../src/engine/deals";
+import { DealLedger, formationAudienceScale } from "../../src/engine/deals";
+import { DEAL_DURATION } from "../../src/engine/relationshipConstants";
 import type { BindingAction } from "../../src/domain/deal";
 import { actionBreaks, actionHonors, conditionFor } from "../../src/domain/deal";
 import { RelationshipModel } from "../../src/engine/relationships";
@@ -239,5 +240,85 @@ describe("0039 — deal model & ledger (pure core)", () => {
   it("G19 (T9 dead-export removal): the module no longer exports the superseded actionImplicates — reconcile() decides kept/broken from actionBreaks/actionHonors alone, never a pre-filter", async () => {
     const dealModule: Record<string, unknown> = await import("../../src/domain/deal");
     expect("actionImplicates" in dealModule).toBe(false);
+  });
+});
+
+describe("#1802 — formation witnesses & audience-scaled folds", () => {
+  it("TEST 1: formation-witness CAPTURE — makeDeal with co-present others records them in formationWitnesses; absent when not passed", () => {
+    const ledger = new DealLedger();
+    const W1 = "witness1";
+    const W2 = "witness2";
+    // With witnesses passed
+    const withWits = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 1, undefined, [W1, W2]);
+    expect(withWits.formationWitnesses).toEqual([W1, W2]);
+    // Without witnesses (flag off case)
+    const noWits = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 1);
+    expect(noWits.formationWitnesses).toBeUndefined();
+    // Empty array also works (0 co-present others)
+    const emptyWits = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 1, undefined, []);
+    expect(emptyWits.formationWitnesses).toEqual([]);
+  });
+
+  it("TEST 2: formationAudienceScale computes bounded multiplier by audience size", () => {
+    // 0 witnesses ⇒ identity (1)
+    expect(formationAudienceScale(0, DEAL_DURATION)).toBe(1);
+    // 1 witness ⇒ 1 + 0.08 = 1.08
+    expect(formationAudienceScale(1, DEAL_DURATION)).toBe(1.08);
+    // 3 witnesses ⇒ 1 + 0.08*3 = 1.24
+    expect(formationAudienceScale(3, DEAL_DURATION)).toBe(1.24);
+    // Many witnesses capped by maxScale (1.6)
+    expect(formationAudienceScale(10, DEAL_DURATION)).toBeLessThanOrEqual(DEAL_DURATION.maxScale);
+    expect(formationAudienceScale(100, DEAL_DURATION)).toBe(DEAL_DURATION.maxScale);
+  });
+
+  it("TEST 3: BREACH-SCOPE BOUNDARY — on breach, revealToWitness reaches exactly the formation-witness set", () => {
+    const ledger = new DealLedger();
+    const W1 = "witness1";
+    const W2 = "witness2";
+    const witnessedBreaches: string[] = [];
+    ledger.make([PROMISOR, PARTNER], "final-two", "ride or die", undefined, 1, undefined, [W1, W2]);
+    const breakIt: BindingAction = { actor: PROMISOR, kind: "vote-evict", targets: [PARTNER] };
+    ledger.reconcile(breakIt, {
+      rel: new RelationshipModel(0.5), rng: new SeededRandom(1),
+      dealsWitnesses: true,
+      revealToWitness: (witness) => { witnessedBreaches.push(witness); },
+      reveal: () => "evt:1",
+    });
+    // Exactly the witness set was notified
+    expect(witnessedBreaches).toHaveLength(2);
+    expect(witnessedBreaches).toEqual(expect.arrayContaining([W1, W2]));
+    // No other houseguest was reached
+    expect(witnessedBreaches.filter((w) => w !== W1 && w !== W2)).toHaveLength(0);
+  });
+
+  it("TEST 4: FLAG-OFF byte-identical — without dealsWitnesses, no record is set and no extra callback fires", () => {
+    const ledger = new DealLedger();
+    const W1 = "witness1";
+    // Make deal WITHOUT witnesses (flag off)
+    const d = ledger.make([PROMISOR, PARTNER], "safety", "safe", undefined, 1);
+    expect(d.formationWitnesses).toBeUndefined();
+    // Reconcile a break with flag OFF — revealToWitness should NOT fire
+    let witnessNotified = false;
+    ledger.reconcile(
+      { actor: PROMISOR, kind: "nominate", targets: [PARTNER] },
+      {
+        rel: new RelationshipModel(0.5), rng: new SeededRandom(1),
+        dealsWitnesses: false,
+        revealToWitness: () => { witnessNotified = true; },
+      },
+    );
+    expect(witnessNotified).toBe(false);
+    // Also, a deal made WITH witnesses but reconciled with flag OFF should not notify
+    const d2 = ledger.make([PROMISOR, PARTNER], "final-two", "to the end", undefined, 1, undefined, [W1]);
+    let witnessNotified2 = false;
+    ledger.reconcile(
+      { actor: PROMISOR, kind: "vote-evict", targets: [PARTNER] },
+      {
+        dealsWitnesses: false,
+        revealToWitness: () => { witnessNotified2 = true; },
+        reveal: () => "evt:2",
+      },
+    );
+    expect(witnessNotified2).toBe(false);
   });
 });

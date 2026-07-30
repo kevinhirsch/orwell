@@ -89,11 +89,38 @@ export interface ReconcileSink {
   dealDepth?: boolean;
   /** 0121 — seed a hidden "keeps their word" reputation for the honorer (diffuses via gossip). */
   reputation?: (honorer: EntityId, other: EntityId, deal: Deal) => void;
+  /**
+   * #1802 — deal witnesses feature flag. When true, the formation trust-fold scales with
+   * audience size (capped by relationshipConstants) and breaches seed into witness knowledge.
+   * OFF (the default) ⇒ byte-identical.
+   */
+  dealsWitnesses?: boolean;
+  /**
+   * #1802 — at breach, seed the breach fact into each formation-witness's knowledge via the
+   * existing 0038 KnowledgeService/gossip diffusion pathway. Called after the reveal to the
+   * wronged party.
+   */
+  revealToWitness?: (witness: EntityId, breaker: EntityId, deal: Deal) => void;
 }
 
 export interface Reconciliation {
   broken: Deal[];
   kept: Deal[];
+}
+
+/**
+ * #1802 — compute the audience-scaled multiplier for the formation trust-fold.
+ * At formation, the counterpart's trust fold scales with audience size inside
+ * existing magnitude caps. Reuses DEAL_DURATION.maxScale as the upper bound.
+ * @param audienceSize — number of co-present witnesses (non-party houseguests in the room)
+ * @param constants — duration constants (provides perWitness + maxScale)
+ */
+export function formationAudienceScale(
+  audienceSize: number,
+  constants: { perWitness: number; maxScale: number },
+): number {
+  if (audienceSize <= 0) return 1;
+  return Math.min(constants.maxScale, 1 + constants.perWitness * audienceSize);
 }
 
 export class DealLedger {
@@ -115,6 +142,7 @@ export class DealLedger {
     madeEventId?: string,
     madeWeek?: number,
     duration?: { expiresWeek?: number; vague?: boolean },
+    witnesses?: EntityId[],
   ): Deal {
     const deal: Deal = {
       id: `deal:${++this.seq}`,
@@ -127,6 +155,7 @@ export class DealLedger {
       ...(madeWeek !== undefined ? { madeWeek } : {}),
       ...(duration?.expiresWeek !== undefined ? { expiresWeek: duration.expiresWeek } : {}),
       ...(duration?.vague ? { vague: true } : {}),
+      ...(witnesses ? { formationWitnesses: witnesses } : {}),
     };
     this.deals.push(deal);
     return deal;
@@ -219,12 +248,18 @@ export class DealLedger {
 
   /** The kept-promise fold (E43/E54): the protected party registers the demonstrated loyalty. 0121: with
    *  the deal-depth layer on, a LOYALTY STREAK (consecutive kept deals, same pair) compounds the fold
-   *  (bounded), and the kept deal seeds a diffusing "reliable" reputation. Off ⇒ the plain honored fold. */
+   *  (bounded), and the kept deal seeds a diffusing "reliable" reputation. Off ⇒ the plain honored fold.
+   *  #1802: when dealsWitnesses is on, the honored fold scales with audience size (bounded by caps). */
   private applyHonor(deal: Deal, honorer: EntityId, sink: ReconcileSink): void {
     const other = deal.parties.find((p) => p !== honorer);
     if (!other) return;
     if (sink.rel && sink.rng) {
       let impact: Partial<EdgeSignals> = DEAL_IMPACTS.honored;
+      // #1802: audience scale — applied BEFORE deal-depth compounding so the total stays bounded
+      if (sink.dealsWitnesses && deal.formationWitnesses && deal.formationWitnesses.length > 0) {
+        const audienceScale = formationAudienceScale(deal.formationWitnesses.length, DEAL_DURATION);
+        impact = scaleImpact(DEAL_IMPACTS.honored, audienceScale);
+      }
       if (sink.dealDepth) {
         const key = `${honorer}->${other}`;
         const streak = (this.streaks.get(key) ?? 0) + 1;
@@ -263,6 +298,13 @@ export class DealLedger {
     if (witnessed) {
       const evId = sink.reveal?.(wronged, breaker, deal, actionKind);
       if (evId) deal.resolvedEventId = evId;
+    }
+    // #1802: when the flag is on and the deal has formation witnesses, seed the breach fact into each
+    // witness's knowledge via the existing diffusion pathway (no new fold mechanism).
+    if (sink.dealsWitnesses && deal.formationWitnesses && deal.formationWitnesses.length > 0) {
+      for (const witness of deal.formationWitnesses) {
+        sink.revealToWitness?.(witness, breaker, deal);
+      }
     }
   }
 

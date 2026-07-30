@@ -90,6 +90,13 @@ export interface Deal {
    * (a nomination/replacement — never secret). Absent ⇒ unsealed, byte-identical to pre-A7.
    */
   sealedBallot?: boolean;
+  /**
+   * Feature #1802 — the audience present at deal formation, recorded from presence ground truth
+   * at the moment makeDeal commits. Empty/absent when flag OFF ⇒ byte-identical. At breach,
+   * the EXISTING applyBreak seeds the breach fact into each witness's knowledge via the standard
+   * 0038 diffusion pathway (no new fold mechanism).
+   */
+  formationWitnesses?: EntityId[];
 }
 
 /** The binding horizon of a deal kind (audit E43): one HOH reign, or the whole season. The active

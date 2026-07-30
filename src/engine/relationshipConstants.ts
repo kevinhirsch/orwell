@@ -381,6 +381,9 @@ export const DEAL_DURATION = {
   perWeekRemaining: 0.2,
   maxScale: 1.6,
   vagueSoften: 0.6,
+  /** #1802 — per-witness additive scale for the formation trust-fold: each co-present witness
+   *  adds this much to the multiplier (1 + perWitness * audienceSize), capped at maxScale. */
+  perWitness: 0.08,
 } as const;
 
 /**
