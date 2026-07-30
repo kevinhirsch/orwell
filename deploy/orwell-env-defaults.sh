@@ -33,6 +33,7 @@
 #   ORWELL_SECRET_PACING        Dormant-secret paced drip (0092).
 #   ORWELL_JURY_HOUSE           Jury grudges accumulating (0100).
 #   ORWELL_TRAITORS_FURY        Jury bearing thresholds (#1790).
+#   ORWELL_PRODUCER_READ        Post-scene exchange accounting (#1792).
 #   ORWELL_SEEDED_TIE_SURFACING Seeded pre-show ties surfacing (0059 §5).
 #       (The five above are the B2 2026-07-05 "living house" activation; the God-Mode "Living house"
 #        dial overrides them per-sandbox at runtime, and /health's `flags` block reports the boot state.)
@@ -104,5 +105,6 @@ ORWELL_SECRET_BARTER=1
 ORWELL_SHOWRUNNER=1
 ORWELL_PLAYER_DOSSIER=1
 ORWELL_TRAITORS_FURY=1
+ORWELL_PRODUCER_READ=1
 EOF
 }

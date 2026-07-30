@@ -1427,6 +1427,12 @@ export function renderGameContext(view: GameStateView): string {
     ...((view.notorietyLegend ?? []).length
       ? [`- RETURNING CAST: the house has heard things — ${view.notorietyLegend!.join("; ")}.`]
       : []),
+    // #1792 — Producer Read: the Vault-free post-scene exchange-accounting beat,
+    // delivered ONCE in the moment prompt immediately after a substantive interaction.
+    // Second person, economical, needles the informational imbalance — never states
+    // a hidden number or asserts a trust/threat delta (ADR 0003: facts to voice).
+    // Absent when no exchange is pending (flag OFF ⇒ byte-identical).
+    ...(view.producerRead ? [`- THE EXCHANGE (voice this in second person, do NOT state numbers or edges): ${view.producerRead}`] : []),
     // 0059/L40 — the ONLY romantic pairs the narrator may voice as a showmance: the public (visible)
     // ones the engine has surfaced. Everything else is friendship/strategy (the SHOWMANCES ARE RARE pin).
     ...((view.showmances ?? []).length

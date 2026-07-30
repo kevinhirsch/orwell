@@ -2,6 +2,7 @@ import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
 import type { NotorietySummary } from "../engine/notoriety";
+import type { ExchangeAccounting } from "../engine/producerRead";
 import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 import type { StructuralMilestone } from "../engine/daySchedule";
 import type { TimeOfDay } from "../engine/timeOfDay";
@@ -438,6 +439,14 @@ export interface GameStateView {
    * Vault-free by construction — open-set flavor strings only, never numbers or hidden state.
    */
   notorietyLegend?: string[];
+  /**
+   * #1792 — Producer Read: Vault-free post-scene exchange-accounting string,
+   * delivered ONCE in the moment prompt immediately following a substantive
+   * recordInteraction. Absent when no exchange is pending (flag OFF ⇒ byte-identical).
+   * Vault-free by construction — boolean accounting + open-set summary strings only,
+   * never numbers or hidden state.
+   */
+  producerRead?: string;
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
   /**
