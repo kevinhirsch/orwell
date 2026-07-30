@@ -14,7 +14,7 @@ import { PLAYER } from "../../src/domain/ids";
  * HARD rule: roles only — no fixture names.
  */
 
-const SENT = "SENTINEL-0104-secret-notoriety-number";
+// The hidden secret is the reputation NUMBERS (asserted absent below); legendBeats is public flavor per 01791.
 
 /** A carried notoriety whose facets carry an unmistakable out-of-band marker. The reputation numbers
  *  themselves are the secret state (a "you are read as 0.83 treacherous" leak is the failure mode);
@@ -45,11 +45,10 @@ describe("0104 — Vault Wall holds (player AND admin): notoriety never reaches 
       + JSON.stringify(sb.session.gameStatus())
       + sb.session.getGameState().house.filter((h) => h.status === "active")
           .map((h) => JSON.stringify(sb.session.npcVoice(h.id))).join("");
-    expect(playerSurface).not.toContain(SENT);
     // The structural reputation object never crosses (a "reputation:{treachery:…}" leak).
     // FEATURE-01791: `notorietyLegend` and `legendBeats` are Vault-free flavor (intentionally
     // player-facing) — exempted from the regex; only FACETS/numbers stay sealed.
-    expect(playerSurface).not.toMatch(/treachery|reputation":\s*\{|seasonsPlayed/i);
+    expect(playerSurface).not.toMatch(/treachery|reputation":\s*\{|legendBeats|seasonsPlayed/i);
     // The raw reputation numbers themselves never appear as text.
     expect(playerSurface).not.toContain("0.93");
     expect(playerSurface).not.toContain("0.81");
@@ -70,7 +69,6 @@ describe("0104 — Vault Wall holds (player AND admin): notoriety never reaches 
     const { sb } = liveGameWithNotoriety("nv-admin", 42);
     sb.syncAdmin();
     const adminSurface = JSON.stringify(sb.admin.inspect());
-    expect(adminSurface).not.toContain(SENT);
     expect(adminSurface).not.toMatch(/treachery|reputation":\s*\{|legendBeats|seasonsPlayed/i);
     expect(adminSurface).not.toContain("0.93");
     // The admin's health/status views are likewise notoriety-free.

@@ -59,6 +59,16 @@ const TOOL_NAME_OVERRIDE: Partial<Record<string, string>> = {
 };
 
 /**
+ * Port methods that have NO outward tool — they exist on the port interface but are not
+ * exposed as a callable MCP tool (they may be consumed internally, or the spec deliberately
+ * voices their result through an always-on context block instead of a callable lever).
+ * The drift guard skips these for tool-registration and dispatch checks.
+ */
+const PORT_ONLY_METHODS: ReadonlySet<string> = new Set([
+  "notorietySummary",  // #1791: voiced through the always-on RETURNING CAST context block
+]);
+
+/**
  * Read `McpServer.ts`'s source and collect every `case "<name>":` inside the `callTool` method's OWN
  * switch — never `requireShape`'s separate switch, which only shape-guards args and can legitimately
  * list (or omit) a name independent of whether a dispatch case exists. Scoping to `callTool` is what
@@ -88,8 +98,9 @@ describe("TCG-16 — every GameSession/EngineCommands port method is reachable e
   ]);
   const dispatched = dispatchedToolNames();
   const allMethods = [...Object.keys(GAME_SESSION_METHODS), ...Object.keys(ENGINE_COMMANDS_METHODS)];
+  const allMethodsWithTool = allMethods.filter((m) => !PORT_ONLY_METHODS.has(m));
 
-  it.each(allMethods)("%s is registered on an outward tool allowlist (the missing-#3 half of BE-103)", (method) => {
+  it.each(allMethodsWithTool)("%s is registered on an outward tool allowlist (the missing-#3 half of BE-103)", (method) => {
     const toolName = TOOL_NAME_OVERRIDE[method] ?? method;
     expect(
       allToolNames.has(toolName),
@@ -97,7 +108,7 @@ describe("TCG-16 — every GameSession/EngineCommands port method is reachable e
     ).toBe(true);
   });
 
-  it.each(allMethods)("%s has a real McpServer.callTool dispatch case (the missing-#4 half of BE-103)", (method) => {
+  it.each(allMethodsWithTool)("%s has a real McpServer.callTool dispatch case (the missing-#4 half of BE-103)", (method) => {
     const toolName = TOOL_NAME_OVERRIDE[method] ?? method;
     expect(
       dispatched.has(toolName),
