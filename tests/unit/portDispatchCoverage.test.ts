@@ -36,6 +36,7 @@ const GAME_SESSION_METHODS: Record<keyof GameSession, true> = {
   recordCastGenesis: true, recordCastIdentity: true, recordCastProfile: true, recordCompetitionFiction: true, recordHouseguestMove: true,
   notorietySummary: true,
   playerDossier: true,
+  playerReceipts: true,
   recordOffscreenSceneTexture: true, recordWorldSnapshot: true, recordProducerProfile: true, requestSelfEviction: true,
   runCompetition: true, sealedFromHouse: true, knowledgeScopeManifest: true, seasonRecap: true, seasonRetrospective: true,
   socialInitiatives: true, stateDelta: true, submitDecision: true, tradeSecret: true, turnIn: true,

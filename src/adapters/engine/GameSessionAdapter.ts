@@ -29,6 +29,7 @@ import { assignRooms, zoneFor, type MovementIntent, type MovementPull } from "..
 import { moodWord, voiceFingerprint } from "../../engine/voice";
 import type { VoiceProfile } from "../../domain/voiceProfile";
 import { NO_NPC_PATHWAY, beatForMoment, producerPrompt, playerDiaryStrategy } from "../../engine/diaryRoom";
+import { computePlayerReceipts, type Receipt } from "../../engine/receipts";
 import { nextMilestone, milestoneDue as milestoneDueOf, beatFeltHours } from "../../engine/daySchedule";
 import { driveSuspicion } from "../../engine/suspicion";
 import {
@@ -756,6 +757,14 @@ const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIG
 const PLAYER_DOSSIER_ENABLED_DEFAULT = process.env.ORWELL_PLAYER_DOSSIER === "1";
 
 /**
+ * #1800 — whether the Booth Has Receipts (deterministic player-record contradiction extraction) runs
+ * by DEFAULT. OFF unless `ORWELL_BOOTH_RECEIPTS=1`. Flag-gated so a disabled flag means
+ * `playerReceipts()` returns [] immediately — byte-identical to not having the method at all.
+ * A test overrides per-session via `setBoothReceiptsEnabled`.
+ */
+const BOOTH_RECEIPTS_ENABLED_DEFAULT = process.env.ORWELL_BOOTH_RECEIPTS === "1";
+
+/**
  * T0-2 ("beats terminate themselves", moonshot P1 stage 1 / #27a) — the CLOSED-SET ceremony/comp
  * pending kinds whose resolution deterministically implies further server-side progress, so
  * `submitDecision` auto-advances ONE more beat step in the SAME committed transaction instead of
@@ -1108,6 +1117,8 @@ export class GameSessionAdapter implements GameSession {
   private producerReadEnabled = PRODUCER_READ_ENABLED_DEFAULT;
   /** #1802 — whether formation-witness deal collateral is active (ORWELL_DEAL_WITNESSES). */
   private dealsWitnessesEnabled = DEALS_WITNESSES_ENABLED_DEFAULT;
+  /** #1800 — whether the Booth Has Receipts runs (deterministic player-contradiction extraction). OFF by default. */
+  private boothReceiptsEnabled = BOOTH_RECEIPTS_ENABLED_DEFAULT;
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
@@ -7912,6 +7923,12 @@ export class GameSessionAdapter implements GameSession {
 
   /** Whether formation-witness deal collateral is live (#1802) — exposed for tests. */
   dealsWitnessesEnabledNow(): boolean { return this.dealsWitnessesEnabled; }
+
+  /** Turn Booth Has Receipts on/off (#1800). OFF by default. */
+  setBoothReceiptsEnabled(on: boolean): void { this.boothReceiptsEnabled = on; }
+
+  /** Whether Booth Has Receipts is live (#1800) — exposed for tests. */
+  boothReceiptsEnabledNow(): boolean { return this.boothReceiptsEnabled; }
   /**
    * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
    * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
@@ -11333,5 +11350,33 @@ export class GameSessionAdapter implements GameSession {
     if (subjectId === undefined) return all;
     const entry = all[subjectId as string];
     return entry !== undefined ? { [subjectId as string]: entry } : {};
+  }
+
+  /**
+   * #1800 — The Booth Has Receipts. Deterministic contradictions drawn ONLY from the player's own
+   * record (deals, events, DR statements). Returns [] when the ORWELL_BOOTH_RECEIPTS flag is OFF.
+   * Never reads the Vault. Never returns NPC knowledge or hidden state.
+   */
+  playerReceipts(): Receipt[] {
+    if (!this.boothReceiptsEnabled) return [];
+    const allEvents = this.record?.events() ?? [];
+    const player = PLAYER;
+    const deals = this.deals?.forParty(player) ?? [];
+    const knowledge = this.playerKnowledgeReader?.() ?? [];
+    const drStatements = knowledge
+      .filter((k: any) => k.pathway === NO_NPC_PATHWAY && k.content)
+      .map((k: any) => ({ id: k.id ?? k.factId ?? '', content: k.content, ts: k.ts ?? 0, subject: k.subject }));
+    const publicStatements = allEvents
+      .filter((e: any) => e.content && e.initiator === player)
+      .map((e: any) => ({ id: e.id ?? '', content: e.content, ts: e.ts ?? 0 }));
+    return computePlayerReceipts({
+      player,
+      deals: deals.map((d: any) => ({
+        id: d.id, kind: d.kind, parties: d.parties, terms: d.terms, status: d.status, madeEventId: d.madeEventId,
+      })),
+      events: allEvents.filter((e: any) => e.initiator === player).map((e: any) => ({ id: e.id, kind: e.kind, content: e.content, initiator: e.initiator })),
+      diaryRoomStatements: drStatements,
+      publicStatements,
+    });
   }
 }

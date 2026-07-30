@@ -54,6 +54,17 @@ module.exports = {
       to: { path: VAULT },
     },
     {
+      name: "no-vault-in-receipts",
+      severity: "error",
+      comment:
+        "#1800 — receipts.ts is structurally Vault-free by design, with no VaultStore, " +
+        "SoulProvider, RelationshipModel, or hidden engine module handle. This rule enforces " +
+        "that it stays that way: no hidden-state imports may reach src/engine/receipts.ts, " +
+        "even as type-only deps (tsPreCompilationDeps catches type-only imports).",
+      from: { path: "^src/engine/receipts\\.ts$" },
+      to: { path: VAULT },
+    },
+    {
       name: "no-vault-on-outward",
       severity: "error",
       comment:
