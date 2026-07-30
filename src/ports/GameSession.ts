@@ -1,6 +1,7 @@
 import type { EntityId } from "../domain/ids";
 import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics";
 import type { VoiceProfile } from "../domain/voiceProfile";
+import type { NotorietySummary } from "../engine/notoriety";
 import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 import type { StructuralMilestone } from "../engine/daySchedule";
 import type { TimeOfDay } from "../engine/timeOfDay";
@@ -430,6 +431,13 @@ export interface GameStateView {
    * moment; absent once the first HOH begins. Vault-free — public facets only (see PremiereIntrosView).
    */
   premiere?: PremiereIntrosView;
+  /**
+   * Feature 01791 — Notoriety legend clauses: the Vault-free "what they heard about you" clauses
+   * from the returning player's legend. Present on premiere and early-social (week 1 social)
+   * phases when the player returned as the same character (has notoriety). Absent otherwise.
+   * Vault-free by construction — open-set flavor strings only, never numbers or hidden state.
+   */
+  notorietyLegend?: string[];
   /** Portrait prompts returned at season start (0051) — present only on the createCharacter response. The FE calls the image API with these and stores the results. */
   portraitPrompts?: PortraitPromptEntry[];
   /**
@@ -2618,6 +2626,14 @@ export interface GameSession {
    * engine truth or NPC knowledge. Absent when the ORWELL_PLAYER_DOSSIER flag is OFF (byte-identical).
    */
   playerDossier(subjectId?: EntityId): Record<EntityId, { content: string; ts: number }[]> | undefined;
+
+  /**
+   * 0104 — the (Vault-free) notoriety legend clauses the narrator may voice as a returning-cast
+   * callback on premiere / early-social. Returns null when the player did not return as the same
+   * character. Only the legend gist crosses; the reputation FACETS / the day-one biases never leave
+   * the engine. Vault-free by construction: an open-set summary, never a Vault read.
+   */
+  notorietySummary(): NotorietySummary | null;
 
   /**
    * FE-driven write-back (0070): enrich the prose `content` of an already-recorded hidden
