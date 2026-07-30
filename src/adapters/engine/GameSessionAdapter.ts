@@ -38,7 +38,7 @@ import {
   type Campaign, type CampaignActor, type Influence, type Drive, type NemesisTrack, type NemesisCandidate,
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
-import { runJuryHouseStretch } from "../../engine/juryHouse";
+import { runJuryHouseStretch, bearingWord } from "../../engine/juryHouse";
 import { JURY_HOUSE } from "../../engine/juryHouseConstants";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import type { EventStore } from "../../ports/EventStore";
@@ -6940,6 +6940,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.wipeoutReelEnabled
         ? { wipeoutReelEnabled: true as const, archetypeOf: (id: EntityId) => this.archetypeReadOf(id) }
         : {}),
+      // #1790: the Traitors' Fury presentation layer (finale bearing display + regrouped reveal) —
+      // present ONLY when the flag is ON (off in the calibration harness ⇒ absent ⇒ no bearing
+      // word, no reveal regrouping ⇒ byte-identical to the pre-feature path).
+      ...(this.traitorsFuryEnabled ? { traitorsFury: true as const } : {}),
     };
   }
 
@@ -10395,10 +10399,33 @@ export class GameSessionAdapter implements GameSession {
     if (!f) return null;
     const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
     const q = f.script.questions[f.questionIx];
+    // Build asking with optional bearing + heldBelief (Traitors' Fury AC2/AC3)
+    let asking: (NamedRef & { bearing?: string; heldBelief?: string }) | null = null;
+    if (f.stage === "questions" && q) {
+      asking = ref(q.juror);
+      if (this.traitorsFuryEnabled) {
+        const askingJurorId = q.juror;
+        const playerFinalistId = f.finalists.includes(PLAYER) ? PLAYER : f.finalists[0];
+        let grudge = (this.live?.juryGrudge?.[askingJurorId]?.[playerFinalistId]) ?? 0;
+        if (!f.finalists.includes(PLAYER)) {
+          grudge = Math.max(
+            this.live?.juryGrudge?.[askingJurorId]?.[f.finalists[0]] ?? 0,
+            this.live?.juryGrudge?.[askingJurorId]?.[f.finalists[1]] ?? 0,
+          );
+        }
+        asking.bearing = bearingWord(grudge);
+        // AC3: heldBelief — name-resolved blame belief from knowledge (NO numbers)
+        const knownFacts = this.npcKnowledge?.known(askingJurorId) ?? [];
+        const blameFact = knownFacts.find((k) => k.content?.includes("turned on them"));
+        if (blameFact) {
+          asking.heldBelief = blameFact.content;
+        }
+      }
+    }
     return {
       stage: f.stage,
       finalists: f.finalists.map(ref),
-      asking: f.stage === "questions" && q ? ref(q.juror) : null,
+      asking,
       reveals: f.script.revealOrder.slice(0, f.revealIx).map((juror) => ({
         juror: ref(juror), votedFor: ref(f.votes![juror]!),
       })),

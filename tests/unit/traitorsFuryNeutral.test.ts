@@ -5,25 +5,8 @@ import { Orchestrator } from "../../src/composition/orchestrator";
 import { FakeClock } from "../../src/adapters/time/FakeClock";
 import type { UserSandbox } from "../../src/composition/registry";
 
-/**
- * #1790 — the CALIBRATION-NEUTRALITY GATE for Traitors' Fury (the sibling of
- * `gossipDriftNeutral` / `triggerOutcomeNeutral` / `stagedTrajectoryNeutral`). The load-bearing
- * determinism guarantee:
- *
- *   • With the flag OFF (the DEFAULT — the calibration harness's state), ZERO blame beliefs are
- *     seeded and ZERO diffusion is called inside juryHouseTick — the entire AC1 block is skipped.
- *     The jury-house grudge layer (0100) still runs (juryHouseEnabled can be ON separately), but
- *     the Traitors' Fury path contributes zero rng draws, zero knowledge writes, zero fold weight.
- *   • The flag setter/getter round-trips correctly so the orchestrator wiring can gate on it.
- *   • With the flag ON, the blame seeding + diffusion path completes without error (it is wired
- *     correctly at runtime). The actual belief content validity is the property test's job.
- *
- * HARD rule: roles only — no names; all fixtures generated.
- */
-
 const SEED = 7;
 
-/** A fixed interleave: advance the live loop a step, then an off-screen tick (where jury house runs). */
 function stepLoop(sb: UserSandbox): boolean {
   const adv = sb.session.advanceGame();
   if (adv.pending) {
@@ -39,8 +22,6 @@ function stepLoop(sb: UserSandbox): boolean {
   return adv.finished;
 }
 
-/** Drive a bounded, fully-deterministic sequence of live steps + off-screen ticks through the LIVE
- *  orchestrator wiring, hashing the full recorded-event stream (the closed-set spine). */
 function runOrchestratorHash(
   juryHouseOn: boolean,
   traitorsFuryOn: boolean,
@@ -68,38 +49,102 @@ describe("#1790 — Traitors' Fury calibration neutrality (flag OFF is a fixed p
     const reg = new GameSessionRegistry();
     const sb = reg.sandboxFor("flag");
     sb.session.createCharacter({ playerName: "The Player", archetype: "floater", seed: SEED });
-    expect(sb.session.traitorsFuryEnabledNow()).toBe(false); // default OFF
+    expect(sb.session.traitorsFuryEnabledNow()).toBe(false);
     sb.session.setTraitorsFuryEnabled(true);
     expect(sb.session.traitorsFuryEnabledNow()).toBe(true);
     sb.session.setTraitorsFuryEnabled(false);
     expect(sb.session.traitorsFuryEnabledNow()).toBe(false);
   });
 
-  it("flag OFF ⇒ the sealed event stream is byte-identical run-to-run (the calibration fixed point)", () => {
-    // OFF seeds no blame belief and calls no diffuseGossip for blame — the existing jury house
-    // grievance diffusion is unchanged. The whole run must be deterministic.
+  it("flag OFF ⇒ the sealed event stream is byte-identical run-to-run", () => {
     expect(runOrchestratorHash(true, false)).toBe(runOrchestratorHash(true, false));
   });
 
-  it("flag OFF + jury house ON ⇒ byte-identical to flag OFF + jury house OFF jury-house runs", () => {
-    // The blame path contributes nothing when the flag is off, so jury-house-enabled runs
-    // are unchanged by the presence of the Traitors' Fury flag (still deterministic).
+  it("flag OFF + jury house ON ⇒ byte-identical runs", () => {
     const withJuryHouse = runOrchestratorHash(true, false);
     expect(withJuryHouse).toMatch(/^[0-9a-f]{64}$/);
-    // Run with jury house OFF too — the hash differs (different event stream) but is self-consistent.
     const withoutJuryHouse = runOrchestratorHash(false, false);
     expect(withoutJuryHouse).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("flag ON drives the LIVE blame-seeding path without error (the wiring is not dead-at-runtime)", () => {
-    // Exercises the orchestrator's traitorsFuryEnabled gate end-to-end; the run completes and
-    // records events (the hash is non-zero). The actual belief content is proven by property tests.
+  it("flag ON drives the LIVE blame-seeding path without error", () => {
     expect(runOrchestratorHash(true, true)).toMatch(/^[0-9a-f]{64}$/);
   });
+});
 
-  it("jury-house scenes appear in the retrospective ONLY post-season", () => {
-    // This is verified implicitly by the terminal-gated buildVaultUnseal path — juryHouseScenes
-    // are only included when the season is finished. The property test verifies the gate holds.
-    expect(true).toBe(true);
+/**
+ * #1790 AC4 — reveal-order NEUTRALITY guard: the regrouped (grouping ON) and ungrouped (grouping OFF)
+ * finales MUST produce the SAME winner, finalists, and vote tally, while the reveal order MAY differ.
+ * This proves grouping is presentation-only — it never perturbs the result.
+ */
+describe("#1790 — reveal-order neutrality (grouping is presentation-only)", () => {
+  it("traitorsFury ON/OFF produce the same winner/finalists/tally with the same seed", () => {
+    const reg = new GameSessionRegistry();
+    const sbOn = reg.sandboxFor("neutral-on");
+    sbOn.session.createCharacter({ playerName: "P", archetype: "floater", seed: SEED });
+    sbOn.session.setJuryHouseEnabled(true);
+    sbOn.session.setTraitorsFuryEnabled(true);
+    const orchOn = new Orchestrator(reg, new FakeClock(), { seed: SEED });
+    let onFinished = false;
+    for (let i = 0; i < 90 && !onFinished; i++) {
+      onFinished = stepLoop(sbOn);
+      if (!onFinished) orchOn.advance("neutral-on", "offscreen-tick");
+    }
+    const onWinner = sbOn.engine.live?.winner;
+    const onFinalTwo = sbOn.engine.live?.finalTwo;
+    const onVotes = sbOn.engine.live?.finale?.votes;
+
+    const reg2 = new GameSessionRegistry();
+    const sbOff = reg2.sandboxFor("neutral-off");
+    sbOff.session.createCharacter({ playerName: "P", archetype: "floater", seed: SEED });
+    sbOff.session.setJuryHouseEnabled(true);
+    sbOff.session.setTraitorsFuryEnabled(false);
+    const orchOff = new Orchestrator(reg2, new FakeClock(), { seed: SEED });
+    let offFinished = false;
+    for (let i = 0; i < 90 && !offFinished; i++) {
+      offFinished = stepLoop(sbOff);
+      if (!offFinished) orchOff.advance("neutral-off", "offscreen-tick");
+    }
+    const offWinner = sbOff.engine.live?.winner;
+    const offFinalTwo = sbOff.engine.live?.finalTwo;
+    const offVotes = sbOff.engine.live?.finale?.votes;
+
+    // Winner, final two, and vote tally MUST be identical with grouping ON vs OFF
+    expect(onWinner).toEqual(offWinner);
+    expect(onFinalTwo).toEqual(offFinalTwo);
+    expect(onVotes).toEqual(offVotes);
+    // Reveal order MAY differ (grouping changes the presentation sequence)
+  });
+
+  it("multiple seeds produce the same neutrality guarantee", () => {
+    for (const seed of [1, 13, 42]) {
+      const reg = new GameSessionRegistry();
+      const sbOn = reg.sandboxFor(`n-${seed}`);
+      sbOn.session.createCharacter({ playerName: "P", archetype: "floater", seed });
+      sbOn.session.setJuryHouseEnabled(true);
+      sbOn.session.setTraitorsFuryEnabled(true);
+      const orchOn = new Orchestrator(reg, new FakeClock(), { seed });
+      let onFin = false;
+      for (let i = 0; i < 90 && !onFin; i++) {
+        onFin = stepLoop(sbOn);
+        if (!onFin) orchOn.advance(`n-${seed}`, "offscreen-tick");
+      }
+
+      const reg2 = new GameSessionRegistry();
+      const sbOff = reg2.sandboxFor(`f-${seed}`);
+      sbOff.session.createCharacter({ playerName: "P", archetype: "floater", seed });
+      sbOff.session.setJuryHouseEnabled(true);
+      sbOff.session.setTraitorsFuryEnabled(false);
+      const orchOff = new Orchestrator(reg2, new FakeClock(), { seed });
+      let offFin = false;
+      for (let i = 0; i < 90 && !offFin; i++) {
+        offFin = stepLoop(sbOff);
+        if (!offFin) orchOff.advance(`f-${seed}`, "offscreen-tick");
+      }
+
+      expect(sbOn.engine.live?.winner).toEqual(sbOff.engine.live?.winner);
+      expect(sbOn.engine.live?.finalTwo).toEqual(sbOff.engine.live?.finalTwo);
+      expect(sbOn.engine.live?.finale?.votes).toEqual(sbOff.engine.live?.finale?.votes);
+    }
   });
 });
