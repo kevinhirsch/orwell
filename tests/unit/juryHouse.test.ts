@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { runJuryHouseStretch } from "../../src/engine/juryHouse";
-import { JURY_HOUSE } from "../../src/engine/juryHouseConstants";
+import { runJuryHouseStretch, bearingWord } from "../../src/engine/juryHouse";
+import { JURY_HOUSE, BEARING_THRESHOLDS, BEARING_MAX } from "../../src/engine/juryHouseConstants";
 import { MANNER_LEAN } from "../../src/engine/juryConstants";
 import { RelationshipModel } from "../../src/engine/relationships";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
@@ -196,5 +196,36 @@ describe("0100 — the jury house is deterministic", () => {
     expect(res.scenes).toHaveLength(0);
     expect(res.grudges).toHaveLength(0);
     expect(events.queryAll()).toHaveLength(0);
+  });
+});
+
+
+describe("#1790 — bearingWord (pure bearing-word mapper)", () => {
+  it.each([
+    // settled: [0, 0.02)
+    [0,     'settled'],
+    [0.01,  'settled'],
+    // cold: [0.02, 0.07)
+    [0.02,  'cold'],
+    [0.06,  'cold'],
+    // warm: [0.07, 0.13)
+    [0.07,  'warm'],
+    [0.12,  'warm'],
+    // burning: >= 0.13
+    [0.13,  'burning'],
+    [0.18,  'burning'],
+    // negative clamps to settled
+    [-1,   'settled'],
+    [-0.5, 'settled'],
+    // above cap clamps to burning
+    [1,    'burning'],
+  ])("grudge %d maps to %s", (grudge, expected) => {
+    expect(bearingWord(grudge)).toBe(expected);
+  });
+
+  it("never returns a number", () => {
+    const result = bearingWord(0.1);
+    expect(typeof result).toBe("string");
+    expect(Number.isNaN(Number(result))).toBe(true);
   });
 });

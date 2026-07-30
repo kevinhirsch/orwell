@@ -623,6 +623,14 @@ const VOTE_DEDUCTION_ENABLED_DEFAULT = process.env.ORWELL_VOTE_DEDUCTION === "1"
 const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 
 /**
+ * #1790 — whether the TRAITORS'-FURY juror-bearing word layer runs by DEFAULT. OFF unless
+ * `ORWELL_TRAITORS_FURY=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`) so calibration
+ * neutrality is provable in isolation: with it unset, bearingWord returns a constant default
+ * ("settled") and the seeded jury-read spine is byte-identical. A test overrides per-session
+ * via `setTraitorsFuryEnabled`.
+ */
+const TRAITORS_FURY_ENABLED_DEFAULT = process.env.ORWELL_TRAITORS_FURY === "1";
+/**
  * 0101 — whether NPC MYTH-MAKING runs by DEFAULT. OFF unless `ORWELL_MYTH_MAKING=1`. A DEDICATED flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_JURY_HOUSE`) so calibration neutrality is provable in isolation:
  * with it unset, `legendTick` no-ops before drawing anything (the dedicated legend-rng stream never
@@ -1074,6 +1082,12 @@ export class GameSessionAdapter implements GameSession {
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
   private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
 
+  /**
+   * #1790 — whether the TRAITORS'-FURY juror-bearing word layer RUNS. DEFAULT OFF: the
+   * calibration/UAT harness leaves it off, so `bearingWord` returns a constant ("settled")
+   * and the seeded jury-read spine is byte-identical. A test flips it via `setTraitorsFuryEnabled`.
+   */
+  private traitorsFuryEnabled = TRAITORS_FURY_ENABLED_DEFAULT;
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
@@ -7774,6 +7788,15 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the jury-house layer is live (0100) — exposed for the orchestrator's wiring symmetry/tests. */
   juryHouseEnabledNow(): boolean { return this.juryHouseEnabled; }
 
+
+  /** Turn the TRAITORS'-FURY juror-bearing word layer on/off (#1790). Off by default — the
+   *  calibration harness leaves it off (with it off bearingWord returns "settled" constantly,
+   *  consuming zero rng, so the seeded spine is byte-identical). */
+  setTraitorsFuryEnabled(on: boolean): void { this.traitorsFuryEnabled = on; }
+
+  /** Whether the traitors'-fury layer is live (#1790) — exposed for the orchestrator's wiring
+   *  symmetry/tests. */
+  traitorsFuryEnabledNow(): boolean { return this.traitorsFuryEnabled; }
   /**
    * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
    * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
