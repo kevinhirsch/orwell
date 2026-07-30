@@ -7779,6 +7779,72 @@ export class GameSessionAdapter implements GameSession {
         row[g.finalist] = Math.min(JURY_HOUSE.adjustmentCap, (row[g.finalist] ?? 0) + g.delta);
       }
     }
+    // #1790 AC1 — TRAITORS' FURY: route the POSSIBLY-WRONG deduced blame into each juror's knowledge,
+    // then diffuse it through the jury-house gossip graph as named-blame grievance. FLAG-GATED: with the
+    // flag OFF this entire block is a no-op (zero draws, zero beliefs, zero diffuse) — byte-identical.
+    // CRITICAL (calibration): the blame diffusion below passes NO `rel` and NO `subjects` to
+    // `diffuseGossip` (content-only, zero edge fold) and reuses the already-established dedicated
+    // jury-house rng — so it adds ZERO new fold weight and ZERO shared-rng draws. The belief is seeded
+    // into a JUROR's knowledge (an NPC), NEVER the player. The jury-house diffusion graph has NO player
+    // node (constructed above by `jurors` filter + the `juryHouse.runJuryHouseStretch` graph) — verify
+    // nothing routes a pathway to the player. The suspicion/confidence numbers stay in
+    // `DeducedVoters.perVoter` (engine-only), never seeded into the belief.
+    if (this.traitorsFuryEnabled && this.live.deducedCulprits) {
+      const nameOf = (id: EntityId): string => this.nameOf(id);
+      // Build the jury-house social graph for blame diffusion — same structure as runJuryHouseStretch
+      // (jurors only, NO player node). Reuse the existing `rel` edge reader.
+      const rel = { edge: (a: EntityId, b: EntityId) => this.rel.edge(a, b) };
+      const graphEdges: Array<readonly [EntityId, EntityId]> = [];
+      for (let i = 0; i < jurors.length; i++) {
+        for (let j = i + 1; j < jurors.length; j++) {
+          if (gossipEdgeAffinity(rel, jurors[i]!, jurors[j]!) > JURY_HOUSE.affinityEdge) {
+            graphEdges.push([jurors[i]!, jurors[j]!] as const);
+          }
+        }
+      }
+      const graph = makeSocialGraph(graphEdges);
+      // For each evicted juror who has a deduced-culprit record, seed the blame belief and diffuse
+      for (const juror of jurors) {
+        const culprits = this.live.deducedCulprits[juror];
+        if (!culprits || culprits.length === 0) continue;
+        // Resolve culprit ids to names for Vault-free prose; NO numbers cross.
+        const culpritNames = culprits.map((id) => nameOf(id)).join(", ");
+        // A stable per-(juror, culprit) factId — deterministic lineage so diffusion reunites itself.
+        // Uses the evictee id + a dedup salt so the factId is collision-free across jurors.
+        const factBase = `traitors-fury:blame:${juror}`;
+        const content = `${nameOf(juror)} believes ${culpritNames} turned on them in the eviction vote`;
+        for (const culprit of culprits) {
+          const factId = `${factBase}:${culprit}`;
+          // Seed the belief into the JUROR's own knowledge (NPC, NEVER the player).
+          knowledge.seedBelief(
+            juror,
+            {
+              content,
+              factId,
+              source: juror,
+              hops: 0,
+              distortion: 0,
+              confidence: 1,
+            },
+            `jury-house:blame:${juror}`,
+          );
+        }
+        if (graphEdges.length === 0) continue;
+        // Diffuse through the jury-house gossip graph: content-only, NO `rel`/`subjects` — same
+        // calibration-discipline as the grievance diffusion in runJuryHouseStretch. Uses the dedicated
+        // jury-house rng so it adds zero shared-rng draws.
+        diffuseGossip({
+          knowledge,
+          graph,
+          rng,
+          origin: juror,
+          fact: { content },
+          rounds: JURY_HOUSE.rounds,
+          transmitProb: JURY_HOUSE.transmitProb,
+          decay: JURY_HOUSE.decay,
+        });
+      }
+    }
   }
 
   /** Turn the JURY-HOUSE grudge layer on/off (0100). Off by default — the calibration harness leaves it off

@@ -435,6 +435,14 @@ export interface LiveSeasonState {
    */
   juryGrudge?: Record<EntityId, Record<EntityId, number>>;
   /**
+   * #1790 — engine-only per evictee, the POSSIBLY-WRONG voters they deduced (0110). Stored at each
+   * eviction by commitStagedEviction so the jury-house blame-diffusion pass (AC1) can seed a
+   * named-blame belief into that juror's knowledge. NEVER projected to any surface — no player-visible
+   * change, not even behind the flag (the flag OFF path skips the whole jury-house blame pass, and the
+   * field itself is absent unless commit 2 stores it).
+   */
+  deducedCulprits?: Record<EntityId, EntityId[]>;
+  /**
    * The per-week eviction ballot record (E12): who voted to evict whom, kept ENGINE-ONLY for
    * manner/deal reconciliation and for the 0048 retrospective UNSEALING. Eviction votes are
    * secret ballots in Big Brother — no projection attributes a weekly vote to its voter while
@@ -2153,6 +2161,9 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
         ctx.rel, new SeededRandom(deductionSeed(evictee, s.week)),
       ).believed
     : votesToEvict;
+  // #1790 — store the POSSIBLY-WRONG deduced set on engine-only season state for jury-house blame
+  // routing (AC1). NEVER projected to any surface — this is an engine-only store.
+  (s.deducedCulprits ??= {})[evictee] = believedVoters;
   recordEvictionManner(s, evictee, [s.hoh!, ...believedVoters], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
   e.goodbyeFrom = selectGoodbyeSenders(s, evictee, ctx.player, rng);
