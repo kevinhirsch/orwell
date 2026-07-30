@@ -50,3 +50,26 @@ export const JURY_HOUSE = {
    */
   adjustmentCap: 0.18,
 } as const;
+
+
+/**
+ * #1790 — the JUROR-BEARING tier thresholds (the B59 rule: every jury-house number is defined here).
+ * Maps a grudge value on the bounded grudge scale (0..`adjustmentCap`) to a bearing word via an
+ * ordered threshold table. Each tier has a lower bound (inclusive) so the mapper reads
+ * "first highest threshold whose min <= clamped value".
+ *
+ * Grudge scale (0..0.18, cap `adjustmentCap:0.18`):
+ *   settled: < 0.02 (includes negative/zero — clamp input to 0)
+ *   cold:    0.02–0.07
+ *   warm:    0.07–0.13
+ *   burning: >= 0.13
+ */
+export const BEARING_THRESHOLDS = [
+  { min: 0,    word: 'settled' },   // [0, 0.02)
+  { min: 0.02, word: 'cold' },      // [0.02, 0.07)
+  { min: 0.07, word: 'warm' },      // [0.07, 0.13)
+  { min: 0.13, word: 'burning' },   // [0.13, ∞)
+] as const;
+
+/** The upper bound for the last tier (adjustment cap — grudge never exceeds this). */
+export const BEARING_MAX = 0.18;

@@ -435,6 +435,14 @@ export interface LiveSeasonState {
    */
   juryGrudge?: Record<EntityId, Record<EntityId, number>>;
   /**
+   * #1790 — engine-only per evictee, the POSSIBLY-WRONG voters they deduced (0110). Stored at each
+   * eviction by commitStagedEviction so the jury-house blame-diffusion pass (AC1) can seed a
+   * named-blame belief into that juror's knowledge. NEVER projected to any surface — no player-visible
+   * change, not even behind the flag (the flag OFF path skips the whole jury-house blame pass, and the
+   * field itself is absent unless commit 2 stores it).
+   */
+  deducedCulprits?: Record<EntityId, EntityId[]>;
+  /**
    * The per-week eviction ballot record (E12): who voted to evict whom, kept ENGINE-ONLY for
    * manner/deal reconciliation and for the 0048 retrospective UNSEALING. Eviction votes are
    * secret ballots in Big Brother — no projection attributes a weekly vote to its voter while
@@ -715,6 +723,14 @@ export interface SeasonCtx {
    * byte-identical on the outcome axis (presentation only; no rng/fold/dropOrder touched either way).
    */
   archetypeOf?: (id: EntityId) => string | undefined;
+  /**
+   * #1790 — when true, the finale vote REVEAL sequence is regrouped for drama (clustering by
+   * bearing/finalist instead of simple juror order). The tally (`tallyJury`) and winner are
+   * UNCHANGED — this flag gates ONLY the presentation-time `f.script.revealOrder` reordering.
+   * Absent/false ⇒ `f.script.revealOrder` is used as-is ⇒ byte-identical with the pre-feature path
+   * (no additional rng draws, no vote perturbation).
+   */
+  traitorsFury?: boolean;
 }
 
 /** A meaningful, player-witnessed beat event (daily-event invariant, 0008). */
@@ -2153,6 +2169,9 @@ function commitStagedEviction(s: LiveSeasonState, ctx: SeasonCtx, evictee: Entit
         ctx.rel, new SeededRandom(deductionSeed(evictee, s.week)),
       ).believed
     : votesToEvict;
+  // #1790 — store the POSSIBLY-WRONG deduced set on engine-only season state for jury-house blame
+  // routing (AC1). NEVER projected to any surface — this is an engine-only store.
+  (s.deducedCulprits ??= {})[evictee] = believedVoters;
   recordEvictionManner(s, evictee, [s.hoh!, ...believedVoters], ctx);
   removeEvictee(s, evictee);          // out now — the last vote landed; the result is public
   e.goodbyeFrom = selectGoodbyeSenders(s, evictee, ctx.player, rng);
@@ -2324,8 +2343,17 @@ function advanceFinale(s: LiveSeasonState, ctx: SeasonCtx, rng: RandomnessSource
       return { beat: "finale", content: `the jury casts their votes`, participants: [...f.finalists] };
     }
     case "reveal": {
-      if (f.revealIx < f.script.revealOrder.length) {
-        const juror = f.script.revealOrder[f.revealIx]!;
+      // #1790 AC4 — regroup the reveal order for drama when traitorsFury is ON
+      // (groups jurors by which finalist they voted for). The original revealOrder is
+      // untouched; the tally/winner are order-independent. Pure presentation-only regrouping.
+      const revealOrder = ctx.traitorsFury && f.votes
+        ? [
+            ...f.jury.filter((j) => f.votes![j] === f.finalists[0]!),
+            ...f.jury.filter((j) => f.votes![j] === f.finalists[1]!),
+          ]
+        : f.script.revealOrder;
+      if (f.revealIx < revealOrder.length) {
+        const juror = revealOrder[f.revealIx]!;
         const voted = f.votes![juror]!;
         f.revealIx += 1;
         return { beat: "finale-reveal", content: `${juror} votes for ${voted}`, participants: [juror, voted] };

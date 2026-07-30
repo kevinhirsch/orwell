@@ -6,7 +6,7 @@ import type { EdgeSignals } from "./relationshipConstants";
 import type { EvictionManner } from "./jury";
 import { richOffscreenStretch, type OffscreenScene } from "./offscreen";
 import { diffuseGossip, makeSocialGraph, gossipEdgeAffinity } from "./gossip";
-import { JURY_HOUSE } from "./juryHouseConstants";
+import { JURY_HOUSE, BEARING_THRESHOLDS, BEARING_MAX } from "./juryHouseConstants";
 
 /**
  * Feature 0100 — the JURY HOUSE: a sequestered SECOND society of the last-nine evictees who keep
@@ -148,4 +148,20 @@ export function runJuryHouseStretch(deps: JuryHouseDeps): JuryHouseResult {
   }
 
   return { scenes, grudges };
+}
+
+
+/**
+ * #1790 — PURE, Vault-safe functional BEARING word for a juror's grudge value.
+ * Maps a numeric grudge (0..`adjustmentCap`) to one of four words: "settled", "cold", "warm",
+ * or "burning", using the thresholds from `BEARING_THRESHOLDS`. Returns a WORD, NEVER a number.
+ * Clamps input to [0, adjustmentCap] so negative values are always "settled".
+ */
+export function bearingWord(grudge: number): string {
+  const clamped = Math.max(0, Math.min(BEARING_MAX, grudge));
+  // Iterate thresholds high-to-low: return the first tier whose min <= clamped.
+  for (let i = BEARING_THRESHOLDS.length - 1; i >= 0; i--) {
+    if (clamped >= BEARING_THRESHOLDS[i]!.min) return BEARING_THRESHOLDS[i]!.word;
+  }
+  return BEARING_THRESHOLDS[0]!.word;
 }

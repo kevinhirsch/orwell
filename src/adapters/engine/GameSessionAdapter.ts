@@ -38,7 +38,7 @@ import {
   type Campaign, type CampaignActor, type Influence, type Drive, type NemesisTrack, type NemesisCandidate,
 } from "../../engine/campaigns";
 import { whisperConspicuousPairings } from "../../engine/houseSuspicion";
-import { runJuryHouseStretch } from "../../engine/juryHouse";
+import { runJuryHouseStretch, bearingWord } from "../../engine/juryHouse";
 import { JURY_HOUSE } from "../../engine/juryHouseConstants";
 import type { KnowledgeService } from "../../ports/KnowledgeService";
 import type { EventStore } from "../../ports/EventStore";
@@ -623,6 +623,14 @@ const VOTE_DEDUCTION_ENABLED_DEFAULT = process.env.ORWELL_VOTE_DEDUCTION === "1"
 const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
 
 /**
+ * #1790 — whether the TRAITORS'-FURY juror-bearing word layer runs by DEFAULT. OFF unless
+ * `ORWELL_TRAITORS_FURY=1`. A DEDICATED flag (sibling to `ORWELL_JURY_HOUSE`) so calibration
+ * neutrality is provable in isolation: with it unset, bearingWord returns a constant default
+ * ("settled") and the seeded jury-read spine is byte-identical. A test overrides per-session
+ * via `setTraitorsFuryEnabled`.
+ */
+const TRAITORS_FURY_ENABLED_DEFAULT = process.env.ORWELL_TRAITORS_FURY === "1";
+/**
  * 0101 — whether NPC MYTH-MAKING runs by DEFAULT. OFF unless `ORWELL_MYTH_MAKING=1`. A DEDICATED flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_JURY_HOUSE`) so calibration neutrality is provable in isolation:
  * with it unset, `legendTick` no-ops before drawing anything (the dedicated legend-rng stream never
@@ -1074,6 +1082,12 @@ export class GameSessionAdapter implements GameSession {
   /** 0122 — deeper+daily NPC confessionals (triggered facets + the day-close sweep); off ⇒ 0040 exactly. */
   private compThemesEnabled = COMP_THEMES_ENABLED_DEFAULT;
 
+  /**
+   * #1790 — whether the TRAITORS'-FURY juror-bearing word layer RUNS. DEFAULT OFF: the
+   * calibration/UAT harness leaves it off, so `bearingWord` returns a constant ("settled")
+   * and the seeded jury-read spine is byte-identical. A test flips it via `setTraitorsFuryEnabled`.
+   */
+  private traitorsFuryEnabled = TRAITORS_FURY_ENABLED_DEFAULT;
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
@@ -6926,6 +6940,10 @@ export class GameSessionAdapter implements GameSession {
       ...(this.wipeoutReelEnabled
         ? { wipeoutReelEnabled: true as const, archetypeOf: (id: EntityId) => this.archetypeReadOf(id) }
         : {}),
+      // #1790: the Traitors' Fury presentation layer (finale bearing display + regrouped reveal) —
+      // present ONLY when the flag is ON (off in the calibration harness ⇒ absent ⇒ no bearing
+      // word, no reveal regrouping ⇒ byte-identical to the pre-feature path).
+      ...(this.traitorsFuryEnabled ? { traitorsFury: true as const } : {}),
     };
   }
 
@@ -7765,6 +7783,72 @@ export class GameSessionAdapter implements GameSession {
         row[g.finalist] = Math.min(JURY_HOUSE.adjustmentCap, (row[g.finalist] ?? 0) + g.delta);
       }
     }
+    // #1790 AC1 — TRAITORS' FURY: route the POSSIBLY-WRONG deduced blame into each juror's knowledge,
+    // then diffuse it through the jury-house gossip graph as named-blame grievance. FLAG-GATED: with the
+    // flag OFF this entire block is a no-op (zero draws, zero beliefs, zero diffuse) — byte-identical.
+    // CRITICAL (calibration): the blame diffusion below passes NO `rel` and NO `subjects` to
+    // `diffuseGossip` (content-only, zero edge fold) and reuses the already-established dedicated
+    // jury-house rng — so it adds ZERO new fold weight and ZERO shared-rng draws. The belief is seeded
+    // into a JUROR's knowledge (an NPC), NEVER the player. The jury-house diffusion graph has NO player
+    // node (constructed above by `jurors` filter + the `juryHouse.runJuryHouseStretch` graph) — verify
+    // nothing routes a pathway to the player. The suspicion/confidence numbers stay in
+    // `DeducedVoters.perVoter` (engine-only), never seeded into the belief.
+    if (this.traitorsFuryEnabled && this.live.deducedCulprits) {
+      const nameOf = (id: EntityId): string => this.nameOf(id);
+      // Build the jury-house social graph for blame diffusion — same structure as runJuryHouseStretch
+      // (jurors only, NO player node). Reuse the existing `rel` edge reader.
+      const rel = { edge: (a: EntityId, b: EntityId) => this.rel.edge(a, b) };
+      const graphEdges: Array<readonly [EntityId, EntityId]> = [];
+      for (let i = 0; i < jurors.length; i++) {
+        for (let j = i + 1; j < jurors.length; j++) {
+          if (gossipEdgeAffinity(rel, jurors[i]!, jurors[j]!) > JURY_HOUSE.affinityEdge) {
+            graphEdges.push([jurors[i]!, jurors[j]!] as const);
+          }
+        }
+      }
+      const graph = makeSocialGraph(graphEdges);
+      // For each evicted juror who has a deduced-culprit record, seed the blame belief and diffuse
+      for (const juror of jurors) {
+        const culprits = this.live.deducedCulprits[juror];
+        if (!culprits || culprits.length === 0) continue;
+        // Resolve culprit ids to names for Vault-free prose; NO numbers cross.
+        const culpritNames = culprits.map((id) => nameOf(id)).join(", ");
+        // A stable per-(juror, culprit) factId — deterministic lineage so diffusion reunites itself.
+        // Uses the evictee id + a dedup salt so the factId is collision-free across jurors.
+        const factBase = `traitors-fury:blame:${juror}`;
+        const content = `${nameOf(juror)} believes ${culpritNames} turned on them in the eviction vote`;
+        for (const culprit of culprits) {
+          const factId = `${factBase}:${culprit}`;
+          // Seed the belief into the JUROR's own knowledge (NPC, NEVER the player).
+          knowledge.seedBelief(
+            juror,
+            {
+              content,
+              factId,
+              source: juror,
+              hops: 0,
+              distortion: 0,
+              confidence: 1,
+            },
+            `jury-house:blame:${juror}`,
+          );
+        }
+        if (graphEdges.length === 0) continue;
+        // Diffuse through the jury-house gossip graph: content-only, NO `rel`/`subjects` — same
+        // calibration-discipline as the grievance diffusion in runJuryHouseStretch. Uses the dedicated
+        // jury-house rng so it adds zero shared-rng draws.
+        diffuseGossip({
+          knowledge,
+          graph,
+          rng,
+          origin: juror,
+          fact: { content },
+          rounds: JURY_HOUSE.rounds,
+          transmitProb: JURY_HOUSE.transmitProb,
+          decay: JURY_HOUSE.decay,
+        });
+      }
+    }
   }
 
   /** Turn the JURY-HOUSE grudge layer on/off (0100). Off by default — the calibration harness leaves it off
@@ -7774,6 +7858,15 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the jury-house layer is live (0100) — exposed for the orchestrator's wiring symmetry/tests. */
   juryHouseEnabledNow(): boolean { return this.juryHouseEnabled; }
 
+
+  /** Turn the TRAITORS'-FURY juror-bearing word layer on/off (#1790). Off by default — the
+   *  calibration harness leaves it off (with it off bearingWord returns "settled" constantly,
+   *  consuming zero rng, so the seeded spine is byte-identical). */
+  setTraitorsFuryEnabled(on: boolean): void { this.traitorsFuryEnabled = on; }
+
+  /** Whether the traitors'-fury layer is live (#1790) — exposed for the orchestrator's wiring
+   *  symmetry/tests. */
+  traitorsFuryEnabledNow(): boolean { return this.traitorsFuryEnabled; }
   /**
    * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
    * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
@@ -10306,10 +10399,33 @@ export class GameSessionAdapter implements GameSession {
     if (!f) return null;
     const ref = (id: EntityId): NamedRef => ({ id, name: this.nameOf(id) });
     const q = f.script.questions[f.questionIx];
+    // Build asking with optional bearing + heldBelief (Traitors' Fury AC2/AC3)
+    let asking: (NamedRef & { bearing?: string; heldBelief?: string }) | null = null;
+    if (f.stage === "questions" && q) {
+      asking = ref(q.juror);
+      if (this.traitorsFuryEnabled) {
+        const askingJurorId = q.juror;
+        const playerFinalistId = f.finalists.includes(PLAYER) ? PLAYER : f.finalists[0];
+        let grudge = (this.live?.juryGrudge?.[askingJurorId]?.[playerFinalistId]) ?? 0;
+        if (!f.finalists.includes(PLAYER)) {
+          grudge = Math.max(
+            this.live?.juryGrudge?.[askingJurorId]?.[f.finalists[0]] ?? 0,
+            this.live?.juryGrudge?.[askingJurorId]?.[f.finalists[1]] ?? 0,
+          );
+        }
+        asking.bearing = bearingWord(grudge);
+        // AC3: heldBelief — name-resolved blame belief from knowledge (NO numbers)
+        const knownFacts = this.npcKnowledge?.known(askingJurorId) ?? [];
+        const blameFact = knownFacts.find((k) => k.content?.includes("turned on them"));
+        if (blameFact) {
+          asking.heldBelief = blameFact.content;
+        }
+      }
+    }
     return {
       stage: f.stage,
       finalists: f.finalists.map(ref),
-      asking: f.stage === "questions" && q ? ref(q.juror) : null,
+      asking,
       reveals: f.script.revealOrder.slice(0, f.revealIx).map((juror) => ({
         juror: ref(juror), votedFor: ref(f.votes![juror]!),
       })),
