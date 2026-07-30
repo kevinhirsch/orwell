@@ -148,6 +148,8 @@ export interface SurfaceReq {
 export interface DiaryRoomReq {
   /** The player's out-of-character confessional entry. */
   entry: string;
+  /** Optional subject to tag this entry to a specific houseguest. */
+  subjectId?: EntityId;
 }
 
 export interface RecordImageBeatReq {

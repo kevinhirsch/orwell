@@ -210,6 +210,9 @@ function requireShape(name: string, args: Record<string, unknown>): void {
       }
       if (args["cue"] !== undefined && typeof args["cue"] !== "string") refuse("cue", "a string when present");
       return;
+    case "playerDossier":
+      // Feature #1793: optional subjectId of any type — mirror the optional-arg read-tool pattern.
+      return;
     case "npcVoice":
     case "getPortraitPrompt":
       if (!isStr(args["id"])) refuse("id", "a houseguest id (string)");
@@ -507,6 +510,8 @@ export class McpServer {
         return this.deps.player.produce(args["mode"] === "dialogue" ? "NPC dialogue" : "scene narration");
       case "socialRead":
         return this.deps.player.socialRead(args["target"] as EntityId | undefined);
+      case "playerDossier":
+        return this.deps.session.playerDossier(args.subjectId as EntityId | undefined);
       case "socialInitiatives":
         return this.deps.session.socialInitiatives();
       case "whereabouts":

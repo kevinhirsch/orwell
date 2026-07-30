@@ -71,6 +71,7 @@ export const FEATURE_FLAGS: FeatureFlagDef[] = [
   { envKey: 'ORWELL_SOCIAL_FATIGUE',         key: 'socialFatigue',          parser: 'inverted' },
   { envKey: 'ORWELL_MULTI_NIGHT_FATIGUE',    key: 'multiNightFatigue',      parser: 'strict' },
   { envKey: 'ORWELL_ACT_COMMIT_VOICE_VETO_CEREMONY', key: 'actCommitVoiceVetoCeremony', parser: 'strict' },
+  { envKey: 'ORWELL_PLAYER_DOSSIER', key: 'playerDossier', parser: 'strict' },
 ];
 
 /** The parsers, keyed by kind, to avoid re-creating closures on every call. */

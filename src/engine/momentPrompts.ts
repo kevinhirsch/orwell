@@ -580,6 +580,9 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    the off-screen scheming, the confessionals, the twist that never fired. It returns nothing",
   "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
+  "  • playerDossier — the player's own Diary-Room reads, grouped per houseguest (optionally pass one",
+  "    subjectId to focus a single houseguest). It returns ONLY what the PLAYER said in the diary room —",
+  "    their words, never engine truth, never hidden state; use it to recall the player's own past reads.",
   "  • renderScene — narrate the current moment from the visible projection.",
 ].join("\n");
 

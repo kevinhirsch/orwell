@@ -169,7 +169,7 @@ export class InMemoryKnowledgeService implements KnowledgeService {
     return false;
   }
 
-  recordDiaryRoom(content: string): KnowledgeFact {
+  recordDiaryRoom(content: string, subjectId?: EntityId): KnowledgeFact {
     const ts = this.clock();
     const sourceEventId = `evt:dr:${++this.seq}`;
     this.events.record({
@@ -177,7 +177,7 @@ export class InMemoryKnowledgeService implements KnowledgeService {
       initiator: PLAYER, witnessSet: [PLAYER], hidden: false,
       content: `[diary-room] ${content}`,
     });
-    return this.pushKnown(PLAYER, { content, pathway: "diary-room", sourceEventId, ts });
+    return this.pushKnown(PLAYER, { content, pathway: "diary-room", sourceEventId, ts, ...(subjectId !== undefined ? { subject: subjectId } : {}) });
   }
 
   seedBelief(entity: EntityId, fact: BeliefInput, pathway: string): KnowledgeFact {

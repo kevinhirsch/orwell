@@ -452,6 +452,14 @@ export interface GameStateView {
    */
   playerDiaryRoom?: string[];
   /**
+   * #1793 — the player's OWN Diary-Room reads, grouped per houseguest (subject).
+   * The player's own NO_NPC_PATHWAY knowledge with a subject field, grouped by subject.
+   * NEVER reads engine truth, Vault, or NPC knowledge — only the player's own tagged reads.
+   * When subjectId is specified, returns only that houseguest's entries.
+   * Absent when the flag is OFF (byte-identical).
+   */
+  playerDossier?: Record<EntityId, { content: string; ts: number }[]>;
+  /**
    * ADR 0019 Layer 2 — the per-PRESENT-NPC knowledge scope. For each houseguest actually in the
    * scene (`whereabouts.present`), the SAME Vault-free `knows`/`suspects` sets `npcVoice` returns —
    * baked into the built context so the narrator voices each present houseguest from THEIR bounded
@@ -2602,6 +2610,14 @@ export interface GameSession {
    * no off-screen scenes have been recorded.
    */
   getOffscreenSceneSkeletons(): OffscreenSceneSkeleton[];
+
+  /**
+   * #1793 — the player's Diary-Room dossier: the player's OWN NO_NPC_PATHWAY diary-room reads,
+   * grouped per houseguest subject. When subjectId is specified, returns only that houseguest's
+   * entries. Vault-free by construction: only the player's own tagged diary-room entries, never
+   * engine truth or NPC knowledge. Absent when the ORWELL_PLAYER_DOSSIER flag is OFF (byte-identical).
+   */
+  playerDossier(subjectId?: EntityId): Record<EntityId, { content: string; ts: number }[]> | undefined;
 
   /**
    * FE-driven write-back (0070): enrich the prose `content` of an already-recorded hidden

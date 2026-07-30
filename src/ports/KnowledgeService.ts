@@ -44,7 +44,7 @@ export interface KnowledgeService {
    * The player's Diary Room: player-level, OOC. Its content becomes the PLAYER's
    * own knowledge but has NO in-game pathway to any NPC.
    */
-  recordDiaryRoom(content: string): KnowledgeFact;
+  recordDiaryRoom(content: string, subjectId?: EntityId): KnowledgeFact;
 
   /** Seed an origin belief on an entity (no telling event — they already knew it). */
   seedBelief(entity: EntityId, fact: BeliefInput, pathway: string): KnowledgeFact;
