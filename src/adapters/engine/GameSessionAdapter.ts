@@ -190,6 +190,7 @@ import {
   CEREMONY_IMPACTS, DEAL_REPUTATION, EVICTION_MANNER_SCALE, RELATIONSHIP_CONSTANTS, clamp01, scaleImpact,
 } from "../../engine/relationshipConstants";
 import type { CeremonyAct } from "../../engine/relationshipConstants";
+import { producerReadPrompt, type ExchangeAccounting } from "../../engine/producerRead";
 import { notorietyBias, recognitionFor } from "../../engine/notoriety";
 import type { NotorietySummary, OpenSetSeasonOutcome } from "../../engine/notoriety";
 import {
@@ -630,6 +631,13 @@ const JURY_HOUSE_ENABLED_DEFAULT = process.env.ORWELL_JURY_HOUSE === "1";
  * via `setTraitorsFuryEnabled`.
  */
 const TRAITORS_FURY_ENABLED_DEFAULT = process.env.ORWELL_TRAITORS_FURY === "1";
+/**
+ * #1792 — whether the Producer Read (post-scene exchange-accounting beat) runs
+ * by DEFAULT. OFF unless `ORWELL_PRODUCER_READ=1`. Flag-gated so a disabled
+ * flag means the `recordInteraction` sink is never wired ⇒ nothing computed ⇒
+ * byte-identical. A test overrides per-session via `setProducerReadEnabled`.
+ */
+const PRODUCER_READ_ENABLED_DEFAULT = process.env.ORWELL_PRODUCER_READ === "1";
 /**
  * 0101 — whether NPC MYTH-MAKING runs by DEFAULT. OFF unless `ORWELL_MYTH_MAKING=1`. A DEDICATED flag
  * (sibling to `ORWELL_CAMPAIGNS`/`ORWELL_JURY_HOUSE`) so calibration neutrality is provable in isolation:
@@ -1088,6 +1096,8 @@ export class GameSessionAdapter implements GameSession {
    * and the seeded jury-read spine is byte-identical. A test flips it via `setTraitorsFuryEnabled`.
    */
   private traitorsFuryEnabled = TRAITORS_FURY_ENABLED_DEFAULT;
+  /** #1792 — whether the Producer Read (post-scene exchange-accounting beat) runs. OFF by default. */
+  private producerReadEnabled = PRODUCER_READ_ENABLED_DEFAULT;
   private compMechanicsPlusEnabled = COMP_MECHANICS_PLUS_ENABLED_DEFAULT;
 
   private compMixedEnabled = COMP_MIXED_ENABLED_DEFAULT;
@@ -7247,6 +7257,17 @@ export class GameSessionAdapter implements GameSession {
     this.pendingFeltHours = hours;
   }
 
+  /** #1792 — pending ExchangeAccounting from the last substantive recordInteraction, consumed once
+   *  by the next getMomentPrompt call (one-shot delivery — never fires on the HUD/view()). */
+  private pendingExchangeAccounting?: ExchangeAccounting;
+  /** Stash the exchange-accounting fact for one-shot delivery in the next moment prompt.
+   *  No-ops when the producer-read flag is off (safety net — the sink is only wired when ON,
+   *  so this is defense-in-depth). */
+  stashExchangeAccounting(acc: ExchangeAccounting): void {
+    if (!this.producerReadEnabled) return;
+    this.pendingExchangeAccounting = acc;
+  }
+
   /**
    * The directed `a→b` arc's hidden TRAJECTORY (0087) — passed to the off-screen society's nature pick when
    * the layer is ON. Returns `STEADY` (no tilt) when the layer is off OR the pair has no momentum yet, so a
@@ -7867,6 +7888,14 @@ export class GameSessionAdapter implements GameSession {
   /** Whether the traitors'-fury layer is live (#1790) — exposed for the orchestrator's wiring
    *  symmetry/tests. */
   traitorsFuryEnabledNow(): boolean { return this.traitorsFuryEnabled; }
+
+  /** Turn the Producer Read exchange-accounting beat on/off (#1792). OFF by default — with it
+   *  off the sink is never wired ⇒ nothing computed ⇒ byte-identical. */
+  setProducerReadEnabled(on: boolean): void { this.producerReadEnabled = on; }
+
+  /** Whether the Producer Read is live (#1792) — exposed for the orchestrator's wiring
+   *  symmetry/tests. */
+  producerReadEnabledNow(): boolean { return this.producerReadEnabled; }
   /**
    * 0101 — NPC MYTH-MAKING: at most once per off-screen tick, mint a LEGEND about a rare, notable player
    * act and let it diffuse NPC-to-NPC exactly like an ordinary rumor (0002/B27b) — see
@@ -10551,11 +10580,26 @@ export class GameSessionAdapter implements GameSession {
   }
 
   getMomentPrompt(req: MomentPromptReq): MomentPromptView {
+    // #1792 — one-shot Producer Read: consume the pending ExchangeAccounting and clear
+    // it so it never fires again (not even on the shared view()/HUD path). Convert to
+    // a Vault-free second-person string.
+    const pendingPr = this.pendingExchangeAccounting;
+    this.pendingExchangeAccounting = undefined;
+    const prLine = pendingPr && this.producerReadEnabled
+      ? producerReadPrompt(pendingPr)
+      : undefined;
     const baseView = this.view();
     // ADR 0019 Layer 2: augment the NARRATION view (only) with each present houseguest's own knowledge
     // scope. Absent when nobody present holds anything ⇒ byte-identical prompt.
     const pk = this.presentKnowledgeForPrompt();
-    const view = pk.length ? { ...baseView, presentKnowledge: pk } : baseView;
+    // Augment the narration view with the one-shot Producer Read string (if any).
+    // Present ONLY in the getMomentPrompt path — the shared view() never carries it,
+    // so the HUD/getGameState never sees or consumes it.
+    const view = prLine
+      ? { ...baseView, presentKnowledge: pk?.length ? pk : undefined, producerRead: prLine }
+      : pk.length
+        ? { ...baseView, presentKnowledge: pk }
+        : baseView;
     const moment = req.moment ?? view.moment;
     // #1735 (A4) — the terminal HARD-CONSTRAINTS block, a SEPARATE field from `systemPrompt` so the
     // caller (the front-end) can append it as the LAST message before generation instead of folding it

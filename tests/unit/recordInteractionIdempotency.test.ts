@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { EngineCommandsAdapter } from "../../src/adapters/engine/EngineCommandsAdapter";
 import { InMemoryEventStore } from "../../src/adapters/inmemory/InMemoryEventStore";
 import { InMemoryKnowledgeService } from "../../src/adapters/inmemory/InMemoryKnowledgeService";
@@ -99,5 +99,47 @@ describe("A10/#591 — recordInteraction is at-most-once per idempotencyKey", ()
     // A brand-new key that the ledger has never seen must NOT bypass the CAS guard — only a REPEAT
     // key short-circuits. This proves the idempotency check didn't weaken stale-write protection.
     expect(() => cmd.recordInteraction(scene("neverSeen", 2))).toThrow(StaleBeatError);
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────────
+  // #1792 — Producer Read: the producerReadSink fires ONCE per substantive scene
+  // and NOT on idempotent replay; does NOT fire for a non-substantive kind.
+  // ──────────────────────────────────────────────────────────────────────────────
+  it("producerReadSink fires ONCE for a substantive interaction (bonding kind)", () => {
+    const { cmd } = mk();
+    const sink = vi.fn();
+    cmd.setProducerReadSink(sink);
+    cmd.recordInteraction(scene("PR1", 0));   // bonding is a substantive kind
+    expect(sink).toHaveBeenCalledTimes(1);
+  });
+
+  it("producerReadSink does NOT fire for a non-substantive interaction (missing kind)", () => {
+    const { cmd } = mk();
+    const sink = vi.fn();
+    cmd.setProducerReadSink(sink);
+    cmd.recordInteraction({ initiator: PLAYER, witnessSet: [PLAYER, npc(1)], content: "x" });
+    expect(sink).not.toHaveBeenCalled();
+  });
+
+  it("producerReadSink fires ONCE per substantive scene and NOT on idempotent replay", () => {
+    const { cmd } = mk();
+    const sink = vi.fn();
+    cmd.setProducerReadSink(sink);
+    cmd.recordInteraction(scene("PR2"));  // first call
+    expect(sink).toHaveBeenCalledTimes(1);
+    cmd.recordInteraction(scene("PR2"));  // idempotent replay — must NOT fire again
+    expect(sink).toHaveBeenCalledTimes(1); // still exactly once
+  });
+
+  it("producerReadSink argument is an ExchangeAccounting with computed fields", () => {
+    const { cmd } = mk();
+    const sink = vi.fn();
+    cmd.setProducerReadSink(sink);
+    cmd.recordInteraction(scene("PR3"));
+    expect(sink).toHaveBeenCalledTimes(1);
+    const arg = sink.mock.calls[0][0];
+    expect(arg).toHaveProperty("playerGained");
+    expect(arg).toHaveProperty("npcGained");
+    expect(arg).toHaveProperty("asymmetry");
   });
 });

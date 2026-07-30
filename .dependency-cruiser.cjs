@@ -43,6 +43,17 @@ const ENGINE_LAYER =
 module.exports = {
   forbidden: [
     {
+      name: "no-vault-in-producer-read",
+      severity: "error",
+      comment:
+        "#1792 — producerRead.ts is structurally Vault-free by design, with no VaultStore, " +
+        "SoulProvider, RelationshipModel, or hidden engine module handle. This rule enforces " +
+        "that it stays that way: no hidden-state imports may reach src/engine/producerRead.ts, " +
+        "even as type-only deps (tsPreCompilationDeps catches type-only imports).",
+      from: { path: "^src/engine/producerRead\\.ts$" },
+      to: { path: VAULT },
+    },
+    {
       name: "no-vault-on-outward",
       severity: "error",
       comment:

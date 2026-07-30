@@ -18,6 +18,7 @@ import { isPrivateRoom, zonesSameEarshot, type Occupancy, type Zone } from "../.
 import { StaleBeatError, EngineRefusal } from "../../domain/errors";
 import { IMAGE_BUDGET } from "../../engine/imageConstants";
 import { feltHoursFromMinutes } from "../../engine/sleepConstants";
+import { computeExchangeAccounting, type ExchangeAccounting } from "../../engine/producerRead";
 
 const INTERACTION_KINDS: ReadonlySet<string> = new Set<InteractionType>([
   "alliance", "gossip", "conflict", "bonding", "strategy", "showmance", "betrayal",
@@ -90,6 +91,12 @@ export class EngineCommandsAdapter implements EngineCommands {
    * recorded scene; the session no-ops it outside the premiere. Unset = standalone (no premiere effect).
    */
   private playerReadSink?: (npcIds: EntityId[]) => void;
+  /**
+   * #1792 — invoked with ExchangeAccounting after a substantive recordInteraction,
+   * so the session can stash the producer-read beat for the next moment prompt.
+   * Unwired (flag OFF / standalone) ⇒ nothing computed or appended.
+   */
+  private producerReadSink?: (acc: ExchangeAccounting) => void;
   /**
    * 0065 Part A — the compare-and-swap stale-write guard for this command port. The authoritative
    * monotonic `beatSeq` lives on the session adapter (it owns the snapshot it is persisted in); the
@@ -209,6 +216,14 @@ export class EngineCommandsAdapter implements EngineCommands {
   }
 
   /**
+   * #1792 — wire the producer-read sink so the session can stash the exchange-accounting beat.
+   * Unwired (flag OFF / standalone) ⇒ nothing computed or appended.
+   */
+  setProducerReadSink(fn: (acc: ExchangeAccounting) => void): void {
+    this.producerReadSink = fn;
+  }
+
+  /**
    * 0065 Part A — wire the session's monotonic `beatSeq` reader + the Vault-free board reader so this
    * command port can enforce the compare-and-swap stale-write guard (the counter is owned/persisted by
    * the session adapter). Standalone adapters that never wire these simply skip the guard.
@@ -249,6 +264,9 @@ export class EngineCommandsAdapter implements EngineCommands {
         return { eventId: prior };
       }
     }
+    // #1792 — snapshot the player's knowledge BEFORE the interaction commits,
+    // so the post-commit diff can detect what the player gained.
+    const beforeIds = new Set(this.knowledge.knownTo(PLAYER).map((f) => f.factId ?? f.id));
     // 0065 Part A — refuse a scene computed against a superseded board BEFORE recording/folding.
     this.guardBeatSeq(req.expectedBeatSeq);
     // Validated references (B39/audit A4): an interaction may only name LIVING houseguests — never an
@@ -486,6 +504,17 @@ export class EngineCommandsAdapter implements EngineCommands {
         hidden: !witnessSet.includes(PLAYER), content: rationale,
       });
       if (this.soulMemo) for (const w of witnessSet) if (w !== PLAYER) this.soulMemo(w, rationale);
+    }
+    // #1792 — Producer Read: compute ExchangeAccounting and fire the sink BEFORE persist,
+    // so the pending accounting survives the commit alongside the event. Only fires for
+    // substantive interactions (matching the same guard the consequence block uses).
+    // Unwired sink ⇒ nothing computed (flag OFF ⇒ byte-identical).
+    if (this.producerReadSink && req.kind && INTERACTION_KINDS.has(req.kind)) {
+      this.producerReadSink(computeExchangeAccounting(
+        { content: req.content, kind: req.kind },
+        beforeIds,
+        this.knowledge.knownTo(PLAYER),
+      ));
     }
     this.onPersist?.(); // durable save (0030): events + the hidden layer survive a restart
     // A10/#591 — record the at-most-once key ONLY after a clean commit. Placed AFTER onPersist so a
