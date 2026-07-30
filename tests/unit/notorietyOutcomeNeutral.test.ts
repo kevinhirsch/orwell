@@ -141,4 +141,37 @@ describe("0104 — the engine still owns outcome magnitude (anti-sycophancy, man
     // width, so it can only tilt the distribution inside the existing envelope (never widen the deltas).
     expect(NOTORIETY.weight * (1 + NOTORIETY.shadeSpread)).toBeLessThan(1);
   });
+
+  it("FEATURE-01791: notorietyLegend is pure flavor — the seeded outcome stream is byte-identical with or without it", () => {
+    // The notorietyLegend field on GameStateView is a PURE prompt-block projection — it never feeds any
+    // engine decision, competition roll, vote, or outcome. The seeded outcome stream (winner, eviction
+    // order, resume, jury votes) must be byte-identical whether or not the player carried a legend.
+    // This test asserts that a player WITH a loaded notoriety produces the SAME calibration-relevant
+    // outcome hash as a player WITHOUT it at the SAME seed. The legend is just flavor in the view.
+    const TREACHEROUS_LEGEND: OpenSetSeasonOutcome = {
+      placement: 2, castSize: 16, playerCompWins: 3,
+      playerEvictionRoles: [{ blindsided: true, betrayed: true }, { blindsided: true }, { betrayed: true }],
+      reachedJury: true, reachedFinalTwo: true, juryVoteShare: 0.3,
+    };
+    // Capture the view at create time (premiere phase) to assert the legend is present,
+    // THEN play to finale and confirm byte-identity.
+    const regA = new GameSessionRegistry();
+    const sbA = regA.sandboxFor("u-legacy-a");
+    sbA.session.setNotoriety(deriveNotoriety(TREACHEROUS_LEGEND));
+    sbA.session.createCharacter({ playerName: "The Player", seed: 42 });
+    const preViewA = sbA.session.getGameState();
+    expect(preViewA.notorietyLegend).toBeDefined();
+    expect(preViewA.notorietyLegend!.length).toBeGreaterThan(0);
+    playToFinale(sbA);
+
+    const regB = new GameSessionRegistry();
+    const sbB = regB.sandboxFor("u-legacy-b");
+    sbB.session.createCharacter({ playerName: "The Player", seed: 42 });
+    const preViewB = sbB.session.getGameState();
+    expect(preViewB.notorietyLegend).toBeUndefined();
+    playToFinale(sbB);
+
+    // The outcome hashes must match: notorietyLegend is flavor-only, never an outcome lever.
+    expect(outcomeHash(sbA)).toBe(outcomeHash(sbB));
+  });
 });

@@ -11101,6 +11101,13 @@ export class GameSessionAdapter implements GameSession {
       // introduce + their OBSERVABLE persona — woven into the premiere moment prompt so the producer
       // never loses track. Present ONLY during the premiere (null otherwise). Vault-free public facets.
       ...(this.premiereIntros() ? { premiere: this.premiereIntros()! } : {}),
+      // FEATURE-01791: notoriety legend clauses — the Vault-free "what they heard" flavor carried on
+      // premiere (the house whispers about the returning player) and early-social week 1 (the talk is
+      // still fresh). Only the legend gist crosses; the reputation FACETS / the day-one biases never
+      // leave the engine. Vault-free by construction — open-set string[] only.
+      ...((this.phase === "premiere" || (this.phase === "social" && this.week === 1)) && this.notorietySummary()?.legendBeats.length
+        ? { notorietyLegend: this.notorietySummary()!.legendBeats }
+        : {}),
       // 0013 §5 / PG-14 / PS-4: the producer's Diary-Room invitation at the current dramatic beat.
       ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
       // 0115: the player's DR strategy as a PRIVATE narrator steer (present only when they've recorded one).

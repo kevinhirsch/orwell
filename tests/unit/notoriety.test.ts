@@ -356,3 +356,49 @@ describe("0104 — the shade never flips the sign of the bias", () => {
     }
   });
 });
+
+// ── FEATURE-01791: notorietyLegend surfaces the RETURNING-CAST block on premiere/early-social ─────
+
+describe("01791 — notorietyLegend appears on premiere/early-social with legendBeats", () => {
+  it("a returning player (notoriety set) gets notorietyLegend on premiere", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("u-got-legend");
+    sb.session.setNotoriety(deriveNotoriety(TREACHEROUS));
+    sb.session.createCharacter({ playerName: "The Player", seed: 7 });
+    const view = sb.session.getGameState();
+    expect(view.notorietyLegend).toBeDefined();
+    expect(view.notorietyLegend!.length).toBeGreaterThan(0);
+    // Every clause is a Vault-free string (never a number, never hidden state)
+    for (const b of view.notorietyLegend!) {
+      expect(typeof b).toBe("string");
+    }
+  });
+
+  it("a fresh player (no notoriety) has no notorietyLegend on premiere", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("u-fresh-legend");
+    sb.session.createCharacter({ playerName: "The Player", seed: 7 });
+    const view = sb.session.getGameState();
+    expect(view.notorietyLegend).toBeUndefined();
+  });
+
+  it("notorietyLegend is absent on a non-premiere, non-early-social phase (week 3 HOH comp / nominations)", () => {
+    const reg = new GameSessionRegistry();
+    const sb = reg.sandboxFor("u-late-social");
+    sb.session.setNotoriety(deriveNotoriety(TREACHEROUS));
+    sb.session.createCharacter({ playerName: "The Player", seed: 7 });
+    // Advance past premiere through the first HOH, nominations, veto — by week 3 the gate is closed.
+    // Advance through the loop until we're past week 1
+    for (let i = 0; i < 30; i++) {
+      const adv = sb.session.advanceGame();
+      if (adv.finished) break;
+      const view = sb.session.getGameState();
+      // If we're past premiere and past week 1 social, the legend should be absent
+      if (view.week >= 2) break;
+      if (view.finished) break;
+    }
+    const view = sb.session.getGameState();
+    // By week 2+ the early-social gate is closed
+    expect(view.notorietyLegend).toBeUndefined();
+  });
+});

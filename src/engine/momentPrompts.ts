@@ -580,6 +580,9 @@ export const BASE_GAME_MASTER_PROMPT = [
   "    the off-screen scheming, the confessionals, the twist that never fired. It returns nothing",
   "    while a season is live (the Wall is absolute in play); after the winner, it is the payoff.",
   "  • askProducers — answer a direct producer question without ever confirming or denying hidden content.",
+  "  • notorietySummary — the Vault-free legend about this returning player: what the house has heard",
+  "    (only present when the player returned as the same character from a past season). Returns the",
+  "    open-set legend clauses the narrator may voice as a callback — never numbers, never hidden state.",
   "  • playerDossier — the player's own Diary-Room reads, grouped per houseguest (optionally pass one",
   "    subjectId to focus a single houseguest). It returns ONLY what the PLAYER said in the diary room —",
   "    their words, never engine truth, never hidden state; use it to recall the player's own past reads.",
@@ -1409,6 +1412,13 @@ export function renderGameContext(view: GameStateView): string {
     ...whereaboutsLines,
     ...presentKnowledgeLines,
     ...premiereLines,
+    // FEATURE-01791 — RETURNING CAST NOTORIETY: the Vault-free legend clauses the house has heard about
+    // the returning player. Always-on block (present in every prompt structure) — only renders content
+    // when legend clauses exist (premiere/early-social with notoriety). Vault-free by construction:
+    // open-set flavor strings only, never numbers or hidden state. Outcome-neutral (byte-identical).
+    ...((view.notorietyLegend ?? []).length
+      ? [`- RETURNING CAST: the house has heard things — ${view.notorietyLegend!.join("; ")}.`]
+      : []),
     // 0059/L40 — the ONLY romantic pairs the narrator may voice as a showmance: the public (visible)
     // ones the engine has surfaced. Everything else is friendship/strategy (the SHOWMANCES ARE RARE pin).
     ...((view.showmances ?? []).length
