@@ -121,3 +121,81 @@ describe("SOC-1/4 — the player's pathway-surfaced facts reach the per-turn nar
     expect(learned).not.toContain("surfaced fact number 0");
   });
 });
+
+/**
+ * #1789 — telephone-game provenance texture on surfaced gossip (hops>=2), flag-gated
+ * behind ORWELL_GOSSIP_DRIFT. When drift is ON, a fact with hops>=2 carries a provenance word
+ * (second-hand/third-hand/everyone's saying) and a conditional deadpan guidance line appears.
+ * When drift is OFF, the output is byte-identical to before this feature (no word, no guidance).
+ */
+describe("#1789 — telephone-game provenance word on surfaced gossip (hops>=2)", () => {
+  const seedPlayerKnowledgeFact = (
+    sb: ReturnType<GameSessionRegistry["sandboxFor"]>,
+    content: string,
+    hops: number,
+  ): void => {
+    // Seed a fact DIRECTLY on the PLAYER (bypassing the NPC↔player pathway) so it appears
+    // in playerKnowledgeReader with known hops, for testing the render path.
+    sb.engine.knowledge.seedBelief(
+      PLAYER,
+      { content, originalContent: content, factId: `t:${content}`, confidence: 0.9, hops, distortion: 0, source: npc(1) },
+      `told-by:${npc(1)}`,
+    );
+  };
+
+  it("drift ON — provenance word appears for hops>=2 facts, no raw hops number leaks", () => {
+    const sb = liveGame(10, "drift-on");
+    seedPlayerKnowledgeFact(sb, "Ada is angling for the veto", 3);
+    sb.session.setGossipDriftEnabled(true);
+
+    const { systemPrompt } = sb.session.getMomentPrompt({ moment: "social" });
+    const learned = playerLearnedBlock(systemPrompt);
+    expect(learned).toContain("(third-hand)");
+    expect(learned).toContain("Ada is angling for the veto");
+    expect(learned).not.toMatch(/\bhops[=:]?\s*\d/);
+    expect(learned).not.toMatch(/\(\s*\d\)/);  // no raw digit in parens
+    // Guidance line present
+    expect(learned).toContain("multiple mouths");
+  });
+
+  it("drift OFF — no provenance word, no guidance line, byte-identical to baseline", () => {
+    const sb = liveGame(11, "drift-off");
+    seedPlayerKnowledgeFact(sb, "Bo is targeting the alliance", 3);
+    // Drift is OFF by default — do NOT enable it.
+
+    const { systemPrompt } = sb.session.getMomentPrompt({ moment: "social" });
+    const learned = playerLearnedBlock(systemPrompt);
+    expect(learned).not.toContain("(third-hand)");
+    expect(learned).not.toContain("(second-hand)");
+    expect(learned).not.toContain("multiple mouths");
+    // The fact content renders cleanly with NO prefix
+    expect(learned).toContain("  - Bo is targeting the alliance");
+    expect(learned).not.toMatch(/\s\(\w+-hand\)\s/);
+  });
+
+  it("hops=1 with drift ON — no provenance word (edge: below threshold)", () => {
+    const sb = liveGame(12, "drift-hop1");
+    seedPlayerKnowledgeFact(sb, "Claire is working the room", 1);
+    sb.session.setGossipDriftEnabled(true);
+
+    const { systemPrompt } = sb.session.getMomentPrompt({ moment: "social" });
+    const learned = playerLearnedBlock(systemPrompt);
+    // No provenance word for hops < 2
+    expect(learned).not.toContain("(second-hand)");
+    expect(learned).not.toContain("(third-hand)");
+    expect(learned).not.toContain("everyone's saying");
+    expect(learned).toContain("  - Claire is working the room");
+  });
+
+  it("guidance line only appears when at least one fact has hops>=2", () => {
+    const sb = liveGame(13, "guidance-gated");
+    seedPlayerKnowledgeFact(sb, "Dana made a secret deal", 1);
+    sb.session.setGossipDriftEnabled(true);
+
+    const { systemPrompt } = sb.session.getMomentPrompt({ moment: "social" });
+    const learned = playerLearnedBlock(systemPrompt);
+    // Only a single fact with hops=1 — no guidance line should appear
+    expect(learned).not.toContain("multiple mouths");
+    expect(learned).not.toContain("passed through");
+  });
+});

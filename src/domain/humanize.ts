@@ -176,6 +176,20 @@ export function confidenceWord(confidence: number): string {
 }
 
 /**
+ * #1789 — map gossip FACT chain HOP count to a provenance WORD for the player-facing texture.
+ * The word reflects chain length ONLY (how many mouths it passed through), NEVER which NPCs are
+ * in the chain. hops < 2 returns an empty string (the rendered prefix is absent — the fact did
+ * not diffuse far enough). Bounded: out-of-range input clamps via Math.max + Math.floor.
+ */
+export function provenanceWord(hops: number): string {
+  const h = Math.max(0, Math.floor(hops));
+  if (h < 2) return "";
+  if (h === 2) return "second-hand";
+  if (h === 3) return "third-hand";
+  return "everyone's saying";
+}
+
+/**
  * PV2 (#997) — render the OVERHEAR surfacing prefix from real belief state instead of the flat literal.
  * The presence layer stores an overhear as `(overheard, muffled) <fragment>…` — `(overheard, muffled)`
  * is a MACHINE SENTINEL kept byte-stable so the knowledge layer's content-lineage anchor

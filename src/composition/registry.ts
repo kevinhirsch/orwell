@@ -381,7 +381,7 @@ function buildUserSandbox(user = "default"): UserSandbox {
   session.setPlayerKnowledgeReader(() =>
     engine.knowledge.knownTo(PLAYER).map((f) => ({
       id: f.id, content: f.content, subject: f.subject, factId: f.factId, pathway: f.pathway,
-      distortion: f.distortion, confidence: f.confidence,
+      distortion: f.distortion, confidence: f.confidence, hops: f.hops,
     })),
   );
   // 0093/0099 — surface an EXPOSED/TRADED secret INTO a houseguest's knowledge through the in-game

@@ -7,6 +7,7 @@ import { dayOfWeek } from "./houseEvents";
 import { physicalFacetToAppearance } from "./portraitPrompts";
 import { MILESTONE_LABEL } from "./daySchedule";
 import { genderPresentationPhrase, pronounsFor, genderGuidanceClause } from "../domain/gender";
+import { provenanceWord } from "../domain/humanize";
 
 /**
  * #1326 — dedupe the "no genderPresentation facet on file" warning per houseguest (per process),
@@ -1613,7 +1614,7 @@ export function renderStoryFacts(
  * the block stays tight (ADR 0003 §1 — prefer removing context to adding it). `undefined` when
  * there is nothing fresh to voice (the prompt is then byte-identical to before this fix).
  */
-export function renderSurfacedFacts(facts: ReadonlyArray<{ content: string }>): string | undefined {
+export function renderSurfacedFacts(facts: ReadonlyArray<{ content: string; hops?: number }>): string | undefined {
   if (facts.length === 0) return undefined;
   const lines: string[] = [
     "WHAT YOU'VE LEARNED (the player's own knowledge, reached through a real in-game pathway — told",
@@ -1621,7 +1622,13 @@ export function renderSurfacedFacts(facts: ReadonlyArray<{ content: string }>): 
     "  when the scene calls for it — the player already holds them, so never contradict or un-know",
     "  them — but never invent extra detail beyond what's stated here:",
   ];
-  for (const f of facts) lines.push(`  - ${f.content}`);
+  if (facts.some((f) => (f.hops ?? 0) >= 2)) {
+    lines.push("  (Some of what you've heard has passed through multiple mouths — the gist may have shifted; take it at face value.)");
+  }
+  for (const f of facts) {
+    const prefix = (f.hops ?? 0) >= 2 ? `(${provenanceWord(f.hops!)}) ` : "";
+    lines.push(`  - ${prefix}${f.content}`);
+  }
   return lines.join("\n");
 }
 
