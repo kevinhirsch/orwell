@@ -2612,6 +2612,14 @@ export interface GameSession {
   getOffscreenSceneSkeletons(): OffscreenSceneSkeleton[];
 
   /**
+   * #1793 — the player's Diary-Room dossier: the player's OWN NO_NPC_PATHWAY diary-room reads,
+   * grouped per houseguest subject. When subjectId is specified, returns only that houseguest's
+   * entries. Vault-free by construction: only the player's own tagged diary-room entries, never
+   * engine truth or NPC knowledge. Absent when the ORWELL_PLAYER_DOSSIER flag is OFF (byte-identical).
+   */
+  playerDossier(subjectId?: EntityId): Record<EntityId, { content: string; ts: number }[]> | undefined;
+
+  /**
    * FE-driven write-back (0070): enrich the prose `content` of an already-recorded hidden
    * off-screen event with model-voiced texture. CONTENT ONLY — it cannot create an event,
    * alter a witness set, flip the hidden flag, or carry a relationship number. Idempotent;

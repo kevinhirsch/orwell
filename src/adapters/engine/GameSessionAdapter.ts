@@ -11111,4 +11111,17 @@ export class GameSessionAdapter implements GameSession {
       ...(daySchedule ? { daySchedule } : {}),
     };
   }
+
+  /**
+   * #1793 — the player's Diary-Room dossier. Returns diary-room entries grouped per houseguest
+   * subject, filtered to a single subject when subjectId is provided. Absent (undefined) when
+   * the ORWELL_PLAYER_DOSSIER flag is OFF. Vault-free by construction.
+   */
+  playerDossier(subjectId?: EntityId): Record<EntityId, { content: string; ts: number }[]> | undefined {
+    if (!PLAYER_DOSSIER_ENABLED_DEFAULT) return undefined;
+    const all = groupPlayerDossier(this.playerKnowledgeReader?.() ?? []);
+    if (subjectId === undefined) return all;
+    const entry = all[subjectId as string];
+    return entry !== undefined ? { [subjectId as string]: entry } : {};
+  }
 }
