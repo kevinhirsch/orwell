@@ -3,6 +3,7 @@ import type { PhysicalCharacteristics } from "../domain/physicalCharacteristics"
 import type { VoiceProfile } from "../domain/voiceProfile";
 import type { NotorietySummary } from "../engine/notoriety";
 import type { ExchangeAccounting } from "../engine/producerRead";
+import type { Receipt } from "../engine/receipts";
 import type { PullQuoteWeek } from "../engine/pullQuoteReel";
 import type { StructuralMilestone } from "../engine/daySchedule";
 import type { TimeOfDay } from "../engine/timeOfDay";
@@ -2643,6 +2644,13 @@ export interface GameSession {
    * engine truth or NPC knowledge. Absent when the ORWELL_PLAYER_DOSSIER flag is OFF (byte-identical).
    */
   playerDossier(subjectId?: EntityId): Record<EntityId, { content: string; ts: number }[]> | undefined;
+
+  /**
+   * #1800 — The Booth Has Receipts: deterministic contradictions drawn ONLY from the player's own
+   * record (deals, events, DR statements). Returns [] when the ORWELL_BOOTH_RECEIPTS flag is OFF.
+   * Never reads the Vault. Never returns NPC knowledge or hidden state.
+   */
+  playerReceipts(): Receipt[];
 
   /**
    * 0104 — the (Vault-free) notoriety legend clauses the narrator may voice as a returning-cast
