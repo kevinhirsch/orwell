@@ -725,6 +725,11 @@ const PER_CONVERSATION_CLOCK_ENABLED_DEFAULT = process.env.ORWELL_TIME_PER_CONVE
 // `timeOfDayEnabled`, so the clock-off calibration sims stay byte-identical.
 const SOCIAL_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_SOCIAL_FATIGUE !== "0";
 const MULTI_NIGHT_FATIGUE_ENABLED_DEFAULT = process.env.ORWELL_MULTI_NIGHT_FATIGUE === "1";
+/**
+ * #1793 — the Player Dossier grouping player diary-room reads per subject (houseguest).
+ * OFF unless `ORWELL_PLAYER_DOSSIER=1`. OFF ⇒ byte-identical: no `playerDossier` field on the view.
+ */
+const PLAYER_DOSSIER_ENABLED_DEFAULT = process.env.ORWELL_PLAYER_DOSSIER === "1";
 
 /**
  * T0-2 ("beats terminate themselves", moonshot P1 stage 1 / #27a) — the CLOSED-SET ceremony/comp
@@ -766,6 +771,31 @@ const AUTO_ADVANCE_PENDING_KINDS: ReadonlySet<PendingDecisionView["kind"]> = new
  * Lives on the ENGINE side (like `EngineCommandsAdapter`); the outward MCP server
  * depends on the `GameSession` port, never on this class or the prompt module.
  */
+/**
+ * #1793 — Group the player's own diary-room/subject-tagged knowledge facts per houseguest.
+ * Reads ONLY the player's NO_NPC_PATHWAY knowledge facts that have a `subject` field,
+ * groups them by subject into Record<EntityId, { content: string; ts: number }[]>,
+ * sorted within each group by ts (oldest first — insertion order).
+ * NEVER reads engine truth, Vault, or NPC knowledge.
+ */
+function groupPlayerDossier(
+  playerKnowledge: readonly { content: string; pathway?: string; subject?: EntityId; ts?: number }[]
+): Record<EntityId, { content: string; ts: number }[]> {
+  const grouped: Record<EntityId, { content: string; ts: number }[]> = {};
+  for (const k of playerKnowledge) {
+    if (k.pathway !== 'diary-room') continue;
+    if (k.subject === undefined) continue;
+    const entry = { content: k.content, ts: k.ts ?? 0 };
+    if (!grouped[k.subject]) grouped[k.subject] = [];
+    grouped[k.subject].push(entry);
+  }
+  // Sort each group by ts (oldest first)
+  for (const subject of Object.keys(grouped)) {
+    grouped[subject].sort((a, b) => a.ts - b.ts);
+  }
+  return grouped;
+}
+
 export class GameSessionAdapter implements GameSession {
   private house: GameHouse | null = null;
   /**
@@ -10934,6 +10964,10 @@ export class GameSessionAdapter implements GameSession {
     // NPC's knowledge or behavior — the DR wall (`deriveNpcKnowledge`) is untouched. `renderGameContext`
     // fences it as GM-only / do-not-voice so the GM narrates the irony of the player's mask, never leaks it.
     const drStrategy = playerDiaryStrategy(this.playerKnowledgeReader?.() ?? []);
+    // #1793 — the Player Dossier: group the player's OWN diary-room/subject-tagged knowledge facts per houseguest.
+    const playerDossier = PLAYER_DOSSIER_ENABLED_DEFAULT
+      ? groupPlayerDossier(this.playerKnowledgeReader?.() ?? [])
+      : undefined;
     // 0118 — the day's shape, telegraphed. Present ONLY when the per-conversation clock is live, so the
     // seeded calibration spine (time-of-day off) and golden replay (per-conversation clock off) never see
     // it ⇒ byte-identical, no golden re-record. A pure read of the live loop state + the day clock; the
@@ -11071,6 +11105,8 @@ export class GameSessionAdapter implements GameSession {
       ...(drPrompt.invite ? { diaryRoomInvite: drPrompt as { invite: true; reason?: string } } : {}),
       // 0115: the player's DR strategy as a PRIVATE narrator steer (present only when they've recorded one).
       ...(drStrategy.length ? { playerDiaryRoom: drStrategy } : {}),
+      // #1793: the player's dossier (present only when the flag is ON and there are tagged entries).
+      ...(playerDossier !== undefined ? { playerDossier } : {}),
       // 0118: the telegraphed day schedule (present only when the per-conversation clock is live).
       ...(daySchedule ? { daySchedule } : {}),
     };

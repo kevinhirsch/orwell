@@ -452,6 +452,14 @@ export interface GameStateView {
    */
   playerDiaryRoom?: string[];
   /**
+   * #1793 — the player's OWN Diary-Room reads, grouped per houseguest (subject).
+   * The player's own NO_NPC_PATHWAY knowledge with a subject field, grouped by subject.
+   * NEVER reads engine truth, Vault, or NPC knowledge — only the player's own tagged reads.
+   * When subjectId is specified, returns only that houseguest's entries.
+   * Absent when the flag is OFF (byte-identical).
+   */
+  playerDossier?: Record<EntityId, { content: string; ts: number }[]>;
+  /**
    * ADR 0019 Layer 2 — the per-PRESENT-NPC knowledge scope. For each houseguest actually in the
    * scene (`whereabouts.present`), the SAME Vault-free `knows`/`suspects` sets `npcVoice` returns —
    * baked into the built context so the narrator voices each present houseguest from THEIR bounded

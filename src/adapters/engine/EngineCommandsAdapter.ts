@@ -574,7 +574,7 @@ export class EngineCommandsAdapter implements EngineCommands {
     // OOC player knowledge with NO in-game pathway to any NPC (0013): the recorded event's
     // witness set is the player alone, and deriveNpcKnowledge filters the diary-room pathway —
     // so the house can never learn it. The player's strategy may inform the engine, never NPCs.
-    this.knowledge.recordDiaryRoom(req.entry);
+    this.knowledge.recordDiaryRoom(req.entry, req.subjectId);
     this.onPersist?.(); // durable save (0030): the player's DR is their persisted knowledge
     return { recorded: true };
   }
